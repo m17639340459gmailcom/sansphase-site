@@ -177,7 +177,14 @@ function setupStage() {
     english: language === "en",
     initiallyCovered: parseRoute(location.hash).page !== 'home',
     loadTimeoutMs: 60000,
-    prepareContent: options => preparePageImages(document,siteContent,options),
+    // Homepage readiness includes its own scene and typography. Content-page
+    // images are a low-priority warmup after entry, never a homepage barrier.
+    prepareContent: () => document.fonts?.ready,
+    onPrepared: () => {
+      const warm = () => preparePageImages(document,siteContent,{concurrency:1}).catch(() => {});
+      if(window.requestIdleCallback) window.requestIdleCallback(warm);
+      else window.setTimeout(warm, 0);
+    },
     isBlocked: () =>
       (menuMedia.matches && Boolean(document.querySelector(".nav.open"))),
   });
@@ -527,6 +534,11 @@ function render({silent=false}={}) {
   document.body.classList.toggle("is-home", page === "home");
   document.body.classList.toggle("content-open", page !== "home");
   document.body.classList.toggle("blog-open", personalPage(page));
+  if(personalPage(page) && blogPhoto && !blogPhoto.hasAttribute('src')) {
+    blogPhoto.sizes=blogPhoto.dataset.backgroundSizes || '100vw';
+    blogPhoto.srcset=blogPhoto.dataset.backgroundSrcset || '';
+    blogPhoto.src=blogPhoto.dataset.backgroundSrc;
+  }
   syncBlogBackdrop(page);
   document.body.classList.toggle("theme-light", page !== "home" && blogTheme === "light");
   main.hidden = page === "home";

@@ -18,6 +18,10 @@ import {
 } from "three";
 import source from "./vendor/space-3d/nebula.glsl";
 import noise from "./vendor/space-3d/classic-noise-4d.glsl";
+import milkyWayURL from "./vendor/eso-milky-way/eso0932a.jpg";
+import galacticURL from "./vendor/eso-galactic-centre/eso0934a.jpg";
+import nebulaURL from "./vendor/eso-scene-photographs/eso1105a.jpg";
+import galaxyURL from "./vendor/eso-scene-photographs/eso1424a.jpg";
 
 // The existing Space-3D nebula shader is baked once by Drei's cube camera.
 // There is no model-generated shader or expensive full-screen noise each frame.
@@ -76,7 +80,7 @@ const blue = [0.045, 0.22, 0.65],
 const blueOffset = [12.3, 28.1, 6.8],
   violetOffset = [-21.7, 11.4, 40.2];
 function Panorama({ rotation, model }) {
-  const map = useTexture("/assets/materials/eso-milky-way.jpg");
+  const map = useTexture(milkyWayURL);
   const width = useThree((state) => state.size.width);
   map.mapping = EquirectangularReflectionMapping;
   map.colorSpace = SRGBColorSpace;
@@ -120,7 +124,7 @@ export const scenePhotographs = [
   {
     chapter: 1,
     name: "works-galactic-photograph",
-    url: "/assets/materials/eso-galactic-centre.jpg",
+    url: galacticURL,
     color: "#b9c8df",
     rate: 0.07,
     phase: 0,
@@ -128,7 +132,7 @@ export const scenePhotographs = [
   {
     chapter: 2,
     name: "journal-nebula-photograph",
-    url: "/assets/materials/eso-m78.jpg",
+    url: nebulaURL,
     color: "#b1c5e0",
     rate: 0.06,
     phase: 1.3,
@@ -136,7 +140,7 @@ export const scenePhotographs = [
   {
     chapter: 3,
     name: "community-galaxy-photograph",
-    url: "/assets/materials/eso-triangulum.jpg",
+    url: galaxyURL,
     color: "#9dafc9",
     rate: 0.05,
     phase: 2.6,

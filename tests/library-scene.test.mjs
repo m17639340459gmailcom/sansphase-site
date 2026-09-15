@@ -27,7 +27,7 @@ await build({
   platform: "node",
   format: "esm",
   jsx: "automatic",
-  loader: { ".glsl": "text" },
+  loader: { ".glsl": "text", ".jpg": "file" },
   external: [
     "react",
     "react/*",

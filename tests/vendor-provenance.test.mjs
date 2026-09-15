@@ -1,8 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { build as bundle } from "esbuild";
+
+test("fingerprinted sky assets retain source bytes without image recompression", async () => {
+  const files=await readdir('dist/assets/scene');
+  for(const [directory,name] of [['eso-milky-way','eso0932a'],['eso-galactic-centre','eso0934a'],['eso-scene-photographs','eso1105a'],['eso-scene-photographs','eso1424a']]) {
+    const matching=files.filter(file=>file.startsWith(name+'-')&&file.endsWith('.jpg'));
+    assert.equal(matching.length,1);
+    assert.deepEqual(await readFile('dist/assets/scene/'+matching[0]),await readFile(`src/vendor/${directory}/${name}.jpg`));
+  }
+});
 
 test("later chapter skies retain distinct non-generated ESO photographic sources", async () => {
   const manifest = JSON.parse(
@@ -60,7 +69,7 @@ test("active effects have pinned third-party source and preserved upstream origi
           format: "esm",
           platform: "browser",
           jsx: "automatic",
-          loader: { ".glsl": "text" },
+          loader: { ".glsl": "text", ".jpg": "file" },
           write: false,
           metafile: true,
           define: { "process.env.NODE_ENV": '"production"' },

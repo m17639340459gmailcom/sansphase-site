@@ -15,6 +15,7 @@ async function setup({
   autoProgress = true,
   prepareContent,
   initiallyCovered = false,
+  onPrepared,
 } = {}) {
   const dom = new JSDOM(universeMarkup(), {
     url: "http://localhost/",
@@ -88,6 +89,7 @@ async function setup({
     loadRenderer: loader,
     prepareContent,
     initiallyCovered,
+    onPrepared,
   });
   await flush();
   const stage = root.querySelector(".universe-stage");
@@ -152,6 +154,20 @@ async function setup({
     },
   };
 }
+test("optional background warmup starts once after homepage readiness", async () => {
+  let notifications = 0, release;
+  const s = await setup({prepareContent: () => new Promise(resolve => {release=resolve;}),onPrepared:()=>notifications++});
+  try {
+    s.ready(); await flush();
+    assert.equal(notifications, 0);
+    release(); await flush();
+    assert.equal(notifications, 1);
+    assert.equal(s.root.classList.contains('is-ready'), true);
+    s.ready(); await flush();
+    assert.equal(notifications, 1, 'repeated renderer callbacks must not duplicate background downloads');
+  } finally {s.close();}
+});
+
 test("home loading indicator follows actual readiness without adding permanent visual controls", async () => {
   const s = await setup();
   try {

@@ -1,7 +1,6 @@
 import React, { useEffect, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import {
-  IcosahedronGeometry,
   MeshPhysicalMaterial,
   Vector3,
   Vector4,
@@ -19,6 +18,7 @@ import {
   RenderMode,
 } from "three.quarks";
 import { referenceReveal } from "./library-entrance.mjs";
+import { orbitalGeometry } from "./orbital-geometry.mjs";
 
 // three.quarks 0.17.1: existing emitter, per-particle orbit behavior and mesh renderer.
 // https://docs.quarks.art/docs/core-components/behaviors
@@ -28,7 +28,7 @@ export function OrbitalParticles({ model }) {
   const anchor = useRef();
   const resources = useRef();
   useEffect(() => {
-    const geometry = new IcosahedronGeometry(1, 1);
+    const geometry = orbitalGeometry();
     const material = new MeshPhysicalMaterial({
       metalness: 0.55,
       roughness: 0.32,

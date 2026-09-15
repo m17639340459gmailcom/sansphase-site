@@ -149,8 +149,7 @@ export function createPreviewServer({
               data.profile.background,
             );
             const responsive = imageSources(data.profile.background);
-            html = html.replace(`<img src="${data.profile.background}"`, `<img ${responsive} src="${data.profile.background}"`);
-            html = html.replace('<link rel="preload" as="image"', `<link ${responsive.replace('srcset=', 'imagesrcset=').replace('sizes=', 'imagesizes=')} rel="preload" as="image"`);
+            html = html.replace(`<img data-background-src="${data.profile.background}"`, `<img ${responsive.replace('srcset=', 'data-background-srcset=').replace('sizes=', 'data-background-sizes=')} data-background-src="${data.profile.background}"`);
           }
           html = html.replace(
             "</head>",
@@ -195,7 +194,7 @@ export function createPreviewServer({
       if(!['.html'].includes(extname(file))) {
         const etag=`W/"${stats.size.toString(16)}-${stats.mtimeMs.toString(16)}"`;
         res.setHeader('ETag',etag);
-        res.setHeader('Cache-Control',/^\/chunks\/[^/]+-[A-Z0-9]+\.mjs$/.test(path)?'public, max-age=31536000, immutable':'public, max-age=0, must-revalidate');
+        res.setHeader('Cache-Control',/^(?:\/chunks\/[^/]+-[A-Z0-9]+\.mjs|\/assets\/scene\/[^/]+-[A-Z0-9]{8}\.jpg)$/.test(path)?'public, max-age=31536000, immutable':'public, max-age=0, must-revalidate');
         if(req.headers['if-none-match']?.split(',').map(x=>x.trim()).some(x=>x===etag||x==='*')) {
           await fileHandle.close();fileHandle=undefined;res.writeHead(304);res.end();return;
         }

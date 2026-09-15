@@ -22,6 +22,7 @@ export function mountUniverse(
     prepareContent,
     initiallyCovered = false,
     loadTimeoutMs = 15000,
+    onPrepared = () => {},
   } = {},
 ) {
   const doc = root.ownerDocument,
@@ -268,6 +269,7 @@ export function mountUniverse(
         contentStarted = false;
       const finishReady = () => {
         if (
+          ready ||
           disposed ||
           token !== generation ||
           failed ||
@@ -281,6 +283,7 @@ export function mountUniverse(
         ready = true;
         sync();
         syncMotion();
+        onPrepared();
       };
       const api = mountCosmos(canvas, {
         reducedMotion: reduced,

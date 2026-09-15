@@ -10,12 +10,14 @@ async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), "sansphase-http-"));
   const root = join(directory, "public");
   await mkdir(root);
+  await mkdir(join(root, 'assets', 'scene'), {recursive:true});
   await Promise.all([
     writeFile(join(root, "index.html"), "<h1>無相</h1>"),
     writeFile(join(root, "scene.mp4"), "0123456789"),
     writeFile(join(root, "scene.webm"), "webm-video"),
     writeFile(join(root, "empty.mp4"), ""),
     writeFile(join(directory, "secret.txt"), "outside root"),
+    writeFile(join(root, 'assets', 'scene', 'sky-ABCDEFG2.jpg'), 'original image bytes'),
   ]);
   const server = createPreviewServer({ root });
   await new Promise((resolve, reject) => {
@@ -54,6 +56,16 @@ async function fixture(t) {
       req.end();
     });
 }
+
+test("content-hashed scene images are immutable while stable names revalidate", async (t) => {
+  const request=await fixture(t);
+  const result=await request('/assets/scene/sky-ABCDEFG2.jpg');
+  assert.equal(result.status,200);
+  assert.equal(result.headers['cache-control'],'public, max-age=31536000, immutable');
+  assert.equal(result.body.toString(),'original image bytes');
+  const cached=await request('/assets/scene/sky-ABCDEFG2.jpg',{headers:{'If-None-Match':result.headers.etag}});
+  assert.equal(cached.status,304);
+});
 
 test("preview serves complete videos with MIME, byte lengths, and cache revalidation", async (t) => {
   const request = await fixture(t);

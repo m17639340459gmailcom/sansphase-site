@@ -97,6 +97,7 @@ export async function preparePageImages(
   {
     signal,
     onProgress = () => {},
+    concurrency = 2,
     decode = (item) => decodeImage(doc, item, signal),
   } = {},
 ) {
@@ -119,7 +120,7 @@ export async function preparePageImages(
       }
     }
   };
-  await Promise.all([worker(), worker()]);
+  await Promise.all(Array.from({length: Math.max(1, Math.min(2, concurrency))}, worker));
   signal?.throwIfAborted();
   onProgress(1);
 }
