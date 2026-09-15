@@ -75,11 +75,17 @@ const blue = [0.045, 0.22, 0.65],
   violet = [0.32, 0.06, 0.38];
 const blueOffset = [12.3, 28.1, 6.8],
   violetOffset = [-21.7, 11.4, 40.2];
-function Panorama({ rotation }) {
+function Panorama({ rotation, model }) {
   const map = useTexture("/assets/materials/eso-milky-way.jpg");
   const width = useThree((state) => state.size.width);
   map.mapping = EquirectangularReflectionMapping;
   map.colorSpace = SRGBColorSpace;
+  useEffect(() => {
+    model.panoramaReady = true;
+    return () => {
+      model.panoramaReady = false;
+    };
+  }, [model, map]);
   useFrame(({ scene }) => scene.backgroundRotation.copy(rotation), -0.2);
   return (
     <Environment
@@ -191,7 +197,7 @@ export function SpaceBackdrop({ model }) {
             compute={() => false}
           >
             <PerspectiveCamera makeDefault fov={70} near={0.1} far={1000} />
-            <Panorama rotation={scene.backgroundRotation} />
+            <Panorama rotation={scene.backgroundRotation} model={model} />
           </RenderTexture>
         </meshBasicMaterial>
       </mesh>

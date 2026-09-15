@@ -1,6 +1,8 @@
 // Runs in <head>, before the asynchronous module graph. Reload restoration
 // belongs to the same render transaction as the view, not a later browser frame.
 (() => {
+  if (!location.hash || /^#\/?(?:home)?\/?$/.test(location.hash))
+    document.documentElement.classList.add('is-home-boot');
   const key = "sansphase-page-view-v1";
   const route = () => location.pathname + location.hash;
   let saved = null;

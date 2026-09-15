@@ -93,7 +93,12 @@ export function OrbitalParticles({ model }) {
     scene.add(batch);
     batch.addSystem(system);
     model.particlesReady = false;
-    resources.current = { system, batch, previousTime: model.time, warmSteps: 32 * 60 };
+    resources.current = {
+      system,
+      batch,
+      previousTime: model.time,
+      warmSteps: 32 * 60,
+    };
     return () => {
       resources.current = undefined;
       system.dispose();
@@ -124,7 +129,7 @@ export function OrbitalParticles({ model }) {
       current.warmSteps -= steps;
       model.particlesReady = current.warmSteps === 0;
       // Reduced-motion mode renders on demand, but still needs a complete field.
-      if (current.warmSteps > 0) state.invalidate();
+      state.invalidate();
     }
     batch.update(delta);
     for (const item of batch.batches) {

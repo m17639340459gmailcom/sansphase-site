@@ -7,9 +7,9 @@ export function universeMarkup(english = false) {
   return `<section class="universe-home" aria-busy="true" data-index="0" data-scene="${s.id}">
     <div class="universe-stage" tabindex="0" role="region" aria-describedby="universe-instructions" aria-label="${english ? "Interactive universe" : "可交互的宇宙"}"><canvas class="universe-canvas" aria-hidden="true"></canvas><div class="chapter-shade" aria-hidden="true"></div><section class="chapter-copy" aria-labelledby="chapter-title" hidden></section></div>
     <h1 class="sr-only">無相</h1>
-    <div class="universe-loader" role="status" aria-live="polite">${loadingIcon}<span>${english ? 'Preparing your space' : '正在准备星空'}</span></div>
+    <div class="universe-loader">${loadingIcon}<span class="universe-load-label" role="status" aria-live="polite">${english ? "Preparing your space" : "正在准备星空"}</span><div class="universe-load-track" role="progressbar" aria-label="${english ? "Page preparation" : "页面准备进度"}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span></span></div><span class="universe-load-percent" aria-hidden="true">0%</span></div>
     <p class="sr-only" id="universe-instructions" aria-live="polite">${esc(english ? s.ariaLabelEn : s.ariaLabel)}</p>
-    <div class="universe-feedback" hidden><p class="universe-status" role="status" aria-live="polite"></p><button class="universe-retry" type="button" hidden></button></div>
+    <div class="universe-feedback" hidden><p class="universe-status" role="status" aria-live="polite"></p><button class="universe-retry" type="button" hidden></button><a class="universe-continue" href="#/notes">${english ? "Browse content" : "先浏览内容"}</a></div>
   </section>`;
 }
 
@@ -19,6 +19,9 @@ export function mountUniverse(
     english = false,
     isBlocked = () => false,
     loadRenderer = () => import("./cosmos.bundle.mjs"),
+    prepareContent,
+    initiallyCovered = false,
+    loadTimeoutMs = 15000,
   } = {},
 ) {
   const doc = root.ownerDocument,
@@ -37,7 +40,11 @@ export function mountUniverse(
     scrolling = false;
   const preference = w.matchMedia?.("(prefers-reduced-motion: reduce)");
   let reduced = preference?.matches ?? false,
-    covered = false;
+    covered = initiallyCovered;
+  let started = false,
+    preparation,
+    loadPercent = 0,
+    loadPhase = "scene";
   let renderer,
     disposed = false,
     ready = false,
@@ -97,7 +104,20 @@ export function mountUniverse(
     root.setAttribute("aria-hidden", String(covered));
     root.inert = covered;
     root.classList.toggle("is-ready", ready);
-    root.querySelector('.universe-loader').setAttribute('aria-hidden', String(ready || failed || covered));
+    const value = ready ? 100 : Math.min(99, Math.floor(loadPercent));
+    root.querySelector(".universe-load-percent").textContent = `${value}%`;
+    root
+      .querySelector(".universe-load-track")
+      .setAttribute("aria-valuenow", String(value));
+    root.querySelector(".universe-load-track span").style.transform =
+      `scaleX(${value / 100})`;
+    root.querySelector(".universe-load-label").textContent =
+      loadPhase === "images"
+        ? text("正在准备页面图片", "Preparing page images")
+        : text("正在准备星空", "Preparing your space");
+    root
+      .querySelector(".universe-loader")
+      .setAttribute("aria-hidden", String(ready || failed || covered));
     root.classList.toggle("has-error", failed);
     root.classList.toggle("is-covered", covered);
     root.classList.toggle("is-reduced", reduced);
@@ -141,27 +161,32 @@ export function mountUniverse(
       instructions.textContent = instructionText;
     status.textContent = failed
       ? text(
-          "当前浏览器无法显示互动背景，仍可通过顶部导航浏览内容。",
-          "The interactive background is unavailable. You can still browse using the navigation above.",
+          "部分页面资源尚未准备完成，可以重试，或通过顶部导航先浏览内容。",
+          "Some page resources could not be prepared. Retry, or browse the content.",
         )
       : "";
     feedback.hidden = !failed;
     retry.hidden = !failed;
-    retry.textContent = text("重试背景", "Retry background");
+    retry.textContent = text("重新加载", "Retry loading");
+    root.querySelector(".universe-continue").textContent = text(
+      "先浏览内容",
+      "Browse content",
+    );
   }
   function syncLoadTimer() {
-    if (disposed || ready || failed || covered || doc.hidden) {
+    if (disposed || !started || ready || failed || covered || doc.hidden) {
       w.clearTimeout(loadTimer);
       loadTimer = undefined;
     } else if (loadTimer === undefined) {
       const token = generation;
-      loadTimer = w.setTimeout(() => fail(token), 15000);
+      loadTimer = w.setTimeout(() => fail(token), loadTimeoutMs);
     }
   }
   function syncMotion() {
     syncLoadTimer();
     renderer?.setReducedMotion(reduced);
     renderer?.setPaused(paused());
+    if (ready && !paused()) renderer?.startPresentation?.();
   }
   function finishChapter() {
     w.clearTimeout(wheelTimer);
@@ -204,12 +229,18 @@ export function mountUniverse(
     w.clearTimeout(loadTimer);
     loadTimer = undefined;
     failed = true;
+    preparation?.abort();
     ready = false;
     renderer?.setPaused(true);
     sync();
   }
   async function start() {
     if (disposed) return;
+    started = true;
+    preparation?.abort();
+    preparation = new AbortController();
+    loadPercent = 0;
+    loadPhase = "scene";
     finishReturn();
     const token = ++generation;
     [loadTimer, wheelTimer].forEach((timer) => w.clearTimeout(timer));
@@ -227,26 +258,71 @@ export function mountUniverse(
     try {
       const { mountCosmos } = await loadRenderer();
       if (disposed || token !== generation || failed) return;
-      let readySignaled = false;
+      loadPercent = 10;
+      sync();
+      let readySignaled = false,
+        contentReady = !prepareContent,
+        contentStarted = false;
       const finishReady = () => {
         if (
           disposed ||
           token !== generation ||
           failed ||
           !renderer ||
-          !readySignaled
+          !readySignaled ||
+          !contentReady
         )
           return;
         w.clearTimeout(loadTimer);
         loadTimer = undefined;
         ready = true;
         sync();
+        syncMotion();
       };
       const api = mountCosmos(canvas, {
         reducedMotion: reduced,
         onReady() {
+          if (disposed || token !== generation || failed) return;
           readySignaled = true;
+          if (prepareContent && !contentStarted) {
+            contentStarted = true;
+            loadPhase = "images";
+            loadPercent = Math.max(loadPercent, 70);
+            sync();
+            const signal = preparation.signal;
+            Promise.resolve()
+              .then(() =>
+                prepareContent({
+                  signal,
+                  onProgress: (value) => {
+                    if (token === generation && !disposed && !failed) {
+                      loadPercent = Math.max(
+                        loadPercent,
+                        70 + 25 * Math.max(0, Math.min(1, value)),
+                      );
+                      sync();
+                    }
+                  },
+                }),
+              )
+              .then(() => doc.fonts?.ready)
+              .then(() => {
+                if (token !== generation || disposed || failed) return;
+                contentReady = true;
+                finishReady();
+              })
+              .catch(() => fail(token));
+          }
           finishReady();
+        },
+        onLoadProgress(value) {
+          if (token === generation && !disposed && !failed) {
+            loadPercent = Math.max(
+              loadPercent,
+              10 + 60 * Math.max(0, Math.min(1, value)),
+            );
+            sync();
+          }
         },
         onError() {
           fail(token);
@@ -520,6 +596,7 @@ export function mountUniverse(
   function cleanup() {
     if (disposed) return;
     disposed = true;
+    preparation?.abort();
     ++generation;
     clearPointer();
     touches.clear();
@@ -533,6 +610,7 @@ export function mountUniverse(
   cleanup.setCovered = (value) => {
     if (disposed) return;
     covered = Boolean(value);
+    if (!covered && !started) start();
     if (covered) {
       finishReturn();
       finishChapter();
@@ -573,6 +651,7 @@ export function mountUniverse(
     else if (covered) finishReturn(true);
     else returnSwapTimer = w.setTimeout(() => finishReturn(true), 220);
   };
-  start();
+  if (!covered) start();
+  else sync();
   return cleanup;
 }

@@ -8,6 +8,7 @@ import vm from "node:vm";
 import { JSDOM, VirtualConsole } from "jsdom";
 import * as visitorLocation from '../src/visitor-location.mjs';
 import * as imageSources from '../dist/image-sources.mjs';
+import * as homePreload from '../dist/home-preload.mjs';
 import * as core from "../dist/core.mjs";
 import * as data from "./fixtures/site-data.mjs";
 import {
@@ -97,6 +98,7 @@ test("local prototype DOM flows", async (t) => {
     if (specifier === './catalog.mjs')
       return loadLibrary(new URL('../dist/catalog.mjs', import.meta.url));
     const exports =
+      specifier === './home-preload.mjs' ? homePreload :
       specifier === './image-sources.mjs' ? imageSources :
       specifier.includes("visitor-location") ? visitorLocation :
       specifier === "./core.mjs"
@@ -107,6 +109,7 @@ test("local prototype DOM flows", async (t) => {
               mountUniverse: (root, options) =>
                 mountActualUniverse(root, {
                   ...options,
+                  prepareContent: async () => {},
                   loadRenderer: async () => ({
                     mountCosmos(canvas, config) {
                       w.queueMicrotask(config.onReady);

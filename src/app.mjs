@@ -1,5 +1,6 @@
 import {visitorTimezone, validTimezone, locateVisitor, searchWeatherCities} from './visitor-location.mjs';
 import {imageSources, imageSourceSet} from './image-sources.mjs';
+import {preparePageImages} from './home-preload.mjs';
 import {
   escapeHTML as esc,
   parseRoute,
@@ -170,8 +171,13 @@ function setupStage() {
   homeRoot = holder.firstElementChild;
   homeRoot.id = "home-stage";
   main.before(homeRoot);
+  document.querySelector('#site-startup')?.remove();
+  document.documentElement.classList.remove('is-home-boot');
   cleanStage = mountUniverse(homeRoot, {
     english: language === "en",
+    initiallyCovered: parseRoute(location.hash).page !== 'home',
+    loadTimeoutMs: 60000,
+    prepareContent: options => preparePageImages(document,siteContent,options),
     isBlocked: () =>
       (menuMedia.matches && Boolean(document.querySelector(".nav.open"))),
   });

@@ -9,6 +9,7 @@ import * as THREE from "three";
 import { LibraryCosmosScene } from "./library-cosmos-scene.jsx";
 import "./library-cosmos.css";
 import { createTurnInput, resetTurnInput } from "./reference-rotation.mjs";
+import { prepareScene } from "./scene-preparation.mjs";
 
 extend(THREE);
 const finite = (v) => (Number.isFinite(v) ? v : 0);
@@ -51,12 +52,15 @@ export function mountCosmos(
     onReady = () => {},
     onError = () => {},
     onProgress = () => {},
+    onLoadProgress = () => {},
     reducedMotion = false,
   } = {},
 ) {
   const model = createLibraryModel(reducedMotion),
     doc = canvas.ownerDocument,
     stage = canvas.parentElement;
+  model.preparing = true;
+  const preparation = new AbortController();
   let disposed = false,
     failed = false,
     announced = false,
@@ -76,6 +80,7 @@ export function mountCosmos(
   function fail(error) {
     if (disposed || failed) return;
     failed = true;
+    preparation.abort();
     console.error("Universe renderer failed:", error);
     sync();
     onError(error);
@@ -154,21 +159,65 @@ export function mountCosmos(
     <VisualBoundary onError={fail}>
       <LibraryCosmosScene
         model={model}
-        onFrame={(p) => {
+        onFrame={(p, state) => {
           const entrance = model.entrance.get().toFixed(3);
-          if (stage.dataset.entrance !== entrance) stage.dataset.entrance = entrance;
+          if (stage.dataset.entrance !== entrance)
+            stage.dataset.entrance = entrance;
           onProgress(p);
-          if (!announced && model.particlesReady === true) {
+          const photosReady = [
+            "works-galactic-photograph",
+            "journal-nebula-photograph",
+            "community-galaxy-photograph",
+          ].every((name) => state.scene.getObjectByName(name));
+          if (!announced) onLoadProgress(model.particlesReady ? 0.35 : 0.1);
+          if (
+            !announced &&
+            model.particlesReady === true &&
+            model.panoramaReady &&
+            photosReady
+          ) {
             announced = true;
-            queueMicrotask(() => {
-              if (!disposed && !failed) onReady();
-            });
+            prepareScene({
+              ...state,
+              signal: preparation.signal,
+              nextFrame: () =>
+                new Promise((resolve, reject) => {
+                  if (preparation.signal.aborted) {
+                    reject(preparation.signal.reason);
+                    return;
+                  }
+                  const abort = () => {
+                    doc.defaultView.cancelAnimationFrame(id);
+                    reject(preparation.signal.reason);
+                  };
+                  const id = doc.defaultView.requestAnimationFrame(() => {
+                    preparation.signal.removeEventListener("abort", abort);
+                    resolve();
+                  });
+                  preparation.signal.addEventListener("abort", abort, {
+                    once: true,
+                  });
+                  state.invalidate();
+                }),
+              onProgress: (value) => onLoadProgress(0.35 + 0.65 * value),
+            })
+              .then(() => {
+                if (!disposed && !failed) onReady();
+              })
+              .catch((error) => {
+                if (!disposed && !failed) fail(error);
+              });
           }
         }}
       />
     </VisualBoundary>
   );
   const api = {
+    startPresentation() {
+      if (disposed || failed) return;
+      model.preparing = false;
+      store?.getState().invalidate();
+    },
     setPointer(x, y, { reset = false } = {}) {
       if (
         disposed ||
@@ -251,6 +300,7 @@ export function mountCosmos(
     dispose() {
       if (disposed) return;
       disposed = true;
+      preparation.abort();
       stop();
       observer?.disconnect();
       doc.removeEventListener("visibilitychange", visibility);

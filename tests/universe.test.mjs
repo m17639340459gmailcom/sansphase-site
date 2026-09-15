@@ -13,6 +13,8 @@ async function setup({
   synchronousReady = false,
   synchronousError = false,
   autoProgress = true,
+  prepareContent,
+  initiallyCovered = false,
 } = {}) {
   const dom = new JSDOM(universeMarkup(), {
     url: "http://localhost/",
@@ -59,6 +61,7 @@ async function setup({
     "setReducedMotion",
     "resize",
     "dispose",
+    "startPresentation",
   ])
     api[method] = (...args) => calls.push([method, ...args]);
   api.setChapter = (value, options) => {
@@ -83,6 +86,8 @@ async function setup({
   const clean = mountUniverse(root, {
     isBlocked: () => blocked,
     loadRenderer: loader,
+    prepareContent,
+    initiallyCovered,
   });
   await flush();
   const stage = root.querySelector(".universe-stage");
@@ -176,6 +181,48 @@ test("home loading indicator follows actual readiness without adding permanent v
   } finally {
     s.close();
   }
+});
+
+test('entry waits for images after GPU readiness and only then reaches 100 percent', async () => {
+  let complete,options;
+  const s=await setup({prepareContent:settings=>{options=settings;return new Promise(resolve=>complete=resolve);}});
+  try {
+    s.callbacks().onLoadProgress(.5);s.ready();await flush();
+    assert.equal(s.root.classList.contains('is-ready'),false);
+    options.onProgress(.5);assert.equal(s.root.querySelector('[role="progressbar"]').getAttribute('aria-valuenow'),'82');
+    options.onProgress(.1);assert.equal(s.root.querySelector('[role="progressbar"]').getAttribute('aria-valuenow'),'82','progress cannot run backwards');
+    assert.equal(s.calls.some(([method])=>method==='startPresentation'),false);
+    complete();await flush();
+    assert.equal(s.root.querySelector('[role="progressbar"]').getAttribute('aria-valuenow'),'100');
+    assert.equal(s.root.classList.contains('is-ready'),true);
+    assert(s.calls.some(([method])=>method==='startPresentation'));
+  } finally {s.close();}
+});
+
+test('image failure offers retry and an old successful completion cannot reveal a new attempt', async () => {
+  const attempts=[];
+  const s=await setup({prepareContent:({signal})=>new Promise((resolve,reject)=>attempts.push({resolve,reject,signal}))});
+  try {
+    s.ready();await flush();s.advance(15001);
+    assert(s.root.classList.contains('has-error'));assert(attempts[0].signal.aborted);
+    s.root.querySelector('.universe-retry').click();await flush();
+    s.ready();await flush();attempts[0].resolve();await flush();
+    assert.equal(s.root.classList.contains('is-ready'),false);
+    attempts[1].reject(new Error('image failure'));await flush();
+    assert(s.root.classList.contains('has-error'));
+    assert.equal(s.root.querySelector('.universe-continue').getAttribute('href'),'#/notes');
+  } finally{s.close();}
+});
+
+test('direct content visits defer the 3D import until the homepage is opened', async () => {
+  const s=await setup({initiallyCovered:true});
+  try {
+    assert.equal(s.calls.some(([method])=>method==='mount'),false);
+    s.clean.setCovered(false);await flush();
+    assert.equal(s.calls.filter(([method])=>method==='mount').length,1);
+    s.ready();s.clean.setCovered(true);s.clean.setCovered(false);await flush();
+    assert.equal(s.calls.filter(([method])=>method==='mount').length,1,'returning keeps the prepared scene');
+  }finally{s.close();}
 });
 
 test("scroll progress introduces real section links with a quiet opening and finite ends", async (t) => {

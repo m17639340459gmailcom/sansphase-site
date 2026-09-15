@@ -33,7 +33,8 @@ export function LibraryCosmosScene({
   }, [model]);
   useFrame((state, delta) => {
     if (model.paused) return;
-    if (!model.reduced && model.particlesReady !== false) model.time += Math.min(delta, 0.05);
+    if (!model.reduced && !model.preparing && model.particlesReady !== false)
+      model.time += Math.min(delta, 0.05);
     advanceReferenceTurn(model, delta);
     if (model.entrance && model.entrance.get() < 1) {
       if (model.reduced || model.progress.get() > 0.01) model.entrance.set(1);

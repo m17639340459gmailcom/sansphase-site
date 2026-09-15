@@ -58,6 +58,7 @@ for (const file of [
   "page-session.js",
   "core.mjs",
   "image-sources.mjs",
+  "home-preload.mjs",
   "data.mjs",
   "universe.mjs",
   "universe-scenes.mjs",

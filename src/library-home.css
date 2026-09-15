@@ -1,4 +1,12 @@
 /* The shared navigation sits over one persistent interactive scene. */
+#site-startup { display: none; }
+.is-home-boot #site-startup {
+  position: fixed; inset: 0; z-index: 2;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+  color: #c2cada; background: #04080d;
+  font-size: 12px; letter-spacing: .14em; font-variant-numeric: tabular-nums;
+}
+.startup-track { width: min(180px, 45vw); height: 2px; background: #c2cada26; }
 #site-header {
   position: fixed;
   inset: 0 0 auto;
@@ -82,6 +90,28 @@ body.is-home #site-footer .site-registration {
   stroke-width: 1.2;
   animation: universe-loading-turn 1.6s linear infinite;
 }
+.universe-load-track {
+  width: min(180px, 45vw);
+  height: 2px;
+  background: #c2cada26;
+  overflow: hidden;
+}
+.universe-load-track span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #c2cada;
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 180ms ease;
+}
+.universe-load-percent {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: .04em;
+}
+.universe-continue { margin-inline-start: 16px; color: inherit; }
 .universe-home.is-ready .universe-loader,
 .universe-home.has-error .universe-loader,
 .universe-home.is-covered .universe-loader {
