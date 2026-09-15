@@ -12,8 +12,10 @@ import {
 import { dirname, resolve, basename, relative, isAbsolute } from "node:path";
 import { JSDOM } from "jsdom";
 import { createElement, ArrowRight, LoaderCircle } from "lucide";
+import { validateSceneCdnOrigin } from "../src/scene-delivery.mjs";
 
 const outdir = process.argv[2] || "dist";
+const sceneCdnOrigin = validateSceneCdnOrigin(process.env.SANSPHASE_SCENE_CDN_ORIGIN);
 const outputRelative = relative(resolve("."), resolve(outdir));
 if (
   !outputRelative ||
@@ -39,7 +41,10 @@ const result = await build({
   jsx: "automatic",
   loader: { ".glsl": "text", ".css": "empty", ".jpg": "file" },
   assetNames: "assets/scene/[name]-[hash]",
-  define: { "process.env.NODE_ENV": '"production"' },
+  define: {
+    "process.env.NODE_ENV": '"production"',
+    __SANSPHASE_SCENE_CDN_ORIGIN__: JSON.stringify(sceneCdnOrigin),
+  },
   splitting: true,
   chunkNames: "chunks/[name]-[hash]",
   outExtension: { ".js": ".mjs" },
@@ -82,7 +87,19 @@ const sceneImages=Object.keys(result.metafile.outputs)
   .filter(path=>/assets\/scene\/.*\.jpg$/.test(path.replaceAll('\\','/')))
   .map(path=>'./'+relative(resolve(outdir),resolve(path)).replaceAll('\\','/'))
   .sort((a,b)=>Number(!a.includes('eso0932a-'))-Number(!b.includes('eso0932a-')));
-await writeFile(`${outdir}/startup-assets.js`, `// Generated from the scene build; original JPEG bytes are unchanged.\n(()=>{if(location.hash&&!/^#\\/?(?:home)?\\/?$/.test(location.hash))return;const urls=${JSON.stringify(sceneImages)};for(const [index,href] of urls.entries()){const link=document.createElement('link');link.rel='preload';link.setAttribute('as','image');link.crossOrigin='anonymous';link.fetchPriority=index===0?'high':'low';link.href=href;document.head.append(link);}const module=document.createElement('link');module.rel='modulepreload';module.href='./cosmos.bundle.mjs';document.head.append(module);})();\n`);
+await build({
+  entryPoints: ["src/startup-assets.mjs"],
+  outfile: `${outdir}/startup-assets.js`,
+  bundle: true,
+  format: "iife",
+  platform: "browser",
+  target: ["es2022"],
+  minify: true,
+  define: {
+    __SANSPHASE_SCENE_CDN_ORIGIN__: JSON.stringify(sceneCdnOrigin),
+    __SANSPHASE_SCENE_IMAGES__: JSON.stringify(sceneImages),
+  },
+});
 const destination = `${outdir}/assets/licenses`;
 await mkdir(destination, { recursive: true });
 await mkdir(`${outdir}/assets/fonts`, { recursive: true });

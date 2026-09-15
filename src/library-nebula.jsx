@@ -18,10 +18,14 @@ import {
 } from "three";
 import source from "./vendor/space-3d/nebula.glsl";
 import noise from "./vendor/space-3d/classic-noise-4d.glsl";
-import milkyWayURL from "./vendor/eso-milky-way/eso0932a.jpg";
-import galacticURL from "./vendor/eso-galactic-centre/eso0934a.jpg";
-import nebulaURL from "./vendor/eso-scene-photographs/eso1105a.jpg";
-import galaxyURL from "./vendor/eso-scene-photographs/eso1424a.jpg";
+import milkyWayPath from "./vendor/eso-milky-way/eso0932a.jpg";
+import galacticPath from "./vendor/eso-galactic-centre/eso0934a.jpg";
+import nebulaPath from "./vendor/eso-scene-photographs/eso1105a.jpg";
+import galaxyPath from "./vendor/eso-scene-photographs/eso1424a.jpg";
+import { sceneAssetUrl } from "./scene-delivery.mjs";
+
+const [milkyWayURL, galacticURL, nebulaURL, galaxyURL] =
+  [milkyWayPath, galacticPath, nebulaPath, galaxyPath].map((path) => sceneAssetUrl(path));
 
 // The existing Space-3D nebula shader is baked once by Drei's cube camera.
 // There is no model-generated shader or expensive full-screen noise each frame.
