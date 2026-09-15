@@ -3,7 +3,7 @@ import { resolve, relative } from 'node:path';
 
 // Deliberate source allowlist: no archives, generated website, credentials,
 // database, uploads, browser profiles, migration exports or one-off experiments.
-const trees=['src','public','server','tests','deploy'];
+const trees=['src','public','server','tests','deploy','docs/assets'];
 const singles=['.gitignore','package.json','pnpm-lock.yaml','pnpm-workspace.yaml','server.mjs','README.md','ARCHITECTURE.md','THIRD_PARTY_NOTICES.md','docs/AUTHOR-GUIDE.md','docs/DEPLOYMENT.md','docs/UPLOAD-15GB.md','docs/RELEASE-PROCESS.md','docs/RELEASE-PREPARATION-2026-09-15.md','scripts/build-site.mjs','scripts/build-cosmos.mjs','scripts/build-manifest.mjs','scripts/verify-site.mjs','scripts/dev.mjs','scripts/start.mjs','scripts/backup-payload.mjs','scripts/restore-payload.mjs','scripts/payload-account.mjs','scripts/healthcheck.mjs','scripts/scheduled-backup.mjs','scripts/publication-files.mjs','scripts/prepare-publication.mjs'];
 
 export async function publicationFiles(root=resolve('.')) {

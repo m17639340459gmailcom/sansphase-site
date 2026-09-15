@@ -25,7 +25,7 @@
 
 app.mjs 管路由和访客交互；library-ui.jsx 管第三方组件；blog-background.css 管博客材质和控件；styles.css 管布局。author-entry.mjs 使用 Tiptap 和 a11y-dialog；author.css 管作者菜单及弹窗。维护源文件，不叠加生成文件补丁。
 
-作品、资料、软件推荐共用 catalog.mjs 的列表与详情渲染，catalog.css 只管理这些栏目的布局，复用博客的卡片材质、字体与控件。三栏分别筛选数据，作者入口统一在作者菜单。功能与验证范围见 docs/CATALOG-PAGES.md。
+作品、资料、软件推荐共用 catalog.mjs 的列表与详情渲染，catalog.css 只管理这些栏目的布局，复用博客的卡片材质、字体与控件。三栏分别筛选数据，作者入口统一在作者菜单。日常编辑说明见 [作者指南](docs/AUTHOR-GUIDE.md)。
 
 刷新由 page-session.js 统一恢复展开状态、搜索、时区和滚动。离页不拆除可见卡片，封面预留比例。内容随首次 HTML 返回，不先显示样例数据。后台迁移不修改这些视觉行为。
 
