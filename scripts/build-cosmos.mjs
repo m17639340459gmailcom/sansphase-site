@@ -109,6 +109,7 @@ await copyFile(new URL("./LICENSE", import.meta.resolve("@fontsource/new-tegomin
 await copyFile(new URL("./LICENSE.md", import.meta.resolve("simple-icons")), `${destination}/simple-icons-LICENSE.md`);
 await copyFile(new URL("../LICENSE", import.meta.resolve("react-colorful")), `${destination}/react-colorful-LICENSE.txt`);
 await copyFile(new URL("../LICENSE.md", import.meta.resolve("plyr")), `${destination}/plyr-LICENSE.md`);
+await copyFile("src/vendor/cldr/LICENSE", `${destination}/unicode-cldr-LICENSE.txt`);
 await copyFile(new URL("./plyr.css", import.meta.resolve("plyr")), `${outdir}/plyr.css`);
 await copyFile(new URL("./plyr.svg", import.meta.resolve("plyr")), `${outdir}/assets/plyr.svg`);
 await copyFile("src/library-home.css", `${outdir}/home.css`);

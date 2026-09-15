@@ -1,4 +1,5 @@
 import {readMusicTracks,musicTracksMarkup} from './music-settings.mjs';
+import {rememberedAccount,rememberSuccessfulLogin} from './login-preferences.mjs';
 import {uploadAuthorFile} from './author-upload.mjs';
 import {uploadLimits,uploadSizeLabel} from './upload-policy.mjs';
 import { Editor } from "@tiptap/core";
@@ -144,7 +145,7 @@ async function updateSite() {
 }
 function login() {
   show(
-    `<h2 id="author-dialog-title">作者登录</h2><p class="author-description">管理文章、资料和个人设置。</p><form data-author-form="login">${field("email", "作者邮箱", "", 'type="email" autocomplete="username" required')}${field("password", "密码", "", 'type="password" autocomplete="current-password" required')}${status()}<button class="author-primary" type="submit">登录作者模式 ${icons.right}</button></form>`,
+    `<h2 id="author-dialog-title">登录</h2><p class="author-description">管理文章、资料和个人设置。</p><form data-author-form="login" method="post" action="/api/author/login" autocomplete="on">${field("email", "账号邮箱", rememberedAccount(), 'id="author-email" type="email" autocomplete="username" required')}${field("password", "密码", "", 'id="author-password" type="password" autocomplete="current-password" required')}<p class="author-description">账号会在本机记住；密码可由浏览器安全保存和自动填充。</p>${status()}<button class="author-primary" type="submit">登录 ${icons.right}</button></form>`,
     { size: "login", back: "" },
   );
 }
@@ -493,11 +494,13 @@ shell.addEventListener("submit", (event) => {
   const form = event.target;
   task(async () => {
     if (form.dataset.authorForm === "login") {
+      const credentials=Object.fromEntries(new FormData(form));
       author = await api(
         "login",
         "POST",
-        Object.fromEntries(new FormData(form)),
+        credentials,
       );
+      void rememberSuccessfulLogin(window,credentials,author.name);
       window.dispatchEvent(
         new CustomEvent("author:identity", { detail: author }),
       );

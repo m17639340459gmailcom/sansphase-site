@@ -214,6 +214,17 @@ test("local prototype DOM flows", async (t) => {
       await navigate('home');assert.ok(q('[data-action="site-music"] svg'));
       await navigate('notes');assert.equal(d.querySelector('[data-action="site-music"]'),null);
     });
+    await t.test('login identity displays the escaped nickname across routes and resets after logout',async()=>{
+      assert.equal(q('[data-author-login]').textContent,'登录');
+      w.dispatchEvent(new w.CustomEvent('author:identity',{detail:{name:'<em>测试昵称</em>'}}));
+      assert.equal(q('[data-author-login]').textContent,'<em>测试昵称</em>');
+      assert.equal(q('[data-author-login]').querySelector('em'),null);
+      await navigate('works');
+      assert.equal(q('[data-author-login]').textContent,'<em>测试昵称</em>');
+      w.dispatchEvent(new w.CustomEvent('author:identity',{detail:null}));
+      assert.equal(q('[data-author-login]').textContent,'登录');
+      await navigate('notes');
+    });
     await t.test("blog search preserves its input, filters and live sidebar widgets", async () => {
       await navigate("notes");
       const search = q("#content-search");
@@ -253,18 +264,26 @@ test("local prototype DOM flows", async (t) => {
       const timezoneTrigger = q("#blog-timezone");
       timezoneTrigger.dispatchEvent(new w.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
       await tick();
-      const tokyo = [...d.querySelectorAll('[role="option"]')].find((el) => el.textContent.includes("Tokyo"));
-      assert.ok(tokyo, "the real Radix menu exposes a Tokyo option");
-      tokyo.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      assert.equal(d.querySelectorAll('[role="option"]').length,1,'no fixed list of cities before searching');
+      input('.timezone-search-input','Tokyo');
+      await tick();
+      const tokyo = [...d.querySelectorAll('[role="option"]')].find((el) => el.textContent.includes("东京"));
+      assert.ok(tokyo, "English search finds Tokyo with a Chinese display name");
+      const timezoneInput=q('.timezone-search-input');
+      timezoneInput.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true}));
+      assert.ok(d.querySelector('.timezone-search-panel'),'confirming an IME candidate does not select a timezone');
+      assert.equal(q('[role="option"][data-highlighted]').getAttribute('aria-selected'),'true','screen reader selection matches highlighted result');
+      tokyo.click();
       await tick();
       assert.equal(q(".blog-date-card .blog-third-party-glass"), dateSurface);
       assert.equal(q("#blog-timezone"), timezoneTrigger, "timezone changes retain the same trigger and card");
-      assert.match(q("#blog-timezone").textContent, /Tokyo/);
+      assert.match(q("#blog-timezone").textContent, /东京/);
       assert.equal(q("[data-clock-zone]").textContent, "Asia/Tokyo");
       timezoneTrigger.dispatchEvent(new w.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
       await tick();
-      [...d.querySelectorAll('[role="option"]')].find((el) => el.textContent.includes("Beijing"))
-        .dispatchEvent(new w.KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      input('.timezone-search-input','Shanghai');
+      await tick();
+      [...d.querySelectorAll('[role="option"]')].find((el) => el.textContent.includes("上海")).click();
       await tick();
     });
     await t.test(

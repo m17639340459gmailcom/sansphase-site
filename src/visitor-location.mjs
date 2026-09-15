@@ -19,6 +19,14 @@ export function locateVisitor(geolocation = globalThis.navigator?.geolocation) {
     {enableHighAccuracy:false,timeout:10000,maximumAge:300000});
   });
 }
+export function watchVisitorLocation(onLocation,geolocation=globalThis.navigator?.geolocation){
+ if(!geolocation?.watchPosition)return ()=>{};
+ const id=geolocation.watchPosition(({coords:{latitude,longitude}})=>{
+  if(Number.isFinite(latitude)&&Number.isFinite(longitude)&&Math.abs(latitude)<=90&&Math.abs(longitude)<=180)
+   onLocation([Number(latitude.toFixed(2)),Number(longitude.toFixed(2)),'当前位置','Current location']);
+ },()=>{},{enableHighAccuracy:false,timeout:10000,maximumAge:300000});
+ return ()=>geolocation.clearWatch(id);
+}
 export async function searchWeatherCities(query, {fetcher=fetch, signal}={}) {
   if (query.trim().length < 2) return [];
   const params=new URLSearchParams({name:query.trim(),count:'6',language:'zh',format:'json'});

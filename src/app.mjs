@@ -1,4 +1,4 @@
-import {visitorTimezone, validTimezone, locateVisitor, searchWeatherCities} from './visitor-location.mjs';
+import {visitorTimezone, validTimezone, locateVisitor, searchWeatherCities,watchVisitorLocation} from './visitor-location.mjs';
 import {imageSources, imageSourceSet} from './image-sources.mjs';
 import {preparePageImages} from './home-preload.mjs';
 import {mountRouteAssets} from './route-assets.mjs';
@@ -69,12 +69,13 @@ function musicState(playing) {
 }
 let blogNoticeIndex = 0;
 let blogNoticeTimer;
-const localTimezone = visitorTimezone();
+let localTimezone = visitorTimezone();
 let timezoneManual = restoredView.timezoneManual === true;
 let blogTimezone = timezoneManual && validTimezone(restoredView.timezone) ? restoredView.timezone : localTimezone;
 let visitorWeatherPlace = null;
 let locatingWeather = null;
 let attemptedLocation = false;
+let manualWeatherPlace=false,stopWeatherWatch;
 let weatherCityResults = [];
 let weatherCityAbort;
 let locationGeneration=0;
@@ -105,9 +106,6 @@ const afterLayout = (callback) =>
 mountToaster(document.querySelector("#toast"));
 let categoryUI;
 let cleanTimezone;
-const blogTimezones = [["Asia/Shanghai", "北京时间 · Beijing"], ["Asia/Tokyo", "东京 · Tokyo"], ["Asia/Singapore", "新加坡 · Singapore"], ["Europe/London", "伦敦 · London"], ["Europe/Paris", "巴黎 · Paris"], ["America/New_York", "纽约 · New York"], ["Australia/Sydney", "悉尼 · Sydney"], ["UTC", "UTC"]];
-for (const zone of new Set([localTimezone,blogTimezone])) if (!blogTimezones.some(([key])=>key===zone)) blogTimezones.unshift([zone,zone]);
-blogTimezones.unshift(['auto','跟随设备时区 · Local time']);
 window.sansphasePageSession?.trackView(() => ({
   language, category: activeCategory, query: activeQuery, filterPage, blogView,
   catalogView, catalogPage: catalogPageNumber,
@@ -145,7 +143,7 @@ function header(page) {
       ? ""
       : `<a class="support-header" href="#/support">${t("支持", "Support")}</a>`;
   const personalAccount = page !== 'home' && siteContent
-    ? `<button class="account-button" data-author-login>${t('登录','Sign in')}</button>` : '';
+    ? `<button class="account-button" data-author-login>${siteContent.author ? esc(siteContent.author.name || t('我的账号','My account')) : t('登录','Sign in')}</button>` : '';
   const homeNav =
     page === "home"
       ? ""
@@ -390,7 +388,7 @@ function syncBlogWeather(page) {
   if (blogWeatherAbort) blogWeatherAbort.abort();
   blogWeatherAbort = undefined;
   blogWeatherRequest = undefined;
-  if (page !== "notes" || typeof fetch !== "function") return;
+  if (page !== "notes" || document.hidden || typeof fetch !== "function") {stopWeatherWatch?.();stopWeatherWatch=undefined;return;}
   if (!visitorWeatherPlace) {
     if (!attemptedLocation) requestWeatherLocation();
     else if (!locatingWeather) {
@@ -401,6 +399,11 @@ function syncBlogWeather(page) {
     }
     return;
   }
+  if(!manualWeatherPlace&&!stopWeatherWatch)stopWeatherWatch=watchVisitorLocation(next=>{
+    if(manualWeatherPlace||document.hidden||parseRoute(location.hash).page!=='notes')return;
+    if(next[0]===visitorWeatherPlace?.[0]&&next[1]===visitorWeatherPlace?.[1])return;
+    visitorWeatherPlace=next;syncBlogWeather('notes');
+  });
   weatherRefreshTimer=setTimeout(()=>syncBlogWeather(parseRoute(location.hash).page),10*60*1000);
   const [latitude, longitude, cityZh, cityEn] = weatherLocation();
   const key = `${latitude}:${longitude}:${language}`;
@@ -414,6 +417,7 @@ function syncBlogWeather(page) {
     })
     .then((data) => {
       if (blogWeatherKey !== key || parseRoute(location.hash).page !== "notes") return;
+      if(!Number.isFinite(data.current?.temperature_2m)||!Number.isFinite(data.current?.weather_code))throw new Error('Incomplete weather data');
       const value = document.querySelector("[data-weather-value]");
       const detail = document.querySelector("[data-weather-detail]");
       const place = document.querySelector("[data-weather-location]");
@@ -451,7 +455,7 @@ function syncBlogWeather(page) {
 }
 function blogMusicPanel() {
   const music=siteContent?.profile?.music || {};
-  return `<div class="blog-side-card blog-music-card"><span class="eyebrow">${icons.music}${t("音乐", "MUSIC")}</span><div class="music-heading"><strong>${esc(music.title || t("音乐歌单","Playlist"))}</strong></div>${music.tracks?.length ? '<div id="blog-audio-player"></div>' : `<p>${t("听一些喜欢的歌。","A few songs I enjoy.")}</p>`}${music.playlistUrl ? `<a class="music-platform-link" href="${esc(music.playlistUrl)}" target="_blank" rel="noopener noreferrer">${icons.music}${t("前往平台听歌单","Open playlist")} ${icons.right}</a>` : ''}${!music.tracks?.length && !music.playlistUrl ? `<p class="subtle">${t("歌单待更新","Playlist coming soon")}</p>` : ''}</div>`;
+  return `<div class="blog-side-card blog-music-card"><span class="eyebrow">${icons.music}${t("音乐", "MUSIC")}</span>${music.tracks?.length ? `<div id="blog-audio-player" aria-label="${esc(music.title || t('音乐歌单','Playlist'))}"></div>` : `<div class="music-heading"><strong>${esc(music.title || t("音乐歌单","Playlist"))}</strong></div><p>${t("听一些喜欢的歌。","A few songs I enjoy.")}</p>`}${music.playlistUrl ? `<a class="music-platform-link" href="${esc(music.playlistUrl)}" target="_blank" rel="noopener noreferrer">${icons.music}${t("前往平台听歌单","Open playlist")} ${icons.right}</a>` : ''}${!music.tracks?.length && !music.playlistUrl ? `<p class="subtle">${t("歌单待更新","Playlist coming soon")}</p>` : ''}</div>`;
 }
 function blogTagsPanel() {
   const tags = [...new Set(notes.flatMap(note=>note.tags||['AI 学习','建站记录']))];
@@ -585,7 +589,7 @@ function render({silent=false}={}) {
   const timezoneHost = document.querySelector("#blog-timezone-control");
   if (timezoneHost) cleanTimezone = mountTimezoneSelect(timezoneHost, {
     value: timezoneManual ? blogTimezone : "auto",
-    items: blogTimezones,
+    locale: language === 'zh' ? 'zh-CN' : 'en-US',
     label: t("选择时区", "Choose time zone"),
     onChange: changeBlogTimezone,
   });
@@ -602,7 +606,7 @@ function render({silent=false}={}) {
       ? t("無相 · 博客与作品", "無相 · Blog and work")
       : `${t({ works: "作品", work: "作品详情", notes: "博客", note: "博客文章", resources: "资料", software: "软件推荐", "resource-center": "资源中心", community: "社区交流", post: "社区讨论", support: "赞助与支持", contact: "联系与合作", account: "个人空间" }[page] || "页面未找到", { works: "Work", work: "Project", notes: "Blog", note: "Blog post", resources: "Learning materials", software: "Software", "resource-center": "Resource center", community: "Community", post: "Discussion", support: "Support", contact: "Contact", account: "Your space" }[page] || "Page not found")} · 無相`;
   document.querySelector("#site-footer").innerHTML =
-    `<span>© 無相</span><a class="site-registration" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">豫ICP备2026037683号-1</a><div class="footer-links"><a href="#/contact">${t("联系与合作", "Contact")}</a><a href="#/support">${t("赞助与支持", "Support")}</a><span>${t("记录 · 创作 · 分享", "Learn · Create · Share")}</span></div>`;
+    `<span>© 無相</span><a class="site-registration" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">豫ICP备2026037683号-1</a><div class="footer-links"><a href="#/contact">${t("联系与合作", "Contact")}</a><a href="#/support">${t("赞助与支持", "Support")}</a><span>${t("记录 · 创作 · 分享", "Learn · Create · Share")}</span></div>${page==='notes'?`<span class="weather-attribution">${t('天气数据','Weather data')}：<a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo</a> · ${t('城市数据','Location data')}：<a href="https://www.geonames.org/" target="_blank" rel="noopener noreferrer">GeoNames</a> · <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener noreferrer">CC BY 4.0</a></span>`:''}`;
 }
 function refreshResults() {
   const page = parseRoute(location.hash).page;
@@ -914,16 +918,28 @@ document.addEventListener("click", event => {
 });
 
 document.addEventListener('click',event=>{
-  if(event.target.closest('[data-action="weather-locate"]')) { visitorWeatherPlace=null; requestWeatherLocation(); }
+  if(event.target.closest('[data-action="weather-locate"]')) { manualWeatherPlace=false;visitorWeatherPlace=null; requestWeatherLocation(); }
   const city=event.target.closest('[data-weather-city]');
   if(city && weatherCityResults[Number(city.dataset.weatherCity)]) {
     locationGeneration++;
+    manualWeatherPlace=true;stopWeatherWatch?.();stopWeatherWatch=undefined;
     visitorWeatherPlace=weatherCityResults[Number(city.dataset.weatherCity)];
     weatherCityAbort?.abort();
     const picker=city.closest('details'); if(picker) picker.open=false;
     syncBlogWeather(parseRoute(location.hash).page);
   }
 });
+document.addEventListener('visibilitychange',()=>{
+  if(!document.hidden&&!timezoneManual){localTimezone=visitorTimezone();blogTimezone=localTimezone;updateBlogClock();}
+  const page=parseRoute(location.hash).page;
+  if(document.hidden)syncBlogWeather(page);
+  else if(page==='notes'){if(manualWeatherPlace)syncBlogWeather(page);else requestWeatherLocation();}
+});
+if(navigator.permissions?.query)navigator.permissions.query({name:'geolocation'}).then(permission=>{
+  permission.addEventListener('change',()=>{
+    if(permission.state==='granted'&&!manualWeatherPlace&&!document.hidden&&parseRoute(location.hash).page==='notes')requestWeatherLocation();
+  });
+}).catch(()=>{});
 document.addEventListener('submit',async event=>{
   if(event.target.id!=='weather-city-search') return;
   event.preventDefault();
