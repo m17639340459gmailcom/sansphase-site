@@ -23,8 +23,9 @@
 4. 在本地运行 cms:backup，把完整私有备份安全传到服务器。使用 cms:restore 写入新的 /var/lib/sansphase/payload 和新的 /etc/sansphase/payload.json；恢复会拒绝覆盖已有目录和配置。保留原 secret 与 authorId，不重新生成或初始化数据库。运行配置使用生产绝对路径，日常启动 push:false。
 5. 安装 deploy/site.env.example 和 deploy/sansphase.service。systemctl daemon-reload 后启用 sansphase；查看 journalctl -u sansphase，并执行 pnpm healthcheck。读取健康检查中的版本，与 dist/build-info.json 对比。
 6. 证书尚不存在时先安装 nginx-bootstrap.conf，准备 /var/www/letsencrypt，执行 nginx -t。使用 Certbot webroot 方式为 www.sansphase.com 申请证书，再用 nginx.conf 替换临时配置。两个配置不要同时启用。再次 nginx -t，通过后 reload。确认 Certbot 自动续期任务正常。不擅自添加未确认的根域名跳转或 DNS 记录。
-7. 安装备份 service/timer，复制 backup.env.example；先手动跑一次备份与恢复演练再开启 timer。日志可在 journalctl -u sansphase-backup 查看。默认保留备份，不自动删除；根据盘容量选择保留周期，并另外配置异地副本与失败通知。
-8. 通过 HTTPS 验收作者登录、草稿/发布/撤回、附件权限与下载、刷新、封面、搜索、手机和访客定位。对登录限流、服务器重启恢复、健康检查、上传失败和磁盘不足做实机验收。
+7. 初次签发证书后，将 deploy/certbot-renew-hook.sh 安装至 /etc/letsencrypt/renewal-hooks/deploy/sansphase-nginx，所有者 root、权限 0755；核对其中 Nginx 与 systemctl 绝对路径。此钩子只处理 www.sansphase.com，先 nginx -t，通过后 reload。运行 certbot renew --cert-name www.sansphase.com --dry-run --run-deploy-hooks 验证续期流程与钩子，并确认续期 timer 存在且启用。
+8. 安装备份 service/timer，复制 backup.env.example；先手动跑一次备份与恢复演练再开启 timer。日志可在 journalctl -u sansphase-backup 查看。默认保留备份，不自动删除；根据盘容量选择保留周期，并另外配置异地副本与失败通知。
+9. 通过 HTTPS 验收作者登录、草稿/发布/撤回、附件权限与下载、刷新、封面、搜索、手机和访客定位。对登录限流、服务器重启恢复、健康检查、上传失败和磁盘不足做实机验收。
 
 ## 大文件与服务器容量
 
