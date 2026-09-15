@@ -9,6 +9,7 @@ import { JSDOM, VirtualConsole } from "jsdom";
 import * as visitorLocation from '../src/visitor-location.mjs';
 import * as imageSources from '../dist/image-sources.mjs';
 import * as homePreload from '../dist/home-preload.mjs';
+import {mountRouteAssets} from '../dist/route-assets.mjs';
 import * as core from "../dist/core.mjs";
 import * as data from "./fixtures/site-data.mjs";
 import {
@@ -98,6 +99,7 @@ test("local prototype DOM flows", async (t) => {
     if (specifier === './catalog.mjs')
       return loadLibrary(new URL('../dist/catalog.mjs', import.meta.url));
     const exports =
+      specifier === './route-assets.mjs' ? {mountRouteAssets:win=>mountRouteAssets(win,{loadAuthor:async()=>{},loadBackground:async()=>{}})} :
       specifier === './home-preload.mjs' ? homePreload :
       specifier === './image-sources.mjs' ? imageSources :
       specifier.includes("visitor-location") ? visitorLocation :

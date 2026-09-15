@@ -1,6 +1,8 @@
 import {visitorTimezone, validTimezone, locateVisitor, searchWeatherCities} from './visitor-location.mjs';
 import {imageSources, imageSourceSet} from './image-sources.mjs';
 import {preparePageImages} from './home-preload.mjs';
+import {mountRouteAssets} from './route-assets.mjs';
+mountRouteAssets(window);
 import {
   escapeHTML as esc,
   parseRoute,

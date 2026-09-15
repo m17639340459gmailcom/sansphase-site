@@ -14,6 +14,7 @@ const canonicalFiles = [
   "core.mjs",
   "image-sources.mjs",
   "home-preload.mjs",
+  "route-assets.mjs",
   "data.mjs",
   "universe.mjs",
   "universe-scenes.mjs",
