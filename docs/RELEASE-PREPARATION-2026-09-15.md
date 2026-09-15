@@ -21,9 +21,11 @@
 
 本地报告：outputs/verification/release-final-build.log、release-final-tests.log、release-production-runtime.log。之前 15 GiB 实际传输与哈希校验记录保留，本轮未重复传输 15 GiB。
 
+追加验证：已将 209 个允许公开的文件保存为独立的本地 Git 提交，再从该提交克隆到开发目录之外的全新目录。使用锁文件重新安装依赖、构建并执行 149 项测试，全部通过，0 失败、0 跳过；没有借用开发目录的 node_modules。该验证在 Windows 上执行，Ubuntu CI 和服务器验收仍待完成。记录保存在 outputs/verification/release-clean-install.log、release-clean-checkout-build.log、release-clean-checkout-tests.log。
+
 ## 尚未完成
 
-- 公开仓库的创建、首次提交和远程推送；完成后要核对远程文件清单及 CI 结果。
+- GitHub 公开仓库的创建及远程推送；本地首次提交和干净副本验证已完成，推送后要核对远程文件清单及 CI 结果。
 - 腾讯云上的 Linux 依赖安装、Nginx 语法与 HTTPS 实测、systemd 启动重启、DNS/域名条件核对。
 - 服务器上的数据恢复、异地备份目标、保留周期、告警接收方式与容量检查。
 - 大文件断点续传、集中媒体永久清理、文章可索引路由与邮件找回密码不属于本轮已完成能力。
