@@ -27,3 +27,9 @@ export function sceneAssetUrl(path, origin = configuredOrigin) {
   if (!origin || !/^\.?\/assets\/scene\/[\w.-]+\.jpg$/.test(path)) return path;
   return origin + "/" + path.replace(/^\.?\//, "");
 }
+
+export function staticAssetUrl(path, base = globalThis.document?.documentElement?.dataset.staticBase || "") {
+  const relative = path.replace(/^\.?\//, "");
+  if (!base || relative.includes("..") || !/^(?:[\w.-]+\.(?:m?js|css)(?:\?|$)|chunks\/[\w.-]+\.mjs$|assets\/(?:materials|fonts)\/[\w.-]+$|assets\/plyr\.svg$)/.test(relative)) return path;
+  return base + relative;
+}

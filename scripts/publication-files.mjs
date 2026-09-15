@@ -7,7 +7,7 @@ const trees=['src','public','server','tests','deploy','docs/assets'];
 const singles=['.gitignore','package.json','pnpm-lock.yaml','pnpm-workspace.yaml','server.mjs','README.md','ARCHITECTURE.md','THIRD_PARTY_NOTICES.md','docs/AUTHOR-GUIDE.md','docs/DEPLOYMENT.md','docs/STATIC-DELIVERY.md','docs/UPLOAD-15GB.md','docs/RELEASE-PROCESS.md','docs/RELEASE-PREPARATION-2026-09-15.md','scripts/build-site.mjs','scripts/build-cosmos.mjs','scripts/build-manifest.mjs','scripts/verify-site.mjs','scripts/dev.mjs','scripts/start.mjs','scripts/backup-payload.mjs','scripts/restore-payload.mjs','scripts/payload-account.mjs','scripts/healthcheck.mjs','scripts/scheduled-backup.mjs','scripts/publication-files.mjs','scripts/prepare-publication.mjs'];
 
 export async function publicationFiles(root=resolve('.')) {
-  const result=[...singles,'.gitattributes','.github/workflows/check.yml'];
+  const result=[...singles,'scripts/static-package.mjs','.gitattributes','.github/workflows/check.yml'];
   async function visit(directory) {
     for(const entry of await readdir(directory,{withFileTypes:true})) {
       const path=resolve(directory,entry.name);

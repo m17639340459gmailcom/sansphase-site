@@ -17,6 +17,7 @@ import {
 } from "./vendor/active-theory-tubes/adapter.mjs";
 import { useRefractionBuffer } from "./library-glass.jsx";
 import { cosmosFraming } from "./library-layout.mjs";
+import { staticAssetUrl } from "./scene-delivery.mjs";
 import {
   projectTubePointer,
   referenceCursorFov,
@@ -30,7 +31,7 @@ function Textures({ tubes }) {
     "/assets/materials/reference-cliffs-MRO.png",
     "/assets/materials/reference-matcap.jpg",
     "/assets/materials/reference-glass-normal.png",
-  ]);
+  ].map((path) => staticAssetUrl(path)));
   textures.forEach((t) => {
     t.wrapS = t.wrapT = RepeatWrapping;
   });

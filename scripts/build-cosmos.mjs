@@ -66,6 +66,7 @@ for (const file of [
   "image-sources.mjs",
   "home-preload.mjs",
   "route-assets.mjs",
+  "scene-delivery.mjs",
   "data.mjs",
   "universe.mjs",
   "universe-scenes.mjs",

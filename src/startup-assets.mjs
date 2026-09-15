@@ -1,4 +1,4 @@
-import { sceneAssetUrl } from "./scene-delivery.mjs";
+import { sceneAssetUrl, staticAssetUrl } from "./scene-delivery.mjs";
 
 // This module is built as a tiny classic script so downloads begin while HTML
 // is parsed, before the renderer's larger module graph has finished loading.
@@ -15,6 +15,6 @@ if (!location.hash || /^#\/?(?:home)?\/?$/.test(location.hash)) {
   }
   const module = document.createElement("link");
   module.rel = "modulepreload";
-  module.href = "./cosmos.bundle.mjs";
+  module.href = staticAssetUrl("./cosmos.bundle.mjs");
   document.head.append(module);
 }

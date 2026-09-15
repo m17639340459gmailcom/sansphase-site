@@ -2,8 +2,17 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   sceneAssetUrl,
+  staticAssetUrl,
   validateSceneCdnOrigin,
 } from "../src/scene-delivery.mjs";
+
+test("versioned static URLs keep API calls, navigation and external files on their original destinations", () => {
+  const base="https://static.example/assets/site/abc/";
+  assert.equal(staticAssetUrl('/assets/materials/normal.png',base),base+'assets/materials/normal.png');
+  assert.equal(staticAssetUrl('./cosmos.bundle.mjs',base),base+'cosmos.bundle.mjs');
+  for(const path of ['/api/author/login','/api/media/image','https://other.example/image.png','#/notes','/../server.mjs']) assert.equal(staticAssetUrl(path,base),path);
+  assert.equal(staticAssetUrl('/assets/materials/normal.png',''),'/assets/materials/normal.png');
+});
 
 test("scene delivery keeps the original asset path and only relocates public scene images", () => {
   const path = "./assets/scene/eso0932a-4NHRAVJH.jpg";

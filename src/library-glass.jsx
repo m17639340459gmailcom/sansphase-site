@@ -18,6 +18,7 @@ import {
 } from "three";
 import { programs } from "./vendor/active-theory-glass/shaders.mjs";
 import { referenceReveal } from "./library-entrance.mjs";
+import { staticAssetUrl } from "./scene-delivery.mjs";
 
 const Refraction = createContext(null);
 export const useRefractionBuffer = () => useContext(Refraction);
@@ -166,7 +167,7 @@ function TexturedGlass(props) {
   const textures = useTexture([
     "/assets/materials/reference-matcap.jpg",
     "/assets/materials/reference-glass-normal.png",
-  ]);
+  ].map((path) => staticAssetUrl(path)));
   textures.forEach((texture) => {
     texture.wrapS = texture.wrapT = RepeatWrapping;
   });

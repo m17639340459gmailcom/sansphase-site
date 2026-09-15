@@ -2,6 +2,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, mkdtemp, rename, rm, lstat, readFile } from "node:fs/promises";
 import { createBuildManifest } from './build-manifest.mjs';
+import { packageStaticFiles } from './static-package.mjs';
+import { validateSceneCdnOrigin } from '../src/scene-delivery.mjs';
 import { resolve, sep } from "node:path";
 
 const run = promisify(execFile);
@@ -25,6 +27,7 @@ let preserveJob = false;
 try {
   // Every build starts empty. A failed compilation leaves the running site intact.
   await run(process.execPath, ["scripts/build-cosmos.mjs", next]);
+  await packageStaticFiles(next,validateSceneCdnOrigin(process.env.SANSPHASE_SCENE_CDN_ORIGIN));
   const { verifySite } = await import("./verify-site.mjs");
   await verifySite(next);
   const {version}=JSON.parse(await readFile('package.json','utf8'));

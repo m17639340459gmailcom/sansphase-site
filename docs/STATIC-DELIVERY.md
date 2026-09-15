@@ -26,29 +26,31 @@ Nginx 为 HTTP 的 `/.well-known/teo-verification/` 路径直接提供文件，�
 
 ### 资源交付配置
 
-已选用 EdgeOne 免费版并完成 `static.sansphase.com` 的 CNAME、边缘 HTTPS 和跨域配置。域名独立防护规则 `static-public-assets-only` 仅允许 `/assets/scene/*` 与证书验证使用的 `/.well-known/*`，其余路径由边缘节点拦截；主站继续直接连接源站。
+已选用 EdgeOne 免费版并完成 `static.sansphase.com` 的 CNAME、边缘 HTTPS 和跨域配置。域名独立防护规则 `static-public-assets-only` 仅允许 `/assets/scene/*`、`/assets/site/*` 与证书验证使用的 `/.well-known/*`，其余路径由边缘节点拦截；主站 HTML 和 API 继续直接连接源站。
 
-构建时可选择公开图片交付地址：
+构建时可选择公开静态资源交付地址：
 
 ```sh
 SANSPHASE_SCENE_CDN_ORIGIN=https://static.sansphase.com pnpm build
 ```
 
-未设置时保留同源路径，适用于本地开发、独立部署及回滚。地址必须是无路径、无用户名密码的 HTTPS origin。预加载脚本与 Three 纹理使用同一个 URL 映射，只有 `/assets/scene/` 的 JPEG 原图被映射；脚本、HTML、作者 API 和上传文件仍走原站。每次生产构建均需显式保留此设置；它不是启动后的运行时开关。
+未设置时保留同源路径，适用于本地开发、独立部署及回滚。地址必须是无路径、无用户名密码的 HTTPS origin。四张场景原图保留原有内容指纹地址；程序、样式、字体和材质等公开构建产物组成 `/assets/site/<内容版本>/` 快照。HTML 的脚本及样式引用、模块内部导入、预加载及材质路径使用同一版本，更新会生成新目录；原文件不压缩转码。HTML、作者 API 和上传内容不会写入快照。每次生产构建均需显式保留此设置；它不是启动后的运行时开关。
 
-源站仅在 `/assets/scene/` 设置固定的 `Access-Control-Allow-Origin: https://www.sansphase.com` 与同值的 `Timing-Allow-Origin`，允许本站匿名读取图片并测量资源下载时间。该响应不依赖请求 Origin，无需按 Origin 拆分缓存；首页和作者 API 不添加这些头部。已有节点缓存可能保留旧头部，更新后需执行直接删除缓存，再验证实际节点响应，不能只检查源站。
+发布时先将 `dist/assets/site/<内容版本>` 安装到 `/var/www/sansphase-static/assets/site/<内容版本>`，核对 `dist/static-delivery.json` 的文件清单与 SHA-256，再切换应用。Nginx 为这些不可变公开文件提供一年缓存、正确的 `.mjs` MIME 类型和固定 CORS。保留旧快照，使已有页面和回滚后的页面仍能获取对应版本。此公共目录独立于 `/var/lib/sansphase` 私有数据目录，不修改数据库及上传目录的权限。
+
+源站在 `/assets/scene/` 和 `/assets/site/` 设置固定的 `Access-Control-Allow-Origin: https://www.sansphase.com` 与同值的 `Timing-Allow-Origin`，允许本站匿名读取公开资源并测量下载时间。该响应不依赖请求 Origin，无需按 Origin 拆分缓存；首页和作者 API 不添加这些头部。已有节点缓存可能保留旧头部，更新后需执行直接删除缓存，再验证实际节点响应，不能只检查源站。
 
 当前使用站长选择的免费套餐。本次配置不启用付费图片处理；升级套餐或新增计费服务需另行确认。
 
 | 项目 | 配置目标 |
 | --- | --- |
-| 内容 | `/assets/scene/` 公开原图及 `/.well-known/` 证书验证；其余路径拒绝 |
+| 内容 | `/assets/scene/` 原图、`/assets/site/` 公开前端快照、`/.well-known/` 证书验证；其余路径拒绝 |
 | 源站 | 当前源站地址；回源 Host 与 TLS SNI 均为 `www.sansphase.com`，验证证书 |
 | 客户端协议 | HTTPS，TLS 1.2/1.3，服务支持时开启 HTTP/2 |
 | 图像处理 | 禁止自动压缩、缩放、水印、格式转换，保持原始字节 |
 | 缓存 | 内容指纹文件缓存一年；不缓存错误响应；保留旧版本以支持回滚 |
 | 跨域 | 针对 `https://www.sansphase.com` 设置图片读取 CORS，不携带账户 Cookie |
-| 安全边界 | 登录、草稿、上传、API、HTML、私有文件不进入此加速域名 |
+| 安全边界 | 登录请求、草稿、上传内容、API、HTML、私有文件不进入此加速域名；编辑器的公开前端程序仍按需加载 |
 | 节点准备 | 套餐支持时提交 URL 预热；否则主动请求验证当前节点缓存，不能将单线路验证视为所有节点均已预热 |
 | 费用 | 核对地区、流量、HTTPS 请求费及源站流量；配置费用/流量告警和可执行的停用方案 |
 | 回滚 | 切回上一发布目录，或清空 `SANSPHASE_SCENE_CDN_ORIGIN` 后重新构建发布；原图和源站服务始终保留 |

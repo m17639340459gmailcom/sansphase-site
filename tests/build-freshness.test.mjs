@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { verifySite } from "../scripts/verify-site.mjs";
+import { rewriteStaticHtml } from "../scripts/static-package.mjs";
 import { loadingIcon } from '../dist/chapter-icons.mjs';
 
 const canonicalFiles = [
@@ -15,6 +16,7 @@ const canonicalFiles = [
   "image-sources.mjs",
   "home-preload.mjs",
   "route-assets.mjs",
+  "scene-delivery.mjs",
   "data.mjs",
   "universe.mjs",
   "universe-scenes.mjs",
@@ -34,6 +36,8 @@ test("the single generated site stays synchronized with source and has all refer
       assert.equal(source.toString().split(placeholder).length,2);
       assert.match(loadingIcon,/^<svg\b/);
       source=Buffer.from(source.toString().replace(placeholder,loadingIcon));
+      const delivery=await readFile('dist/static-delivery.json','utf8').then(JSON.parse).catch(error=>{if(error.code==='ENOENT')return null;throw error});
+      source=Buffer.from(rewriteStaticHtml(source.toString(),delivery));
     }
     assert.equal(digest(await readFile(`dist/${file}`)), digest(source), `dist/${file} is stale; run pnpm build`);
   }

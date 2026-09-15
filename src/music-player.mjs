@@ -1,5 +1,6 @@
 import Plyr from "plyr";
 import { icons } from "./library-ui.jsx";
+import { staticAssetUrl } from "./scene-delivery.mjs";
 
 // Plyr controls playback. Platform share URLs deliberately never become audio sources.
 export function mountMusicPlayer(host, tracks, {onState=()=>{},autoplay=false}={}) {
@@ -8,7 +9,7 @@ export function mountMusicPlayer(host, tracks, {onState=()=>{},autoplay=false}={
   const audio = host.querySelector("audio");
   const player = new Plyr(audio, {
     controls: ["play", "progress", "current-time", "mute", "volume"],
-    iconUrl: "/assets/plyr.svg", autoplay: false, storage: { enabled: false },
+    iconUrl: staticAssetUrl("/assets/plyr.svg"), autoplay: false, storage: { enabled: false },
     i18n: { play: "播放", pause: "暂停", mute: "静音", unmute: "取消静音", volume: "音量", seek: "播放进度", played: "已播放", currentTime: "当前时间" },
   });
   const status = host.querySelector(".music-error");
