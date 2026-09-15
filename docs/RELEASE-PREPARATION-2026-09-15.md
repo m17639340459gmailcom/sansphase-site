@@ -1,6 +1,8 @@
 # 发布候选版整理记录 · 2026-09-15
 
-状态：本地工程整理与生产入口检查通过；GitHub 上传及腾讯云正式部署尚未完成。
+状态：本地工程整理、生产入口检查及 GitHub Ubuntu 24.04 构建测试通过；源码已发布至公开仓库，腾讯云正式部署尚未完成。
+
+仓库：[m17639340459gmailcom/sansphase-site](https://github.com/m17639340459gmailcom/sansphase-site)。默认分支为 `codex/release-preparation`，当前仍为发布候选版。
 
 ## 已落实
 
@@ -13,7 +15,7 @@
 - 静态资源 ETag 与内容摘要 chunk 缓存；作者身份相关 HTML/API 不缓存；日志不记录 Cookie、请求体与查询参数。
 - 提供 Ubuntu systemd、Nginx HTTPS/登录限流/15 GiB 上传和备份 timer 模板，以及域名、备份、恢复、回滚说明。
 - 公开源码采用明确文件清单并扫描已知私有值，保留许可证。项目所有者已明确确认首页参考素材的完整使用权，授权说明随来源记录保留。
-- 增加 GitHub CI 配置；它需要实际推送后才能在 GitHub 运行，本地通过不冒充 Linux CI 通过。
+- GitHub CI 已在 Ubuntu 24.04 实际执行：安装依赖、构建与 149 项测试全部通过。自动流程保持只读仓库权限；随后将 Actions 更新到 Node 24 运行时并固定提交版本，避免旧运行时弃用警告。
 
 ## 验证
 
@@ -23,9 +25,10 @@
 
 追加验证：已将 209 个允许公开的文件保存为独立的本地 Git 提交，再从该提交克隆到开发目录之外的全新目录。使用锁文件重新安装依赖、构建并执行 149 项测试，全部通过，0 失败、0 跳过；没有借用开发目录的 node_modules。该验证在 Windows 上执行，Ubuntu CI 和服务器验收仍待完成。记录保存在 outputs/verification/release-clean-install.log、release-clean-checkout-build.log、release-clean-checkout-tests.log。
 
+首次远程验证：[GitHub Actions 34959513876](https://github.com/m17639340459gmailcom/sansphase-site/actions/runs/34959513876)，提交 `4a18fe8`，Ubuntu 24.04，149 通过、0 失败、0 跳过。公开文件清单为 210 个文件（增加仓库头图），已核对远程提交与本地提交一致，已知私有值扫描和文档相对链接检查通过。当前提交的检查状态以仓库 Actions 为准。
+
 ## 尚未完成
 
-- GitHub 公开仓库的创建及远程推送；本地首次提交和干净副本验证已完成，推送后要核对远程文件清单及 CI 结果。
 - 腾讯云上的 Linux 依赖安装、Nginx 语法与 HTTPS 实测、systemd 启动重启、DNS/域名条件核对。
 - 服务器上的数据恢复、异地备份目标、保留周期、告警接收方式与容量检查。
 - 大文件断点续传、集中媒体永久清理、文章可索引路由与邮件找回密码不属于本轮已完成能力。
