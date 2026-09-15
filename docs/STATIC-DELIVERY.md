@@ -26,6 +26,10 @@ Nginx 为 HTTP 的 `/.well-known/teo-verification/` 路径直接提供文件，�
 
 ### 资源交付配置
 
+已选用 EdgeOne 免费版并完成 `static.sansphase.com` 的 CNAME 与边缘 HTTPS 配置。网站的场景 URL 尚未切换，仍需完成缓存响应头更新、静态路径边界和浏览器验证。
+
+源站仅在 `/assets/scene/` 设置固定的 `Access-Control-Allow-Origin: https://www.sansphase.com` 与同值的 `Timing-Allow-Origin`，允许本站匿名读取图片并测量资源下载时间。该响应不依赖请求 Origin，无需按 Origin 拆分缓存；首页和作者 API 不添加这些头部。已有节点缓存可能保留旧头部，更新后需执行直接删除缓存，再验证实际节点响应，不能只检查源站。
+
 需站长先确认服务及费用，不自动购买、开通计费或修改 DNS。建议先仅加速公开场景图片，独立加速域名可使用站长确认后的 `static.sansphase.com`。
 
 | 项目 | 配置目标 |
@@ -37,7 +41,7 @@ Nginx 为 HTTP 的 `/.well-known/teo-verification/` 路径直接提供文件，�
 | 缓存 | 内容指纹文件缓存一年；不缓存错误响应；保留旧版本以支持回滚 |
 | 跨域 | 针对 `https://www.sansphase.com` 设置图片读取 CORS，不携带账户 Cookie |
 | 安全边界 | 登录、草稿、上传、API、HTML、私有文件不进入此加速域名 |
-| 预热 | 发布后预热四张首页原图，完成后再切换资源域名 |
+| 节点准备 | 套餐支持时提交 URL 预热；否则主动请求验证当前节点缓存，不能将单线路验证视为所有节点均已预热 |
 | 费用 | 核对地区、流量、HTTPS 请求费及源站流量；配置费用/流量告警和可执行的停用方案 |
 | 回滚 | 恢复同源场景 URL；保留原图和源站服务，停止引流后处理加速服务 |
 
