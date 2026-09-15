@@ -264,7 +264,7 @@ export class ReferenceTubes {
         true;
   }
   update(time) {
-    if (!this.gpu || this.disposed) return;
+    if (!this.gpu || this.disposed || this.geometry.instanceCount === 0) return;
     this.positionVariable.material.uniforms.time.value = time;
     this.lifeVariable.material.uniforms.time.value = time;
     this.gpu.compute();

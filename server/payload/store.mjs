@@ -1,7 +1,8 @@
 import {byteRange} from '../http-range.mjs';
 import {withStreamUpload,uploadLimits} from '../stream-upload.mjs';
 import { createLocalReq, logoutOperation } from "payload";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
+import { createImageVariants } from '../image-variants.mjs';
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { Readable } from "node:stream";
@@ -12,6 +13,7 @@ const fail = (message, status = 400) =>
   Object.assign(new Error(message), { status });
 const collections = new Set(["articles", "announcements", "library_entries"]);
 export function createPayloadStore(payload, { directory, authorId }) {
+  const imageVariant = createImageVariants(directory);
   let activeUploads=0;
   async function identity(token) {
     if (!token) throw fail("请先登录作者账号。", 401);
@@ -35,19 +37,24 @@ export function createPayloadStore(payload, { directory, authorId }) {
     if (!uuidPattern.test(id || "")) throw fail("文件不存在。", 404);
     return payload.findByID({ collection: "media", id });
   }
-  async function readMedia(id,rangeHeader) {
+  async function readMedia(id,rangeHeader, imageWidth) {
     // Internal only: callers must authorize the owner or check published references first.
     const row = await mediaRecord(id);
     if (!row.filename || basename(row.filename) !== row.filename)
       throw fail("文件不存在。", 404);
-    const path = resolve(directory, "uploads", row.filename);
-    const size = (await stat(path)).size;
+    const original = resolve(directory, "uploads", row.filename);
+    const variant = await imageVariant(original, imageWidth, row.mimeType || '');
+    const path = variant || original;
+    const info = await stat(path);
+    const size = info.size;
+    const etag = '"' + createHash('sha256').update(`${path}:${size}:${info.mtimeMs}`).digest('hex') + '"';
     const range=byteRange(rangeHeader,size);
     if(range===false) return new Response(null,{status:416,headers:{'Content-Range':`bytes */${size}`,'Content-Length':'0'}});
     return new Response(Readable.toWeb(createReadStream(path,range||undefined)), {
       status:range?206:200,
       headers: {
-        "Content-Type": row.mimeType || "application/octet-stream",
+        "Content-Type": variant ? 'image/webp' : row.mimeType || "application/octet-stream",
+        "ETag": etag,
         "Content-Length": String(range?range.end-range.start+1:size),
         'Accept-Ranges':'bytes',
         ...(range?{'Content-Range':`bytes ${range.start}-${range.end}/${size}`}:{ }),

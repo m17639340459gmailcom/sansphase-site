@@ -147,7 +147,7 @@ async function setup({
     },
   };
 }
-test("home is an unlabelled visual canvas with accessible semantics and no visible loading slogans", async () => {
+test("home loading indicator follows actual readiness without adding permanent visual controls", async () => {
   const s = await setup();
   try {
     assert.equal(s.root.querySelectorAll("canvas").length, 1);
@@ -166,9 +166,12 @@ test("home is an unlabelled visual canvas with accessible semantics and no visib
     assert.equal(s.root.querySelector(".universe-feedback").hidden, true);
     assert.equal(s.root.querySelector(".universe-status").textContent, "");
     assert.equal(s.root.getAttribute("aria-busy"), "true");
+    assert.equal(s.root.querySelector('.universe-loader').getAttribute('aria-hidden'), 'false');
+    assert(s.root.querySelector('.universe-loader svg'), 'use the existing Lucide icon family');
     assert.ok(!s.root.classList.contains("is-ready"));
     s.ready();
     assert.equal(s.root.getAttribute("aria-busy"), "false");
+    assert.equal(s.root.querySelector('.universe-loader').getAttribute('aria-hidden'), 'true');
     assert.ok(s.root.classList.contains("is-ready"));
   } finally {
     s.close();

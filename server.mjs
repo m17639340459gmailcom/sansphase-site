@@ -1,4 +1,5 @@
 import {byteRange} from './server/http-range.mjs';
+import {imageSources} from './src/image-sources.mjs';
 import {uploadTimeoutMs} from './src/upload-policy.mjs';
 import http from "node:http";
 import { open, readFile } from "node:fs/promises";
@@ -81,11 +82,25 @@ export function createPreviewServer({
                 cookie: req.headers.cookie,
                 download: requestURL.searchParams.has("download"),
                 range: req.headers.range,
+                width: requestURL.searchParams.get('w'),
               },
             );
             const type =
               upstream.headers.get("content-type") ||
               "application/octet-stream";
+            // Re-check publication/auth above before any cache response, so an
+            // unpublished image cannot be retrieved with a cached validator.
+            const etag = upstream.headers.get('etag');
+            if (!requestURL.searchParams.has('preview') && etag) {
+              res.setHeader('ETag', etag);
+              res.setHeader('Cache-Control', 'private, max-age=0, must-revalidate');
+              if (!req.headers.range && req.headers['if-none-match'] === etag) {
+                await upstream.body?.cancel();
+                res.writeHead(304);
+                res.end();
+                return;
+              }
+            }
             res.statusCode=upstream.status;
             for(const header of ['Content-Length','Content-Range','Accept-Ranges']) if(upstream.headers.has(header)) res.setHeader(header,upstream.headers.get(header));
             res.setHeader("Content-Type", type);
@@ -128,11 +143,15 @@ export function createPreviewServer({
             return;
           }
           let html = await readFile(resolve(rootPath, "index.html"), "utf8");
-          if (data.profile?.background)
+          if (data.profile?.background) {
             html = html.replaceAll(
               "./assets/materials/blog-space.png",
               data.profile.background,
             );
+            const responsive = imageSources(data.profile.background);
+            html = html.replace(`<img src="${data.profile.background}"`, `<img ${responsive} src="${data.profile.background}"`);
+            html = html.replace('<link rel="preload" as="image"', `<link ${responsive.replace('srcset=', 'imagesrcset=').replace('sizes=', 'imagesizes=')} rel="preload" as="image"`);
+          }
           html = html.replace(
             "</head>",
             `<script id="site-content" type="application/json">${serializeContent(data)}</script></head>`,

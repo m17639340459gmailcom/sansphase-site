@@ -11,7 +11,7 @@ import {
 } from "node:fs/promises";
 import { dirname, resolve, basename, relative, isAbsolute } from "node:path";
 import { JSDOM } from "jsdom";
-import { createElement, ArrowRight } from "lucide";
+import { createElement, ArrowRight, LoaderCircle } from "lucide";
 
 const outdir = process.argv[2] || "dist";
 const outputRelative = relative(resolve("."), resolve(outdir));
@@ -57,6 +57,7 @@ for (const file of [
   "catalog.css",
   "page-session.js",
   "core.mjs",
+  "image-sources.mjs",
   "data.mjs",
   "universe.mjs",
   "universe-scenes.mjs",
@@ -228,11 +229,12 @@ const chapterArrow = createElement(ArrowRight, {
   "aria-hidden": "true",
   focusable: "false",
 }).outerHTML;
+const loadingIcon = createElement(LoaderCircle, {"aria-hidden":"true", focusable:"false"}).outerHTML;
 delete globalThis.document;
 dom.window.close();
 await writeFile(
   `${outdir}/chapter-icons.mjs`,
-  `// Generated from lucide@1.45.0 ArrowRight. See assets/licenses.\nexport const chapterArrow=${JSON.stringify(chapterArrow)};\n`,
+  `// Generated from lucide@1.45.0. See assets/licenses.\nexport const chapterArrow=${JSON.stringify(chapterArrow)};\nexport const loadingIcon=${JSON.stringify(loadingIcon)};\n`,
 );
 // Remove only obsolete, generated chunk files from this build's own directory.
 const chunkDir = await realpath(`${outdir}/chunks`),

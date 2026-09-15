@@ -1,4 +1,5 @@
 import { escapeHTML as esc, filterItems } from "./core.mjs";
+import {imageSources} from './image-sources.mjs';
 
 // Shared presentation for three independent author-managed collections.
 export const catalogKinds = {
@@ -112,10 +113,10 @@ function tags(item, ui) {
     )
     .join("");
 }
-function cover(item, ui) {
+function cover(item, ui, sizes = '(max-width: 700px) 100vw, (max-width: 1100px) 50vw, 25vw') {
   const src = safeURL(item.coverSrc);
   return src
-    ? `<div class="cover-frame"><img class="catalog-cover" src="${esc(src)}" alt="${esc(title(item, ui.t))}" width="960" height="540" loading="lazy"></div>`
+    ? `<div class="cover-frame"><img class="catalog-cover" src="${esc(src)}" ${imageSources(src, sizes)} alt="${esc(title(item, ui.t))}" width="960" height="540" loading="lazy" decoding="async"></div>`
     : "";
 }
 function actions(kind, item, ui) {
@@ -194,5 +195,5 @@ export function catalogPage(kind, items, state, ui) {
 export function catalogDetail(kind, item, ui) {
   const { t, icons } = ui;
   const download = safeURL(item.downloadUrl);
-  return `<section class="page catalog-detail-page"><article class="article reading-article"><a class="back-link" href="#/${kind}">${icons.left}${t("返回", "Back to ")}${t(...catalogKinds[kind].label)}</a><div class="eyebrow">${icons[catalogKinds[kind].icon]}${esc(item.category)}</div><h1>${esc(title(item, t))}</h1><div class="post-tags">${date(item.date) ? `<time datetime="${esc(item.date)}">${date(item.date)}</time>` : ""}${(item.tags || []).map((tag) => `<span class="article-meta-tag">${esc(tag)}</span>`).join("")}</div><p class="article-intro">${esc(summary(item, t))}</p>${cover(item, ui).replace("catalog-cover", "article-cover").replace('loading="lazy"', 'loading="eager"')}<div class="article-body">${item.bodyHTML || `<p>${esc(summary(item, t))}</p>`}</div>${download || safeURL(item.externalUrl) ? `<section class="catalog-download" aria-label="${t("获取与链接", "Downloads and links")}">${download ? `<div><h2>${t("下载文件", "Download file")}</h2><p>${esc(item.file || t("附件", "Attachment"))}${fileSize(item.fileSize) ? ` · ${fileSize(item.fileSize)}` : ""}</p></div>` : ""}<div class="catalog-detail-actions">${actions(kind, item, ui)}</div></section>` : ""}<div class="article-bottom"><a class="text-link" href="#/${kind}">${icons.left}${t("浏览更多", "Browse more")}</a></div></article></section>`;
+  return `<section class="page catalog-detail-page"><article class="article reading-article"><a class="back-link" href="#/${kind}">${icons.left}${t("返回", "Back to ")}${t(...catalogKinds[kind].label)}</a><div class="eyebrow">${icons[catalogKinds[kind].icon]}${esc(item.category)}</div><h1>${esc(title(item, t))}</h1><div class="post-tags">${date(item.date) ? `<time datetime="${esc(item.date)}">${date(item.date)}</time>` : ""}${(item.tags || []).map((tag) => `<span class="article-meta-tag">${esc(tag)}</span>`).join("")}</div><p class="article-intro">${esc(summary(item, t))}</p>${cover(item, ui, '(max-width: 960px) 100vw, 960px').replace("catalog-cover", "article-cover").replace('loading="lazy"', 'loading="eager"')}<div class="article-body">${item.bodyHTML || `<p>${esc(summary(item, t))}</p>`}</div>${download || safeURL(item.externalUrl) ? `<section class="catalog-download" aria-label="${t("获取与链接", "Downloads and links")}">${download ? `<div><h2>${t("下载文件", "Download file")}</h2><p>${esc(item.file || t("附件", "Attachment"))}${fileSize(item.fileSize) ? ` · ${fileSize(item.fileSize)}` : ""}</p></div>` : ""}<div class="catalog-detail-actions">${actions(kind, item, ui)}</div></section>` : ""}<div class="article-bottom"><a class="text-link" href="#/${kind}">${icons.left}${t("浏览更多", "Browse more")}</a></div></article></section>`;
 }

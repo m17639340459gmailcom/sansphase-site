@@ -155,9 +155,10 @@ export function mountCosmos(
       <LibraryCosmosScene
         model={model}
         onFrame={(p) => {
-          stage.dataset.entrance = model.entrance.get().toFixed(3);
+          const entrance = model.entrance.get().toFixed(3);
+          if (stage.dataset.entrance !== entrance) stage.dataset.entrance = entrance;
           onProgress(p);
-          if (!announced) {
+          if (!announced && model.particlesReady === true) {
             announced = true;
             queueMicrotask(() => {
               if (!disposed && !failed) onReady();

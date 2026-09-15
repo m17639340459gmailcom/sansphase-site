@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { JSDOM, VirtualConsole } from "jsdom";
 import * as visitorLocation from '../src/visitor-location.mjs';
+import * as imageSources from '../dist/image-sources.mjs';
 import * as core from "../dist/core.mjs";
 import * as data from "./fixtures/site-data.mjs";
 import {
@@ -96,6 +97,7 @@ test("local prototype DOM flows", async (t) => {
     if (specifier === './catalog.mjs')
       return loadLibrary(new URL('../dist/catalog.mjs', import.meta.url));
     const exports =
+      specifier === './image-sources.mjs' ? imageSources :
       specifier.includes("visitor-location") ? visitorLocation :
       specifier === "./core.mjs"
         ? core

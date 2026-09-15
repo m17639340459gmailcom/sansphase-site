@@ -1,12 +1,13 @@
 import { escapeHTML as esc } from "./core.mjs";
 import { universeScenes } from "./universe-scenes.mjs";
-import { chapterArrow } from "./chapter-icons.mjs";
+import { chapterArrow, loadingIcon } from "./chapter-icons.mjs";
 
 export function universeMarkup(english = false) {
   const s = universeScenes[0];
   return `<section class="universe-home" aria-busy="true" data-index="0" data-scene="${s.id}">
     <div class="universe-stage" tabindex="0" role="region" aria-describedby="universe-instructions" aria-label="${english ? "Interactive universe" : "可交互的宇宙"}"><canvas class="universe-canvas" aria-hidden="true"></canvas><div class="chapter-shade" aria-hidden="true"></div><section class="chapter-copy" aria-labelledby="chapter-title" hidden></section></div>
     <h1 class="sr-only">無相</h1>
+    <div class="universe-loader" role="status" aria-live="polite">${loadingIcon}<span>${english ? 'Preparing your space' : '正在准备星空'}</span></div>
     <p class="sr-only" id="universe-instructions" aria-live="polite">${esc(english ? s.ariaLabelEn : s.ariaLabel)}</p>
     <div class="universe-feedback" hidden><p class="universe-status" role="status" aria-live="polite"></p><button class="universe-retry" type="button" hidden></button></div>
   </section>`;
@@ -96,6 +97,7 @@ export function mountUniverse(
     root.setAttribute("aria-hidden", String(covered));
     root.inert = covered;
     root.classList.toggle("is-ready", ready);
+    root.querySelector('.universe-loader').setAttribute('aria-hidden', String(ready || failed || covered));
     root.classList.toggle("has-error", failed);
     root.classList.toggle("is-covered", covered);
     root.classList.toggle("is-reduced", reduced);

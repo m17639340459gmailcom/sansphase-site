@@ -61,6 +61,37 @@ body.is-home #site-footer .site-registration {
 .universe-home.is-ready .universe-stage {
   opacity: 1;
 }
+.universe-loader {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  color: #c2cada;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  pointer-events: none;
+  transition: opacity 280ms ease, visibility 280ms ease;
+}
+.universe-loader svg {
+  width: 30px;
+  height: 30px;
+  stroke-width: 1.2;
+  animation: universe-loading-turn 1.6s linear infinite;
+}
+.universe-home.is-ready .universe-loader,
+.universe-home.has-error .universe-loader,
+.universe-home.is-covered .universe-loader {
+  opacity: 0;
+  visibility: hidden;
+}
+@keyframes universe-loading-turn { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .universe-loader svg { animation: none; }
+}
 .universe-home.is-returning-out .universe-stage {
   opacity: 0;
   transition-duration: 220ms;

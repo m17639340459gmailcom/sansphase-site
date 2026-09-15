@@ -35,7 +35,7 @@ export function GlassSceneBuffer({ children, model }) {
     if (model.paused) return;
     const glass = [],
       tubes = [];
-    scene.traverse((object) => {
+    scene.traverseVisible((object) => {
       if (
         object.isMesh &&
         object.visible &&
@@ -47,7 +47,8 @@ export function GlassSceneBuffer({ children, model }) {
       if (
         object.isMesh &&
         object.visible &&
-        object.material?.userData?.referenceTubes
+        object.material?.userData?.referenceTubes &&
+        object.geometry.instanceCount > 0
       ) {
         tubes.push(object);
         object.visible = false;
@@ -63,8 +64,10 @@ export function GlassSceneBuffer({ children, model }) {
         object.visible = true;
         object.material.uniforms.tRefraction.value = second.texture;
       });
-      gl.setRenderTarget(first);
-      gl.render(scene, camera);
+      if (tubes.length) {
+        gl.setRenderTarget(first);
+        gl.render(scene, camera);
+      }
     } finally {
       gl.setRenderTarget(previous);
       gl.toneMapping = tone;
@@ -76,7 +79,7 @@ export function GlassSceneBuffer({ children, model }) {
     scene.traverse((object) => {
       const material = object.material;
       if (material?.userData?.referenceGlass) {
-        material.uniforms.tRefraction.value = first.texture;
+        material.uniforms.tRefraction.value = tubes.length ? first.texture : second.texture;
         if (material.uniforms.tVideo)
           material.uniforms.tVideo.value = second.texture;
       }

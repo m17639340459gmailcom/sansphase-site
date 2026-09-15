@@ -41,7 +41,9 @@ export function OrbitalParticles({ model }) {
     const system = new ParticleSystem({
       duration: 32,
       looping: true,
-      prewarm: true,
+      // Quarks' synchronous prewarm simulates 1,920 steps in the first frame.
+      // Run the identical warmup through its public batch API over small frames.
+      prewarm: false,
       autoDestroy: false,
       worldSpace: false,
       shape: new DonutEmitter({
@@ -90,7 +92,8 @@ export function OrbitalParticles({ model }) {
     // lives at the scene root to avoid applying the opening transform twice.
     scene.add(batch);
     batch.addSystem(system);
-    resources.current = { system, batch, previousTime: model.time };
+    model.particlesReady = false;
+    resources.current = { system, batch, previousTime: model.time, warmSteps: 32 * 60 };
     return () => {
       resources.current = undefined;
       system.dispose();
@@ -104,7 +107,7 @@ export function OrbitalParticles({ model }) {
     };
   }, [scene, model]);
 
-  useFrame(() => {
+  useFrame((state) => {
     const current = resources.current;
     if (!current) return;
     const { system, batch } = current;
@@ -115,6 +118,14 @@ export function OrbitalParticles({ model }) {
         : Math.min(0.05, Math.max(0, model.time - current.previousTime));
     current.previousTime = model.time;
     system.emitter.updateWorldMatrix(true, false);
+    if (current.warmSteps > 0 && !model.paused) {
+      const steps = Math.min(24, current.warmSteps);
+      for (let i = 0; i < steps; i++) batch.update(1 / 60);
+      current.warmSteps -= steps;
+      model.particlesReady = current.warmSteps === 0;
+      // Reduced-motion mode renders on demand, but still needs a complete field.
+      if (current.warmSteps > 0) state.invalidate();
+    }
     batch.update(delta);
     for (const item of batch.batches) {
       item.name = "stellar-grains";

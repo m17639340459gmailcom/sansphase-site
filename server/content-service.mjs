@@ -1,4 +1,5 @@
 import sanitizeHtml from "sanitize-html";
+import {imageSourceSet} from '../src/image-sources.mjs';
 import { normalizeSocialLink } from "../src/social-links.mjs";
 import { richTextAttributes, richTextStyles } from "./rich-text-policy.mjs";
 import { cleanMusic, cleanAppearance } from "./profile-settings.mjs";
@@ -34,7 +35,7 @@ export function cleanBody(body, origin, media, preview = "") {
     allowedAttributes: {
       ...richTextAttributes,
       a: ["href", "title", "rel", "target"],
-      img: ["src", "alt", "width", "height", "loading"],
+      img: ["src", "srcset", "sizes", "alt", "width", "height", "loading", "decoding"],
       code: ["class"],
       th: ["colspan", "rowspan"],
       td: ["colspan", "rowspan"],
@@ -67,7 +68,10 @@ export function cleanBody(body, origin, media, preview = "") {
         return {
           tagName: "img",
           attribs: {
-            src: `/api/media/${id}${preview ? `?preview=${preview}` : ""}`,
+            src: `/api/media/${id}?w=1280${preview ? `&preview=${preview}` : ""}`,
+            srcset: imageSourceSet(`/api/media/${id}${preview ? `?preview=${preview}` : ''}`),
+            sizes: '(max-width: 960px) 100vw, 960px',
+            decoding: 'async',
             alt: attrs.alt || "",
             loading: "lazy",
             ...(Number(attrs.width) > 0
@@ -106,10 +110,13 @@ export function createContentService({ url, token, fetcher = fetch, store }) {
       });
     return raw ? response : (await response.json()).data;
   };
-  const mediaPath = (id, media, preview = "") => {
+  const mediaPath = (id, media, preview = "", width = 0) => {
     if (!uuidPattern.test(id || "")) return "";
     media.add(id);
-    return `/api/media/${id}${preview ? `?preview=${preview}` : ""}`;
+    const params = new URLSearchParams();
+    if (preview) params.set('preview', preview);
+    if (width) params.set('w', width);
+    return `/api/media/${id}${params.size ? `?${params}` : ''}`;
   };
   const note = (row, media, preview = "") => ({
     id: row.slug,
@@ -121,7 +128,7 @@ export function createContentService({ url, token, fetcher = fetch, store }) {
       ? row.tags.filter((x) => typeof x === "string")
       : [],
     date: row.published_at || row.date_created,
-    coverSrc: mediaPath(row.cover, media, preview),
+    coverSrc: mediaPath(row.cover, media, preview, 960),
     bodyHTML: cleanBody(row.body, origin, media, preview),
     attachments: (row.attachments || []).flatMap(
       ({ directus_files_id: file }) =>
@@ -190,8 +197,8 @@ export function createContentService({ url, token, fetcher = fetch, store }) {
             name: profile.name || "無相",
             signature: profile.signature || "",
             bio: profile.bio || "",
-            avatar: mediaPath(profile.avatar, media),
-            background: mediaPath(profile.background, media),
+            avatar: mediaPath(profile.avatar, media, '', 384),
+            background: mediaPath(profile.background, media, '', 1920),
             music: cleanMusic(profile.music_settings),
             appearance: cleanAppearance(profile.appearance),
             socialLinks: (Array.isArray(profile.social_links)
@@ -210,7 +217,7 @@ export function createContentService({ url, token, fetcher = fetch, store }) {
         .map((row) => ({
           title: row.title || "",
           summary: row.summary || "",
-          image: mediaPath(row.image, media),
+          image: mediaPath(row.image, media, '', 960),
           link: safeLink(row.link),
         })),
     };
@@ -259,7 +266,7 @@ export function createContentService({ url, token, fetcher = fetch, store }) {
   return {
     snapshot,
     preview,
-    async media(id, { previewId, cookie = "", download = false, range } = {}) {
+    async media(id, { previewId, cookie = "", download = false, range, width } = {}) {
       if (!uuidPattern.test(id))
         throw Object.assign(new Error("Not found"), { status: 404 });
       const allowed = previewId
@@ -267,7 +274,7 @@ export function createContentService({ url, token, fetcher = fetch, store }) {
         : (await snapshot()).media;
       if (!allowed.has(id))
         throw Object.assign(new Error("Not found"), { status: 404 });
-      if (store) return store.readMedia(id,range);
+      if (store) return store.readMedia(id,range, download ? undefined : width);
       return request(`/assets/${id}${download ? "?download=true" : ""}`, {
         raw: true,
       });

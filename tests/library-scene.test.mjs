@@ -66,6 +66,11 @@ test("actual library scene: glass, persistent scroll presentation, home-only inp
     { width: 1600, height: 900 },
   );
   await renderer.advanceFrames(1, 1 / 60);
+  assert.equal(model.particlesReady, false, "particle preparation is spread across frames");
+  assert.ok(state.scene.getObjectByName("orbital-particle-emitter").system.particleNum <= 40,
+    "first frame does not simulate the entire particle lifetime");
+  await renderer.advanceFrames(80, 1 / 60);
+  assert.equal(model.particlesReady, true);
   const scene = state.scene,
     find = (name) => {
       const obj = scene.getObjectByName(name);
@@ -474,6 +479,17 @@ test("entry reveals particles before glass with a turning approach and pauses wi
   );
   try {
     await renderer.advanceFrames(1, 1 / 60);
+    assert.equal(model.time, 0, "entry waits for a fully prepared particle field");
+    model.paused = true;
+    const preparing = state.scene.getObjectByName("orbital-particle-emitter").system.particleNum;
+    await renderer.advanceFrames(10, 1 / 60);
+    assert.equal(state.scene.getObjectByName("orbital-particle-emitter").system.particleNum, preparing);
+    model.paused = false;
+    await renderer.advanceFrames(79, 1 / 60);
+    assert.equal(model.particlesReady, true);
+    assert.equal(model.time, 0, "warmup does not consume the entrance animation");
+    const population = state.scene.getObjectByName("orbital-particle-emitter").system.particleNum;
+    assert.ok(population > 1800 && population < 2200, "retain the existing particle density");
     const find = (name) => state.scene.getObjectByName(name);
     const firstDistance = find("opening-installation").position.distanceTo(
       state.camera.position,
@@ -512,3 +528,4 @@ test("entry reveals particles before glass with a turning approach and pauses wi
       model[key].destroy();
   }
 });
+

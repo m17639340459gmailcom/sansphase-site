@@ -5,6 +5,22 @@ import {
   ReferenceTubes,
   TubeInput,
 } from "../src/vendor/active-theory-tubes/adapter.mjs";
+
+test("an empty cursor field does not run GPU simulation; emission resumes it", () => {
+  const tubes = new ReferenceTubes(null);
+  let computations = 0;
+  tubes.gpu = {compute() {computations++;}, getCurrentRenderTarget() {return {texture:null};}};
+  tubes.positionVariable = {material:{uniforms:{time:{value:0}}}};
+  tubes.lifeVariable = {material:{uniforms:{time:{value:0}}}};
+  tubes.update(1);
+  assert.equal(computations, 0);
+  tubes.release(new Vector3(1, 2, 0), new Vector3(1, 0, 0), new Color('#fff'));
+  tubes.update(2);
+  assert.equal(computations, 1);
+  assert.equal(tubes.positionVariable.material.uniforms.time.value, 2);
+  tubes.gpu = undefined;
+  tubes.dispose();
+});
 test("reference input emits separate chains and cannot bridge an old location", () => {
   const input = new TubeInput(),
     releases = [],
