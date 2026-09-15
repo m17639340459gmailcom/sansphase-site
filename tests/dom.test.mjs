@@ -178,6 +178,16 @@ test("local prototype DOM flows", async (t) => {
     await navigation;
     await tick();
   };
+  const clickRoute = async (selector) => {
+    // Anchor navigation and hashchange are separate tasks in jsdom. Wait for
+    // the event the application renders on, rather than assuming 15 ms is enough.
+    const navigation = new Promise((resolve) =>
+      w.addEventListener("hashchange", resolve, { once: true }),
+    );
+    click(selector);
+    await navigation;
+    await tick();
+  };
   try {
     await t.test("reload restores view state before restoring scroll, in the initial render", async () => {
       assert.equal(q("#blog-calendar-body").hidden, false);
@@ -645,7 +655,7 @@ test("local prototype DOM flows", async (t) => {
       assert.equal(d.querySelectorAll('.catalog-card').length,3);
       input('#content-search','软件 0');
       assert.equal(d.querySelectorAll('.catalog-card').length,1,'search resets the page');
-      click('.catalog-card-title'); await tick();
+      await clickRoute('.catalog-card-title');
       assert.equal(w.location.hash,'#/work/tool-0');
       assert.match(q('.reading-article').textContent,/安装与使用/);
       assert(q('.catalog-download a[download]'));
@@ -667,7 +677,7 @@ test("local prototype DOM flows", async (t) => {
       assert.equal(q('[data-action="catalog-view"]').disabled,true);
       click('[data-action="clear-search"]');
       assert.equal(q('[data-action="catalog-view"]').disabled,false);
-      click('.catalog-card-title'); await tick();
+      await clickRoute('.catalog-card-title');
       assert.equal(w.location.hash,'#/software/tool-0');
       assert.match(q('main h1').textContent,/验证软件/);
     });

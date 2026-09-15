@@ -1,6 +1,6 @@
 # 发布候选版整理记录 · 2026-09-15
 
-状态：本地工程整理、生产入口检查及 GitHub Ubuntu 24.04 构建测试通过；源码已发布至公开仓库，腾讯云正式部署尚未完成。
+状态：源码已发布至公开仓库，腾讯云正式部署与基础生产验收已完成。以下保留各阶段记录，最新生产状态见文末追加验收。
 
 仓库：[m17639340459gmailcom/sansphase-site](https://github.com/m17639340459gmailcom/sansphase-site)。默认分支为 `codex/release-preparation`，当前仍为发布候选版。
 
