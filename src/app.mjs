@@ -579,7 +579,7 @@ function render({silent=false}={}) {
       ? t("無相 · 博客与作品", "無相 · Blog and work")
       : `${t({ works: "作品", work: "作品详情", notes: "博客", note: "博客文章", resources: "资料", software: "软件推荐", "resource-center": "资源中心", community: "社区交流", post: "社区讨论", support: "赞助与支持", contact: "联系与合作", account: "个人空间" }[page] || "页面未找到", { works: "Work", work: "Project", notes: "Blog", note: "Blog post", resources: "Learning materials", software: "Software", "resource-center": "Resource center", community: "Community", post: "Discussion", support: "Support", contact: "Contact", account: "Your space" }[page] || "Page not found")} · 無相`;
   document.querySelector("#site-footer").innerHTML =
-    `<span>© 無相</span><div class="footer-links"><a href="#/contact">${t("联系与合作", "Contact")}</a><a href="#/support">${t("赞助与支持", "Support")}</a><span>${t("记录 · 创作 · 分享", "Learn · Create · Share")}</span></div>`;
+    `<span>© 無相</span><a class="site-registration" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">豫ICP备2026037683号-1</a><div class="footer-links"><a href="#/contact">${t("联系与合作", "Contact")}</a><a href="#/support">${t("赞助与支持", "Support")}</a><span>${t("记录 · 创作 · 分享", "Learn · Create · Share")}</span></div>`;
 }
 function refreshResults() {
   const page = parseRoute(location.hash).page;

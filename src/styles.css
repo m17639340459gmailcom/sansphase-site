@@ -915,6 +915,7 @@ svg {
 }
 #site-footer {
   border-top: 1px solid var(--line);
+  flex-wrap: wrap;
   padding: 27px var(--page);
   display: flex;
   justify-content: space-between;
