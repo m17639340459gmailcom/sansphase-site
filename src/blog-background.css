@@ -1,0 +1,290 @@
+/* Blog theme. One material plane per card; no animated or asynchronous material swap. */
+body.blog-open {
+  --glass-fill: linear-gradient(135deg, rgb(239 246 255 / 8%), rgb(213 231 252 / 3%));
+  --glass-edge: rgb(224 237 255 / 38%);
+  --glass-shadow: inset 0 1px 0 rgb(255 255 255 / 16%), 0 10px 28px rgb(3 9 22 / 12%);
+  --control-fill: linear-gradient(155deg, rgb(242 248 255 / 13%), rgb(213 230 251 / 4%));
+  --control-edge: rgb(228 239 255 / 35%);
+  --content-cyan: #c2ddf3;
+  --content-line: rgb(216 233 252 / 24%);
+  --muted: #c3cddd;
+  --text: #f2f6fc;
+  color-scheme: dark;
+}
+/* A saved tint changes only the card material. Layout and backdrop stay fixed. */
+body.blog-open[data-glass-tint="custom"] {
+  --glass-fill: linear-gradient(135deg, color-mix(in srgb, var(--card-tint) calc(var(--card-opacity) * 100%), transparent), color-mix(in srgb, var(--card-tint) calc(var(--card-opacity) * 55%), transparent));
+}
+body.blog-open[data-custom-edge="true"] {
+  --glass-edge: color-mix(in srgb, var(--card-edge-color) calc(var(--card-edge-opacity) * 100%), transparent);
+}
+body.blog-open[data-custom-edge="true"] .blog-page :is(.blog-card, .blog-identity, .blog-side-card, .blog-notice, .blog-toolbar):is(:hover, :focus-within) {
+  --glass-edge: color-mix(in srgb, var(--card-edge-color) min(100%, calc(var(--card-edge-opacity) * 100% * 65 / 38)), transparent);
+}
+#blog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+  visibility: hidden;
+  background: #070d18;
+  contain: strict;
+}
+#blog-backdrop img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  object-fit: cover;
+  object-position: 54% 46%;
+  filter: brightness(.94);
+}
+#blog-galaxy-field {
+  position: absolute;
+  inset: 0;
+  opacity: .35;
+  pointer-events: none;
+  contain: strict;
+}
+#blog-galaxy-field canvas { display: block; width: 100%; height: 100%; }
+body.blog-open #blog-backdrop { visibility: visible; }
+body.blog-open #main { background: transparent; animation: none; transition: none; }
+/* The document already reserves a stable gutter. Radix's scroll lock must
+   not reserve the same scrollbar width a second time. */
+body.blog-open[data-scroll-locked] { margin-right: 0 !important; }
+body.blog-open .fade-in { opacity: 1; transform: none; animation: none; }
+
+/* Semantic hosts own layout only. GlassSurface fills the entire host; its
+   portable CSS material is identical before and after SVG feature detection. */
+.blog-page :is(.blog-card, .blog-identity, .blog-side-card, .blog-notice, .blog-toolbar) {
+  --card-inset: 24px;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  animation: none;
+  transition: none;
+  transform: none;
+}
+.blog-page .blog-card { --card-inset: 26px 22px; }
+.blog-page .blog-identity { --card-inset: 24px 22px 26px; }
+.blog-page .blog-notice { --card-inset: 0; position: relative; }
+.blog-page .blog-toolbar { --card-inset: 12px 14px; }
+.blog-page .blog-results.is-grid .blog-card { --card-inset: 23px 22px 25px; }
+.blog-page .blog-third-party-glass {
+  outline: none;
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 100%;
+  border: 1px solid var(--glass-edge);
+  border-radius: 0;
+  background: var(--glass-fill);
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(6px) saturate(1.06);
+  -webkit-backdrop-filter: blur(6px) saturate(1.06);
+  transition: none;
+  animation: none;
+}
+.blog-page :is(.blog-card, .blog-identity, .blog-side-card, .blog-notice, .blog-toolbar):is(:hover, :focus-within) {
+  --glass-edge: rgb(236 246 255 / 65%);
+  --glass-fill: linear-gradient(135deg, rgb(239 246 255 / 11%), rgb(213 231 252 / 5%));
+}
+body.blog-open[data-glass-tint="custom"] .blog-page :is(.blog-card, .blog-identity, .blog-side-card, .blog-notice, .blog-toolbar):is(:hover, :focus-within) {
+  --glass-fill: linear-gradient(135deg, color-mix(in srgb, var(--card-tint) calc(var(--card-opacity) * 100% + 3%), transparent), color-mix(in srgb, var(--card-tint) calc(var(--card-opacity) * 55% + 2%), transparent));
+}
+.blog-page .blog-third-party-glass .glass-surface__content {
+  display: block;
+  width: 100%;
+  height: auto;
+  padding: var(--card-inset);
+  background: none;
+  border: 0;
+  box-shadow: none;
+}
+.blog-third-party-glass-content { width: 100%; min-width: 0; }
+.blog-page .blog-card-bottom .arrow,
+.blog-page .blog-card:hover .blog-card-bottom .arrow { transform: none; transition: none; }
+.blog-page :is(h1, h2, strong) { color: var(--text); }
+.blog-page :is(p, .subtle, .blog-date) { color: #d0dae7; }
+.blog-page :is(h1, h2, p, .subtle) { text-shadow: 0 1px 3px rgb(0 6 18 / 55%); }
+.blog-page :is(.blog-card, .blog-notice) h2 { color: #f5f8ff; }
+.blog-page .blog-notice::after { content: none; }
+.blog-page .eyebrow { display: inline-flex; align-items: center; gap: 7px; }
+.blog-page .eyebrow svg { width: 14px; height: 14px; flex: none; }
+.blog-page .identity-mark {
+  background: linear-gradient(135deg, rgb(209 234 255 / 12%), rgb(175 203 238 / 3%));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 18%);
+}
+
+/* Every in-content control shares one neutral material. Header controls keep
+   their own navigation styling. States use edge/contrast changes, never motion. */
+.blog-page :is(button, .identity-links a, .tag, .search, .timezone-select) {
+  color: var(--text);
+  background: var(--control-fill);
+  border: 1px solid var(--control-edge);
+  border-radius: 0;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 14%);
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+  transition: none;
+  animation: none;
+  transform: none;
+}
+.blog-page :is(button, .identity-links a, .tag, .search):is(:hover, :focus-visible, :focus-within),
+.blog-page button[data-state="on"], .blog-page button[aria-expanded="true"] {
+  background: linear-gradient(155deg, rgb(242 248 255 / 22%), rgb(213 230 251 / 8%));
+  border-color: rgb(236 246 255 / 68%);
+  color: #fff;
+}
+.blog-page :is(button, a, input):focus-visible,
+.blog-timezone-menu :focus-visible { border-color: var(--focus-edge); }
+.blog-page .search input { color: var(--text); background: none; min-width: 0; }
+.blog-page .search input::placeholder { color: #d0dae7; }
+.blog-page .timezone-select {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 38px;
+  padding: 7px 10px;
+  margin-bottom: 0;
+  font-size: 12px;
+  text-align: left;
+}
+.timezone-select > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.timezone-select svg, .blog-timezone-menu svg { display: block; width: 15px; height: 15px; }
+.blog-timezone-menu {
+  z-index: 100;
+  width: var(--radix-select-trigger-width);
+  max-height: min(300px, var(--radix-select-content-available-height));
+  overflow: hidden;
+  color: #f2f6fc;
+  background: var(--dialog-fill);
+  border: 1px solid rgb(224 237 255 / 42%);
+  border-radius: 0;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 14%), 0 12px 32px rgb(0 5 17 / 30%);
+  backdrop-filter: var(--dialog-blur);
+  font: inherit;
+}
+.timezone-options { padding: 5px; }
+.timezone-option {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 8px;
+  font-size: 12px;
+  cursor: default;
+  outline: none;
+}
+.timezone-option[data-state="checked"] { color: #c2ddf3; }
+.timezone-option[data-highlighted] { color: #fff; background: rgb(212 232 255 / 12%); }
+.timezone-scroll { display: grid; place-items: center; height: 22px; color: #c2ddf3; }
+.blog-date-card [data-clock-zone] { display: none; }
+.blog-date-card .calendar-body { margin-top: 18px; }
+
+/* The toolbar has one fluid spacer between its filters and right-side tools. */
+.blog-page .blog-toolbar { container: blog-toolbar / inline-size; }
+.blog-toolbar .blog-third-party-glass-content {
+  display: grid;
+  grid-template-columns: minmax(max-content, 1fr) minmax(0, 250px) max-content;
+  align-items: center;
+  gap: 14px;
+}
+.blog-toolbar #category-filter { min-width: 0; }
+.blog-toolbar .filters { display: flex; flex-wrap: nowrap; align-items: center; white-space: nowrap; }
+.blog-toolbar .search { width: 100%; min-width: 0; max-width: none; }
+.blog-toolbar .blog-view-switch { justify-self: end; }
+@container blog-toolbar (max-width: 520px) {
+  .blog-toolbar .blog-third-party-glass-content { grid-template-columns: minmax(0, 1fr) max-content; gap: 10px; }
+  .blog-toolbar #category-filter { grid-column: 1 / -1; }
+}
+.blog-notice .blog-third-party-glass-content { display: block; }
+.blog-notice-copy { padding: 25px 116px 26px 28px; min-height: 152px; }
+.blog-notice .blog-notice-side { position: absolute; right: 28px; bottom: 26px; width: 74px; gap: 28px; }
+.blog-page .blog-results .blog-card.has-cover { --card-inset: 0; }
+.blog-card.has-cover .blog-card-copy { padding: 24px 22px; }
+.blog-notice-content { min-width: 0; flex: 1 1 auto; }
+.blog-notice-slides { display: grid; }
+.blog-notice-slide { grid-area: 1 / 1; min-width: 0; }
+.blog-notice-slide[aria-hidden="true"] { visibility: hidden; pointer-events: none; }
+
+/* Long-form reading needs a local contrast floor over arbitrary author images. */
+body.blog-open .article {
+  padding: clamp(28px, 4vw, 58px);
+  color: #eef4fc;
+  background: rgb(7 17 33 / 64%);
+  border: 1px solid var(--glass-edge);
+  border-radius: 0;
+  box-shadow: var(--glass-shadow);
+  backdrop-filter: blur(8px);
+}
+body.blog-open .article :is(h1, h2) { color: #f5f8ff; }
+body.blog-open[data-glass-tint="custom"] .article {
+  background: linear-gradient(color-mix(in srgb, var(--card-tint) calc(var(--card-opacity) * 100%), transparent), color-mix(in srgb, var(--card-tint) calc(var(--card-opacity) * 55%), transparent)), rgb(7 17 33 / 64%);
+}
+body.blog-open .article :is(p, li, .article-body) { color: #e2ecf9; }
+body.blog-open .article :is(.back-link, .subtle, .post-tags) { color: #c2d4eb; }
+body.blog-open .article-contents { border-block: 1px solid var(--content-line); }
+body.blog-open .article-contents button { color: var(--blog-accent); background: transparent; border: 0; }
+body.blog-open .article-contents button:is(:hover,:focus-visible) { color: var(--text); }
+body.blog-open .article-code-tools button { background: var(--control-fill); border: 1px solid var(--control-edge); color: var(--text); }
+body.blog-open .reading-article .article-body blockquote { background: rgb(200 225 255 / 4%); border-left-color: var(--blog-accent); }
+body.blog-open .reading-article .article-body :not(pre)>code { background: rgb(200 225 255 / 8%); }
+body.blog-open .reading-article .article-body pre { background: rgb(3 12 23 / 22%); border-color: var(--content-line); }
+body.blog-open[data-custom-article-background="true"] .article {
+  background: color-mix(in srgb, var(--article-background-color) calc(var(--article-background-opacity) * 100%), transparent);
+}
+body.blog-open[data-custom-article-text="true"] .article :is(h1, h2, h3, h4, h5, h6, p, li, .article-body, .article-intro, blockquote, td, th) {
+  color: color-mix(in srgb, var(--article-text-color) calc(var(--article-text-opacity) * 100%), transparent);
+}
+
+/* Restrained accent palette: shared by small icons and emphasis, not page fills. */
+body.blog-open { --blog-accent: #bfdfff; }
+body.blog-open[data-blog-accent="violet"] { --blog-accent: #dac5ff; }
+body.blog-open[data-blog-accent="mint"] { --blog-accent: #afe5d7; }
+body.blog-open[data-blog-accent="peach"] { --blog-accent: #f3c9b1; }
+body.blog-open[data-custom-accent="true"] { --blog-accent: color-mix(in srgb, var(--custom-accent) calc(var(--accent-opacity) * 100%), transparent); --content-cyan: var(--blog-accent); }
+.blog-page :is(.eyebrow, .page-meta, .blog-date-time, .identity-links) { color: var(--blog-accent); }
+.blog-page .eyebrow svg { color: var(--blog-accent); }
+.blog-page .tag[data-tone] { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; --tag-color: #bfddf4; color: var(--tag-color); border-color: color-mix(in srgb, var(--tag-color) 40%, transparent); background: color-mix(in srgb, var(--tag-color) 10%, transparent); }
+.blog-page .tag[data-tone="1"] { --tag-color: #d9c7ef; }
+.blog-page .tag[data-tone="2"] { --tag-color: #b6dfd3; }
+.blog-page .tag[data-tone="3"] { --tag-color: #ecd1b7; }
+.blog-page .tag[data-tone="4"] { --tag-color: #ebc0cd; }
+.blog-page .tag[data-tone]::before { content: ""; width: 4px; height: 4px; flex: none; background: currentColor; }
+.blog-page .tag[data-tone]:hover { background: color-mix(in srgb, var(--tag-color) 19%, transparent); color: var(--tag-color); }
+.blog-tags button.tag { min-height: 30px; }
+.blog-page .blog-card-bottom { flex-wrap: wrap; }
+.platform-icon { display: block; width: 18px; height: 18px; flex: none; }
+.blog-page .identity-links a { color: var(--blog-accent); }
+.music-heading { margin: 18px 0 8px; }
+.music-platform-link { display: inline-flex; align-items: center; gap: 7px; margin-top: 16px; font-size: 12px; color: var(--blog-accent); }
+.music-platform-link svg { width: 16px; height: 16px; }
+#blog-audio-player { min-height: 158px; margin-top: 12px; --plyr-color-main: var(--blog-accent); --plyr-audio-controls-background: transparent; --plyr-audio-control-color: #e9f2fc; --plyr-audio-control-color-hover: #152438; --plyr-range-thumb-height: 10px; --plyr-control-radius: 0; --plyr-range-fill-background: var(--blog-accent); --plyr-font-family: inherit; }
+#blog-audio-player .plyr__controls { display: flex; flex-wrap: wrap; padding: 0; gap: 7px; }
+#blog-audio-player .plyr__progress__container { min-width: 90px; flex: 1; }
+#blog-audio-player .plyr__volume { max-width: none; flex: 1; }
+#blog-audio-player .plyr__controls button { width: 30px; height: 30px; padding: 6px; }
+.music-current { font-size: 13px; overflow-wrap: anywhere; min-height: 22px; margin-bottom: 10px; }
+.music-track-controls { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
+.music-track-controls button { display: grid; place-items: center; width: 32px; height: 30px; }
+.music-track-controls svg { width: 16px; height: 16px; }
+.music-track-controls span { font-size: 11px; color: var(--muted); }
+.music-error { font-size: 12px; line-height: 1.6; }
+.music-error:empty { display: none; }
+@media(max-width: 600px) {
+  .blog-notice-copy { padding: 20px 100px 20px 20px; }
+  .blog-notice .blog-notice-side { right: 16px; bottom: 20px; }
+}

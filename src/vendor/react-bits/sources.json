@@ -1,0 +1,36 @@
+{
+  "commit": "3a1c7f2f9f94ed833934ab5c2635760b9e644583",
+  "files": [
+    {
+      "path": "Ribbons.jsx",
+      "url": "https://raw.githubusercontent.com/DavidHDev/react-bits/3a1c7f2f9f94ed833934ab5c2635760b9e644583/src/content/Animations/Ribbons/Ribbons.jsx",
+      "sha256": "cbcac6d5f11fa7032f866bcc4028e59fa65214443414d36c2a5f8b183269d5eb"
+    },
+    {
+      "path": "Ribbons.css",
+      "url": "https://raw.githubusercontent.com/DavidHDev/react-bits/3a1c7f2f9f94ed833934ab5c2635760b9e644583/src/content/Animations/Ribbons/Ribbons.css",
+      "sha256": "fdbfa678eceb09b9b451a9d9de91e9834e19bcf6c07e859af5c964f6763d7943"
+    },
+    {
+      "path": "Galaxy.jsx",
+      "url": "https://raw.githubusercontent.com/DavidHDev/react-bits/3a1c7f2f9f94ed833934ab5c2635760b9e644583/src/content/Backgrounds/Galaxy/Galaxy.jsx",
+      "sha256": "1f40a69c2d1a93d66481008d44899d7f6665904ae80ffb2de43f99add582c077"
+    },
+    {
+      "path": "Galaxy.css",
+      "url": "https://raw.githubusercontent.com/DavidHDev/react-bits/3a1c7f2f9f94ed833934ab5c2635760b9e644583/src/content/Backgrounds/Galaxy/Galaxy.css",
+      "sha256": "3efecd1df6de1d34f861c5cb4058a335be170446f8e8ed282556e93b3109599c"
+    },
+    {
+      "path": "GlassSurface.jsx",
+      "url": "https://raw.githubusercontent.com/DavidHDev/react-bits/3a1c7f2f9f94ed833934ab5c2635760b9e644583/src/content/Components/GlassSurface/GlassSurface.jsx",
+      "sha256": "86851af613462b29e8efd7faf5590618c35c7cab6ac2a225a2f30a778ea2e5f4"
+    },
+    {
+      "path": "GlassSurface.css",
+      "url": "https://raw.githubusercontent.com/DavidHDev/react-bits/3a1c7f2f9f94ed833934ab5c2635760b9e644583/src/content/Components/GlassSurface/GlassSurface.css",
+      "sha256": "c346eb72ce130a1cfef4f126f52b7c1b8e417671b6eabd4ba7ee042209bdd15f"
+    }
+  ]
+}
+

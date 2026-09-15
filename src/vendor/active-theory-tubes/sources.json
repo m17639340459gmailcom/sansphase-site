@@ -1,0 +1,106 @@
+{
+  "source": "https://activetheory.net/assets/shaders/compiled.vs",
+  "behaviorSource": "https://activetheory.net/assets/data/uil.1780406240914.json",
+  "runtimeSource": "https://activetheory.net/assets/js/app.1780406240914.js",
+  "retrieved": "2026-09-13",
+  "changes": "Original movement/lifecycle retained. Hydra includes, flags, merged headers and draw buffers adapted to Three. Newborn nodes are initialized along the input direction using Three Line3. The original previous-segment fallback also handles coincident nodes; only a wholly collapsed chain is clipped. Tube cross-sections use Three Curve.computeFrenetFrames parallel transport instead of the unstable radial basis. Dormant chains clipped before normalizing; negative fractional powers guarded; non-finite fragments discarded and HDR output bounded to 64 for half-float bloom buffers. Local input only; blue/violet colors.",
+  "frameAdapter": {
+    "file": "three-curve-frame.glsl",
+    "sha256": "c7c4164cc414bdede8300ab61a51919cb5e01618101950ab742c2e6fca683c86",
+    "source": "https://github.com/mrdoob/three.js/blob/r186/src/extras/core/Curve.js",
+    "license": "MIT; Three.js notice retained by the build"
+  },
+  "authorization": "On 2026-09-15 the project owner explicitly confirmed full usage rights and authorized inclusion in this website and its public repository. This records the owner's confirmation, not an upstream open-source license or a sublicense to others. See THIRD_PARTY_NOTICES.md.",
+  "files": [
+    {
+      "name": "ProtonTube.glsl",
+      "sha256": "959af760d823e6e3d5553338374231d8d920461755693daca9a6e7379b5abaa6"
+    },
+    {
+      "name": "TubeShader.glsl",
+      "sha256": "52c51d487e7996965027389a8507cffc92cfc85d360d54b7081690197e8f6c74"
+    },
+    {
+      "name": "rotation.glsl",
+      "sha256": "0499b805d649eabd00d27bd1d3fa935236dc38daaca8a3134460c0a2e7e9fa32"
+    },
+    {
+      "name": "fbr.vs",
+      "sha256": "e70f2d89b1f453ba1d370bc5768ca98152457ef51def3ae4e6e97210cd71e759"
+    },
+    {
+      "name": "ProtonTubesUniforms.fs",
+      "sha256": "7eaff98d617bb3c4c37d1a13306acdca538745704426e2ebb241d549c81d66c9"
+    },
+    {
+      "name": "range.glsl",
+      "sha256": "8be26d76b1d49cf94b91d3d4ff50026d91efb2b40b6b51a508869448dca5979e"
+    },
+    {
+      "name": "conditionals.glsl",
+      "sha256": "0cb93bdefb2f3df59e1e0184390d6c324e73559a6619c72423cbb615c9573395"
+    },
+    {
+      "name": "fbr.fs",
+      "sha256": "5712ee7e186f06e9607c79fc14214f47ab03c682e3f0367ff2bc4af099be2ceb"
+    },
+    {
+      "name": "matcap.vs",
+      "sha256": "d77508f23f132d6ecbf983a92dd409e7f47e8e69bd1f1a0ba58fc68b943354d3"
+    },
+    {
+      "name": "blendmodes.glsl",
+      "sha256": "f7c2d6784817cc519c1434b43da7f2a3676402a8685736f2121e6c1b5305c7f2"
+    },
+    {
+      "name": "rgb2hsv.fs",
+      "sha256": "c2360d7942a724caa3e3abd80f51f4b5d868c06f5483174291a699b518bb864d"
+    },
+    {
+      "name": "ProtonAntimatterLifecycle.fs",
+      "sha256": "b9f79e45792d6ffda18df2e7b8a04555d647ef9e909f090d02f3c33cc2753808"
+    },
+    {
+      "name": "ProtonTubesMain.fs",
+      "sha256": "1da39008812b826107abb101c93d5851bd865bbcd50dee6e9ffa79bb68484d88"
+    },
+    {
+      "name": "antimatter.glsl",
+      "sha256": "07d02195f0f30db7d0b6e7e52ff3213ebc1bb01f79d5f8ec01c2410ec0f52553"
+    },
+    {
+      "name": "curl.glsl",
+      "sha256": "b000dce75e3b8afb9370faf1d6c80f83d01d1f09c6a364412d0846a61c90589f"
+    },
+    {
+      "name": "AntimatterSpawn.fs",
+      "sha256": "ce9aca2ac27bf9c2273f74c51fd0dadd61f13de19de760fab8ba663496bddf29"
+    },
+    {
+      "name": "movement.glsl",
+      "sha256": "f42ffd056dd56ceef9543573d92abdd41733cbe9cdf2852e532a674aa0f6961e"
+    },
+    {
+      "name": "TubePlayer.txt",
+      "sha256": "3d31198454fe8b11ba7c684e4aef1b1f23f562560c2ee15799c5064a0442c0c5"
+    },
+    {
+      "name": "ProtonTubes.txt",
+      "sha256": "34532ff3e5e953586671f214e07cd6aaade977d147f1ba2cfa7cf27fb0004932"
+    },
+    {
+      "name": "AntimatterSpawn.txt",
+      "sha256": "2b7e2fe86c78dda6bbd40b15ae6c6b70078426dfd73854949346f1057b0f18b0"
+    },
+    {
+      "name": "GenerateTube.txt",
+      "sha256": "d8d95d73f90c169ce2244f1ad20b7d53092218627090fb16cced516fa93b85a2"
+    }
+  ],
+  "programs": {
+    "vertexShader": "e0ef3939bb754fc6b2fc0c94d8fec82c4d44068e278031981b4cec69a955b89a",
+    "fragmentShader": "d3929f3e6ddc175fb6ef4040cb9e7d5b30f3d1a6b9c954ace1218b218ff4c2c2",
+    "positionShader": "39f4947c3488825aeee96d5c9b2a5aebd49b9b3b7915eca77c52734e4c9f303b",
+    "lifecycleShader": "32867ce04ccb76b6cb5074dc779d11b8171234219d0334ea704c3e53771ba901"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "Tiptap Editor",
+  "version": "3.31.3",
+  "license": "MIT",
+  "source": "https://github.com/ueberdosis/tiptap",
+  "documentation": "https://tiptap.dev/docs/editor/getting-started/install/vanilla-javascript",
+  "packages": [
+    "@tiptap/core",
+    "@tiptap/pm",
+    "@tiptap/starter-kit",
+    "@tiptap/extension-image",
+    "@tiptap/extension-table",
+    "@tiptap/extension-text-style"
+  ],
+  "usage": "Local front-end author editor. No cloud service or AI extension."
+}

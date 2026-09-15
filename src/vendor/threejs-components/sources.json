@@ -1,0 +1,31 @@
+{
+  "name": "threejs-components",
+  "version": "0.0.19",
+  "license": "ISC",
+  "tarball": "https://registry.npmjs.org/threejs-components/-/threejs-components-0.0.19.tgz",
+  "tarballSha256": "eeca00fa3163e37e0f5a49df8d3d658529a345a86329e31e19d59978b05c0997",
+  "authorDemo": "https://codepen.io/soju22/full/qEbdVjK",
+  "notes": "The published package declares ISC but contains no separate license file. Original component bodies and upstream files are retained. Renderer, event handling, scheduling and disposal are owned by our existing adapter; no upstream renderer or remote CDN is shipped.",
+  "files": [
+    {
+      "path": "build/cursors/tubes1.min.js",
+      "output": "tubes.mjs",
+      "start": "function PC(",
+      "end": "const KC =",
+      "imports": "import { Mesh as Pr, Vector3 as it, TubeGeometry as Fi, CatmullRomCurve3 as Ni, Group as Yr, PointLight as tn, MeshStandardMaterial as Ii, MathUtils as tt, Color as Qs } from 'three';",
+      "exports": "export { QC as Tubes };",
+      "sha256": "676abd6ccd18742a36dcb4ffce66a2052a4f203f240cd8cf97c6ea33a181f81b",
+      "bodySha256": "d3f4d2c965ef0c052632772b0f1f237ae9120e347b9289f15b71931ee7f58d33"
+    },
+    {
+      "path": "build/cursors/particles1.cdn.min.js",
+      "output": "particles.mjs",
+      "start": "const { randFloat:",
+      "end": "function k(",
+      "imports": "import { MathUtils as o, Object3D as c, Vector3 as h, Color as a, HalfFloatType as p, BufferGeometry as m, Float32BufferAttribute as g, PointsMaterial as l, AdditiveBlending as d, TextureLoader as v, Points as f } from 'three';\nimport { GPUComputationRenderer as S } from 'three/addons/misc/GPUComputationRenderer.js';",
+      "exports": "export { q as FlowParticles };",
+      "sha256": "fda550b6f747d509809650a5e7742e80ea3e1de703223e009d1182538b6153ab",
+      "bodySha256": "d9e112246b2386eee3ddd649141b5b4885657fb29036b3b709472944095257f6"
+    }
+  ]
+}

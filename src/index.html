@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#090909" />
+    <meta
+      name="description"
+      content="無相的个人网站，分享博客文章、软件作品、学习资料与工具使用心得。"
+    />
+    <title>無相 · 博客与作品</title>
+    <script src="./page-session.js"></script>
+    <link rel="preload" as="image" href="./assets/materials/blog-space.png" />
+    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./home.css" />
+    <link rel="stylesheet" href="./cosmos.bundle.css" />
+    <link rel="stylesheet" href="./blog-glass-surface.css" />
+    <link rel="stylesheet" href="./plyr.css" />
+    <link rel="stylesheet" href="./blog-background.css?v=0.101" />
+    <link rel="stylesheet" href="./blog-galaxy.css" />
+    <link rel="stylesheet" href="./catalog.css" />
+    <link rel="stylesheet" href="./author.css" />
+    <link rel="stylesheet" href="./visitor-controls.css" />
+    <script type="module" src="./author.bundle.mjs"></script>
+    <script type="module" src="./app.mjs?v=0.101"></script>
+    <script type="module" src="./blog-galaxy.mjs"></script>
+  </head>
+  <body>
+    <a href="#main" class="skip-link">跳到正文 / Skip to content</a>
+    <header id="site-header"></header>
+    <div id="blog-backdrop" aria-hidden="true">
+      <img src="./assets/materials/blog-space.png" width="2560" height="1440" alt="" fetchpriority="high" />
+      <div id="blog-galaxy-field" aria-hidden="true"></div>
+    </div>
+    <main id="main" tabindex="-1"></main>
+    <footer id="site-footer"></footer>
+    <div
+      id="dialog-shell"
+      class="dialog-shell"
+      aria-hidden="true"
+      aria-labelledby="dialog-title"
+    >
+      <div class="dialog-backdrop" data-a11y-dialog-hide></div>
+      <div id="modal" class="dialog-panel"></div>
+    </div>
+    <div id="toast"></div>
+    <noscript>这是可交互的本地原型，需要浏览器启用 JavaScript。</noscript>
+  </body>
+</html>

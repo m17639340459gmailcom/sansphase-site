@@ -1,0 +1,21 @@
+{
+  "retrieved": "2026-09-13",
+  "files": [
+    {
+      "file": "alien-cracked-normal.png",
+      "source": "https://activetheory.net/assets/images/pbr/alien_cracked_2_normal.png",
+      "sha256": "690765f8e93a654f33ae957a533c4254242d0180e67afff6770754d9c831f963"
+    },
+    {
+      "file": "matcap-test.jpg",
+      "source": "https://activetheory.net/assets/images/room/matcap-test.jpg",
+      "sha256": "05a650fd8714db616f263996c5bda6d9b541864f85deeea2e90dda8dbb6b24b6"
+    },
+    {
+      "file": "cliffs-MRO.png",
+      "source": "https://activetheory.net/assets/images/pbr/cliffs_MRO.png",
+      "sha256": "7d0c64d83b62165d357339da21d48b02ff59f313f2fc7af0df31a318b922eccc"
+    }
+  ],
+  "authorization": "On 2026-09-15 the project owner explicitly confirmed full usage rights and authorized inclusion in this website and its public repository. This records the owner's confirmation, not an upstream open-source license or a sublicense to others. See THIRD_PARTY_NOTICES.md."
+}

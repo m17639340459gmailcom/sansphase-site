@@ -1,0 +1,47 @@
+{
+  "retrieved": "2026-09-13",
+  "license": "CC BY 4.0",
+  "licenseUrl": "https://www.eso.org/public/copyright/",
+  "adaptation": "Original publication JPEG bytes retained. Drei Image supplies cropping and fade; slow display transforms driven by elapsed time, and separate existing Three.js star particles. No AI image generation. Not a volumetric reconstruction.",
+  "files": [
+    {
+      "id": "eso1625a",
+      "file": "eso1625a-wallpaper.jpg",
+      "title": "A deep infrared view of the Orion Nebula from HAWK-I",
+      "type": "Observation",
+      "credit": "ESO/H. Drass et al.",
+      "page": "https://www.eso.org/public/images/eso1625a/",
+      "url": "https://cdn.eso.org/images/wallpaper4/eso1625a.jpg",
+      "width": 1920,
+      "height": 1200,
+      "bytes": 488821,
+      "sha256": "ab32598d9a29e34e740898c44e3ec0620387b4b052bf2439f9d3528f29003a41"
+    },
+    {
+      "id": "eso1105a",
+      "file": "eso1105a.jpg",
+      "title": "The reflection nebula Messier 78",
+      "type": "Observation",
+      "credit": "ESO/Igor Chekalin",
+      "page": "https://www.eso.org/public/images/eso1105a/",
+      "url": "https://cdn.eso.org/images/publicationjpg/eso1105a.jpg",
+      "width": 4000,
+      "height": 3876,
+      "bytes": 3446173,
+      "sha256": "7914fc330f1619e7c070d8c6b52e78de960706638f5f7d3e32b2768ddf399778"
+    },
+    {
+      "id": "eso1424a",
+      "file": "eso1424a.jpg",
+      "title": "VST snaps a very detailed view of the Triangulum Galaxy",
+      "type": "Observation",
+      "credit": "ESO",
+      "page": "https://www.eso.org/public/images/eso1424a/",
+      "url": "https://cdn.eso.org/images/publicationjpg/eso1424a.jpg",
+      "width": 4000,
+      "height": 3355,
+      "bytes": 3788911,
+      "sha256": "24b3d51ec8f2d1ad998bb5bb6f83111f251df0b64b21bcaafd1c2213a5d00853"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+.header-actions .site-music-toggle {
+  display:inline-grid; place-items:center; width:36px; height:36px;
+  flex:0 0 36px; padding:4px; border:0; border-radius:50%;
+  color:var(--text); background:transparent; cursor:pointer;
+}
+.site-music-toggle .ui-icon {width:28px;height:28px;aspect-ratio:1;flex:none;animation:music-disc-turn 9s linear infinite;animation-play-state:paused;}
+.site-music-toggle.is-playing .ui-icon {animation-play-state:running;}
+.site-music-toggle:hover,.site-music-toggle:focus-visible {background:rgb(220 235 255 / 7%);color:var(--blog-accent,#b9d9ed);}
+@keyframes music-disc-turn {to{transform:rotate(360deg);}}
+@media(prefers-reduced-motion:reduce){.site-music-toggle .ui-icon{animation:none;}}
+.site-music-player[hidden] {display:none!important;}
+.weather-city-picker {margin-top:12px;font-size:12px;min-width:0;}
+.weather-city-picker summary {cursor:pointer;color:inherit;}
+.weather-city-picker button {max-width:100%;padding:6px 8px;border:1px solid var(--line);background:rgb(215 232 255 / 9%);color:inherit;font:inherit;cursor:pointer;}
+.weather-city-picker button:hover {background:rgb(215 232 255 / 18%);}
+.weather-city-picker>button {margin-top:8px;}
+#weather-city-search {display:flex;gap:6px;margin-top:8px;min-width:0;}
+#weather-city-search .search {min-width:0;flex:1;padding:4px 8px;}
+#weather-city-search input {width:100%;min-width:0;color:inherit;background:transparent;border:0;font:inherit;}
+[data-weather-cities] {display:grid;gap:6px;margin-top:6px;overflow-wrap:anywhere;}
+[data-weather-cities] button {text-align:left;}
+.blog-weather-card [data-weather-detail] {min-height:2.8em;font-size:12px;line-height:1.4;}
+.blog-weather-card [data-weather-location] {overflow:hidden;white-space:nowrap;text-overflow:ellipsis;display:block;}
+.author-checkbox {display:flex;align-items:flex-start;gap:8px;font-size:13px;margin-top:16px;}
+.author-checkbox input {accent-color:var(--blog-accent,#a6cff0);width:16px;height:16px;margin:2px 0;}
+.author-music-tracks {display:grid;gap:10px;}
+.author-music-track {display:grid;grid-template-columns:minmax(0,1fr) 34px;gap:8px;align-items:end;}
+.author-music-track label {min-width:0;display:grid;gap:5px;font-size:12px;}
+.author-music-track input {width:100%;min-width:0;}
+.author-music-track button {padding:7px;}
+.weather-line>div {min-width:0;}
+.blog-date-card .calendar-time {
+  font-family:ui-monospace,"SFMono-Regular",Consolas,"Liberation Mono",monospace;
+  font-size:clamp(26px,2.4vw,34px);font-weight:400;font-style:normal;
+  font-variant-numeric:lining-nums tabular-nums;font-synthesis:none;
+  line-height:1.2;min-height:1.2em;letter-spacing:0;white-space:nowrap;
+}
