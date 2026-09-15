@@ -2,7 +2,7 @@
 // belongs to the same render transaction as the view, not a later browser frame.
 (() => {
   if (!location.hash || /^#\/?(?:home)?\/?$/.test(location.hash))
-    document.documentElement.classList.add('is-home-boot');
+    document.documentElement.classList.add('is-home-boot', 'is-site-preparing');
   const key = "sansphase-page-view-v1";
   const route = () => location.pathname + location.hash;
   let saved = null;

@@ -143,7 +143,7 @@ function header(page) {
       ? ""
       : `<a class="support-header" href="#/support">${t("支持", "Support")}</a>`;
   const personalAccount = page !== 'home' && siteContent
-    ? `<button class="account-button" data-author-login>${siteContent.author?t('作者模式','Author mode'):t('作者登录','Author sign in')}</button>` : '';
+    ? `<button class="account-button" data-author-login>${t('登录','Sign in')}</button>` : '';
   const homeNav =
     page === "home"
       ? ""

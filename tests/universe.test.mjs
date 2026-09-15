@@ -225,6 +225,22 @@ test('direct content visits defer the 3D import until the homepage is opened', a
   }finally{s.close();}
 });
 
+test('loading hides surrounding site controls and restores them only when ready or browsing content', async () => {
+  const s=await setup();
+  try {
+    s.w.document.body.insertAdjacentHTML('beforeend','<header id="site-header"><a href="#/notes">Blog</a></header><footer id="site-footer">Footer</footer>');
+    s.callbacks().onLoadProgress(.5);
+    assert(s.w.document.documentElement.classList.contains('is-site-preparing'));
+    assert.equal(s.w.document.querySelector('#site-header').inert,true);
+    s.ready();
+    assert.equal(s.w.document.documentElement.classList.contains('is-site-preparing'),false);
+    assert.equal(s.w.document.querySelector('#site-header').inert,false);
+    s.error();assert(s.w.document.documentElement.classList.contains('is-site-preparing'));
+    s.clean.setCovered(true);
+    assert.equal(s.w.document.documentElement.classList.contains('is-site-preparing'),false);
+  }finally{s.close();}
+});
+
 test("scroll progress introduces real section links with a quiet opening and finite ends", async (t) => {
   const s = await setup({ autoProgress: false });
   t.after(() => s.close());

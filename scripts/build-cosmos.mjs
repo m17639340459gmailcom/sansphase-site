@@ -231,6 +231,7 @@ const chapterArrow = createElement(ArrowRight, {
   focusable: "false",
 }).outerHTML;
 const loadingIcon = createElement(LoaderCircle, {"aria-hidden":"true", focusable:"false"}).outerHTML;
+await writeFile(`${outdir}/index.html`, (await readFile(`${outdir}/index.html`, 'utf8')).replace('<span class="startup-icon" aria-hidden="true"></span>', loadingIcon));
 delete globalThis.document;
 dom.window.close();
 await writeFile(

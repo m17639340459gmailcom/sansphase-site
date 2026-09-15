@@ -97,6 +97,9 @@ export function mountUniverse(
     ];
   };
   function sync() {
+    const preparing = !covered && !ready;
+    doc.documentElement.classList.toggle('is-site-preparing', preparing);
+    doc.querySelectorAll('#site-header, #site-footer, .skip-link').forEach(element => { element.inert = preparing; });
     const s = universeScenes[index];
     root.dataset.index = String(index);
     root.dataset.scene = universeScenes[index].id;
@@ -596,6 +599,8 @@ export function mountUniverse(
   function cleanup() {
     if (disposed) return;
     disposed = true;
+    doc.documentElement.classList.remove('is-site-preparing');
+    doc.querySelectorAll('#site-header, #site-footer, .skip-link').forEach(element => { element.inert = false; });
     preparation?.abort();
     ++generation;
     clearPointer();

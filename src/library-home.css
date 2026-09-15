@@ -7,6 +7,13 @@
   font-size: 12px; letter-spacing: .14em; font-variant-numeric: tabular-nums;
 }
 .startup-track { width: min(180px, 45vw); height: 2px; background: #c2cada26; }
+.is-site-preparing #site-header,
+.is-site-preparing #site-footer,
+.is-site-preparing .skip-link {
+  visibility: hidden;
+  pointer-events: none;
+}
+.is-site-preparing .universe-home { z-index: 20; }
 #site-header {
   position: fixed;
   inset: 0 0 auto;
@@ -84,9 +91,10 @@ body.is-home #site-footer .site-registration {
   pointer-events: none;
   transition: opacity 280ms ease, visibility 280ms ease;
 }
-.universe-loader svg {
-  width: 30px;
-  height: 30px;
+.universe-loader svg,
+.is-home-boot #site-startup svg {
+  width: 36px;
+  height: 36px;
   stroke-width: 1.2;
   animation: universe-loading-turn 1.6s linear infinite;
 }
@@ -100,7 +108,9 @@ body.is-home #site-footer .site-registration {
   display: block;
   width: 100%;
   height: 100%;
-  background: #c2cada;
+  background: linear-gradient(90deg, #8d9cbd, #dce8f7, #a99ac9, #8d9cbd);
+  background-size: 200% 100%;
+  animation: universe-loading-sheen 2.4s linear infinite;
   transform: scaleX(0);
   transform-origin: left;
   transition: transform 180ms ease;
@@ -111,6 +121,11 @@ body.is-home #site-footer .site-registration {
   font-size: 11px;
   letter-spacing: .04em;
 }
+.universe-load-label,
+.is-home-boot #site-startup .startup-label {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
+}
 .universe-continue { margin-inline-start: 16px; color: inherit; }
 .universe-home.is-ready .universe-loader,
 .universe-home.has-error .universe-loader,
@@ -119,8 +134,11 @@ body.is-home #site-footer .site-registration {
   visibility: hidden;
 }
 @keyframes universe-loading-turn { to { transform: rotate(360deg); } }
+@keyframes universe-loading-sheen { to { background-position: -200% 0; } }
 @media (prefers-reduced-motion: reduce) {
   .universe-loader svg { animation: none; }
+  .is-home-boot #site-startup svg { animation: none; }
+  .universe-load-track span { animation: none; }
 }
 .universe-home.is-returning-out .universe-stage {
   opacity: 0;
