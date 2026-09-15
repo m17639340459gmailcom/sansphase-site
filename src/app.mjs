@@ -176,7 +176,9 @@ function setupStage() {
   cleanStage = mountUniverse(homeRoot, {
     english: language === "en",
     initiallyCovered: parseRoute(location.hash).page !== 'home',
-    loadTimeoutMs: 60000,
+    // Allow the original-resolution scene assets to finish on a slower link.
+    // This is only a failure deadline: successful readiness enters immediately.
+    loadTimeoutMs: 120000,
     // Homepage readiness includes its own scene and typography. Content-page
     // images are a low-priority warmup after entry, never a homepage barrier.
     prepareContent: () => document.fonts?.ready,
