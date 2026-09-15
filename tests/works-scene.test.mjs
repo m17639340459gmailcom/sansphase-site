@@ -4,7 +4,20 @@ import {
   cosmosFraming,
   skyLayerOpacity,
   skyLayerOffset,
+  photographsCoverPanorama,
 } from "../src/library-layout.mjs";
+
+test('panorama remains available until a loaded, visible photograph is fully opaque', () => {
+  const photograph={visible:true,material:{map:{isTexture:true},opacity:0.9999}};
+  assert.equal(photographsCoverPanorama([undefined,photograph]),false);
+  photograph.material.opacity=1;
+  assert.equal(photographsCoverPanorama([undefined,photograph]),true);
+  photograph.visible=false;
+  assert.equal(photographsCoverPanorama([photograph]),false);
+  photograph.visible=true;photograph.material.map=null;
+  assert.equal(photographsCoverPanorama([photograph]),false);
+  assert.equal(photographsCoverPanorama([]),false);
+});
 
 test("successive skies enter below and leave above without a discontinuity on reverse scroll", () => {
   for (const chapter of [1, 2, 3]) {

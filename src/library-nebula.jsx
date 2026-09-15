@@ -6,7 +6,7 @@ import { RenderTexture } from "@react-three/drei/core/RenderTexture.js";
 import { ScreenSpace } from "@react-three/drei/core/ScreenSpace.js";
 import { PerspectiveCamera } from "@react-three/drei/core/PerspectiveCamera.js";
 import { Image } from "@react-three/drei/core/Image.js";
-import { skyLayerOpacity, skyLayerOffset } from "./library-layout.mjs";
+import { skyLayerOpacity, skyLayerOffset, photographsCoverPanorama } from "./library-layout.mjs";
 import {
   ShaderMaterial,
   Matrix4,
@@ -149,6 +149,7 @@ export const scenePhotographs = [
 export function SpaceBackdrop({ model }) {
   const { camera, size, scene } = useThree();
   const photographs = useRef([]);
+  const panorama = useRef();
   const depth = 150;
   const height = 2 * Math.tan((camera.fov * Math.PI) / 360) * depth;
   const width = (height * size.width) / size.height;
@@ -182,10 +183,15 @@ export function SpaceBackdrop({ model }) {
       photograph.rotation.z = 0.012 * Math.sin(time * 0.55);
       material.zoom = 1.035 + 0.022 * Math.sin(time * 0.7);
     }
+    // Keep the panorama texture live for an immediate reverse transition, but
+    // do not draw its covered plane again in each refraction/final scene pass.
+    if (panorama.current)
+      panorama.current.visible = !photographsCoverPanorama(photographs.current);
   });
   return (
     <ScreenSpace depth={depth}>
       <mesh
+        ref={panorama}
         name="galactic-backdrop"
         scale={[(height * size.width) / size.height, height, 1]}
         renderOrder={-100}

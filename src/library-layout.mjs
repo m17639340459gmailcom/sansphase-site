@@ -7,6 +7,13 @@ const finite = (value, fallback = 0) =>
 export const skyLayerOpacity = (progress, chapter) =>
   MathUtils.smootherstep(finite(progress), chapter - 0.92, chapter - 0.05);
 
+// SpaceBackdrop's photograph planes retain a cover margin throughout travel.
+// Only a loaded, visible, completely opaque plane can hide the underlay.
+export const photographsCoverPanorama = (photographs) =>
+  photographs.some((mesh) =>
+    mesh?.visible && mesh.material?.map && mesh.material.opacity >= 1,
+  );
+
 // Screen-height displacement: the next photograph arrives from below while
 // the outgoing one passes upwards. Its existing Drei Image supplies rendering.
 export const skyLayerOffset = (progress, chapter) =>
