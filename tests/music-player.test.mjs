@@ -34,6 +34,10 @@ test('real Plyr mounts controls, switches tracks, and disposes audio',async()=>{
     assert(played>0);
     host.querySelector('[data-prev]').click();
     assert.equal(host.querySelector('.music-current').textContent,'第一首');
+    host.querySelector('audio').dispatchEvent(new w.Event('ended'));
+    assert.equal(host.querySelector('.music-current').textContent,'第二首','ended advances in saved order');
+    host.querySelector('[data-next]').click();
+    assert.equal(host.querySelector('.music-current').textContent,'第一首','playlist wraps in order');
     dispose(); assert(paused>0);
     const tracks=[{title:'持续播放',url:'https://example.com/stay.mp3'}];
     mod.namespace.mountSiteMusic(host,{tracks},()=>{});

@@ -66,6 +66,15 @@ function musicState(playing) {
     button.setAttribute('aria-label',playing?t('暂停音乐','Pause music'):t('播放音乐','Play music'));
     button.title=button.getAttribute('aria-label');
   }
+  const state=musicModule?.siteMusicState();
+  const volume=document.querySelector('[data-site-music-volume]');
+  if(volume&&state)volume.value=state.muted?0:state.volume;
+  const mute=document.querySelector('[data-action="site-music-mute"]');
+  if(mute&&state){mute.innerHTML=state.muted?icons.muted:icons.volume;mute.setAttribute('aria-label',state.muted?t('取消静音','Unmute'):t('静音','Mute'));}
+}
+function homeMusicControls() {
+  if(!siteContent?.profile?.music?.tracks?.length)return `<button type="button" class="site-music-toggle" data-action="site-music" aria-pressed="false" aria-label="${t('播放音乐','Play music')}">${icons.disc}</button>`;
+  return `<div class="home-music-tools"><button type="button" class="site-music-toggle ${musicIsPlaying?'is-playing':''}" data-action="site-music" aria-pressed="${musicIsPlaying}" aria-label="${musicIsPlaying?t('暂停音乐','Pause music'):t('播放音乐','Play music')}">${icons.disc}</button><details class="home-music-controls"><summary aria-label="${t('音乐控制','Music controls')}" title="${t('音乐音量','Music volume')}">${icons['chevron-down']}</summary><div class="home-music-panel"><div class="home-music-volume"><button type="button" data-action="site-music-mute" aria-label="${t('静音','Mute')}">${icons.volume}</button><input type="range" data-site-music-volume min="0" max="1" step="0.05" value="1" aria-label="${t('音乐音量','Music volume')}"></div></div></details></div>`;
 }
 let blogNoticeIndex = 0;
 let blogNoticeTimer;
@@ -159,7 +168,7 @@ function header(page) {
       )
       .join(
         "",
-      )}</nav><div class="header-actions">${homeNav}${support}${themeToggle}${page==='home'?`<button type="button" class="site-music-toggle ${musicIsPlaying?'is-playing':''}" data-action="site-music" aria-pressed="${musicIsPlaying}" aria-label="${musicIsPlaying?t('暂停音乐','Pause music'):t('播放音乐','Play music')}">${icons.disc}</button>`:''}<button class="language" data-action="language" aria-label="${t("Switch to English", "切换到中文")}">${t("中 / EN", "EN / 中")}</button>${personalAccount}<button class="icon-button menu-button" data-action="menu" aria-controls="navigation" aria-expanded="false" aria-label="${t("打开菜单", "Open menu")}">${icons.menu}</button></div>`;
+      )}</nav><div class="header-actions">${homeNav}${support}${themeToggle}${page==='home'?homeMusicControls():''}<button class="language" data-action="language" aria-label="${t("Switch to English", "切换到中文")}">${t("中 / EN", "EN / 中")}</button>${personalAccount}<button class="icon-button menu-button" data-action="menu" aria-controls="navigation" aria-expanded="false" aria-label="${t("打开菜单", "Open menu")}">${icons.menu}</button></div>`;
 }
 function home() {
   return "";
@@ -183,6 +192,7 @@ function setupStage() {
     // images are a low-priority warmup after entry, never a homepage barrier.
     prepareContent: () => document.fonts?.ready,
     onPrepared: () => {
+      if(parseRoute(location.hash).page==='home'&&siteContent?.profile?.music?.autoplay!==false)musicModule?.prepareSiteMusicPlayback();
       const warm = () => preparePageImages(document,siteContent,{concurrency:1}).catch(() => {});
       if(window.requestIdleCallback) window.requestIdleCallback(warm);
       else window.setTimeout(warm, 0);
@@ -583,7 +593,7 @@ function render({silent=false}={}) {
   if(siteContent?.profile?.music?.tracks?.length || musicModule) import('./music.bundle.mjs').then(module=>{
     if(musicGeneration!==musicRenderGeneration) return;
     musicModule=module;
-    module.mountSiteMusic(musicHost,siteContent?.profile?.music,musicState);
+    module.mountSiteMusic(musicHost,siteContent?.profile?.music,musicState,{autoplayReady:page!=='home'||homeRoot.classList.contains('is-ready')});
     musicState(musicIsPlaying);
   }).catch(()=>{ if(musicHost?.isConnected) musicHost.textContent=t('播放器暂时无法载入。','Player unavailable.'); });
   const timezoneHost = document.querySelector("#blog-timezone-control");
@@ -766,6 +776,7 @@ document.addEventListener("click", (e) => {
       if(siteContent?.profile?.music?.tracks?.length && musicModule) musicModule.toggleSiteMusic();
       else toast(t('作者尚未设置可在本站播放的音乐。','No on-site audio has been configured.'));
       break;
+    case 'site-music-mute': musicModule?.toggleSiteMusicMute(); break;
     case "theme-toggle":
       blogTheme = blogTheme === "dark" ? "light" : "dark";
       try {
@@ -835,6 +846,7 @@ document.addEventListener("click", (e) => {
   }
 });
 document.addEventListener("input", (e) => {
+  if(e.target.matches('[data-site-music-volume]'))musicModule?.setSiteMusicVolume(e.target.value);
   if (e.target.id === "content-search") {
     activeQuery = e.target.value;
     catalogPageNumber = 1;
@@ -856,6 +868,8 @@ function changeBlogTimezone(value) {
 }
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
+    const musicOptions=document.querySelector('.home-music-controls[open]');
+    if(musicOptions){musicOptions.open=false;musicOptions.querySelector('summary').focus();e.preventDefault();return;}
     if (e.defaultPrevented || document.querySelector('.blog-timezone-menu[data-state="open"]')) return;
     const nav = document.querySelector(".nav");
     if (nav?.classList.contains("open")) {

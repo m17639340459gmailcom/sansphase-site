@@ -161,13 +161,22 @@ test("author hub groups actions; background editing preserves profile; back navi
     d.querySelector('[name="music_link_url"]').value='https://example.com/music.mp3';
     click('[data-add-track]');
     assert.equal(d.querySelectorAll('[data-track-source]').length,1);
+    for(const [title,url] of [['第二首','https://example.com/two.mp3'],['第三首','https://example.com/three.mp3']]){
+      d.querySelector('[name="music_link_title"]').value=title;
+      d.querySelector('[name="music_link_url"]').value=url;click('[data-add-track]');
+    }
+    click('[data-track-source="https://example.com/three.mp3"] [data-move-track="-1"]');
+    click('[data-track-source="https://example.com/three.mp3"] [data-move-track="-1"]');
+    assert(d.querySelector('[data-track-source] [data-move-track="-1"]').disabled);
+    click('[data-track-source="https://example.com/music.mp3"] [data-move-track="1"]');
     d.querySelector('[name="music_title"]').value = "新的歌单名称";
     d.querySelector('form').dispatchEvent(new w.Event('submit', {bubbles:true,cancelable:true}));
     await settle();
     assert.deepEqual(writes.at(-1).social_links, profile.social_links);
     assert.equal(writes.at(-1).music_settings.title, '新的歌单名称');
     assert.equal(writes.at(-1).music_settings.playlistUrl,profile.music_settings.playlistUrl,'preserve legacy data when saving in-site playback settings');
-    assert.equal(writes.at(-1).music_settings.tracks[0].title,'链接测试音乐');
+    assert.deepEqual(writes.at(-1).music_settings.tracks.map(t=>t.title),['第三首','第二首','链接测试音乐']);
+    assert.deepEqual(writes.at(-1).music_settings.tracks.map(t=>t.url),['https://example.com/three.mp3','https://example.com/two.mp3','https://example.com/music.mp3']);
     click('[data-author-back]'); await settle();
     click('[data-author-open="profile"]'); await settle();
     click('[data-add-social]');

@@ -1,9 +1,10 @@
 import Plyr from "plyr";
 import { icons } from "./library-ui.jsx";
 import { staticAssetUrl } from "./scene-delivery.mjs";
+import { createMusicAutoplay } from './music-autoplay.mjs';
 
 // Plyr controls playback. Platform share URLs deliberately never become audio sources.
-export function mountMusicPlayer(host, tracks, {onState=()=>{},autoplay=false}={}) {
+export function mountMusicPlayer(host, tracks, {onState=()=>{},autoplay=false,autoplayReady=true}={}) {
   let index = 0;
   host.classList.add('vinyl-player');
   host.innerHTML = `<div class="music-turntable" aria-hidden="true"><div class="music-record"><div class="music-record-label"><span>無相</span><img hidden alt="" decoding="async"></div></div><svg class="music-tonearm" viewBox="0 0 70 90"><circle cx="10" cy="8" r="8" fill="#666a74" stroke="#242832" stroke-width="2"/><circle cx="10" cy="8" r="5" fill="#d4d6df"/><path d="M10 8 C11 35 12 48 23 57 L43 71" fill="none" stroke="#a5a9b5" stroke-width="5" stroke-linecap="round"/><path d="M10 8 C11 35 12 48 23 57 L43 71" fill="none" stroke="#f3f0ee" stroke-width="3" stroke-linecap="round"/><path d="m39 64 14 9 -5 8 -14 -9z" fill="#e6e4e6" stroke="#a6a4af"/><path d="m42 78 4 3" stroke="#e1dace" stroke-width="2"/></svg></div><p class="music-current" aria-live="polite"></p><div class="music-track-caption"><span data-music-state>待播放</span><span aria-hidden="true">·</span><span data-track-count></span></div><audio preload="none"></audio><p class="music-error" role="status"></p>`;
@@ -19,6 +20,7 @@ export function mountMusicPlayer(host, tracks, {onState=()=>{},autoplay=false}={
     i18n: { play: "播放", pause: "暂停", mute: "静音", unmute: "取消静音", volume: "音量", seek: "播放进度", played: "已播放", currentTime: "当前时间" },
   });
   const status = host.querySelector(".music-error");
+  const automatic=createMusicAutoplay({document:host.ownerDocument,play:()=>player.play(),onBlocked:()=>{status.textContent='';onState(false);},onError:()=>{status.textContent='暂时无法播放，请切换下一首或稍后重试。';onState(false);}});
   host.querySelector('.music-track-caption').className='sr-only';
   host.querySelector('.music-current').classList.add('sr-only');
   const artwork=host.querySelector('.music-record-label img');
@@ -44,11 +46,15 @@ export function mountMusicPlayer(host, tracks, {onState=()=>{},autoplay=false}={
     if (play) player.play()?.catch(() => { status.textContent = "暂时无法播放，请检查音频来源或稍后重试。"; });
   };
   // Plyr rebuilds custom controls when a source changes; delegate from the stable host.
-  const transport=event=>{if(event.target.closest('[data-prev]'))load(-1,true);else if(event.target.closest('[data-next]'))load(1,true);};
+  const transport=event=>{
+    if(event.target.closest('[data-plyr="play"],[data-prev],[data-next]'))automatic.cancel();
+    if(event.target.closest('[data-prev]'))load(-1,true);else if(event.target.closest('[data-next]'))load(1,true);
+  };
   host.addEventListener('click',transport);
   player.on("ended", () => load(1, true));
   player.on("error", () => { status.textContent = "此音频暂时无法播放，请切换下一首或稍后重试。"; });
   for(const [event,label] of Object.entries({playing:'播放中',pause:'已暂停',ended:'播放结束',error:'播放失败',waiting:'正在缓冲'}))player.on(event,()=>setPlayback(event==='playing',label));
+  player.on('volumechange',()=>onState(!player.paused));
   let intersects=true;
   const visibility=()=>host.classList.toggle('is-offscreen',!intersects||host.ownerDocument.hidden);
   host.ownerDocument.addEventListener('visibilitychange',visibility);
@@ -58,9 +64,13 @@ export function mountMusicPlayer(host, tracks, {onState=()=>{},autoplay=false}={
     status.textContent=error?.name==='NotAllowedError'?'请点击播放开始收听。':'暂时无法播放，请检查音频来源。';onState(false);
   });
   load();
-  if(autoplay) play();
-  const dispose=()=>{host.removeEventListener('click',transport);host.ownerDocument.removeEventListener('visibilitychange',visibility);observer?.disconnect();player.pause();player.destroy();host.classList.remove('is-playing');onState(false);};
-  dispose.toggle=()=>player.paused?play():player.pause();
+  automatic.update({enabled:autoplay,ready:autoplayReady});
+  const dispose=()=>{automatic.dispose();host.removeEventListener('click',transport);host.ownerDocument.removeEventListener('visibilitychange',visibility);observer?.disconnect();player.pause();player.destroy();host.classList.remove('is-playing');onState(false);};
+  dispose.toggle=()=>{automatic.cancel();return player.paused?play():player.pause();};
+  dispose.volume=value=>{player.volume=Math.max(0,Math.min(1,Number(value)));player.muted=false;};
+  dispose.mute=()=>{player.muted=!player.muted;};
+  dispose.state=()=>({volume:player.volume,muted:player.muted,paused:player.paused});
+  dispose.autoplay=options=>automatic.update(options);
   return dispose;
 }
 
@@ -71,19 +81,24 @@ export function parkSiteMusic() {
   if(document.body.moveBefore && siteHost.isConnected) document.body.moveBefore(siteHost,null);
   else document.body.append(siteHost);
 }
-export function mountSiteMusic(target,settings,onState) {
+export function mountSiteMusic(target,settings,onState,{autoplayReady=true}={}) {
   const tracks=settings?.tracks||[];
   const key=JSON.stringify(tracks);
   if(key!==playlistKey) {
     sitePlayer?.();siteHost?.remove();sitePlayer=undefined;siteHost=undefined;playlistKey=key;
     if(tracks.length) {
       siteHost=document.createElement('div');siteHost.className='site-music-player';siteHost.hidden=true;document.body.append(siteHost);
-      sitePlayer=mountMusicPlayer(siteHost,tracks,{onState,autoplay:settings.autoplay===true});
+      sitePlayer=mountMusicPlayer(siteHost,tracks,{onState,autoplay:false,autoplayReady:false});
     }
   }
   if(siteHost && target) {
     if(target.moveBefore && siteHost.isConnected) target.moveBefore(siteHost,null);else target.append(siteHost);
     siteHost.hidden=false;
   } else parkSiteMusic();
+  sitePlayer?.autoplay({enabled:settings?.autoplay===true,ready:autoplayReady});
 }
 export function toggleSiteMusic() { sitePlayer?.toggle(); }
+export function setSiteMusicVolume(value) { sitePlayer?.volume(value); }
+export function toggleSiteMusicMute() { sitePlayer?.mute(); }
+export function siteMusicState() { return sitePlayer?.state(); }
+export function prepareSiteMusicPlayback() { sitePlayer?.autoplay({enabled:true,ready:true}); }

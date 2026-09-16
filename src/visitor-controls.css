@@ -9,6 +9,16 @@
 @keyframes music-disc-turn {to{transform:rotate(360deg);}}
 @media(prefers-reduced-motion:reduce){.site-music-toggle .ui-icon{animation:none;}}
 .site-music-player[hidden] {display:none!important;}
+.home-music-tools {position:relative;display:flex;align-items:center;gap:0;}
+.home-music-controls summary {display:grid;place-items:center;list-style:none;cursor:pointer;width:24px;height:36px;}
+.home-music-controls summary::-webkit-details-marker {display:none;}
+.home-music-controls summary svg {width:14px;height:14px;}
+.home-music-panel {position:absolute;top:calc(100% + 10px);right:0;width:180px;padding:10px;background:var(--dialog-fill,#102337ed);border:1px solid var(--line);backdrop-filter:var(--dialog-blur,blur(16px));box-shadow:0 8px 24px #0004;}
+.home-music-panel button {display:grid;place-items:center;width:40px;height:40px;padding:8px;color:inherit;border:0;background:transparent;cursor:pointer;}
+.home-music-panel button:hover,.home-music-panel button:focus-visible {background:rgb(220 235 255 / 12%);}
+.home-music-panel svg {width:18px;height:18px;}
+.home-music-volume {display:flex;align-items:center;gap:6px;}
+.home-music-volume input {width:100%;min-width:0;accent-color:var(--text);}
 .blog-weather-card .weather-attribution {display:flex;flex-wrap:wrap;gap:2px 6px;margin-top:8px;color:var(--muted);font-size:11px;line-height:1.6;}
 .weather-attribution a {text-underline-offset:3px;}
 .weather-attribution a:hover,.weather-attribution a:focus-visible {color:var(--text);text-decoration:underline;}
@@ -27,10 +37,13 @@
 .author-checkbox {display:flex;align-items:flex-start;gap:8px;font-size:13px;margin-top:16px;}
 .author-checkbox input {accent-color:var(--blog-accent,#a6cff0);width:16px;height:16px;margin:2px 0;}
 .author-music-tracks {display:grid;gap:10px;}
-.author-music-track {display:grid;grid-template-columns:minmax(0,1fr) 34px;gap:8px;align-items:end;}
+.author-music-track {display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:end;}
 .author-music-track label {min-width:0;display:grid;gap:5px;font-size:12px;}
 .author-music-track input {width:100%;min-width:0;}
 .author-music-track button {padding:7px;}
+.author-music-order {display:flex;gap:3px;}
+.author-music-order button {width:32px;min-height:34px;padding:7px;}
+.author-music-order button:disabled {opacity:.3;cursor:default;}
 .weather-line>div {min-width:0;}
 .blog-date-card .calendar-time {
   font-family:ui-monospace,"SFMono-Regular",Consolas,"Liberation Mono",monospace;
