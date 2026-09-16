@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { JSDOM, VirtualConsole } from "jsdom";
 import * as visitorLocation from '../src/visitor-location.mjs';
+import * as siteCopy from '../src/site-copy.mjs';
 import * as imageSources from '../dist/image-sources.mjs';
 import * as homePreload from '../dist/home-preload.mjs';
 import {mountRouteAssets} from '../dist/route-assets.mjs';
@@ -99,6 +100,7 @@ test("local prototype DOM flows", async (t) => {
     if (specifier === './catalog.mjs')
       return loadLibrary(new URL('../dist/catalog.mjs', import.meta.url));
     const exports =
+      specifier === './site-copy.mjs' ? siteCopy :
       specifier === './route-assets.mjs' ? {mountRouteAssets:win=>mountRouteAssets(win,{loadAuthor:async()=>{},loadBackground:async()=>{}})} :
       specifier === './home-preload.mjs' ? homePreload :
       specifier === './image-sources.mjs' ? imageSources :
@@ -636,7 +638,7 @@ test("local prototype DOM flows", async (t) => {
       }
     });
     await t.test(
-      "language switch renders English content and data safely",
+      "language switch translates UI and keeps original authored posts",
       async () => {
         await navigate("notes");
         click("[data-action=language]");
@@ -644,11 +646,11 @@ test("local prototype DOM flows", async (t) => {
         assert.equal(d.activeElement, q('[data-action="language"]'));
         assert.match(q("main h1").textContent, /Blog/);
         await navigate("note/building-sansphase");
-        assert.match(
+        assert.equal(
           q(".article h1").textContent,
-          /Website development journal/,
+          data.notes.find(item=>item.id==='building-sansphase').title,
         );
-        assert.match(q(".article-body").textContent, /local prototype/);
+        assert.match(q(".article-body").textContent, /本地/);
         await navigate("community");
         assert.match(q("main").textContent, /not open yet/);
         click("[data-action=language]");

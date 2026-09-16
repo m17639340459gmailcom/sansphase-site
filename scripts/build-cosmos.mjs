@@ -59,6 +59,7 @@ for (const file of [
   "app.mjs",
   "visitor-controls.css",
   "visitor-location.mjs",
+  "site-copy.mjs",
   "catalog.mjs",
   "catalog.css",
   "page-session.js",

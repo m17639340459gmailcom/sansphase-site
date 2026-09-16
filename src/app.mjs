@@ -1,5 +1,6 @@
-import {visitorTimezone, validTimezone, locateVisitor, searchWeatherCities,watchVisitorLocation} from './visitor-location.mjs';
+import {visitorTimezone, validTimezone, locateVisitor, searchWeatherCities,watchVisitorLocation,localizeWeatherPlace} from './visitor-location.mjs';
 import {imageSources, imageSourceSet} from './image-sources.mjs';
+import {siteCopy,localizedResource} from './site-copy.mjs';
 import {preparePageImages} from './home-preload.mjs';
 import {mountRouteAssets} from './route-assets.mjs';
 mountRouteAssets(window);
@@ -91,6 +92,7 @@ let blogTheme = (() => {
     return "dark";
   }
 })();
+let weatherDataCache;
 let blogWeatherRequest;
 let blogWeatherKey = "";
 let blogWeatherAbort;
@@ -99,6 +101,7 @@ let blogWeatherOpen = restoredView.weatherOpen === true;
 let filterPage = typeof restoredView.filterPage === "string" ? restoredView.filterPage : "";
 let hasRenderedOnce = false;
 const t = (zh, en) => (language === "zh" ? zh : en);
+const copy = value => siteCopy(value,language);
 const main = document.querySelector("#main");
 const blogPhoto = document.querySelector("#blog-backdrop img");
 let blogRevealGeneration = 0;
@@ -195,13 +198,13 @@ function setupStage() {
       (menuMedia.matches && Boolean(document.querySelector(".nav.open"))),
   });
 }
-const displayTitle = (item) => t(item.title, item.en || item.title);
-const displaySummary = (item) =>
-  t(item.summary, item.summaryEn || item.summary);
+// Authored posts keep their original language. Only their surrounding UI changes.
+const displayTitle = (item) => item.title;
+const displaySummary = (item) => item.summary;
 const categoryLabel = (name, list) => {
   if (name === "all") return t("全部", "All");
   const item = list.find((i) => i.category === name);
-  return t(name, item?.categoryEn || name);
+  return list===notes ? name : t(name, item?.categoryEn || name);
 };
 function pageHeading(kicker, title, description, meta = "") {
   return `<div class="eyebrow">${kicker}</div><div class="page-heading"><div><h1>${title}</h1><p>${description}</p></div>${meta ? `<span class="page-meta">${meta}</span>` : ""}</div>`;
@@ -255,7 +258,7 @@ function notesResults() {
     : emptyState();
 }
 function noticeItems() {
-  if (siteContent) return siteContent.announcements;
+  if (siteContent) return siteContent.announcements.map(item=>({...item,title:copy(item.title),summary:copy(item.summary)}));
   return [
     ["这里记录正在发生的事。", "A record of what is taking shape.", "AI 学习、作品制作与网站建设会逐步整理在这里。", "AI learning, project making, and site development will be organised here."],
     ["首页宇宙入口已完成。", "The immersive home is in place.", "首页保留空间场景，博客从导航进入，不打断首屏体验。", "The space scene remains the entrance; the blog opens from navigation."],
@@ -337,7 +340,7 @@ async function requestWeatherLocation() {
   const generation=++locationGeneration;
   const detail=document.querySelector('[data-weather-detail]');
   if(detail) detail.textContent=t('正在请求定位许可…','Requesting location permission…');
-  locatingWeather=locateVisitor().then(place=>{
+  locatingWeather=locateVisitor(undefined,{locale:language}).then(place=>{
     if(generation!==locationGeneration) return;
     visitorWeatherPlace=place;
     syncBlogWeather(parseRoute(location.hash).page);
@@ -346,9 +349,20 @@ async function requestWeatherLocation() {
     const value=document.querySelector('[data-weather-value]');
     const detail=document.querySelector('[data-weather-detail]');
     if(value) value.textContent=t('请选择位置','Choose location');
-    if(detail) detail.textContent=error.message;
+    if(detail) detail.textContent=t('未获得位置，请允许定位或搜索城市。','Location unavailable. Allow location access or search for a city.');
   }).finally(()=>{locatingWeather=null;});
   return locatingWeather;
+}
+
+function refreshWeatherCityLabel() {
+  const original=visitorWeatherPlace,locale=language;
+  if(!original?.[4])return;
+  localizeWeatherPlace(original,{locale}).then(next=>{
+    if(visitorWeatherPlace!==original)return;
+    visitorWeatherPlace=next;
+    const place=document.querySelector('[data-weather-location]');
+    if(place)place.textContent=t(next[2],next[3]);
+  }).catch(()=>{});
 }
 function weatherText(code) {
   const labels = {
@@ -414,12 +428,7 @@ function syncBlogWeather(page) {
   blogWeatherKey = key;
   const controller = new AbortController();
   blogWeatherAbort = controller;
-  blogWeatherRequest = fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,visibility,precipitation,surface_pressure,is_day&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset&forecast_days=1&temperature_unit=celsius&wind_speed_unit=kmh&timezone=auto`, { signal: controller.signal })
-    .then((response) => {
-      if (!response.ok) throw new Error(`weather ${response.status}`);
-      return response.json();
-    })
-    .then((data) => {
+  const applyWeather=data=> {
       if (blogWeatherKey !== key || parseRoute(location.hash).page !== "notes") return;
       if(!Number.isFinite(data.current?.temperature_2m)||!Number.isFinite(data.current?.weather_code))throw new Error('Incomplete weather data');
       const value = document.querySelector("[data-weather-value]");
@@ -427,7 +436,7 @@ function syncBlogWeather(page) {
       const place = document.querySelector("[data-weather-location]");
       const [labelZh, labelEn] = weatherText(data.current?.weather_code);
       if (value) value.textContent = `${Math.round(Number(data.current?.temperature_2m))}°C · ${t(labelZh, labelEn)}`;
-      if (place) place.textContent = t(cityZh, cityEn);
+      if (place) place.textContent = t(weatherLocation()[2],weatherLocation()[3]);
       const range = document.querySelector("[data-weather-range]");
       const wind = document.querySelector("[data-weather-wind]");
       const visibility = document.querySelector("[data-weather-visibility]");
@@ -448,6 +457,22 @@ function syncBlogWeather(page) {
       if (sunrise) sunrise.textContent = formatClock(daily.sunrise?.[0]);
       if (glyph) glyph.innerHTML = weatherGlyph(current.weather_code, current.is_day);
       if (detail) detail.textContent = t(`更新于 ${current.time?.replace("T", " ") || ""}`, `Updated ${current.time?.replace("T", " ") || ""}`);
+  };
+  const coordinatesKey=`${latitude}:${longitude}`;
+  if(weatherDataCache?.key===coordinatesKey && Date.now()-weatherDataCache.time<10*60*1000) {
+    clearTimeout(weatherRefreshTimer);
+    weatherRefreshTimer=setTimeout(()=>syncBlogWeather(parseRoute(location.hash).page),Math.max(1000,10*60*1000-(Date.now()-weatherDataCache.time)));
+    applyWeather(weatherDataCache.data);return;
+  }
+  blogWeatherRequest = fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m,visibility,precipitation,surface_pressure,is_day&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset&forecast_days=1&temperature_unit=celsius&wind_speed_unit=kmh&timezone=auto`, { signal: controller.signal })
+    .then((response) => {
+      if (!response.ok) throw new Error(`weather ${response.status}`);
+      return response.json();
+    })
+    .then(data=>{
+      if(controller.signal.aborted)return;
+      applyWeather(data);
+      weatherDataCache={key:coordinatesKey,time:Date.now(),data};
     })
     .catch(() => {
       if (controller.signal.aborted || blogWeatherKey !== key) return;
@@ -472,7 +497,7 @@ function blogAuthorPanel() {
   const profile=siteContent?.profile;
   if(!profile) return `<div class="blog-identity"><span class="eyebrow">${icons.user}${t("内容作者", "AUTHOR")}</span><div class="identity-mark" aria-hidden="true">無</div><h2>無相</h2><p>${t("AI · 创作 · 学习", "AI · Making · Learning")}</p><div class="identity-line"></div><span class="subtle">${t("把想法做成可以被看见的作品。", "Turning ideas into work that can be seen.")}</span><nav class="identity-links" aria-label="${t("站内入口", "Site links")}"><a href="#/community" aria-label="${t("社区交流", "Community")}">${icons.link}</a><a href="#/resource-center" aria-label="${t("资源中心", "Resource center")}">${icons.document}</a><a href="#/contact" aria-label="${t("联系", "Contact")}">${icons.right}</a></nav></div>`;
   const tags=[...new Set(notes.flatMap(note=>note.tags||[]))];
-  return `<div class="blog-identity">${profile.avatar?`<img class="identity-avatar" src="${esc(profile.avatar)}" ${imageSources(profile.avatar, '136px')} decoding="async" alt="${esc(profile.name)}" width="136" height="136">`:'<div class="identity-mark" aria-hidden="true">無</div>'}<h2>${esc(profile.name)}</h2><p>${esc(profile.signature)}</p><div class="identity-line"></div><span class="subtle identity-bio">${esc(profile.bio)}</span><p class="identity-count">${notes.length} ${t('篇文章','articles')} · ${tags.length} ${t('个标签','tags')}</p><nav class="identity-links" aria-label="${t('作者其他平台','Author links')}">${profile.socialLinks.map(link=>`<a href="${esc(link.url)}" target="_blank" rel="noopener noreferrer" aria-label="${esc(link.label || socialPlatform(link.url)?.name || "个人主页")}" title="${esc(link.label || socialPlatform(link.url)?.name || "个人主页")}">${socialIcon(link.url, icons.link)}<span class="sr-only">${esc(link.label || socialPlatform(link.url)?.name || "个人主页")}</span></a>`).join('')}</nav></div>`;
+  return `<div class="blog-identity">${profile.avatar?`<img class="identity-avatar" src="${esc(profile.avatar)}" ${imageSources(profile.avatar, '136px')} decoding="async" alt="${esc(profile.name)}" width="136" height="136">`:'<div class="identity-mark" aria-hidden="true">無</div>'}<h2>${esc(profile.name)}</h2><p>${esc(copy(profile.signature))}</p><div class="identity-line"></div><span class="subtle identity-bio">${esc(copy(profile.bio))}</span><p class="identity-count">${notes.length} ${t('篇文章','articles')} · ${tags.length} ${t('个标签','tags')}</p><nav class="identity-links" aria-label="${t('作者其他平台','Author links')}">${profile.socialLinks.map(link=>`<a href="${esc(link.url)}" target="_blank" rel="noopener noreferrer" aria-label="${esc(link.label || socialPlatform(link.url)?.name || t("个人主页","Profile"))}" title="${esc(link.label || socialPlatform(link.url)?.name || t("个人主页","Profile"))}">${socialIcon(link.url, icons.link)}<span class="sr-only">${esc(link.label || socialPlatform(link.url)?.name || t("个人主页","Profile"))}</span></a>`).join('')}</nav></div>`;
 }
 function notesPage() {
   const nextView = blogView === "list" ? t("切换为网格", "Switch to grid") : t("切换为列表", "Switch to list");
@@ -508,7 +533,7 @@ function communityPage() {
 }
 function sectionsHTML(item) {
   if (typeof item.bodyHTML === 'string') return item.bodyHTML;
-  return t(item.sections, item.sectionsEn)
+  return item.sections
     .map(([title, body]) => `<h2>${esc(title)}</h2><p>${esc(body)}</p>`)
     .join("");
 }
@@ -529,7 +554,26 @@ function accountPage() { return communityPage(); }
 function notFound() {
   return `<section class="page"><div class="empty" style="margin-top:50px"><div class="eyebrow" style="justify-content:center;margin-bottom:20px">404 / A LITTLE OFF TRACK</div><h1>${t("这个角落还没有内容。", "Nothing here just yet.")}</h1><p style="margin:20px 0 28px">${t("这条链接可能已变更，或内容尚未公开。", "The link may have changed, or this content is not public yet.")}</p><a class="button" href="#/home">${t("回到首页", "Back home")} ${arrow}</a></div></section>`;
 }
-function render({silent=false}={}) {
+function render({silent=false,preserveScroll=false}={}) {
+  if(siteContent) {
+    works=(siteContent.works||[]).map(item=>({...item,en:item.title,summaryEn:item.summary}));
+    resources=(siteContent.resources||[]).map(item=>localizedResource(item,language));
+    software=(siteContent.software||[]).map(item=>localizedResource(item,language));
+    resourceCenter=(siteContent['resource-center']||[]).map(item=>localizedResource(item,language));
+  }
+  const position = preserveScroll ? {left:window.scrollX,top:window.scrollY} : null;
+  const anchorSelector='.blog-card, .article-body > *, .blog-side-card';
+  const anchorNodes=position?.top>1 ? [...main.querySelectorAll(anchorSelector)] : [];
+  const headerBottom=document.querySelector('#site-header').getBoundingClientRect().bottom;
+  const anchorIndex=anchorNodes.findIndex(node=>{
+    const rect=node.getBoundingClientRect();
+    return rect.bottom>headerBottom && rect.top<window.innerHeight;
+  });
+  const anchorTop=anchorIndex<0 ? null : anchorNodes[anchorIndex].getBoundingClientRect().top;
+  const previousMinHeight = main.style.minHeight;
+  // Disposing glass roots and parking audio briefly empties the page. Keep its
+  // height until the replacement is ready, so the browser cannot clamp scrollY.
+  if(position) main.style.minHeight = `${main.getBoundingClientRect().height}px`;
   setupStage();
   musicModule?.parkSiteMusic();
   document.body.dataset.blogAccent=siteContent?.profile?.appearance?.accent || "blue";
@@ -578,18 +622,21 @@ function render({silent=false}={}) {
   categoryUI = undefined;
   cleanTimezone?.();
   cleanTimezone = undefined;
+  cleanArticleReading?.();
   cleanGlassSurfaces();
   main.innerHTML = (views[page] || notFound)();
   cleanArticleReading=enhanceArticleReading(main.querySelector(".reading-article"),{english:language==="en"});
   mountBlogGlassSurfaces();
   const musicHost=document.querySelector("#blog-audio-player");
   const musicGeneration=++musicRenderGeneration;
-  if(siteContent?.profile?.music?.tracks?.length || musicModule) import('./music.bundle.mjs').then(module=>{
+  const mountMusic=module=>{
     if(musicGeneration!==musicRenderGeneration) return;
     musicModule=module;
-    module.mountSiteMusic(musicHost,siteContent?.profile?.music,musicState,{autoplayReady:page!=='home'||homeRoot.classList.contains('is-ready')});
+    module.mountSiteMusic(musicHost,siteContent?.profile?.music,musicState,{language,autoplayReady:page!=='home'||homeRoot.classList.contains('is-ready')});
     musicState(musicIsPlaying);
-  }).catch(()=>{ if(musicHost?.isConnected) musicHost.textContent=t('播放器暂时无法载入。','Player unavailable.'); });
+  };
+  if(musicModule) mountMusic(musicModule);
+  else if(siteContent?.profile?.music?.tracks?.length) import('./music.bundle.mjs').then(mountMusic).catch(()=>{ if(musicHost?.isConnected) musicHost.textContent=t('播放器暂时无法载入。','Player unavailable.'); });
   const timezoneHost = document.querySelector("#blog-timezone-control");
   if (timezoneHost) cleanTimezone = mountTimezoneSelect(timezoneHost, {
     value: timezoneManual ? blogTimezone : "auto",
@@ -611,6 +658,16 @@ function render({silent=false}={}) {
       : `${t({ works: "作品", work: "作品详情", notes: "博客", note: "博客文章", resources: "资料", software: "软件推荐", "resource-center": "资源中心", community: "社区交流", post: "社区讨论", support: "赞助与支持", contact: "联系与合作", account: "个人空间" }[page] || "页面未找到", { works: "Work", work: "Project", notes: "Blog", note: "Blog post", resources: "Learning materials", software: "Software", "resource-center": "Resource center", community: "Community", post: "Discussion", support: "Support", contact: "Contact", account: "Your space" }[page] || "Page not found")} · 無相`;
   document.querySelector("#site-footer").innerHTML =
     `<div class="footer-identity"><span class="footer-copyright">© 無相</span><a class="site-registration" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">豫ICP备2026037683号-1</a></div><div class="footer-links"><a href="#/contact">${t("联系与合作", "Contact")}</a><a href="#/support">${t("赞助与支持", "Support")}</a><span>${t("记录 · 创作 · 分享", "Learn · Create · Share")}</span></div>`;
+  document.querySelector('.skip-link').textContent=t('跳到正文','Skip to content');
+  document.querySelector('meta[name="description"]').content=t('無相的个人网站，分享博客文章、软件作品、学习资料与工具使用心得。','SANSPHASE: blog posts, software projects, learning resources and practical notes.');
+  if(position) {
+    main.style.minHeight=previousMinHeight;
+    const anchor=anchorIndex<0 ? null : main.querySelectorAll(anchorSelector)[anchorIndex];
+    // English may wrap onto extra lines above the viewport. Keep the current
+    // article/card in the same visible place, rather than jumping its content.
+    if(anchor) position.top=window.scrollY+anchor.getBoundingClientRect().top-anchorTop;
+    window.scrollTo({...position,behavior:'instant'});
+  }
 }
 function refreshResults() {
   const page = parseRoute(location.hash).page;
@@ -755,8 +812,9 @@ document.addEventListener("click", (e) => {
     }
     case "language":
       language = language === "zh" ? "en" : "zh";
-      render();
-      document.querySelector('[data-action="language"]').focus();
+      render({silent:true,preserveScroll:true});
+      refreshWeatherCityLabel();
+      document.querySelector('[data-action="language"]').focus({preventScroll:true});
       break;
     case "blog-view":
       blogView = a.dataset.view === "grid" ? "grid" : "list";
@@ -928,6 +986,7 @@ document.addEventListener('click',event=>{
     locationGeneration++;
     manualWeatherPlace=true;stopWeatherWatch?.();stopWeatherWatch=undefined;
     visitorWeatherPlace=weatherCityResults[Number(city.dataset.weatherCity)];
+    refreshWeatherCityLabel();
     weatherCityAbort?.abort();
     const picker=city.closest('details'); if(picker) picker.open=false;
     syncBlogWeather(parseRoute(location.hash).page);
@@ -951,7 +1010,7 @@ document.addEventListener('submit',async event=>{
   weatherCityAbort?.abort(); const controller=new AbortController(); weatherCityAbort=controller;
   result.textContent=t('正在搜索…','Searching…');
   try {
-    const cities=await searchWeatherCities(new FormData(event.target).get('city'),{signal:controller.signal});
+    const cities=await searchWeatherCities(new FormData(event.target).get('city'),{signal:controller.signal,locale:language});
     if(!result.isConnected || controller.signal.aborted) return;
     weatherCityResults=cities;
     result.innerHTML=cities.length ? cities.map((city,i)=>`<button type="button" data-weather-city="${i}">${esc(city[2])}</button>`).join('') : t('没有找到，请尝试英文名或附近城市。','No results. Try another name or a nearby city.');

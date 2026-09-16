@@ -219,6 +219,23 @@ test("author hub groups actions; background editing preserves profile; back navi
     assert.match(d.querySelector('.author-editor').textContent,/版本与运行环境/);
     assert.match(d.querySelector('.author-editor').textContent,/更新记录/);
     click('[data-author-close]'); click('[data-discard]');
+    d.documentElement.lang='en';
+    click('[data-author-login]'); await settle();
+    assert.equal(d.querySelector('#author-dialog-title').textContent,'Author mode');
+    click('[data-author-open="works"]');await settle();click('[data-new]');await settle();
+    assert.equal(d.querySelector('#author-dialog-title').textContent,'New Work');
+    assert.equal(d.querySelector('[name="title"]').value,'');
+    assert.equal(d.querySelector('[data-article-template="works"]').textContent,'Software project');
+    click('[data-author-back]');await settle();click('[data-author-back]');await settle();
+    click('[data-author-open="appearance"]');await settle();
+    assert(d.querySelector('[aria-label="Text and icon opacity"]'));
+    assert(d.querySelector('[aria-label="Color hue"]'));
+    click('[data-author-back]');await settle();click('[data-author-open="profile"]');await settle();
+    assert.equal(d.querySelector('[name="signature"]').value,profile.signature,'switching UI language keeps authored values');
+    click('[data-author-close]');
+    d.documentElement.lang='zh-CN';click('[data-author-login]');await settle();
+    click('[data-author-open="works"]');await settle();
+    assert.equal(d.querySelector('#author-dialog-title').textContent,'作品');
     assert.deepEqual(errors, []);
   } finally {
     dom.window.close();

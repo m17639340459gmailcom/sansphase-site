@@ -46,7 +46,7 @@ export function mountRouteAssets(
     pendingClick = true;
     const label = button.textContent;
     button.setAttribute("aria-busy", "true");
-    button.textContent = "正在准备…";
+    button.textContent = doc.documentElement.lang.startsWith('en') ? 'Preparing…' : '正在准备…';
     try {
       if (!author) author = loadAuthor();
       await author;
@@ -58,7 +58,7 @@ export function mountRouteAssets(
       }
     } catch {
       author = null;
-      if (button.isConnected) button.title = "登录组件加载失败，点击重试";
+      if (button.isConnected) button.title = doc.documentElement.lang.startsWith('en') ? 'Unable to load sign-in. Click to retry.' : '登录组件加载失败，点击重试';
     } finally {
       pendingClick = false;
       if (button.isConnected) {

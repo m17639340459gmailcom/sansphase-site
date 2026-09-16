@@ -52,6 +52,16 @@ test('real Plyr mounts controls, switches tracks, and disposes audio',async()=>{
     mod.namespace.mountSiteMusic(host,{tracks},()=>{});
     assert.equal(host.querySelector('.site-music-player audio'),persistent);
     assert.equal(persistent.currentTime,34);
+    persistent.volume=.25;
+    mod.namespace.mountSiteMusic(host,{tracks},()=>{},{language:'en'});
+    assert.equal(host.querySelector('.site-music-player audio'),persistent,'language updates preserve the audio element');
+    assert.equal(persistent.paused,false,'language updates keep playback running');
+    assert.equal(persistent.currentTime,34);
+    assert.equal(persistent.volume,.25);
+    assert.equal(host.querySelector('.site-music-player [data-next]').getAttribute('aria-label'),'Next track');
+    assert.equal(host.querySelector('.site-music-player [data-plyr="volume"]').getAttribute('aria-label'),'Volume');
+    mod.namespace.mountSiteMusic(host,{tracks},()=>{},{language:'zh'});
+    assert.equal(host.querySelector('.site-music-player [data-next]').getAttribute('aria-label'),'下一首');
     mod.namespace.toggleSiteMusic();assert.equal(persistent.paused,true);
     mod.namespace.mountSiteMusic(null,{tracks:[]},()=>{});
     assert.equal(w.document.querySelector('.site-music-player'),null);
