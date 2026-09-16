@@ -27,6 +27,7 @@ test('real Plyr mounts controls, switches tracks, and disposes audio',async()=>{
     const dispose=mod.namespace.mountMusicPlayer(host,[{title:'第一首',url:'https://example.com/one.mp3'},{title:'第二首',url:'https://example.com/two.mp3'}]);
     assert(host.querySelector('[data-plyr="play"]'));
     assert(host.querySelector('input[data-plyr="volume"]'));
+    assert.equal(host.querySelector('audio').volume,0.4,'each visit starts at forty percent volume');
     assert.equal(played,0,'does not autoplay on visit');
     host.querySelector('[data-next]').click();
     assert.equal(host.querySelector('.music-current').textContent,'第二首');

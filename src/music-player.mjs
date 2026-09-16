@@ -15,7 +15,7 @@ export function mountMusicPlayer(host, tracks, {onState=()=>{},autoplay=false,au
     <div class="music-volume-row"><button type="button" class="plyr__control" data-plyr="mute" aria-label="静音"><span class="icon--pressed">${icons.muted}</span><span class="icon--not-pressed">${icons.volume}</span></button><div class="plyr__volume"><input data-plyr="volume" type="range" min="0" max="1" step="0.05" value="1" autocomplete="off" aria-label="音量"></div><span class="music-position" data-track-position aria-hidden="true"></span></div>
   </div>`;
   const player = new Plyr(audio, {
-    controls, invertTime:false, toggleInvert:false,
+    controls, volume:0.4, invertTime:false, toggleInvert:false,
     iconUrl: staticAssetUrl("/assets/plyr.svg"), loadSprite:false, autoplay: false, storage: { enabled: false },
     i18n: { play: "播放", pause: "暂停", mute: "静音", unmute: "取消静音", volume: "音量", seek: "播放进度", played: "已播放", currentTime: "当前时间" },
   });
