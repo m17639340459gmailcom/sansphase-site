@@ -199,6 +199,7 @@ test("local prototype DOM flows", async (t) => {
     await t.test("reload restores view state before restoring scroll, in the initial render", async () => {
       assert.equal(q("#blog-calendar-body").hidden, false);
       assert.equal(q("#blog-weather-details").hidden, false);
+      assert.equal(q(".weather-attribution").closest("#blog-weather-details"),q("#blog-weather-details"),"weather sources belong inside the optional details");
       assert.ok(q("#results").classList.contains("is-grid"));
       assert.equal(q("#content-search").value, "网站");
       assert.equal(q('[data-category="建站记录"]').getAttribute("aria-checked"), "true");
@@ -207,6 +208,7 @@ test("local prototype DOM flows", async (t) => {
         cards: 8, calendarOpen: true, weatherOpen: true }]);
       click('[data-action="blog-calendar"]');
       click('[data-action="weather-details"]');
+      assert.equal(q(".weather-attribution").closest("[hidden]"),q("#blog-weather-details"),"collapsed weather cards do not display source links");
       click('[data-action="blog-view"]');
       input("#content-search", "");
       click('[data-category="all"]');

@@ -157,8 +157,8 @@ export function mountUniverse(
       text("可交互的宇宙", "Interactive universe"),
     );
     const instructionText = `${english ? s.ariaLabelEn : s.ariaLabel}${english ? ". " : "。"}${text(
-      "滚轮向下或向上滚动一次切换一幕，也可使用空格或上下方向键。首屏可用左右方向键调整观察角度。",
-      "Scroll down or up once to move to the next or previous scene, or use Space or the up and down arrow keys. On the opening, use the left and right arrow keys to adjust the view.",
+      "滚轮向下或向上滚动一次切换一幕；手机向上划进入下一幕，向下划返回上一幕。也可使用空格或上下方向键。首屏可用左右方向键调整观察角度。",
+      "Scroll down or up once to change scenes. On touchscreens, swipe up for the next scene or down for the previous scene. You can also use Space or the up and down arrow keys. On the opening, use the left and right arrow keys to adjust the view.",
     )}`;
     if (instructions.textContent !== instructionText)
       instructions.textContent = instructionText;
@@ -380,11 +380,8 @@ export function mountUniverse(
           pointer.axis = "horizontal";
       }
       if (pointer.axis === "vertical") {
-        setTravel(
-          pointer.startProgress -
-            dy / Math.max(400, stage.getBoundingClientRect().height * 0.9),
-          true,
-        );
+        // Decide a whole chapter on release, so a short or cancelled swipe
+        // cannot strand the scene between chapters or interrupt its animation.
         return;
       }
       if (pointer.axis !== "horizontal") return;
@@ -412,6 +409,7 @@ export function mountUniverse(
     }
     if (
       !usable() ||
+      (event.pointerType === "touch" && Math.abs(progress - targetProgress) >= 0.0002) ||
       (!openingInteractive() && event.pointerType !== "touch") ||
       multiTouch ||
       pointer ||
@@ -459,16 +457,14 @@ export function mountUniverse(
       !cancel &&
       pointer.touch &&
       pointer.axis !== "horizontal" &&
+      pointer.startProgress === targetProgress &&
+      Math.abs(progress - targetProgress) < 0.0002 &&
       Math.abs(dy) >= 65 &&
       Math.abs(dy) >= Math.abs(dx) * 1.2;
     const click = !cancel && !pointer.dragged && Math.hypot(dx, dy) <= 6;
     const reset = cancel || pointer.touch;
-    const travelled = pointer.touch && pointer.axis === "vertical";
     clearPointer(cancel);
-    if (travelled) {
-      scrolling = false;
-      sync();
-    } else if (swipe) changeChapter(dy < 0 ? 1 : -1);
+    if (swipe) changeChapter(dy < 0 ? 1 : -1);
     else if (click && usable() && openingInteractive())
       renderer.pulse(...point(event));
     if (reset) resetViewPointer();

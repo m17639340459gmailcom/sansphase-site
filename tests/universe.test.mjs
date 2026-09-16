@@ -1021,18 +1021,19 @@ test("retry starts a new renderer generation and ignores old callbacks", async (
   }
 });
 
-test("vertical touch travel follows the finger before release without orbiting or pulsing", async () => {
+test("one vertical touch swipe completes one chapter on release without orbiting or pulsing", async () => {
   const s = await setup();
   try {
     s.ready();
     const orbitCount = s.calls.filter((c) => c[0] === "setOrbit").length;
     s.pointer("pointerdown", 500, 400, 1, "touch");
     s.pointer("pointermove", 507, 320, 1, "touch");
-    assert.ok(Number(s.root.dataset.progress) > 0);
+    assert.equal(Number(s.root.dataset.progress), 0);
     s.pointer("pointermove", 510, 100, 1, "touch");
-    assert.equal(s.root.dataset.index, "1");
+    assert.equal(Number(s.root.dataset.progress), 0, "the gesture must not leave a partial scene before release");
     s.pointer("pointerup", 510, 100, 1, "touch");
-    assert.equal(s.root.dataset.index, "1");
+    assert.equal(Number(s.root.dataset.progress), 1);
+    assert.deepEqual(s.calls.filter(c=>c[0]==="setChapter").at(-1).slice(1), [1,{continuous:false}]);
     assert.equal(s.calls.filter((c) => c[0] === "setOrbit").length, orbitCount);
     assert.equal(s.calls.filter((c) => c[0] === "pulse").length, 0);
     s.pointer("pointerup", 510, 100, 1, "touch");
@@ -1040,7 +1041,7 @@ test("vertical touch travel follows the finger before release without orbiting o
     s.advance(1200);
     s.pointer("pointerdown", 500, 200, 1, "touch");
     s.pointer("pointerup", 500, 265, 1, "touch");
-    assert.equal(s.root.dataset.index, "0");
+    assert.equal(Number(s.root.dataset.progress), 0);
   } finally {
     s.close();
   }
@@ -1053,11 +1054,11 @@ test("short or canceled touch swipes do not cross a chapter, and only an opening
     s.pointer("pointerdown", 500, 400, 1, "touch");
     s.pointer("pointermove", 500, 336, 1, "touch");
     s.pointer("pointerup", 500, 336, 1, "touch");
-    assert.equal(s.root.dataset.index, "0");
+    assert.equal(Number(s.root.dataset.progress), 0);
     s.pointer("pointerdown", 500, 400, 1, "touch");
     s.pointer("pointermove", 500, 200, 1, "touch");
     s.pointer("pointercancel", 500, 200, 1, "touch");
-    assert.equal(s.root.dataset.index, "0");
+    assert.equal(Number(s.root.dataset.progress), 0);
     assert.equal(s.calls.filter((c) => c[0] === "pulse").length, 0);
     s.clean.returnToOpening();
     s.pointer("pointerdown", 500, 400, 1, "touch");
@@ -1066,6 +1067,51 @@ test("short or canceled touch swipes do not cross a chapter, and only an opening
     assert.equal(s.root.dataset.index, "0");
   } finally {
     s.close();
+  }
+});
+
+test("a touch gesture begun during a chapter transition never queues another chapter", async (t) => {
+  const s=await setup({autoProgress:false});t.after(()=>s.close());s.ready();
+  s.pointer("pointerdown",500,400,1,"touch");
+  s.pointer("pointermove",500,320,1,"touch");
+  s.pointer("pointerup",500,320,1,"touch");
+  assert.equal(s.calls.filter(c=>c[0]==="setChapter").at(-1)[1],1);
+  const before=s.calls.length;
+  s.callbacks().onProgress(.5);
+  s.pointer("pointerdown",500,400,2,"touch");
+  s.pointer("pointermove",500,100,2,"touch");
+  s.callbacks().onProgress(1);
+  s.pointer("pointerup",500,100,2,"touch");
+  assert.equal(s.calls.slice(before).filter(c=>c[0]==="setChapter").length,0);
+  s.pointer("pointerdown",500,400,3,"touch");
+  s.pointer("pointermove",500,320,3,"touch");
+  s.pointer("pointerup",500,320,3,"touch");
+  assert.equal(s.calls.filter(c=>c[0]==="setChapter").at(-1)[1],2);
+});
+
+test("touch release cannot add a chapter after the keyboard changed the original scene", async (t) => {
+  const s=await setup({autoProgress:false});t.after(()=>s.close());s.ready();
+  s.pointer("pointerdown",500,400,1,"touch");
+  s.pointer("pointermove",500,300,1,"touch");
+  s.key(" ");s.callbacks().onProgress(1);
+  const before=s.calls.length;
+  s.pointer("pointerup",500,200,1,"touch");
+  assert.equal(s.calls.slice(before).filter(c=>c[0]==="setChapter").length,0);
+  assert.equal(Number(s.root.dataset.progress),1);
+});
+
+test("short deliberate swipes traverse whole chapters and stay within both scene boundaries", async (t) => {
+  for(const reduced of [false,true]){
+    const s=await setup({reduced});t.after(()=>s.close());s.ready();
+    const swipe=dy=>{
+      s.pointer("pointerdown",500,400,1,"touch");
+      s.pointer("pointermove",505,400+dy,1,"touch");
+      s.pointer("pointerup",505,400+dy,1,"touch");
+    };
+    swipe(80);assert.equal(Number(s.root.dataset.progress),0);
+    for(const chapter of [1,2,3]){swipe(-80);assert.equal(Number(s.root.dataset.progress),chapter);}
+    swipe(-80);assert.equal(Number(s.root.dataset.progress),3);
+    for(const chapter of [2,1,0]){swipe(80);assert.equal(Number(s.root.dataset.progress),chapter);}
   }
 });
 

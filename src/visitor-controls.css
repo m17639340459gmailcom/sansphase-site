@@ -10,6 +10,8 @@
 @media(prefers-reduced-motion:reduce){.site-music-toggle .ui-icon{animation:none;}}
 .site-music-player[hidden] {display:none!important;}
 .blog-weather-card .weather-attribution {display:flex;flex-wrap:wrap;gap:2px 6px;margin-top:8px;color:var(--muted);font-size:11px;line-height:1.6;}
+.weather-details .weather-attribution {grid-column:1 / -1;margin-top:0;}
+.weather-attribution span {color:inherit;font:inherit;letter-spacing:normal;}
 .weather-attribution a {text-underline-offset:3px;}
 .weather-attribution a:hover,.weather-attribution a:focus-visible {color:var(--text);text-decoration:underline;}
 .weather-city-picker {margin-top:12px;font-size:12px;min-width:0;}
