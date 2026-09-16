@@ -153,7 +153,7 @@ test("author hub groups actions; background editing preserves profile; back navi
     click('[data-author-back]'); await settle();
     click('[data-author-open="music"]');
     await settle();
-    assert.equal(d.querySelector('[name="playlist_url"]').value, profile.music_settings.playlistUrl);
+    assert.equal(d.querySelector('[name="playlist_url"]'),null);
     assert.ok(d.querySelector('[data-upload="music"]'));
     assert.match(d.querySelector('[data-upload="music"]').getAttribute('accept'),/audio/);
     assert.ok(d.querySelector('[name="music_autoplay"]'));
@@ -166,6 +166,7 @@ test("author hub groups actions; background editing preserves profile; back navi
     await settle();
     assert.deepEqual(writes.at(-1).social_links, profile.social_links);
     assert.equal(writes.at(-1).music_settings.title, '新的歌单名称');
+    assert.equal(writes.at(-1).music_settings.playlistUrl,profile.music_settings.playlistUrl,'preserve legacy data when saving in-site playback settings');
     assert.equal(writes.at(-1).music_settings.tracks[0].title,'链接测试音乐');
     click('[data-author-back]'); await settle();
     click('[data-author-open="profile"]'); await settle();

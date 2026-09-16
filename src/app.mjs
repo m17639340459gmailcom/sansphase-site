@@ -455,7 +455,7 @@ function syncBlogWeather(page) {
 }
 function blogMusicPanel() {
   const music=siteContent?.profile?.music || {};
-  return `<div class="blog-side-card blog-music-card"><span class="eyebrow">${icons.music}${t("音乐", "MUSIC")}</span>${music.tracks?.length ? `<div id="blog-audio-player" aria-label="${esc(music.title || t('音乐歌单','Playlist'))}"></div>` : `<div class="music-heading"><strong>${esc(music.title || t("音乐歌单","Playlist"))}</strong></div><p>${t("听一些喜欢的歌。","A few songs I enjoy.")}</p>`}${music.playlistUrl ? `<a class="music-platform-link" href="${esc(music.playlistUrl)}" target="_blank" rel="noopener noreferrer">${icons.music}${t("前往平台听歌单","Open playlist")} ${icons.right}</a>` : ''}${!music.tracks?.length && !music.playlistUrl ? `<p class="subtle">${t("歌单待更新","Playlist coming soon")}</p>` : ''}</div>`;
+  return `<div class="blog-side-card blog-music-card"><span class="eyebrow">${icons.music}${t("音乐", "MUSIC")}</span>${music.tracks?.length ? `<div id="blog-audio-player" aria-label="${t('音乐播放器','Music player')}"></div>` : `<p class="subtle">${t("歌单待更新","Playlist coming soon")}</p>`}</div>`;
 }
 function blogTagsPanel() {
   const tags = [...new Set(notes.flatMap(note=>note.tags||['AI 学习','建站记录']))];

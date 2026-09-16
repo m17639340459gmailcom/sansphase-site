@@ -20,6 +20,7 @@ export function mountMusicPlayer(host, tracks, {onState=()=>{},autoplay=false}={
   });
   const status = host.querySelector(".music-error");
   host.querySelector('.music-track-caption').className='sr-only';
+  host.querySelector('.music-current').classList.add('sr-only');
   const artwork=host.querySelector('.music-record-label img');
   artwork.addEventListener('error',()=>{artwork.hidden=true;});
   const setPlayback=(playing,label)=>{
@@ -46,7 +47,7 @@ export function mountMusicPlayer(host, tracks, {onState=()=>{},autoplay=false}={
   const transport=event=>{if(event.target.closest('[data-prev]'))load(-1,true);else if(event.target.closest('[data-next]'))load(1,true);};
   host.addEventListener('click',transport);
   player.on("ended", () => load(1, true));
-  player.on("error", () => { status.textContent = "此音频暂时无法播放，可前往原平台收听。"; });
+  player.on("error", () => { status.textContent = "此音频暂时无法播放，请切换下一首或稍后重试。"; });
   for(const [event,label] of Object.entries({playing:'播放中',pause:'已暂停',ended:'播放结束',error:'播放失败',waiting:'正在缓冲'}))player.on(event,()=>setPlayback(event==='playing',label));
   let intersects=true;
   const visibility=()=>host.classList.toggle('is-offscreen',!intersects||host.ownerDocument.hidden);

@@ -310,7 +310,7 @@ async function backgrounds() {
 async function profile(section = "profile") {
   current = await api("profile");
   const content = section === "music"
-    ? `${field("music_title", "歌单名称", current.music_settings?.title || "我的歌单", 'maxlength="120"')}<div class="author-media-row">${uploadField("music", "上传音乐", false)}</div><details class="author-music-sources"><summary>${icons.link} 添加音频链接</summary>${field("music_link_title","歌曲名称","",'maxlength="120"')}${field("music_link_url","音频网址","",'type="url" placeholder="https://…/music.mp3"')}<button type="button" data-add-track>${icons.plus} 加入播放列表</button><p class="author-description">填写可公开播放的音频直链，酷狗分享页请放在下方平台入口中。</p></details><h3>本站播放列表</h3><div class="author-music-tracks">${musicTracksMarkup(current.music_settings?.tracks||[],icons.close)}</div><p class="author-description">支持 MP3、M4A、OGG、WAV、FLAC，单首最多 100 MB。保存后生效。</p><details class="author-music-sources"><summary>平台歌单入口（选填）</summary>${field("playlist_url", "平台歌单链接（选填）", current.music_settings?.playlistUrl, 'type="url" placeholder="https://t1.kugou.com/…"')}<p class="author-description">保留前往酷狗等平台收听的入口，不会替代本站播放列表。</p></details><label class="author-checkbox"><input type="checkbox" name="music_autoplay" ${current.music_settings?.autoplay !== false ? 'checked' : ''}>尝试自动播放（浏览器可能要求访客先点击播放）</label>`
+    ? `${field("music_title", "歌单名称", current.music_settings?.title || "我的歌单", 'maxlength="120"')}<div class="author-media-row">${uploadField("music", "上传音乐", false)}</div><details class="author-music-sources"><summary>${icons.link} 添加音频链接</summary>${field("music_link_title","歌曲名称","",'maxlength="120"')}${field("music_link_url","音频网址","",'type="url" placeholder="https://…/music.mp3"')}<button type="button" data-add-track>${icons.plus} 加入播放列表</button><p class="author-description">填写可直接播放的 HTTPS 音频网址。普通平台分享页无法直接在本站播放；也可以上传音频文件。歌曲名称仅用于作者管理。</p></details><h3>本站播放列表</h3><div class="author-music-tracks">${musicTracksMarkup(current.music_settings?.tracks||[],icons.close)}</div><p class="author-description">支持 MP3、M4A、OGG、WAV、FLAC，单首最多 100 MB。保存后生效。</p><label class="author-checkbox"><input type="checkbox" name="music_autoplay" ${current.music_settings?.autoplay !== false ? 'checked' : ''}>尝试自动播放（浏览器可能要求访客先点击播放）</label>`
     : section === "appearance"
     ? `<p class="author-description">选择调色对象，再用下方同一个调色板调整。可以直接选预设颜色，也可以自由取色。</p><div id="author-card-color-picker"></div>`
     : `${field("name", "名称", current.name, 'required maxlength="80"')}${field("signature", "个性签名", current.signature, 'maxlength="200"')}${area("bio", "简介", current.bio, 'rows="2" maxlength="1000"')}<div class="author-media-row">${uploadField("avatar", "更换头像")}<img class="author-avatar-preview" ${previewAttributes(current.avatar, "avatar")} alt="头像预览"></div><h3>其他平台主页</h3><div class="author-social-rows">${(current.social_links || []).map(socialRow).join("")}</div><button type="button" data-add-social>${icons.plus} 添加主页链接</button>`;
@@ -413,7 +413,7 @@ shell.addEventListener("click", (event) => {
       tracks.push({title:title.value.trim()||'音乐',url:url.href});
       host.querySelector('.author-music-tracks').innerHTML=musicTracksMarkup(tracks,icons.close);
       title.value='';link.value='';dirty=true;feedback('链接已加入，保存设置后生效。');
-    } catch {feedback('请输入 HTTPS 音频直链，平台分享页请填写在平台歌单入口中。',true);}
+    } catch {feedback('请输入可直接播放的 HTTPS 音频网址，或上传音频文件；普通平台分享页无法直接播放。',true);}
     return;
   }
   if (target.hasAttribute("data-author-close")) requestClose();
@@ -538,9 +538,8 @@ shell.addEventListener("submit", (event) => {
       if (form.dataset.settings === "music") {
         const tracks=readMusicTracks(host);
         if(tracks.some(track=>!track.title)) throw new Error('请填写歌曲名称。');
-        if (values.playlist_url && !/^https:\/\//.test(values.playlist_url)) throw new Error("歌单链接请使用 HTTPS 网址。");
-        if(tracks.some(track=>/^https?:\/\/([^/]*\.)?(kugou\.com|music\.163\.com|y\.qq\.com)(\/|$)/i.test(track.url))) throw new Error('平台分享页不能用作音频直链，请填写在上方平台歌单链接中。');
-        values.music_settings = {title:values.music_title,playlistUrl:values.playlist_url,tracks,autoplay:values.music_autoplay==='on'};
+        if(tracks.some(track=>/^https?:\/\/([^/]*\.)?(kugou\.com|music\.163\.com|y\.qq\.com)(\/|$)/i.test(track.url))) throw new Error('平台分享页不能用作音频直链，请使用可播放的音频网址或上传音频文件。');
+        values.music_settings = {title:values.music_title,playlistUrl:current.music_settings?.playlistUrl,tracks,autoplay:values.music_autoplay==='on'};
       }
       if (form.dataset.settings === "appearance") values.appearance = cardColorPicker.value();
       await api("profile", "PATCH", values);

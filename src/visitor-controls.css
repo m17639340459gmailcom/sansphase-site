@@ -69,7 +69,7 @@
 .blog-page .music-record, .blog-page .music-record::before, .blog-page .music-record-label, .blog-page .music-record-label::after, .blog-page #blog-audio-player .vinyl-controls button[data-plyr="play"] { border-radius:50%!important; }
 .music-tonearm { position:absolute; left:48%; top:0; width:48%; height:60%; z-index:2; overflow:visible; transform-origin:14% 9%; transform:rotate(-25deg); transition:transform .65s cubic-bezier(.22,.8,.22,1); filter:drop-shadow(0 2px 2px rgb(0 0 0 / 45%)); }
 .vinyl-player.is-playing .music-tonearm { transform:rotate(0deg); }
-.blog-music-card p.music-current { margin:10px 0 10px; min-height:20px; text-align:center; color:var(--text); font-size:14px; font-weight:500; line-height:1.5; }
+.music-turntable { margin-bottom:12px; }
 .music-track-caption { display:flex; justify-content:center; gap:8px; color:var(--muted); font-size:10px; margin:5px 0 15px; letter-spacing:.04em; }
 #blog-audio-player .vinyl-controls { display:flex; flex-direction:column; flex-wrap:nowrap; gap:8px; width:100%; padding:0; color:var(--text); }
 .vinyl-controls .music-seek-row { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:8px; width:100%; }
@@ -87,6 +87,7 @@
 #blog-audio-player .vinyl-controls .plyr__volume { flex:1; min-width:0; max-width:none; }
 .vinyl-controls .music-volume-row svg { width:14px; height:14px; fill:none; stroke-width:1.6; }
 .blog-music-card p.music-error { margin:12px 0 0; color:var(--muted); font-size:11px; }
+.blog-music-card p.music-error:empty { display:none; }
 .theme-light #blog-audio-player .vinyl-controls button[data-plyr="play"] { border-color:#55667d; }
 @media(prefers-reduced-motion:reduce) { .music-record { animation:none; } .music-tonearm { transition:none; } }
 

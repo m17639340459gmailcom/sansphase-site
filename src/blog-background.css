@@ -270,14 +270,11 @@ body.blog-open[data-custom-accent="true"] { --blog-accent: color-mix(in srgb, va
 .platform-icon { display: block; width: 18px; height: 18px; flex: none; }
 .blog-page .identity-links a { color: var(--blog-accent); }
 .music-heading { margin: 18px 0 8px; }
-.music-platform-link { display: inline-flex; align-items: center; gap: 7px; margin-top: 16px; font-size: 12px; color: var(--blog-accent); }
-.music-platform-link svg { width: 16px; height: 16px; }
 #blog-audio-player { min-height: 158px; margin-top: 12px; --plyr-color-main: var(--blog-accent); --plyr-audio-controls-background: transparent; --plyr-audio-control-color: #e9f2fc; --plyr-audio-control-color-hover: #152438; --plyr-range-thumb-height: 10px; --plyr-control-radius: 0; --plyr-range-fill-background: var(--blog-accent); --plyr-font-family: inherit; }
 #blog-audio-player .plyr__controls { display: flex; flex-wrap: wrap; padding: 0; gap: 7px; }
 #blog-audio-player .plyr__progress__container { min-width: 90px; flex: 1; }
 #blog-audio-player .plyr__volume { max-width: none; flex: 1; }
 #blog-audio-player .plyr__controls button { width: 30px; height: 30px; padding: 6px; }
-.music-current { font-size: 13px; overflow-wrap: anywhere; min-height: 22px; margin-bottom: 10px; }
 .music-track-controls { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
 .music-track-controls button { display: grid; place-items: center; width: 32px; height: 30px; }
 .music-track-controls svg { width: 16px; height: 16px; }
