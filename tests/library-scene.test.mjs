@@ -179,7 +179,10 @@ test("actual library scene: glass, persistent scroll presentation, home-only inp
   );
   const initialClusterTurn = cluster.quaternion.clone();
   const initialSpin = find("autonomous-stellar-field").rotation.y;
+  const beforeSkyDrift = state.scene.backgroundRotation.y;
   for (let i = 0; i < 90; i++) await renderer.advanceFrames(1, 1 / 60);
+  assert.ok(Math.abs(state.scene.backgroundRotation.y - beforeSkyDrift - 1.5 * 0.0022) < 1e-8,
+    'opening panorama turns continuously at the gentle leftward speed');
   assert.ok(
     Math.abs(find("autonomous-stellar-field").rotation.y - initialSpin) > 0.002,
     "the deep star field moves while no input is present",
@@ -276,6 +279,16 @@ test("actual library scene: glass, persistent scroll presentation, home-only inp
     "rotating the R cannot drag its particle orbits when simulation is frozen",
   );
   model.reduced = false;
+  for (const chapter of [1, 2, 3]) {
+    model.progress.set(chapter);
+    await renderer.advanceFrames(1, 1 / 60);
+    const held = state.scene.backgroundRotation.y;
+    await renderer.advanceFrames(30, 1 / 60);
+    assert.equal(state.scene.backgroundRotation.y, held,
+      'later chapters do not advance the new opening-only turn');
+  }
+  model.progress.set(0);
+  await renderer.advanceFrames(1, 1 / 60);
   assert.ok(
     !ring.quaternion.equals(fixed),
     "the circular frame responds to dragging too",

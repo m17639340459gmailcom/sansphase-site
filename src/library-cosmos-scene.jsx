@@ -25,6 +25,7 @@ export function LibraryCosmosScene({
 }) {
   const entrance = useRef(),
     deepStars = useRef(),
+    openingSkyDrift = useRef(0),
     skyTurn = useRef(0);
   useEffect(() => {
     if (!model.entrance) return;
@@ -51,6 +52,11 @@ export function LibraryCosmosScene({
     // Hold the selected view through later scenes rather than unwinding it
     // with the R's full-turn chapter choreography.
     if (p < 0.01) {
+      // A gentle, continuous leftward panorama turn. The previous sway peaked
+      // at 0.00176 rad/s; this is slightly faster and never reverses direction.
+      // Hold this offset in other chapters so their photographs stay unchanged.
+      if (!model.reduced && !model.preparing && model.particlesReady !== false)
+        openingSkyDrift.current += Math.min(delta, 0.05) * 0.0022;
       const target = model.yaw.get() * 0.35;
       skyTurn.current = model.reduced
         ? target
@@ -69,7 +75,7 @@ export function LibraryCosmosScene({
       0.32 + p * 0.18 + Math.sin(model.time * 0.017) * 0.025,
       Math.PI / 2 +
         p * 0.14 +
-        Math.sin(model.time * 0.022) * 0.08 +
+        openingSkyDrift.current +
         skyTurn.current,
       -0.5,
     );
