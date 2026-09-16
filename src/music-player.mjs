@@ -34,6 +34,9 @@ export function mountMusicPlayer(host, tracks, {onState=()=>{},autoplay=false,au
     index = (index + step + tracks.length) % tracks.length;
     setPlayback(false,'待播放');
     player.source = { type: "audio", title: tracks[index].title, sources: [{ src: tracks[index].url }] };
+    // Plyr replaces the original audio element on every source change. Buffer
+    // the active song during scene preparation; autoplay still waits for readiness.
+    player.media.preload = 'auto';
     host.querySelector(".music-current").textContent = tracks[index].title;
     host.querySelector("[data-track-count]").textContent = `${index + 1} / ${tracks.length}`;
     host.querySelector('[data-track-position]').textContent=`${index+1}/${tracks.length}`;
@@ -54,7 +57,6 @@ export function mountMusicPlayer(host, tracks, {onState=()=>{},autoplay=false,au
   player.on("ended", () => load(1, true));
   player.on("error", () => { status.textContent = "此音频暂时无法播放，请切换下一首或稍后重试。"; });
   for(const [event,label] of Object.entries({playing:'播放中',pause:'已暂停',ended:'播放结束',error:'播放失败',waiting:'正在缓冲'}))player.on(event,()=>setPlayback(event==='playing',label));
-  player.on('volumechange',()=>onState(!player.paused));
   let intersects=true;
   const visibility=()=>host.classList.toggle('is-offscreen',!intersects||host.ownerDocument.hidden);
   host.ownerDocument.addEventListener('visibilitychange',visibility);
@@ -67,9 +69,6 @@ export function mountMusicPlayer(host, tracks, {onState=()=>{},autoplay=false,au
   automatic.update({enabled:autoplay,ready:autoplayReady});
   const dispose=()=>{automatic.dispose();host.removeEventListener('click',transport);host.ownerDocument.removeEventListener('visibilitychange',visibility);observer?.disconnect();player.pause();player.destroy();host.classList.remove('is-playing');onState(false);};
   dispose.toggle=()=>{automatic.cancel();return player.paused?play():player.pause();};
-  dispose.volume=value=>{player.volume=Math.max(0,Math.min(1,Number(value)));player.muted=false;};
-  dispose.mute=()=>{player.muted=!player.muted;};
-  dispose.state=()=>({volume:player.volume,muted:player.muted,paused:player.paused});
   dispose.autoplay=options=>automatic.update(options);
   return dispose;
 }
@@ -98,7 +97,4 @@ export function mountSiteMusic(target,settings,onState,{autoplayReady=true}={}) 
   sitePlayer?.autoplay({enabled:settings?.autoplay===true,ready:autoplayReady});
 }
 export function toggleSiteMusic() { sitePlayer?.toggle(); }
-export function setSiteMusicVolume(value) { sitePlayer?.volume(value); }
-export function toggleSiteMusicMute() { sitePlayer?.mute(); }
-export function siteMusicState() { return sitePlayer?.state(); }
 export function prepareSiteMusicPlayback() { sitePlayer?.autoplay({enabled:true,ready:true}); }

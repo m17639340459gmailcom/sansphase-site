@@ -28,10 +28,13 @@ test('real Plyr mounts controls, switches tracks, and disposes audio',async()=>{
     assert(host.querySelector('[data-plyr="play"]'));
     assert(host.querySelector('input[data-plyr="volume"]'));
     assert.equal(host.querySelector('audio').volume,0.4,'each visit starts at forty percent volume');
+    assert.equal(host.querySelector('audio').preload,'auto','the active first track buffers before playback is allowed');
+    assert.equal(host.querySelectorAll('audio source').length,1,'only the current song downloads during preparation');
     assert.equal(played,0,'does not autoplay on visit');
     host.querySelector('[data-next]').click();
     assert.equal(host.querySelector('.music-current').textContent,'第二首');
     assert.equal(host.querySelector('audio source').getAttribute('src'),'https://example.com/two.mp3');
+    assert.equal(host.querySelector('audio').preload,'auto','Plyr source replacement keeps buffering enabled');
     assert(played>0);
     host.querySelector('[data-prev]').click();
     assert.equal(host.querySelector('.music-current').textContent,'第一首');
