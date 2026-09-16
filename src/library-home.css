@@ -37,7 +37,8 @@ body.is-home #site-footer {
   background: transparent;
   pointer-events: none;
 }
-body.is-home #site-footer > :not(.site-registration) {
+body.is-home #site-footer > :not(.footer-identity):not(.site-registration),
+body.is-home #site-footer .footer-copyright {
   display: none;
 }
 body.is-home #site-footer .site-registration {
@@ -352,6 +353,9 @@ body.content-open .universe-feedback {
   body.content-open #main {
     padding-top: 82px;
   }
+}
+@media (max-width: 760px) {
+  body.content-open #main { padding-top: 68px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .universe-home,

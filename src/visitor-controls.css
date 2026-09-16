@@ -9,8 +9,9 @@
 @keyframes music-disc-turn {to{transform:rotate(360deg);}}
 @media(prefers-reduced-motion:reduce){.site-music-toggle .ui-icon{animation:none;}}
 .site-music-player[hidden] {display:none!important;}
-#site-footer:has(.weather-attribution) {flex-wrap:wrap;}
-#site-footer .weather-attribution {flex-basis:100%;font-size:11px;line-height:1.6;color:var(--muted);}
+.blog-weather-card .weather-attribution {display:flex;flex-wrap:wrap;gap:2px 6px;margin-top:8px;color:var(--muted);font-size:11px;line-height:1.6;}
+.weather-attribution a {text-underline-offset:3px;}
+.weather-attribution a:hover,.weather-attribution a:focus-visible {color:var(--text);text-decoration:underline;}
 .weather-city-picker {margin-top:12px;font-size:12px;min-width:0;}
 .weather-city-picker summary {cursor:pointer;color:inherit;}
 .weather-city-picker button {max-width:100%;padding:6px 8px;border:1px solid var(--line);background:rgb(215 232 255 / 9%);color:inherit;font:inherit;cursor:pointer;}
@@ -88,3 +89,28 @@
 .blog-music-card p.music-error { margin:12px 0 0; color:var(--muted); font-size:11px; }
 .theme-light #blog-audio-player .vinyl-controls button[data-plyr="play"] { border-color:#55667d; }
 @media(prefers-reduced-motion:reduce) { .music-record { animation:none; } .music-tonearm { transition:none; } }
+
+@media (max-width: 900px) {
+  .blog-page .blog-identity { --card-inset:20px; }
+  #blog-audio-player {max-width:220px;margin-inline:auto;}
+  .blog-identity :is(.identity-avatar,.identity-mark) {float:left;width:72px;margin:0 16px 12px 0;}
+  .blog-identity h2 {padding-top:6px;font-size:20px;}
+  .blog-identity .identity-line {clear:both;margin:14px 0 12px;}
+}
+@media (max-width: 760px) {
+  .blog-page .blog-side-card { --card-inset:20px; }
+  .blog-page .blog-music-card { --card-inset:10px 20px 14px; }
+  .blog-page .blog-toolbar { --card-inset:12px; }
+  .blog-page .blog-toolbar .search,.blog-page .blog-view-switch {min-height:44px;}
+  .blog-page .search input,.timezone-search-input {font-size:16px;}
+  .blog-page .weather-details-toggle {min-height:44px;margin-bottom:0;}
+  .weather-city-picker {margin-top:4px;}
+  .weather-city-picker summary {min-height:44px;line-height:44px;}
+  .weather-city-picker button {min-height:44px;}
+  .weather-attribution a {min-height:24px;line-height:24px;}
+  .blog-page .calendar-toggle {min-height:44px;}
+  .blog-page #blog-audio-player .vinyl-controls button {width:44px;height:44px;}
+  .vinyl-controls .music-transport {grid-template-columns:1fr 44px 1fr;}
+  .blog-page .timezone-search-heading button {width:44px;height:44px;}
+  .blog-page .timezone-search-results .timezone-option {min-height:44px;}
+}
