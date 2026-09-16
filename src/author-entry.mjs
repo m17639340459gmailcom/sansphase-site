@@ -2,6 +2,7 @@ import {readMusicTracks,musicTracksMarkup} from './music-settings.mjs';
 import {rememberedAccount,rememberSuccessfulLogin} from './login-preferences.mjs';
 import {uploadAuthorFile} from './author-upload.mjs';
 import {uploadLimits,uploadSizeLabel} from './upload-policy.mjs';
+import {imageSources,imageSourceSet} from './image-sources.mjs';
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
@@ -51,6 +52,18 @@ const area = (name, label, value = "", extra = "") =>
   `<label class="author-field">${label}<textarea name="${name}" ${extra}>${esc(value ?? "")}</textarea></label>`;
 const status = () =>
   '<p class="author-feedback" role="status" aria-live="polite"></p>';
+// Match the existing panel, gallery and avatar sizes, including Retina screens.
+const previewSizes = {
+  background: '(max-width: 440px) calc(100vw - 60px), (max-width: 600px) calc(50vw - 38px), 228px',
+  cover: '(max-width: 600px) calc(100vw - 58px), (max-width: 800px) calc(100vw - 90px), 710px',
+  avatar: '72px',
+};
+const previewSource = (id, type) => `/api/author/media/${id}?w=${type === 'cover' ? 768 : 384}`;
+const previewAttributes = (id, type) => {
+  if (!id) return 'hidden';
+  const source = previewSource(id, type);
+  return `src="${esc(source)}" ${imageSources(source, previewSizes[type])} decoding="async"`;
+};
 const feedback = (message, error = false) => {
   const el = host.querySelector(".author-feedback");
   if (el) {
@@ -199,7 +212,7 @@ async function edit(selected, id) {
   const announcement = kind === "announcements";
   show(
     `<div class="eyebrow">AUTHOR / ${names[kind]}</div><h2 id="author-dialog-title">${id ? "编辑" : "新建"}${names[kind]}</h2><p class="author-description">${current.status === "published" ? "当前内容已发布。保存草稿不会改变访客看到的版本。" : "草稿仅作者可见，确认后再发布。"}</p><form data-author-form="content">${field("title", "标题", current.title, 'required maxlength="200"')}${announcement ? "" : `<div class="author-two">${field("slug", "网址名称", current.slug, 'required pattern="[a-z0-9]+(-[a-z0-9]+)*" placeholder="例如 my-first-note"')}${field("category", "栏目", current.category, 'maxlength="80"')}</div>`}${area("summary", announcement ? "公告说明" : "摘要", current.summary, 'rows="2" maxlength="2000"')}${announcement ? `${field("link", "点击跳转网址（选填）", current.link, 'type="url" placeholder="https://"')}${field("sort", "显示顺序", current.sort || 0, 'type="number" min="0" max="9999"')}` : `${field("tags", "标签（用逗号分隔）", (current.tags || []).join("，"))}`}
-    <div class="author-media-row">${uploadField(announcement ? "image" : "cover", announcement ? "上传公告海报" : "上传封面")}<button type="button" data-clear-image>清除图片</button><div class="cover-frame author-cover-preview ${announcement ? "cover-frame--notice" : ""}"><img class="author-image-preview" ${current[announcement ? "image" : "cover"] ? `src="/api/author/media/${current[announcement ? "image" : "cover"]}"` : "hidden"} alt="${announcement ? "公告海报裁切预览" : "文章封面裁切预览"}"></div></div><p class="author-description">${announcement ? "公告海报固定按 12:5 展示，建议上传 1440 × 600 像素的横图。" : ["works", "resources", "software"].includes(kind) ? "此处按 16:9 预览原始封面；作品、资料及软件推荐网格以大封面展示，下方为 70 像素信息栏，标题和简介各一行。图片居中裁切，请把主体放在中央。" : "封面固定按 16:9 展示，建议上传 1600 × 900 像素的横图。"}其他比例会居中裁切，请将重要文字和主体放在中间。原图保留，正文图片不受此比例限制。</p>
+    <div class="author-media-row">${uploadField(announcement ? "image" : "cover", announcement ? "上传公告海报" : "上传封面")}<button type="button" data-clear-image>清除图片</button><div class="cover-frame author-cover-preview ${announcement ? "cover-frame--notice" : ""}"><img class="author-image-preview" ${previewAttributes(current[announcement ? "image" : "cover"], "cover")} alt="${announcement ? "公告海报裁切预览" : "文章封面裁切预览"}"></div></div><p class="author-description">${announcement ? "公告海报固定按 12:5 展示，建议上传 1440 × 600 像素的横图。" : ["works", "resources", "software"].includes(kind) ? "此处按 16:9 预览原始封面；作品、资料及软件推荐网格以大封面展示，下方为 70 像素信息栏，标题和简介各一行。图片居中裁切，请把主体放在中央。" : "封面固定按 16:9 展示，建议上传 1600 × 900 像素的横图。"}其他比例会居中裁切，请将重要文字和主体放在中间。原图保留，正文图片不受此比例限制。</p>
     ${announcement ? "" : `<div class="author-editor-wrap"><div class="author-editor-tools" role="toolbar" aria-label="正文格式"><button type="button" data-format="bold" aria-label="加粗"><b>B</b></button><button type="button" data-format="italic" aria-label="斜体"><i>I</i></button><button type="button" data-format="heading">标题</button><button type="button" data-format="bulletList">列表</button><button type="button" data-format="blockquote">引用</button><button type="button" data-format="codeBlock">代码</button><button type="button" data-format="undo">撤销</button><button type="button" data-format="redo">重做</button>${uploadField("body", "正文图片")}${textTools()}</div><div class="author-editor" aria-label="文章正文"></div></div><div class="author-preview article-body" hidden></div><div class="author-media-row">${uploadField("attachment", kind === "articles" ? "添加附件" : kind === "works" ? `上传软件文件（最多 ${uploadSizeLabel(uploadLimits.maxFileBytes)}）` : `上传下载文件（最多 ${uploadSizeLabel(uploadLimits.maxFileBytes)}）`, false)}</div><div class="author-files"></div>${kind === "articles" ? "" : field("external_url", kind === "works" ? "项目或演示链接（选填）" : kind === "resources" ? "来源链接（选填）" : "官方网站（选填）", current.external_url, 'type="url" placeholder="https://"')}`}
     ${status()}<div class="author-form-actions"><button type="button" data-preview>${announcement ? "" : "预览"}</button><button type="submit" data-save>保存草稿</button><button type="button" class="author-primary" data-publish>发布${current.status === "published" ? "修改" : ""}</button>${current.status === "published" ? '<button type="button" data-unpublish>撤回公开内容</button>' : ""}</div></form>`,
     { size: announcement ? "compact" : "editor", back: "list" },
@@ -291,7 +304,7 @@ async function backgrounds() {
   current=await api("profile");
   const library=[...(current.background_library || [])];
   if (current.background && !library.some(item=>item.id===current.background)) library.unshift({id:current.background,name:"当前背景"});
-  const tile=item=>`<div class="author-background-tile"><img src="/api/author/media/${esc(item.id)}" width="320" height="180" alt="${esc(item.name)}" loading="lazy"><div><strong>${esc(item.name)}</strong><div class="author-background-actions">${item.deletedAt?`<button type="button" data-background-action="restore" data-background-id="${esc(item.id)}">恢复</button>`:`<button type="button" data-background-action="use" data-background-id="${esc(item.id)}" ${current.background===item.id?'disabled':''}>${current.background===item.id?'正在使用':'使用背景'}</button><button type="button" data-background-action="remove" data-background-id="${esc(item.id)}" ${current.background===item.id?'disabled':''}>删除</button>`}</div></div></div>`;
+  const tile=(item,index)=>`<div class="author-background-tile"><img ${previewAttributes(item.id,"background")} width="320" height="180" alt="${esc(item.name)}" loading="${!item.deletedAt && index < 2 ? "eager" : "lazy"}"><div><strong>${esc(item.name)}</strong><div class="author-background-actions">${item.deletedAt?`<button type="button" data-background-action="restore" data-background-id="${esc(item.id)}">恢复</button>`:`<button type="button" data-background-action="use" data-background-id="${esc(item.id)}" ${current.background===item.id?'disabled':''}>${current.background===item.id?'正在使用':'使用背景'}</button><button type="button" data-background-action="remove" data-background-id="${esc(item.id)}" ${current.background===item.id?'disabled':''}>删除</button>`}</div></div></div>`;
   show(`<h2 id="author-dialog-title">博客背景</h2><p class="author-description">上传后保存在背景库，点击使用即可切换。删除的图片可在“最近删除”中恢复。</p><div class="author-media-row">${uploadField("background","上传背景")}<button type="button" data-background-action="default" ${!current.background?'disabled':''}>使用默认背景</button></div><div class="author-background-gallery">${library.filter(item=>!item.deletedAt).map(tile).join('') || '<p class="subtle">还没有上传背景，当前使用默认星空。</p>'}</div>${library.some(item=>item.deletedAt)?`<details class="author-deleted-backgrounds"><summary>最近删除</summary><div class="author-background-gallery">${library.filter(item=>item.deletedAt).map(tile).join('')}</div></details>`:''}${status()}`);
 }
 async function profile(section = "profile") {
@@ -300,7 +313,7 @@ async function profile(section = "profile") {
     ? `${field("music_title", "歌单名称", current.music_settings?.title || "我的歌单", 'maxlength="120"')}<div class="author-media-row">${uploadField("music", "上传音乐", false)}</div><details class="author-music-sources"><summary>${icons.link} 添加音频链接</summary>${field("music_link_title","歌曲名称","",'maxlength="120"')}${field("music_link_url","音频网址","",'type="url" placeholder="https://…/music.mp3"')}<button type="button" data-add-track>${icons.plus} 加入播放列表</button><p class="author-description">填写可公开播放的音频直链，酷狗分享页请放在下方平台入口中。</p></details><h3>本站播放列表</h3><div class="author-music-tracks">${musicTracksMarkup(current.music_settings?.tracks||[],icons.close)}</div><p class="author-description">支持 MP3、M4A、OGG、WAV、FLAC，单首最多 100 MB。保存后生效。</p><details class="author-music-sources"><summary>平台歌单入口（选填）</summary>${field("playlist_url", "平台歌单链接（选填）", current.music_settings?.playlistUrl, 'type="url" placeholder="https://t1.kugou.com/…"')}<p class="author-description">保留前往酷狗等平台收听的入口，不会替代本站播放列表。</p></details><label class="author-checkbox"><input type="checkbox" name="music_autoplay" ${current.music_settings?.autoplay !== false ? 'checked' : ''}>尝试自动播放（浏览器可能要求访客先点击播放）</label>`
     : section === "appearance"
     ? `<p class="author-description">选择调色对象，再用下方同一个调色板调整。可以直接选预设颜色，也可以自由取色。</p><div id="author-card-color-picker"></div>`
-    : `${field("name", "名称", current.name, 'required maxlength="80"')}${field("signature", "个性签名", current.signature, 'maxlength="200"')}${area("bio", "简介", current.bio, 'rows="2" maxlength="1000"')}<div class="author-media-row">${uploadField("avatar", "更换头像")}<img class="author-avatar-preview" ${current.avatar ? `src="/api/author/media/${current.avatar}"` : "hidden"} alt="头像预览"></div><h3>其他平台主页</h3><div class="author-social-rows">${(current.social_links || []).map(socialRow).join("")}</div><button type="button" data-add-social>${icons.plus} 添加主页链接</button>`;
+    : `${field("name", "名称", current.name, 'required maxlength="80"')}${field("signature", "个性签名", current.signature, 'maxlength="200"')}${area("bio", "简介", current.bio, 'rows="2" maxlength="1000"')}<div class="author-media-row">${uploadField("avatar", "更换头像")}<img class="author-avatar-preview" ${previewAttributes(current.avatar, "avatar")} alt="头像预览"></div><h3>其他平台主页</h3><div class="author-social-rows">${(current.social_links || []).map(socialRow).join("")}</div><button type="button" data-add-social>${icons.plus} 添加主页链接</button>`;
   show(
     `<h2 id="author-dialog-title">${({background:"博客背景",music:"音乐",appearance:"点缀颜色"})[section] || "个人信息"}</h2><form data-author-form="profile" data-settings="${section}">${content}${status()}<div class="author-form-actions"><button class="author-primary" type="submit">保存设置</button></div></form>`,
   );
@@ -586,7 +599,11 @@ shell.addEventListener("change", (event) => {
             ? ".author-background-preview"
             : ".author-image-preview",
       );
-      image.src = saved.url;
+      const previewType = target === "avatar" ? "avatar" : "cover";
+      const source = previewSource(saved.id, previewType);
+      image.sizes = previewSizes[previewType];
+      image.srcset = imageSourceSet(source);
+      image.src = source;
       image.hidden = false;
     }
     dirty = true;

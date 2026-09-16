@@ -230,9 +230,9 @@ export function createPayloadStore(payload, { directory, authorId }) {
       });
       return fileDTO(saved);
     },
-    async media(id, token) {
+    async media(id, token, imageWidth) {
       await identity(token);
-      return readMedia(id);
+      return readMedia(id, undefined, imageWidth);
     },
     readMedia,
     async publicData() {

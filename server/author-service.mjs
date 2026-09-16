@@ -294,7 +294,7 @@ export function createAuthorService({
           req.method === "GET" &&
           uuidPattern.test(parts[1] || "")
         ) {
-          const upstream = await store.media(parts[1], token);
+          const upstream = await store.media(parts[1], token, parsed.searchParams.get('w'));
           const type =
             upstream.headers.get("content-type") || "application/octet-stream";
           res.setHeader("Content-Type", type);
@@ -302,8 +302,25 @@ export function createAuthorService({
             "Content-Security-Policy",
             "sandbox; default-src 'none'",
           );
-          if (!/^image\/(png|jpeg|gif|webp|avif)(?:;|$)/i.test(type))
+          if (/^image\/(png|jpeg|gif|webp|avif)(?:;|$)/i.test(type)) {
+            // Only the owner's browser may retain previews. Reauthorize every
+            // request, including validators, so logout cannot reuse a stale 304.
+            const etag = upstream.headers.get('etag');
+            if (etag) {
+              res.setHeader('Cache-Control', 'private, max-age=0, must-revalidate');
+              res.setHeader('Vary', 'Cookie');
+              res.setHeader('ETag', etag);
+              if (req.headers['if-none-match'] === etag) {
+                await upstream.body?.cancel();
+                res.writeHead(304);
+                res.end();
+                return;
+              }
+            }
+          } else
             res.setHeader("Content-Disposition", "attachment");
+          if (upstream.headers.has('content-length'))
+            res.setHeader('Content-Length', upstream.headers.get('content-length'));
           await pipeline(Readable.fromWeb(upstream.body), res);
           return;
         }

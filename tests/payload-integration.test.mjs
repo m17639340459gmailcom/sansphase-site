@@ -450,9 +450,13 @@ test(
           ).text();
           assert.match(html, /新作者/);
           assert.match(html, /id="site-content"/);
+          const mediaETag = (await req('media/' + image.id + '?w=384')).headers.get('etag');
+          assert(mediaETag);
+          await req('media/' + image.id + '?w=384', 'GET', undefined, 304, {'If-None-Match':mediaETag});
           await json("logout", "POST", {});
           assert.equal(await json("session"), null);
           await req("content/articles", "GET", undefined, 401);
+          await req('media/' + image.id + '?w=384', 'GET', undefined, 401, {'If-None-Match':mediaETag});
           await assert.rejects(contentService.preview(article.id, cookie), {
             status: 401,
           });
