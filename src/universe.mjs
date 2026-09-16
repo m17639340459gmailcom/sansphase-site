@@ -37,7 +37,6 @@ export function mountUniverse(
   let copyKey = "",
     progress = 0,
     targetProgress = 0,
-    wheelDirection = 0,
     scrolling = false;
   const preference = w.matchMedia?.("(prefers-reduced-motion: reduce)");
   let reduced = preference?.matches ?? false,
@@ -158,8 +157,8 @@ export function mountUniverse(
       text("可交互的宇宙", "Interactive universe"),
     );
     const instructionText = `${english ? s.ariaLabelEn : s.ariaLabel}${english ? ". " : "。"}${text(
-      "空格或上下方向键切换场景，首屏可用左右方向键调整观察角度。",
-      "Use Space or the up and down arrow keys to change scenes. On the opening, use the left and right arrow keys to adjust the view.",
+      "滚轮向下或向上滚动一次切换一幕，也可使用空格或上下方向键。首屏可用左右方向键调整观察角度。",
+      "Scroll down or up once to move to the next or previous scene, or use Space or the up and down arrow keys. On the opening, use the left and right arrow keys to adjust the view.",
     )}`;
     if (instructions.textContent !== instructionText)
       instructions.textContent = instructionText;
@@ -195,7 +194,6 @@ export function mountUniverse(
   function finishChapter() {
     w.clearTimeout(wheelTimer);
     wheelTimer = undefined;
-    wheelDirection = 0;
     scrolling = false;
     updateProgress(targetProgress);
   }
@@ -489,43 +487,29 @@ export function mountUniverse(
         !usable() ||
         pointer ||
         touches.size ||
+        event.defaultPrevented ||
         event.ctrlKey ||
+        !Number.isFinite(event.deltaY) ||
+        event.deltaY === 0 ||
+        event.target?.closest?.('input,textarea,select,[contenteditable="true"],[role="dialog"]') ||
         Math.abs(event.deltaX) > Math.abs(event.deltaY)
       )
         return;
       event.preventDefault();
+      const continuingGesture = wheelTimer !== undefined;
       w.clearTimeout(wheelTimer);
       wheelTimer = w.setTimeout(() => {
         wheelTimer = undefined;
-        wheelDirection = 0;
-        scrolling = false;
+        scrolling = !reduced && Math.abs(progress - targetProgress) >= 0.0002;
         sync();
       }, 230);
-      const delta =
-        event.deltaY *
-        (event.deltaMode === 1
-          ? 16
-          : event.deltaMode === 2
-            ? stage.clientHeight || 600
-            : 1);
-      const height = stage.getBoundingClientRect().height || 600;
-      // Bound the required travel: a tall monitor must not require several
-      // wheel strokes per chapter. Keep continuous motion and a bounded lead.
-      const travel = clamp(height * 1.1, 900, 1200);
-      const direction = Math.sign(delta);
-      const origin =
-        wheelDirection && direction !== wheelDirection
-          ? progress
-          : targetProgress;
-      if (direction) wheelDirection = direction;
-      setTravel(
-        clamp(
-          origin + clamp(delta, -travel * 0.35, travel * 0.35) / travel,
-          progress - 0.5,
-          progress + 0.5,
-        ),
-        true,
-      );
+      // One gesture owns one complete keyboard-style transition. Keep consuming
+      // its inertia even after arrival; only a fresh gesture at rest can advance.
+      if (continuingGesture || Math.abs(progress - targetProgress) >= 0.0002)
+        return;
+      const direction = Math.sign(event.deltaY);
+      if (clamp(Math.round(targetProgress) + direction, 0, universeScenes.length - 1) !== targetProgress)
+        changeChapter(direction);
     },
     { passive: false },
   );
@@ -644,7 +628,6 @@ export function mountUniverse(
       return;
     w.clearTimeout(wheelTimer);
     wheelTimer = undefined;
-    wheelDirection = 0;
     clearPointer();
     touches.clear();
     multiTouch = false;

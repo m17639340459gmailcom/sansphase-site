@@ -519,7 +519,7 @@ test("content overlay preserves the canvas and chapter while blocking backdrop i
     s.close();
   }
 });
-test("wheel travel gives each scene room while forms and the menu suppress shortcuts", async () => {
+test("one wheel gesture completes one scene while forms and the menu suppress shortcuts", async () => {
   const s = await setup({ reduced: true });
   try {
     s.ready();
@@ -531,11 +531,8 @@ test("wheel travel gives each scene room while forms and the menu suppress short
           cancelable: true,
         }),
       );
-    assert.ok(
-      Number(s.root.dataset.progress) >= 0.45 &&
-        Number(s.root.dataset.progress) < 0.75,
-      "five normal wheel ticks should advance visibly without rushing through an entire scene",
-    );
+    assert.equal(Number(s.root.dataset.progress), 1,
+      "one wheel gesture must finish a scene and its trailing events must not skip ahead");
     const index = s.root.dataset.index;
     const input = s.w.document.createElement("input");
     s.root.append(input);
@@ -668,7 +665,7 @@ test("opening content before the first frame does not spend the render timeout w
   }
 });
 
-test("small wheel deltas continuously advance and immediately reverse instead of waiting behind a chapter lock", async () => {
+test("a small wheel input uses the complete keyboard transition in either direction", async () => {
   const s = await setup();
   try {
     s.ready();
@@ -680,28 +677,25 @@ test("small wheel deltas continuously advance and immediately reverse instead of
           cancelable: true,
         }),
       );
-    wheel();
-    const first = Number(s.root.dataset.progress);
-    assert.ok(first > 0 && first < 1);
+    wheel(1);
+    assert.equal(Number(s.root.dataset.progress), 1);
     wheel(24);
-    const second = Number(s.root.dataset.progress);
-    assert.ok(second > first && second - first < 0.1);
     wheel(-24);
-    assert.ok(Math.abs(Number(s.root.dataset.progress) - first) < 0.001);
+    assert.equal(Number(s.root.dataset.progress), 1, "a burst, including its bounce, stays on one scene");
     s.advance(250);
     assert.equal(s.root.classList.contains("is-transitioning"), false);
-    assert.ok(
-      s.calls
-        .filter((c) => c[0] === "setChapter")
-        .slice(-3)
-        .every((c) => c[2].continuous === true),
-    );
+    wheel(-1);
+    assert.equal(Number(s.root.dataset.progress), 0);
+    const wheelTransition=s.calls.filter(c=>c[0]==="setChapter").at(-1)[2];
+    s.key(" ");
+    assert.deepEqual(wheelTransition, s.calls.filter(c=>c[0]==="setChapter").at(-1)[2]);
+    assert.equal(wheelTransition.continuous, false);
   } finally {
     s.close();
   }
 });
 
-test("wheel reversal responds from the visible position instead of queued forward travel", async () => {
+test("wheel input cannot interrupt or queue chapters while a transition is still rendering", async () => {
   const s = await setup({ autoProgress: false });
   try {
     s.ready();
@@ -709,17 +703,21 @@ test("wheel reversal responds from the visible position instead of queued forwar
       s.stage.dispatchEvent(
         new s.w.WheelEvent("wheel", { deltaY, cancelable: true }),
       );
-    wheel(350);
-    wheel(350);
-    wheel(350);
-    assert.ok(s.calls.filter((c) => c[0] === "setChapter").at(-1)[1] > 0.2);
-    s.callbacks().onProgress(0.15);
+    wheel(120);
+    const at=s.calls.length;
+    s.advance(800);
+    s.callbacks().onProgress(0.5);
+    wheel(120);
     wheel(-30);
-    const target = s.calls.filter((c) => c[0] === "setChapter").at(-1)[1];
-    assert.ok(
-      target < 0.15 && target > 0.1,
-      "reverse input must turn back immediately even while forward input is still damping",
-    );
+    assert.equal(s.calls.slice(at).filter(c=>c[0]==="setChapter").length,0);
+    s.advance(800);
+    wheel(120);
+    assert.equal(Number(s.root.dataset.progress),0.5);
+    assert.equal(s.calls.slice(at).filter(c=>c[0]==="setChapter").length,0);
+    s.advance(250);
+    s.callbacks().onProgress(1);
+    wheel(-30);
+    assert.equal(s.calls.filter(c=>c[0]==="setChapter").at(-1)[1],0);
   } finally {
     s.close();
   }
@@ -734,10 +732,10 @@ test("a fast wheel burst cannot queue several unseen scenes", async (t) => {
       new s.w.WheelEvent("wheel", { deltaY: 1200, cancelable: true }),
     );
   const target = s.calls.filter((c) => c[0] === "setChapter").at(-1)[1];
-  assert.ok(target > 0.22 && target <= 0.5, `queued ${target} scenes`);
+  assert.equal(target, 1, `queued ${target} scenes`);
 });
 
-test("later scenes take a short wheel stroke even on a tall desktop display", async (t) => {
+test("one wheel tick completes each adjacent scene regardless of desktop height", async (t) => {
   for (const height of [600, 900, 1440]) {
     const s = await setup();
     t.after(() => s.close());
@@ -752,17 +750,69 @@ test("later scenes take a short wheel stroke even on a tall desktop display", as
       s.clean.returnToOpening();
       s.advance(1000);
       for (let scene = 0; scene < start; scene++) s.key("ArrowDown");
-      for (let tick = 0; tick < 10; tick++)
-        s.stage.dispatchEvent(
+      s.stage.dispatchEvent(
           new s.w.WheelEvent("wheel", { deltaY: 120, cancelable: true }),
         );
       const reached = Number(s.root.dataset.progress);
-      assert.ok(
-        reached >= start + 0.99 && reached <= start + 1.34,
-        `${height}px display reached ${reached} from ${start}`,
-      );
+      assert.equal(reached, start + 1, `${height}px display reached ${reached} from ${start}`);
     }
   }
+});
+
+test("long touchpad inertia cannot advance another chapter after the animation finishes", async (t) => {
+  const s=await setup({autoProgress:false});
+  t.after(()=>s.close());
+  s.ready();
+  const wheel=deltaY=>s.stage.dispatchEvent(new s.w.WheelEvent("wheel",{deltaY,cancelable:true}));
+  const before=s.calls.filter(c=>c[0]==="setChapter").length;
+  wheel(80);
+  for(let frame=0;frame<48;frame++){
+    s.advance(100);
+    s.callbacks().onProgress(Math.min(1,(frame+1)/30));
+    wheel(frame<30?12:0.2);
+  }
+  assert.equal(s.calls.filter(c=>c[0]==="setChapter").length,before+1);
+  assert.equal(Number(s.root.dataset.progress),1);
+  s.advance(250);
+  wheel(1);
+  assert.equal(s.calls.filter(c=>c[0]==="setChapter").at(-1)[1],2);
+});
+
+test("wheel input preserves zoom, horizontal scrolling and form controls and respects scene ends", async (t) => {
+  const s=await setup({reduced:true});
+  t.after(()=>s.close());s.ready();
+  const wheel=(options,target=s.stage)=>{
+    const event=new s.w.WheelEvent("wheel",{bubbles:true,cancelable:true,...options});
+    target.dispatchEvent(event);return event;
+  };
+  const input=s.w.document.createElement("textarea");s.stage.append(input);
+  for(const [options,target] of [
+    [{deltaY:0},s.stage], [{deltaY:120,ctrlKey:true},s.stage],
+    [{deltaY:1,deltaX:40},s.stage], [{deltaY:120},input],
+  ])assert.equal(wheel(options,target).defaultPrevented,false);
+  assert.equal(Number(s.root.dataset.progress),0);
+  wheel({deltaY:-1});assert.equal(Number(s.root.dataset.progress),0);s.advance(250);
+  for(const deltaMode of [0,1,2]){
+    wheel({deltaY:1,deltaMode});s.advance(250);
+  }
+  assert.equal(Number(s.root.dataset.progress),3);
+  wheel({deltaY:120});s.advance(250);
+  assert.equal(Number(s.root.dataset.progress),3);
+  wheel({deltaY:-1});assert.equal(Number(s.root.dataset.progress),2);
+  s.advance(250);
+  wheel({deltaY:-1},s.root.querySelector('.chapter-links a'));
+  assert.equal(Number(s.root.dataset.progress),1,"hovering a scene link must still allow scene navigation");
+});
+
+test("wheel gestures wait for an existing Space transition without queuing another scene", async (t) => {
+  const s=await setup({autoProgress:false});t.after(()=>s.close());s.ready();
+  s.key(" ");const before=s.calls.length;
+  s.callbacks().onProgress(0.4);
+  s.stage.dispatchEvent(new s.w.WheelEvent("wheel",{deltaY:120,cancelable:true}));
+  s.advance(250);s.callbacks().onProgress(1);
+  assert.equal(s.calls.slice(before).filter(c=>c[0]==="setChapter").length,0);
+  s.stage.dispatchEvent(new s.w.WheelEvent("wheel",{deltaY:120,cancelable:true}));
+  assert.equal(s.calls.filter(c=>c[0]==="setChapter").at(-1)[1],2);
 });
 
 test("stopping halfway into works does not suddenly reveal its copy", async (t) => {
