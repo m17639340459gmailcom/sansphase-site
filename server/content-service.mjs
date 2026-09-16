@@ -274,7 +274,7 @@ export function createContentService({ url, token, fetcher = fetch, store }) {
         : (await snapshot()).media;
       if (!allowed.has(id))
         throw Object.assign(new Error("Not found"), { status: 404 });
-      if (store) return store.readMedia(id,range, download ? undefined : width);
+      if (store) return store.readMedia(id,range, download ? undefined : width,{streaming:!download});
       return request(`/assets/${id}${download ? "?download=true" : ""}`, {
         raw: true,
       });

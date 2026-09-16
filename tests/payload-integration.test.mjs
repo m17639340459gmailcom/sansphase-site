@@ -3,6 +3,8 @@ import {PassThrough,Readable} from 'node:stream';
 import {request as httpRequest} from 'node:http';
 import {pipeline} from 'node:stream/promises';
 import {once} from 'node:events';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import {fileHash} from '../server/file-hash.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -441,6 +443,26 @@ test(
         assert.equal((await fetch(origin+'/api/media/'+track.id)).status,404);
         const hugeImage=new FormData();hugeImage.set('file',new Blob([new Uint8Array(26*1024**2)],{type:'image/png'}),'too-big.png');await req('upload','POST',hugeImage,413);
         const wrong=new FormData();wrong.set('file',new Blob(['text'],{type:'text/plain'}),'not-audio.txt');wrong.set('purpose','music');await req('upload','POST',wrong,400);
+      });
+      await t.test('indexed MP3 streams preserve original downloads and publication boundaries',async t=>{
+        const run=promisify(execFile);
+        try{await run('ffmpeg',['-version'],{windowsHide:true});}catch{t.skip('FFmpeg required for release verification');return;}
+        const source=resolve(directory,'test-original.mp3');
+        await run('ffmpeg',['-hide_banner','-loglevel','error','-f','lavfi','-i','sine=frequency=440:duration=2','-c:a','libmp3lame','-b:a','320k','-write_xing','0',source],{windowsHide:true});
+        const original=await readFile(source),form=new FormData();
+        form.set('file',new Blob([original],{type:'audio/mpeg'}),'indexed-test.mp3');form.set('purpose','music');
+        const track=await json('upload','POST',form),profile=await json('profile');
+        const url=origin+'/api/media/'+track.id;
+        assert.equal((await fetch(url)).status,404);
+        await json('profile','PATCH',{...profile,music_settings:{tracks:[{title:'indexed',url:'/api/media/'+track.id}]}});
+        const r=await fetch(url,{headers:{Range:'bytes=0-2047'}}),body=Buffer.from(await r.arrayBuffer());
+        assert.equal(r.status,206);assert.equal(body.length,2048);assert.equal(r.headers.get('content-type'),'audio/mpeg');
+        assert(body.includes(Buffer.from('Info'))||body.includes(Buffer.from('Xing')));
+        assert.match(r.headers.get('content-range'),/^bytes 0-2047\//);
+        assert.deepEqual(Buffer.from(await(await fetch(url+'?download=1')).arrayBuffer()),original);
+        assert.deepEqual(Buffer.from(await(await req('media/'+track.id)).arrayBuffer()),original);
+        await json('profile','PATCH',{...profile,music_settings:{tracks:[]}});
+        assert.equal((await fetch(url,{headers:{Range:'bytes=0-10'}})).status,404,'cached copy does not bypass publication checks');
       });
       await t.test(
         "server rendered initial data and revoked sessions",

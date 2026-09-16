@@ -3,6 +3,7 @@ import {withStreamUpload,uploadLimits} from '../stream-upload.mjs';
 import { createLocalReq, logoutOperation } from "payload";
 import { randomUUID, createHash } from "node:crypto";
 import { createImageVariants } from '../image-variants.mjs';
+import { createAudioVariants } from '../audio-variants.mjs';
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { Readable } from "node:stream";
@@ -14,6 +15,7 @@ const fail = (message, status = 400) =>
 const collections = new Set(["articles", "announcements", "library_entries"]);
 export function createPayloadStore(payload, { directory, authorId }) {
   const imageVariant = createImageVariants(directory);
+  const audioVariant = createAudioVariants(directory);
   let activeUploads=0;
   async function identity(token) {
     if (!token) throw fail("请先登录作者账号。", 401);
@@ -37,14 +39,15 @@ export function createPayloadStore(payload, { directory, authorId }) {
     if (!uuidPattern.test(id || "")) throw fail("文件不存在。", 404);
     return payload.findByID({ collection: "media", id });
   }
-  async function readMedia(id,rangeHeader, imageWidth) {
+  async function readMedia(id,rangeHeader, imageWidth,{streaming=false}={}) {
     // Internal only: callers must authorize the owner or check published references first.
     const row = await mediaRecord(id);
     if (!row.filename || basename(row.filename) !== row.filename)
       throw fail("文件不存在。", 404);
     const original = resolve(directory, "uploads", row.filename);
     const variant = await imageVariant(original, imageWidth, row.mimeType || '');
-    const path = variant || original;
+    const audio = streaming ? await audioVariant(original,row.mimeType || '') : null;
+    const path = variant || audio || original;
     const info = await stat(path);
     const size = info.size;
     const etag = '"' + createHash('sha256').update(`${path}:${size}:${info.mtimeMs}`).digest('hex') + '"';
@@ -53,7 +56,7 @@ export function createPayloadStore(payload, { directory, authorId }) {
     return new Response(Readable.toWeb(createReadStream(path,range||undefined)), {
       status:range?206:200,
       headers: {
-        "Content-Type": variant ? 'image/webp' : row.mimeType || "application/octet-stream",
+        "Content-Type": variant ? 'image/webp' : audio ? 'audio/mpeg' : row.mimeType || "application/octet-stream",
         "ETag": etag,
         "Content-Length": String(range?range.end-range.start+1:size),
         'Accept-Ranges':'bytes',
@@ -133,6 +136,8 @@ export function createPayloadStore(payload, { directory, authorId }) {
         if(fields.purpose==='background' && !/^image\/(png|jpeg|webp|gif|avif)$/.test(file.mimetype)) throw fail('背景请选择图片。');
         if(fields.purpose==='music' && !/^audio\/(mpeg|mp3|mp4|x-m4a|aac|ogg|wav|wave|x-wav|flac|webm)$/.test(file.mimetype)) throw fail('请选择 MP3、M4A、OGG、WAV 或 FLAC 音频。');
         const saved=await payload.create({collection:'media',data:{title:file.name,originalName:file.name},file,...auth});
+        if(fields.purpose==='music' && saved.filename && basename(saved.filename)===saved.filename)
+          await audioVariant(resolve(directory,'uploads',saved.filename),saved.mimeType || '');
         return {...fileDTO(saved),purpose:fields.purpose};
       }); } finally {activeUploads--;}
     },
