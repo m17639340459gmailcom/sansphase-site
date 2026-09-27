@@ -1,0 +1,37 @@
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+.preview/
+.build/
+.local/
+cms/.env
+cms/data/
+cms/uploads/
+cms/extensions/
+
+# Only source belongs in Git. Build outputs, private data and historical copies
+# are kept locally; .gitignore does not remove files already staged in Git.
+dist/
+outputs/
+archive/
+.openai/
+.env
+.env.*
+!.env.example
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.pem
+*.key
+*.p12
+*.pfx
+coverage/
+playwright-report/
+test-results/
+*.zip
+*.7z
+*.tar
+*.tgz
+*.tar.gz

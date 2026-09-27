@@ -1,0 +1,7 @@
+allowBuilds:
+  core-js: false
+  esbuild: false
+overrides:
+  use-sync-external-store@1.2.0: 1.7.0
+  # Old drizzle tooling transitively requests an esbuild version with GHSA-67mh-4wv8-2f99.
+  '@esbuild-kit/core-utils>esbuild': 0.25.4

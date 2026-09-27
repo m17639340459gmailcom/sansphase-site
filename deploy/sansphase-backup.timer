@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily SANSPHASE private backup
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+RandomizedDelaySec=15m
+Persistent=true
+Unit=sansphase-backup.service
+
+[Install]
+WantedBy=timers.target

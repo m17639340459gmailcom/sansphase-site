@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#090909" />
+    <link rel="icon" type="image/png" sizes="32x32" href="./favicon-32.png?v=photo-1" />
+    <link rel="shortcut icon" type="image/x-icon" href="./favicon.ico?v=photo-1" />
+    <link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png?v=photo-1" />
+    <meta
+      name="description"
+      content="無相的个人网站，分享博客文章、软件作品、学习资料与工具使用心得。"
+    />
+    <title>無相 · 博客与作品</title>
+    <script src="./page-session.js"></script>
+    <script src="./startup-assets.js"></script>
+    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./home.css" />
+    <link rel="stylesheet" href="./cosmos.bundle.css" />
+    <link rel="stylesheet" href="./blog-glass-surface.css" />
+    <link rel="stylesheet" href="./plyr.css" />
+    <link rel="stylesheet" href="./blog-background.css?v=0.101" />
+    <link rel="stylesheet" href="./blog-galaxy.css" />
+    <link rel="stylesheet" href="./catalog.css" />
+    <link rel="stylesheet" href="./visitor-controls.css" />
+    <link rel="stylesheet" href="./reader.css" />
+    <script type="module" src="./app.mjs?v=0.101"></script>
+  </head>
+  <body>
+    <div id="site-startup" role="status"><span class="startup-icon" aria-hidden="true"></span><span class="startup-label">正在准备星空</span><span class="startup-track"></span><span>0%</span></div>
+    <a href="#main" class="skip-link">跳到正文 / Skip to content</a>
+    <header id="site-header"></header>
+    <div id="blog-backdrop" aria-hidden="true">
+      <img data-background-src="./assets/materials/blog-space.png" width="2560" height="1440" alt="" decoding="async" fetchpriority="low" />
+      <div id="blog-galaxy-field" aria-hidden="true"></div>
+    </div>
+    <main id="main" tabindex="-1"></main>
+    <footer id="site-footer"><a class="site-registration" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">豫ICP备2026037683号-1</a></footer>
+    <div
+      id="dialog-shell"
+      class="dialog-shell"
+      aria-hidden="true"
+      aria-labelledby="dialog-title"
+    >
+      <div class="dialog-backdrop" data-a11y-dialog-hide></div>
+      <div id="modal" class="dialog-panel"></div>
+    </div>
+    <div id="toast"></div>
+    <noscript>请启用 JavaScript，以浏览文章、作品并使用网站的交互功能。</noscript>
+  </body>
+</html>

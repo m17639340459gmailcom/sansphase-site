@@ -1,0 +1,29 @@
+[Unit]
+Description=SANSPHASE website and Payload
+After=network.target
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=sansphase
+Group=sansphase
+WorkingDirectory=/opt/sansphase/current
+EnvironmentFile=/etc/sansphase/site.env
+ExecStart=/usr/bin/node scripts/start.mjs
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=180
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/sansphase
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sansphase
+
+[Install]
+WantedBy=multi-user.target

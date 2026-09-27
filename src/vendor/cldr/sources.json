@@ -1,0 +1,19 @@
+{
+  "project": "Unicode CLDR",
+  "version": "48.0.0",
+  "license": "Unicode-3.0",
+  "transformation": "Flatten zh exemplarCity entries by full time-zone path; copy known city names to equivalent IDs in the BCP 47 timezone alias data. No fixed menu: runtime search uses the browser timezone database.",
+  "files": [
+    {
+      "url": "https://raw.githubusercontent.com/unicode-org/cldr-json/48.0.0/cldr-json/cldr-dates-full/main/zh/timeZoneNames.json",
+      "sha256": "fb5b919f2468832636c2be991aa97a6ddb2f3ac481eb9cdba03e7f8e93dbb7dd"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/unicode-org/cldr-json/48.0.0/cldr-json/cldr-bcp47/bcp47/timezone.json",
+      "sha256": "c11423884420f00cf52733c854de5c898ddb6657ce560334c638a2bd994a1448"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/unicode-org/cldr-json/48.0.0/LICENSE"
+    }
+  ]
+}

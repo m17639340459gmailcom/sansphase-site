@@ -1,0 +1,41 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {siteCopy,localizedResource,createContentProjection} from '../src/site-copy.mjs';
+test('reviewed site copy switches without altering the original or using stale translations',()=>{
+  const title='AI 学习记录 · 本站模板';
+  assert.equal(siteCopy(title,'en'),'AI learning journal · Site template');
+  assert.equal(siteCopy(title,'zh'),title);
+  assert.equal(siteCopy(title+'（已修改）','en'),title+'（已修改）');
+  const item={title,summary:'空白记录表，包含学习目标、资料来源、实践结果和下一步。',category:'学习记录',bodyHTML:'<p>空白记录表，包含学习目标、资料来源、实践结果和下一步。</p>'};
+  const original=structuredClone(item),result=localizedResource(item,'en');
+  assert.deepEqual(item,original);
+  assert.match(result.bodyHTML,/blank journal/);
+  assert.equal(result.category,'学习记录','filter values stay stable across languages');
+  assert.equal(result.categoryEn,'Learning journal');
+});
+
+test('collection presentation reuses unchanged source and recomputes only changed content or language',()=>{
+  const title='AI 学习记录 · 本站模板';
+  const note={id:'note',title:'原文'};
+  const work={id:'work',title:'作品',summary:'简介'};
+  const resource={id:'resource',title,summary:'空白记录表，包含学习目标、资料来源、实践结果和下一步。',category:'学习记录'};
+  const source={notes:[note],works:[work],resources:[resource],software:[],'resource-center':[]};
+  const project=createContentProjection();
+  const first=project(source,'en');
+  assert.equal(first.notes,source.notes,'authored notes keep their original array and language');
+  assert.equal(first.works[0].en,'作品');
+  assert.equal(first.resources[0].en,'AI learning journal · Site template');
+  assert.equal(first.resources[0].category,'学习记录');
+  assert.deepEqual(resource,{id:'resource',title,summary:'空白记录表，包含学习目标、资料来源、实践结果和下一步。',category:'学习记录'});
+  const same=project(source,'en');
+  for(const key of ['notes','works','resources','software','resourceCenter'])assert.equal(same[key],first[key],key);
+  source.resources=[{...resource,id:'new'}];
+  const changed=project(source,'en');
+  assert.notEqual(changed.resources,first.resources);
+  assert.equal(changed.works,first.works,'unrelated collections do not recompute');
+  const chinese=project(source,'zh');
+  assert.equal(chinese.resources[0],source.resources[0],'Chinese uses the original entry');
+  assert.notEqual(chinese.resources,changed.resources);
+  source.resources=[];
+  assert.equal(project(source,'zh').resources.length,0,'newly empty lists cannot retain old content');
+});

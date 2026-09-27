@@ -1,0 +1,25 @@
+{
+  "retrieved": "2026-09-13",
+  "name": "Space-3D",
+  "repository": "https://github.com/wwwtyro/space-3d",
+  "commit": "67578c3107c38160b0c6f1e12cacb7d8f9105f7a",
+  "license": "Unlicense; included classic noise is MIT",
+  "noiseLicenseSource": "https://github.com/ashima/webgl-noise/blob/master/LICENSE",
+  "files": [
+    {
+      "file": "nebula.glsl",
+      "sha256": "41f719b559e0e2d10e266e3e2b2f365fec96928168d0c18cef4eb2bedcc17f0f"
+    },
+    {
+      "file": "classic-noise-4d.glsl",
+      "sha256": "c1af363d9300dee26ba483486369f0856a5d230abb384b1e0e2f4bee48f84e95"
+    }
+  ],
+  "integration": [
+    "The original GLSL files are preserved byte for byte.",
+    "library-nebula.jsx splits the upstream stage markers and expands its noise include for Three.js.",
+    "The adapter removes the GLSL 100 directive for Three.js WebGL2 and initializes the upstream uninitialized displacement vector to zero.",
+    "Existing Drei Environment and RenderTexture compose the photo and nebula with a separate wide lens. Sky rotation and stellar orbits use elapsed scene time, not pointer input.",
+    "Colour, density, panorama framing and brightness are integration parameters; no AI-generated image or new effect shader is used."
+  ]
+}

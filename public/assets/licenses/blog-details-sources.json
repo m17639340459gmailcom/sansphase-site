@@ -1,0 +1,42 @@
+{
+  "components": [
+    {
+      "name": "react-colorful",
+      "version": "5.8.1",
+      "source": "https://github.com/omgovich/react-colorful",
+      "license": "MIT",
+      "usage": "Author card tint picker and hexadecimal color input, bundled locally"
+    },
+    {
+      "name": "Simple Icons",
+      "version": "16.31.0",
+      "source": "https://github.com/simple-icons/simple-icons",
+      "usage": "Selected platform icons, bundled locally"
+    },
+    {
+      "name": "Plyr",
+      "version": "3.8.4",
+      "source": "https://github.com/sampotts/plyr",
+      "usage": "Audio player for explicitly configured direct audio URLs; does not resolve Kugou share URLs"
+    },
+    {
+      "name": "New Tegomin",
+      "package": "@fontsource/new-tegomin@5.3.0",
+      "source": "https://fonts.google.com/specimen/New+Tegomin",
+      "license": "OFL-1.1",
+      "usage": "Local Latin subset; font-display optional prevents late font replacement"
+    }
+  ],
+  "reference": {
+    "layoutTypography": "https://homulilly.com/",
+    "css": "https://homulilly.com/css/style.css",
+    "observedChineseStack": "Noto Sans SC, PingFang SC, Microsoft YaHei",
+    "observedLatinFont": "New Tegomin",
+    "note": "Reference typography and restrained accent details only, no theme assets or content copied"
+  },
+  "kugou": {
+    "playlist": "https://t1.kugou.com/1bKaRccG5V3",
+    "officialIntegration": "https://www.kugou.com/about/index.html",
+    "status": "Official page shows a ten-song playlist and requests QR login. No site-level playback SDK credentials available. Editable link only for this playlist."
+  }
+}

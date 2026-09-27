@@ -1,0 +1,66 @@
+{
+  "source": "https://activetheory.net/assets/shaders/compiled.vs",
+  "retrieved": "2026-09-13",
+  "authorization": "On 2026-09-15 the project owner explicitly confirmed full usage rights and authorized inclusion in this website and its public repository. This records the owner's confirmation, not an upstream open-source license or a sublicense to others. See THIRD_PARTY_NOTICES.md.",
+  "changes": "Engine includes expanded; platform flags resolved for browser WebGL; time and resolution uniforms declared for Three. Original shading body preserved. The renderer supplies unsigned-byte refraction/video-replacement buffers, matching the published FXLayer/SnapshotFrame defaults.",
+  "files": [
+    {
+      "name": "HomeLogoShader.glsl",
+      "sha256": "221e4d35fd9413e1ab39a6bf48b66db1e6c054852dcada9f70cde88a8d889ccc"
+    },
+    {
+      "name": "matcap.vs",
+      "sha256": "d77508f23f132d6ecbf983a92dd409e7f47e8e69bd1f1a0ba58fc68b943354d3"
+    },
+    {
+      "name": "range.glsl",
+      "sha256": "8be26d76b1d49cf94b91d3d4ff50026d91efb2b40b6b51a508869448dca5979e"
+    },
+    {
+      "name": "simplenoise.glsl",
+      "sha256": "78a949f3df24d667605e8df7d533f1a50d3edf7bd9cde6828c44084b0eb367da"
+    },
+    {
+      "name": "fresnel.glsl",
+      "sha256": "e48c1baa0c17d3fb4cbe5c7f6bf148de078ab197b9a87e3f3217e8aefaecf0d4"
+    },
+    {
+      "name": "rgbshift.fs",
+      "sha256": "3cfa6fbd1f09abe602733ed1b296e1e952ae6f2fe36afe2798518ccbcd12363b"
+    },
+    {
+      "name": "radialblur.fs",
+      "sha256": "b091fdaf329fcc3fcae2ee0ec2d1555a0f31dc32fbf8f8b1637a75a2fd0a8330"
+    },
+    {
+      "name": "normalmap.glsl",
+      "sha256": "b9bce9dc9b82db6491294acc4df09d4a1ac456afd1fc2fb6b89f484f0e0d4248"
+    },
+    {
+      "name": "transformUV.glsl",
+      "sha256": "29a5588a8a38efa24041ec4d4b64ab85d5595dbab066c7841b8896558d96d6a0"
+    },
+    {
+      "name": "blendmodes.glsl",
+      "sha256": "f7c2d6784817cc519c1434b43da7f2a3676402a8685736f2121e6c1b5305c7f2"
+    },
+    {
+      "name": "rgb2hsv.fs",
+      "sha256": "c2360d7942a724caa3e3abd80f51f4b5d868c06f5483174291a699b518bb864d"
+    },
+    {
+      "name": "HomeColumnShader.glsl",
+      "sha256": "ef46961c745618b0fc46196805a85cdc6609dbefec984b7dd1680487410fb011"
+    }
+  ],
+  "programs": {
+    "HomeLogoShader": {
+      "vertexSha256": "1cc4e45cb10759dceadf351b2f4276cf7eefb180c502bf617c34e860ac74a2c1",
+      "fragmentSha256": "cfe63eb9955287efaae20e9995b48ebadc3abccf9ac48e33dad2f6de2a9eb861"
+    },
+    "HomeColumnShader": {
+      "vertexSha256": "caba98e96f9077911899d312d41446e83bfcf12af46fe9bd8960f68294b34750",
+      "fragmentSha256": "082a1513f9524065e471e98823f0a2f964641c968f1508240db07695bcffb9f9"
+    }
+  }
+}

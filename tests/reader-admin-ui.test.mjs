@@ -1,0 +1,132 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { JSDOM } from 'jsdom';
+import { adminReadersPage, mountReaderAdmin } from '../src/admin-readers.mjs';
+
+test('reader management shows real metrics, filters, detail and audited actions without exposing controls to guests', async () => {
+  assert.doesNotMatch(adminReadersPage(null), /id="reader-admin-list"/);
+  assert.match(adminReadersPage(null), /href="#\/account"/);
+  assert.doesNotMatch(adminReadersPage(null), /data-author-login/);
+  const dom = new JSDOM(`<!doctype html><body><main>${adminReadersPage({ name: 'Owner' })}</main></body>`, { url: 'http://127.0.0.1:4196/#/admin' });
+  const old = Object.fromEntries(['window', 'document', 'fetch', 'FormData'].map(key => [key, globalThis[key]]));
+  let disabled = false, vip = false, vipUntil = null, deleted = false, uid = '0001', requestedFilter = '', actionCount = 0, reviewed = false, expiredCleaned = false;
+  const user = { id: 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa', uid: '0001', nickname: '测试读者', email: 'reader@qq.com', phone: '13800138000', verified: true, createdAt: '2026-09-24T08:00:00Z', lastLoginIp: '198.51.100.23', lastLoginAt: '2026-09-24T08:30:00Z' };
+  const reply = value => ({ ok: true, json: async () => value });
+  Object.assign(globalThis, { window: dom.window, document: dom.window.document, FormData: dom.window.FormData,
+    fetch: async (url, options = {}) => {
+      if (url.endsWith('/review') && options.method !== 'POST') return reply({ profiles: reviewed ? [] : [{ id: 'bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb', kind: 'signature', nickname: '测试读者', proposedValue: '你好', createdAt: '2026-09-24T08:00:00Z' }],
+        expired: expiredCleaned ? [] : [{ id: 'cccccccc-cccc-4ccc-cccc-cccccccccccc', email: 'expired@example.test', expiresAt: '2026-09-24T08:05:00Z' }], files: [], versions: [], media: [] });
+      if (url.includes('/review/') && options.method === 'POST') {
+        if (url.includes('/profile/')) reviewed = true;
+        if (url.includes('/expired/cleanup')) { assert.deepEqual(JSON.parse(options.body).ids, ['cccccccc-cccc-4ccc-cccc-cccccccccccc']); expiredCleaned = true; }
+        return reply({ ok: true, cleaned: expiredCleaned ? 1 : 0 });
+      }
+      if (url.includes('/audit')) return reply({ events: actionCount ? [{ action: 'disable', readerId: user.id, at: '2026-09-24T09:00:00Z' }] : [] });
+      if (url.includes('/logins')) return reply({ events: [{ id: 'event-1', ip: '198.51.100.23', at: '2026-09-24T08:30:00Z' }] });
+      if (options.method === 'POST') { if (url.endsWith('/uid')) { uid = JSON.parse(options.body).uid; return reply({ ...user, uid, disabled, vip }); } actionCount++; if (url.includes('vip-grant')) { vip = true; vipUntil = '2026-10-24T08:00:00Z'; } else if (url.includes('vip-add-days')) { assert.equal(JSON.parse(options.body).days, 7); vipUntil = '2026-10-31T08:00:00Z'; } else if (url.includes('vip-revoke')) { vip = false; vipUntil = null; } else if (url.includes('disable')) disabled = true; else if (url.includes('delete')) deleted = true; return reply({ ...user, uid, disabled, vip, vipUntil }); }
+      const params = new URL(url, 'http://127.0.0.1').searchParams;
+      requestedFilter = params.get('status');
+      const visible = deleted || requestedFilter === 'disabled' && !disabled ? [] : [{ ...user, uid, disabled, vip, vipUntil }];
+      return reply({ users: visible, page: 1, totalPages: 1, total: visible.length, summary: { total: 1, active: disabled ? 0 : 1, pending: 0, disabled: disabled ? 1 : 0, vip: 12, expiredVip: 3 } });
+    } });
+  const dialog = document.querySelector('#reader-admin-detail');
+  dialog.showModal = () => dialog.setAttribute('open', '');
+  dialog.close = () => dialog.removeAttribute('open');
+  const root = document.querySelector('main');
+  const cleanup = mountReaderAdmin(root);
+  const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+  try {
+    await settle();
+    assert.match(root.textContent, /已验证账号1/);
+    assert.equal(root.querySelectorAll('.reader-admin-metric').length, 5);
+    assert.equal(root.querySelector('.reader-admin-metric--vip').textContent, 'VIP 用户12');
+    assert.equal(root.querySelector('.reader-admin-metric--expired').textContent, 'VIP 已到期3');
+    assert.match(root.textContent, /reader@qq.com/);
+    assert.match(root.textContent, /UID 0001/);
+    assert.match(root.textContent, /198\.51\.100\.23/);
+    root.querySelector('[data-admin-filter="disabled"]').click();
+    await settle();
+    assert.equal(requestedFilter, 'disabled');
+    assert.match(root.textContent, /没有符合条件的账号/);
+    root.querySelector('[data-admin-filter="all"]').click();
+    await settle();
+    root.querySelector('[data-admin-open]').click();
+    await settle();
+    assert(dialog.hasAttribute('open'));
+    assert.match(dialog.textContent, /未经过短信验证/);
+    assert.match(dialog.textContent, /最近登录记录[\s\S]*198\.51\.100\.23/);
+    assert.match(dialog.textContent, /开通一个月 VIP/);
+    assert(root.querySelector('[data-admin-action="vip-add-days"]'), 'the author can add days to a non-VIP reader');
+    root.querySelector('[data-admin-action="vip-add-days"]').click();
+    assert.match(dialog.textContent, /从现在起开通指定天数/);
+    assert(root.querySelector('[data-admin-vip-days]'));
+    root.querySelector('[data-admin-cancel]').click();
+    const uidForm = root.querySelector('[data-admin-uid-form]');
+    uidForm.querySelector('[name="uid"]').value = '0009';
+    uidForm.dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }));
+    await settle();
+    assert.match(dialog.textContent, /UID 0009/);
+    assert.match(root.querySelector('#reader-admin-list').textContent, /UID 0009/);
+    root.querySelector('[data-admin-action="disable"]').click();
+    assert.equal(actionCount, 0);
+    root.querySelector('[data-admin-confirm="disable"]').click();
+    await settle();
+    assert.equal(actionCount, 1);
+    assert.match(root.textContent, /已停用/);
+    root.querySelector('[data-admin-view="memberships"]').click();
+    await settle();
+    assert.match(root.querySelector('[data-admin-panel="memberships"]').textContent, /会员权限[\s\S]*UID 0009/);
+    root.querySelector('[data-admin-panel="memberships"] [data-admin-open]').click();
+    await settle();
+    root.querySelector('[data-admin-action="vip-grant"]').click();
+    assert.equal(actionCount, 1);
+    root.querySelector('[data-admin-confirm="vip-grant"]').click();
+    await settle();
+    assert.equal(actionCount, 2);
+    assert.match(root.querySelector('[data-admin-panel="memberships"]').textContent, /VIP/);
+    root.querySelector('[data-admin-panel="memberships"] [data-admin-open]').click();
+    await settle();
+    assert(root.querySelector('[data-admin-action="vip-add-days"]'));
+    root.querySelector('[data-admin-action="vip-add-days"]').click();
+    assert.equal(actionCount, 2);
+    const daysInput = root.querySelector('[data-admin-vip-days]');
+    daysInput.value = '7';
+    root.querySelector('[data-admin-confirm="vip-add-days"]').click();
+    await settle();
+    assert.equal(actionCount, 3);
+    assert.equal(vipUntil, '2026-10-31T08:00:00Z');
+    assert.match(root.textContent, /会员有效期已增加 7 天/);
+    root.querySelector('[data-admin-view="activity"]').click();
+    await settle();
+    assert.match(root.textContent, /停用账号/);
+    root.querySelector('[data-admin-view="review"]').click();
+    await settle();
+    assert.equal(root.querySelector('.reader-admin-header h1').textContent, '审核与清理');
+    assert.match(root.querySelector('#reader-admin-review-profiles').textContent, /你好/);
+    root.querySelector('[data-admin-review-action="approve"]').click();
+    await settle();
+    assert.equal(reviewed, true);
+    root.querySelector('[data-admin-select="expired"]').click();
+    root.querySelector('[data-admin-bulk-clean="expired"]').click();
+    await settle();
+    assert.equal(expiredCleaned, true);
+    root.querySelector('[data-admin-view="accounts"]').click();
+    await settle();
+    root.querySelector('[data-admin-open]').click();
+    await settle();
+    root.querySelector('[data-admin-action="delete"]').click();
+    root.querySelector('[data-admin-confirm="delete"]').click();
+    await settle();
+    assert.equal(actionCount, 3);
+    assert.match(dialog.textContent, /请输入完整邮箱后再删除/);
+    root.querySelector('[data-admin-delete-email]').value = user.email;
+    root.querySelector('[data-admin-confirm="delete"]').click();
+    await settle();
+    assert.equal(actionCount, 4);
+    assert.match(root.textContent, /账号已删除/);
+  } finally {
+    cleanup();
+    Object.assign(globalThis, old);
+    dom.window.close();
+  }
+});

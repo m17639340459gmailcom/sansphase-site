@@ -1,0 +1,16 @@
+{
+  "retrieved": "2026-09-13",
+  "title": "The Milky Way panorama",
+  "credit": "ESO/S. Brunier",
+  "source": "https://www.eso.org/public/images/eso0932a/",
+  "license": "CC-BY-4.0",
+  "licenseSource": "https://www.eso.org/public/outreach/copyright/",
+  "files": [
+    {
+      "file": "eso0932a.jpg",
+      "source": "https://cdn.eso.org/images/large/eso0932a.jpg",
+      "sha256": "60400c92c54b7c1bd12299c69e83b16e5b6256e7dabacc478c021758ecd28179"
+    }
+  ],
+  "notes": "Photographic source released in 2009; no AI generation or image synthesis. Shown with spherical mapping in Drei Environment."
+}

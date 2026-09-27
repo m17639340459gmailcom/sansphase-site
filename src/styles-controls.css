@@ -1,0 +1,14 @@
+/* Shared scroll/slider appearance. The gutter width stays constant on reload. */
+:root { --scroll-thumb: #6f829b; --scroll-track: #151e2c; }
+* { scrollbar-color: var(--scroll-thumb) var(--scroll-track); scrollbar-width: thin; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--scroll-track); }
+::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border: 2px solid var(--scroll-track); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #adc3dd; }
+input[type="range"] { appearance: none; background: transparent; accent-color: #bfdfff; }
+input[type="range"]::-webkit-slider-runnable-track { height: 4px; background: rgb(191 223 255 / 30%); border-radius: 2px; }
+input[type="range"]::-webkit-slider-thumb { appearance: none; width: 12px; height: 12px; margin-top: -4px; background: #d6eaff; border: 1px solid #f2f7ff; border-radius: 50%; }
+input[type="range"]::-moz-range-track { height: 4px; background: rgb(191 223 255 / 30%); }
+input[type="range"]::-moz-range-thumb { width: 10px; height: 10px; background: #d6eaff; border: 1px solid #f2f7ff; border-radius: 50%; }
+@font-face { font-family: "New Tegomin"; src: url("./assets/fonts/new-tegomin-latin.woff2") format("woff2"); font-weight: 400; font-style: normal; font-display: optional; unicode-range: U+0000-007F; }
+body.blog-open .blog-page, body.blog-open .article, .author-panel { font-family: "New Tegomin", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif; }

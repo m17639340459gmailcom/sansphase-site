@@ -1,0 +1,17 @@
+{
+  "title": "A 340-million pixel starscape from Paranal",
+  "id": "eso0934a",
+  "type": "Observation",
+  "page": "https://www.eso.org/public/images/eso0934a/",
+  "url": "https://cdn.eso.org/images/large/eso0934a.jpg",
+  "credit": "ESO/S. Guisard (www.eso.org/~sguisard)",
+  "license": "CC BY 4.0",
+  "licenseUrl": "https://www.eso.org/public/copyright/",
+  "file": "eso0934a.jpg",
+  "sha256": "479925c063381aa28c7bbc36177071d6927d6e0f2cbd698816203237af4ecc8c",
+  "width": 4331,
+  "height": 2480,
+  "bytes": 5841432,
+  "adaptation": "Original JPEG bytes unchanged. Existing Drei Image handles cover, opacity and slow camera drift. Display color/exposure adjusted in the existing material; foreground stars are separate. Not an AI-generated image or a volumetric reconstruction.",
+  "retrieved": "2026-09-13"
+}
