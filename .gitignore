@@ -5,10 +5,8 @@ Thumbs.db
 .preview/
 .build/
 .local/
-cms/.env
-cms/data/
-cms/uploads/
-cms/extensions/
+# Retired Directus workspace; may contain private legacy data.
+cms/
 
 # Only source belongs in Git. Build outputs, private data and historical copies
 # are kept locally; .gitignore does not remove files already staged in Git.
@@ -35,3 +33,5 @@ test-results/
 *.tar
 *.tgz
 *.tar.gz
+__pycache__/
+*.pyc

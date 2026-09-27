@@ -2,6 +2,7 @@ import { readFile, mkdir, mkdtemp, copyFile, writeFile, stat } from 'node:fs/pro
 import { resolve, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { publicationFiles, scanPublication } from './publication-files.mjs';
+import { prunePublications } from './publication-retention.mjs';
 
 const root=resolve('.');
 const files=await publicationFiles(root);
@@ -35,6 +36,9 @@ if(issues.length) {
     await copyFile(resolve(root,file),destination);
     manifest.push({file,bytes:(await stat(destination)).size,sha256:createHash('sha256').update(await readFile(destination)).digest('hex')});
   }
-  await writeFile(resolve(base,'latest.json'),JSON.stringify({directory:target,files:manifest,createdAt:new Date().toISOString()},null,2));
+  const createdAt=new Date().toISOString();
+  await writeFile(resolve(target,'.publication-complete.json'),JSON.stringify({kind:'sansphase-publication',createdAt}));
+  await writeFile(resolve(base,'latest.json'),JSON.stringify({directory:target,files:manifest,createdAt},null,2));
+  await prunePublications(base,target);
   console.log(JSON.stringify({status:'prepared-not-published',directory:target,files:files.length,privateValueMatches:0},null,2));
 }

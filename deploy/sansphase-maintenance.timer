@@ -1,0 +1,10 @@
+[Unit]
+Description=SANSPHASE daily verified backup rotation
+
+[Timer]
+OnCalendar=*-*-* 06:30:00
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

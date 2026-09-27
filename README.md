@@ -11,7 +11,7 @@
 ![Payload 3.89](https://img.shields.io/badge/Payload-3.89-a7b8dc?style=flat-square)
 ![Release candidate](https://img.shields.io/badge/Status-release_candidate-c2abd8?style=flat-square)
 
-[使用说明](docs/AUTHOR-GUIDE.md) · [项目结构](ARCHITECTURE.md) · [部署指南](docs/DEPLOYMENT.md) · [发布流程](docs/RELEASE-PROCESS.md)
+[使用说明](docs/AUTHOR-GUIDE.md) · [项目结构](ARCHITECTURE.md) · [部署指南](docs/DEPLOYMENT.md) · [发布流程](docs/RELEASE-PROCESS.md) · [维护与数据保护](docs/MAINTENANCE.md)
 
 </div>
 
