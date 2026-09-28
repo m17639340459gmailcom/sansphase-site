@@ -63,7 +63,7 @@ test("active effects have pinned third-party source and preserved upstream origi
     ? JSON.parse(await readFile(process.env.SCENE_BUILD_META, "utf8"))
     : (
         await bundle({
-          entryPoints: ["src/library-cosmos.jsx", "src/library-ui.jsx"],
+          entryPoints: ["src/library-cosmos.tsx", "src/library-ui.tsx"],
           outdir: "outputs/verification/provenance",
           bundle: true,
           format: "esm",

@@ -3,11 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import sharp from 'sharp';
-import { clientAddress } from './client-ip.mjs';
-import { membershipState } from './reader-membership.mjs';
+import { clientAddress } from './client-ip.ts';
+import { membershipState } from './reader-membership.ts';
 import { uuidPattern } from './content-service.mjs';
 import { withStreamUpload } from './stream-upload.mjs';
-import { createReaderWorkflow, registrationLifetimeMs } from './reader-workflow.mjs';
+import { createReaderWorkflow, registrationLifetimeMs } from './reader-workflow.ts';
 import { contactDetailReason } from './reader-profile-policy.mjs';
 import { cleanReaderFiles } from './reader-file-cleanup.mjs';
 

@@ -1,12 +1,17 @@
+export type ByteRange = { start: number; end: number };
+
 // null means unsupported/malformed (serve the full file); false means 416.
-export function byteRange(header, size) {
+export function byteRange(
+  header: string | undefined | null,
+  size: number,
+): ByteRange | false | null {
   if (typeof header !== "string") return null;
   const match = /^bytes=(\d*)-(\d*)$/i.exec(header.trim());
   if (!match || (!match[1] && !match[2])) return null;
   const length = BigInt(size);
   if (length === 0n) return false;
-  let start;
-  let end;
+  let start: bigint;
+  let end: bigint;
   if (!match[1]) {
     const suffix = BigInt(match[2]);
     if (suffix === 0n) return false;
@@ -20,4 +25,3 @@ export function byteRange(header, size) {
   }
   return { start: Number(start), end: Number(end) };
 }
-

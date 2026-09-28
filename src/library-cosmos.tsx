@@ -1,9 +1,11 @@
 import React, { Component } from "react";
+import type { ReactNode } from 'react';
 import {
   createRoot as createFiberRoot,
   extend,
   events,
 } from "@react-three/fiber";
+import type { RootState, RootStore } from '@react-three/fiber';
 import { animate, motionValue } from "motion";
 import * as THREE from "three";
 import { LibraryCosmosScene } from "./library-cosmos-scene.jsx";
@@ -11,8 +13,8 @@ import "./library-cosmos.css";
 import { createTurnInput, resetTurnInput } from "./reference-rotation.mjs";
 import { prepareScene } from "./scene-preparation.mjs";
 
-extend(THREE);
-const finite = (v) => (Number.isFinite(v) ? v : 0);
+extend(THREE as unknown as Parameters<typeof extend>[0]);
+const finite = (v: number) => (Number.isFinite(v) ? v : 0);
 export function createLibraryModel(reduced = false) {
   return {
     progress: motionValue(0),
@@ -31,12 +33,36 @@ export function createLibraryModel(reduced = false) {
     reduced,
   };
 }
-class VisualBoundary extends Component {
+type LibraryModel = ReturnType<typeof createLibraryModel> & {
+  preparing?: boolean;
+  particlesReady?: boolean;
+  panoramaReady?: boolean;
+};
+type MountOptions = {
+  onReady?: () => void;
+  onError?: (error: unknown) => void;
+  onProgress?: (progress: number) => void;
+  onLoadProgress?: (progress: number) => void;
+  reducedMotion?: boolean;
+};
+type TweenKey = 'progress' | 'yaw' | 'pitch';
+const Scene = LibraryCosmosScene as React.ComponentType<{
+  model: LibraryModel;
+  onFrame: (progress: number, state: RootState) => void;
+}>;
+// Legacy JS preparation accepts progress values even though its inferred default callback is zero-arg.
+const runPreparation = prepareScene as unknown as (options: RootState & {
+  signal: AbortSignal;
+  nextFrame: () => Promise<void>;
+  onProgress: (progress: number) => void;
+}) => Promise<void>;
+
+class VisualBoundary extends Component<{ onError: (error: unknown) => void; children: ReactNode }> {
   state = { failed: false };
   static getDerivedStateFromError() {
     return { failed: true };
   }
-  componentDidCatch(error) {
+  componentDidCatch(error: Error) {
     this.props.onError(error);
   }
   render() {
@@ -47,37 +73,37 @@ class VisualBoundary extends Component {
 // Preserve the existing page controller contract. Libraries own graphics and
 // easing; this adapter owns only site navigation, pause, sizing and cleanup.
 export function mountCosmos(
-  canvas,
+  canvas: HTMLElement,
   {
     onReady = () => {},
     onError = () => {},
     onProgress = () => {},
     onLoadProgress = () => {},
     reducedMotion = false,
-  } = {},
+  }: MountOptions = {},
 ) {
-  const model = createLibraryModel(reducedMotion),
+  const model: LibraryModel = createLibraryModel(reducedMotion),
     doc = canvas.ownerDocument,
-    stage = canvas.parentElement;
+    stage = canvas.parentElement!;
   model.preparing = true;
   const preparation = new AbortController();
   let disposed = false,
     failed = false,
-    announced = false,
-    store,
-    frameRoot,
-    observer;
+    announced = false;
+  let store: RootStore | undefined;
+  let frameRoot: ReturnType<typeof createFiberRoot> | undefined;
+  let observer: ResizeObserver | undefined;
   let target = 0,
     orbit = { x: 0, y: 0 },
     paused = false;
-  const tweens = new Map();
+  const tweens = new Map<TweenKey, ReturnType<typeof animate>>();
   // R3F releases its context asynchronously. Each mount owns a draw canvas so
   // an old release cannot destroy a newly retried renderer on the same element.
   const drawCanvas = doc.createElement("canvas");
   drawCanvas.className = "universe-gl-canvas";
   drawCanvas.setAttribute("aria-hidden", "true");
   stage.insertBefore(drawCanvas, canvas);
-  function fail(error) {
+  function fail(error: unknown) {
     if (disposed || failed) return;
     failed = true;
     preparation.abort();
@@ -108,7 +134,7 @@ export function mountCosmos(
       tween("progress", target, true);
     if (!model.paused) store?.getState().invalidate();
   }
-  function tween(key, value, continuous = false) {
+  function tween(key: TweenKey, value: number, continuous = false) {
     tweens.get(key)?.stop();
     if (model.reduced || model.paused) model[key].set(value);
     else
@@ -146,18 +172,18 @@ export function mountCosmos(
       height = Math.max(1, bounds.height || 720);
     store?.getState().setSize(width, height, bounds.top || 0, bounds.left || 0);
   }
-  const lost = (e) => {
+  const lost = (e: Event) => {
     e.preventDefault();
     fail(new Error("WebGL context lost"));
   };
   const visibility = () => sync();
-  const renderError = (event) => {
+  const renderError = (event: ErrorEvent) => {
     if (/cosmos\.bundle\.mjs/.test(event.filename || ""))
       fail(event.error || new Error(event.message));
   };
   const sceneContent = () => (
     <VisualBoundary onError={fail}>
-      <LibraryCosmosScene
+      <Scene
         model={model}
         onFrame={(p, state) => {
           const entrance = model.entrance.get().toFixed(3);
@@ -177,20 +203,20 @@ export function mountCosmos(
             photosReady
           ) {
             announced = true;
-            prepareScene({
+            runPreparation({
               ...state,
               signal: preparation.signal,
               nextFrame: () =>
-                new Promise((resolve, reject) => {
+                new Promise<void>((resolve, reject) => {
                   if (preparation.signal.aborted) {
                     reject(preparation.signal.reason);
                     return;
                   }
                   const abort = () => {
-                    doc.defaultView.cancelAnimationFrame(id);
+                    doc.defaultView!.cancelAnimationFrame(id);
                     reject(preparation.signal.reason);
                   };
-                  const id = doc.defaultView.requestAnimationFrame(() => {
+                  const id = doc.defaultView!.requestAnimationFrame(() => {
                     preparation.signal.removeEventListener("abort", abort);
                     resolve();
                   });
@@ -218,7 +244,7 @@ export function mountCosmos(
       model.preparing = false;
       store?.getState().invalidate();
     },
-    setPointer(x, y, { reset = false } = {}) {
+    setPointer(x: number, y: number, { reset = false } = {}) {
       if (
         disposed ||
         model.paused ||
@@ -233,7 +259,7 @@ export function mountCosmos(
       model.pointerAt = model.time;
       store?.getState().invalidate();
     },
-    setOrbit(x, y = 0, { dragging = false } = {}) {
+    setOrbit(x: number, y = 0, { dragging = false } = {}) {
       if (dragging && !model.reduced && !model.paused) {
         model.turnInput.pending += finite(x) - orbit.x;
         orbit.x = finite(x);
@@ -256,10 +282,10 @@ export function mountCosmos(
     endOrbit({ cancel = false } = {}) {
       if (cancel) resetTurnInput(model.turnInput);
     },
-    pulse(x, y) {
+    pulse(x: number, y: number) {
       api.setPointer(x, y);
     },
-    setChapter(value, { continuous = false, immediate = false } = {}) {
+    setChapter(value: number, { continuous = false, immediate = false } = {}) {
       target = THREE.MathUtils.clamp(finite(value), 0, 3);
       const pointerEnabled = target === 0;
       if (model.pointerEnabled !== pointerEnabled) {
@@ -276,7 +302,7 @@ export function mountCosmos(
       } else tween("progress", target, continuous);
       if (immediate || model.reduced || model.paused) onProgress(target);
     },
-    setPaused(value) {
+    setPaused(value: boolean) {
       if (
         paused === !!value &&
         model.paused === (paused || doc.hidden || failed)
@@ -285,7 +311,7 @@ export function mountCosmos(
       paused = !!value;
       sync();
     },
-    setReducedMotion(value) {
+    setReducedMotion(value: boolean) {
       if (model.reduced === !!value) return;
       model.reduced = !!value;
       if (model.reduced) {
@@ -293,7 +319,7 @@ export function mountCosmos(
         model.progress.set(target);
         onProgress(target);
       }
-      if (store) frameRoot.render(sceneContent());
+      if (store) frameRoot!.render(sceneContent());
       sync();
     },
     resize,
@@ -304,7 +330,7 @@ export function mountCosmos(
       stop();
       observer?.disconnect();
       doc.removeEventListener("visibilitychange", visibility);
-      doc.defaultView.removeEventListener("error", renderError);
+      doc.defaultView!.removeEventListener("error", renderError);
       drawCanvas.removeEventListener("webglcontextlost", lost);
       frameRoot?.unmount();
       drawCanvas.remove();
@@ -316,7 +342,7 @@ export function mountCosmos(
   };
   drawCanvas.addEventListener("webglcontextlost", lost);
   doc.addEventListener("visibilitychange", visibility);
-  doc.defaultView.addEventListener("error", renderError);
+  doc.defaultView!.addEventListener("error", renderError);
   frameRoot = createFiberRoot(drawCanvas);
   frameRoot
     .configure({

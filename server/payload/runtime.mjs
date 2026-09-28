@@ -10,9 +10,9 @@ import { createContentService } from "../content-service.mjs";
 import {createPublicationRevision} from './publication-revision.mjs';
 import { smtpConfigured } from './smtp-settings.mjs';
 import { createLoginLedger } from '../login-ledger.mjs';
-import { createReaderUidStore } from '../reader-uids.mjs';
+import { createReaderUidStore } from '../reader-uids.ts';
 import { createReaderRetention } from '../reader-retention.mjs';
-import { createReaderWorkflow } from '../reader-workflow.mjs';
+import { createReaderWorkflow } from '../reader-workflow.ts';
 import { createMediaRetention } from './media-retention.mjs';
 
 export async function createPayloadRuntime(

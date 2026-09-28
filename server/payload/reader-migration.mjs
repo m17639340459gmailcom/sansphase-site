@@ -1,7 +1,7 @@
 import { DatabaseSync, backup } from 'node:sqlite';
 import { mkdir, access } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { readerUidsTableSql, readerUidsTriggerSql } from '../reader-uids.mjs';
+import { readerUidsTableSql, readerUidsTriggerSql } from '../reader-uids.ts';
 
 const required = ['authors', 'authors_sessions', 'site_profile', 'library_entries', '_library_entries_v', 'payload_locked_documents_rels', 'payload_preferences_rels'];
 const column = (db, table, name) => db.prepare(`PRAGMA table_info(${table})`).all().some(row => row.name === name);

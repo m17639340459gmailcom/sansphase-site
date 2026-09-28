@@ -1,7 +1,7 @@
 import { DatabaseSync, backup } from "node:sqlite";
 import { mkdir, readFile, writeFile, copyFile } from "node:fs/promises";
 import { resolve, basename } from "node:path";
-import {fileHash} from '../server/file-hash.mjs';
+import {fileHash} from '../server/file-hash.ts';
 const settings = JSON.parse(
   await readFile(
     process.env.PAYLOAD_CONFIG_FILE || ".local/payload-env.json",

@@ -1,9 +1,9 @@
 import { readFile, rename } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { uuidPattern } from './content-service.mjs';
-import { addCalendarMonth, addMembershipDays, membershipState } from './reader-membership.mjs';
+import { addCalendarMonth, addMembershipDays, membershipState } from './reader-membership.ts';
 import { readerAudit, removeReaderAccount } from './reader-account-removal.mjs';
-import { createReaderWorkflow, registrationLifetimeMs } from './reader-workflow.mjs';
+import { createReaderWorkflow, registrationLifetimeMs } from './reader-workflow.ts';
 import { cleanReaderFiles } from './reader-file-cleanup.mjs';
 import { contactDetailReason } from './reader-profile-policy.mjs';
 import { createMediaRetention } from './payload/media-retention.mjs';

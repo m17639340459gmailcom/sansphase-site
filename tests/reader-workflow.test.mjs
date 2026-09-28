@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { createReaderWorkflow, registrationLifetimeMs } from '../server/reader-workflow.mjs';
+import { createReaderWorkflow, registrationLifetimeMs } from '../server/reader-workflow.ts';
 
 test('pending registration is separate, expires after five minutes, and does not retain plaintext password', async () => {
   const directory = await mkdtemp(resolve(tmpdir(), 'sansphase-workflow-'));

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { addCalendarMonth, addMembershipDays, membershipState } from '../server/reader-membership.mjs';
+import { addCalendarMonth, addMembershipDays, membershipState } from '../server/reader-membership.ts';
 
 test('one month means the same UTC time next calendar month, clamping short months', () => {
   assert.equal(addCalendarMonth('2026-01-31T12:30:00.000Z'), '2026-02-28T12:30:00.000Z');

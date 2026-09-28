@@ -1,5 +1,5 @@
 // Original, quiet synthetic audio for the opt-in localhost preview only.
-import { byteRange } from '../../server/http-range.mjs';
+import { byteRange } from '../../server/http-range.ts';
 
 function tone(frequency) {
   const rate=22050,seconds=18,frames=rate*seconds;

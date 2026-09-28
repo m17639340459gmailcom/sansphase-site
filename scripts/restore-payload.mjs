@@ -1,6 +1,6 @@
 import { readFile, mkdir, copyFile, writeFile } from "node:fs/promises";
 import { resolve, dirname, sep } from "node:path";
-import {fileHash} from '../server/file-hash.mjs';
+import {fileHash} from '../server/file-hash.ts';
 const [backupPath, targetPath, configPath] = process.argv.slice(2);
 if (!backupPath || !targetPath || !configPath)
   throw Error(

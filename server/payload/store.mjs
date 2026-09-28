@@ -1,4 +1,4 @@
-import {byteRange} from '../http-range.mjs';
+import {byteRange} from '../http-range.ts';
 import {withStreamUpload,uploadLimits} from '../stream-upload.mjs';
 import { createLocalReq, logoutOperation } from "payload";
 import { randomUUID, createHash } from "node:crypto";

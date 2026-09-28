@@ -1,4 +1,4 @@
-import { build } from "esbuild";
+import { build, transform } from "esbuild";
 import {
   copyFile,
   mkdir,
@@ -28,9 +28,9 @@ await mkdir(outdir, { recursive: true });
 await cp("public", outdir, { recursive: true });
 const result = await build({
   entryPoints: {
-    "cosmos.bundle": "src/library-cosmos.jsx",
-    "ui.bundle": "src/library-ui.jsx",
-    "blog-galaxy": "src/blog-galaxy.jsx",
+    "cosmos.bundle": "src/library-cosmos.tsx",
+    "ui.bundle": "src/library-ui.tsx",
+    "blog-galaxy": "src/blog-galaxy.tsx",
     "author.bundle": "src/author-entry.mjs",
     "music.bundle": "src/music-player.mjs",
   },
@@ -55,6 +55,7 @@ const result = await build({
 });
 // Site pages and their styles have one source of truth under src/. The build
 // output is disposable; it is never edited by hand.
+const typedBrowserModules = new Set(['access-policy.mjs', 'core.mjs', 'image-sources.mjs', 'scene-delivery.mjs']);
 for (const file of [
   "index.html",
   "app.mjs",
@@ -92,7 +93,17 @@ for (const file of [
   "blog-background.css",
   "author.css",
 ]) {
-  await copyFile(`src/${file}`, `${outdir}/${file}`);
+  if (typedBrowserModules.has(file)) {
+    const stem = file.slice(0, -'.mjs'.length);
+    const adapter = (await readFile(`src/${file}`, 'utf8')).trim();
+    if (adapter !== `// Source adapter for Node tests while the browser receives compiled output.\nexport * from './${stem}.ts';`)
+      throw new Error(`Unexpected TypeScript source adapter: ${file}`);
+    const source = await readFile(`src/${stem}.ts`, 'utf8');
+    const compiled = await transform(source, { loader: 'ts', format: 'esm', target: 'es2022' });
+    await writeFile(`${outdir}/${file}`, compiled.code);
+  } else {
+    await copyFile(`src/${file}`, `${outdir}/${file}`);
+  }
 }
 await writeFile(`${outdir}/styles.css`, await composeSiteStyles());
 await mkdir("outputs/verification", { recursive: true });

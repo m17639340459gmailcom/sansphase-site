@@ -1,2 +1,2 @@
-export const publicRoute = page => ['home', 'notes', 'note'].includes(page);
-export const publicKind = kind => kind === 'notes';
+// Source adapter for Node tests while the browser receives compiled output.
+export * from './access-policy.ts';

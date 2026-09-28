@@ -11,7 +11,10 @@ BEGIN
   INSERT INTO reader_uids (reader_id) VALUES (NEW.id);
 END;`;
 
-export function createReaderUidStore(directory) {
+type UidRow = { uid: number };
+type ReaderIdRow = { reader_id: string };
+
+export function createReaderUidStore(directory: string) {
   const db = new DatabaseSync(resolve(directory, 'content.db'));
   db.exec('PRAGMA busy_timeout = 5000');
   const table = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reader_uids'").get();
@@ -21,24 +24,24 @@ export function createReaderUidStore(directory) {
   const reverse = db.prepare('SELECT reader_id FROM reader_uids WHERE uid=?');
   const update = db.prepare('UPDATE reader_uids SET uid=? WHERE reader_id=?');
   const advance = db.prepare("UPDATE sqlite_sequence SET seq=MAX(seq, ?) WHERE name='reader_uids'");
-  const format = value => String(value).padStart(4, '0');
+  const format = (value: number) => String(value).padStart(4, '0');
   return {
-    get(readerId) {
-      const uid = lookup.get(String(readerId))?.uid;
-      if (!Number.isSafeInteger(uid) || uid < 1) throw Error('Reader account has no UID. Run the reader migration.');
+    get(readerId: string | number) {
+      const uid = (lookup.get(String(readerId)) as UidRow | undefined)?.uid;
+      if (typeof uid !== 'number' || !Number.isSafeInteger(uid) || uid < 1) throw Error('Reader account has no UID. Run the reader migration.');
       return format(uid);
     },
-    readerId(uid) {
+    readerId(uid: string | number) {
       if (!/^\d{1,15}$/.test(String(uid))) return null;
       const value = Number(uid);
-      return Number.isSafeInteger(value) && value > 0 ? reverse.get(value)?.reader_id || null : null;
+      return Number.isSafeInteger(value) && value > 0 ? (reverse.get(value) as ReaderIdRow | undefined)?.reader_id || null : null;
     },
-    assignRandom(readerId) {
+    assignRandom(readerId: string | number) {
       const id = String(readerId);
       db.exec('BEGIN IMMEDIATE');
       try {
-        const previous = lookup.get(id)?.uid;
-        if (!Number.isSafeInteger(previous)) throw Object.assign(Error('用户不存在。'), { code: 'UID_READER_MISSING' });
+        const previous = (lookup.get(id) as UidRow | undefined)?.uid;
+        if (typeof previous !== 'number' || !Number.isSafeInteger(previous)) throw Object.assign(Error('用户不存在。'), { code: 'UID_READER_MISSING' });
         for (let attempt = 0; attempt < 100; attempt++) {
           const value = randomInt(100_000, 1_000_000);
           if (reverse.get(value)) continue;
@@ -50,16 +53,16 @@ export function createReaderUidStore(directory) {
         throw Object.assign(Error('六位 UID 暂时无法分配，请稍后重试。'), { code: 'UID_POOL_BUSY' });
       } catch (error) { db.exec('ROLLBACK'); throw error; }
     },
-    set(readerId, requested) {
+    set(readerId: string | number, requested: string) {
       if (typeof requested !== 'string' || !/^\d{4,9}$/.test(requested) || Number(requested) < 1)
         throw Object.assign(Error('UID 需要填写 4 至 9 位数字，且不能全为 0。'), { code: 'UID_INVALID' });
       const id = String(readerId), value = Number(requested);
       db.exec('BEGIN IMMEDIATE');
       try {
-        const previous = lookup.get(id)?.uid;
-        if (!Number.isSafeInteger(previous)) throw Object.assign(Error('用户不存在。'), { code: 'UID_READER_MISSING' });
+        const previous = (lookup.get(id) as UidRow | undefined)?.uid;
+        if (typeof previous !== 'number' || !Number.isSafeInteger(previous)) throw Object.assign(Error('用户不存在。'), { code: 'UID_READER_MISSING' });
         if (previous !== value) {
-          const occupied = reverse.get(value)?.reader_id;
+          const occupied = (reverse.get(value) as ReaderIdRow | undefined)?.reader_id;
           if (occupied && occupied !== id) throw Object.assign(Error('该 UID 已被其他用户使用。'), { code: 'UID_TAKEN' });
           update.run(value, id);
           advance.run(value);

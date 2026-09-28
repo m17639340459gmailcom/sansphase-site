@@ -20,7 +20,7 @@ import { socialIcon, socialPlatform } from "./blog-details.mjs";
 import { normalizeSocialLink } from "./social-links.mjs";
 import {mountCardColorPicker} from "./author-colors.jsx";
 import {articleTemplates, catalogTemplates} from './article-templates.mjs';
-import { createDialog, icons } from "./library-ui.jsx";
+import { createDialog, icons } from "./library-ui.tsx";
 import { escapeHTML as esc } from "./core.mjs";
 const names = () => ({
   articles: uiText("博客文章", "Blog posts"),

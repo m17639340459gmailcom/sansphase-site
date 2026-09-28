@@ -21,6 +21,7 @@ function BlogBackground() {
     saturation: 0.42,
     twinkleIntensity: 0.56,
     rotationSpeed: 0.018,
+    eventSource: undefined,
   });
 }
 

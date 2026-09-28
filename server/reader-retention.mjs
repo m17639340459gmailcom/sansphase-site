@@ -1,5 +1,5 @@
 import { readerAudit, removeReaderAccount } from './reader-account-removal.mjs';
-import { registrationLifetimeMs } from './reader-workflow.mjs';
+import { registrationLifetimeMs } from './reader-workflow.ts';
 import { cleanReaderFiles } from './reader-file-cleanup.mjs';
 
 const thirtyDays = 30 * 24 * 60 * 60 * 1000;

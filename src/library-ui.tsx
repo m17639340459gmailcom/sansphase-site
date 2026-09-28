@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import type { ComponentType, KeyboardEvent } from 'react';
 export { socialIcon, socialPlatform, tagTone } from "./blog-details.mjs";
 export { applyCardAppearance } from "./glass-theme.mjs";
 export { mountMobileBlogOrder } from "./mobile-blog-order.mjs";
@@ -74,7 +75,7 @@ const family = {
   image: ImageIcon,
   play: Play, pause: Pause, previous: SkipBack, next: SkipForward, volume: Volume2, muted: VolumeX,
 };
-export const icon = (name, classes = "") =>
+export const icon = (name: keyof typeof family, classes = "") =>
   createElement(family[name], {
     class: `ui-icon ${classes}`,
     "aria-hidden": "true",
@@ -82,12 +83,12 @@ export const icon = (name, classes = "") =>
     "stroke-width": 1.6,
   }).outerHTML;
 export const icons = Object.fromEntries(
-  Object.keys(family).map((name) => [name, icon(name)]),
+  (Object.keys(family) as Array<keyof typeof family>).map((name) => [name, icon(name)]),
 );
 export const arrow = icon("right", "arrow");
 export { toast };
 
-export function mountToaster(container) {
+export function mountToaster(container: Element) {
   const root = createRoot(container);
   flushSync(() =>
     root.render(
@@ -114,11 +115,11 @@ export function mountToaster(container) {
   };
 }
 
-export function createDialog(container) {
+export function createDialog(container: HTMLElement) {
   const dialog = new A11yDialog(container);
   const doc = container.ownerDocument;
-  const priorInert = new Map();
-  const setBackground = (value) => {
+  const priorInert = new Map<HTMLElement, boolean>();
+  const setBackground = (value: boolean) => {
     doc.body.classList.toggle("dialog-open", value);
     for (const id of ["site-header", "home-stage", "main", "site-footer"]) {
       const node = doc.getElementById(id);
@@ -126,7 +127,7 @@ export function createDialog(container) {
         if (value) {
           priorInert.set(node, node.inert);
           node.inert = true;
-        } else if (priorInert.has(node)) node.inert = priorInert.get(node);
+        } else if (priorInert.has(node)) node.inert = priorInert.get(node) ?? false;
       }
     }
     if (!value) priorInert.clear();
@@ -143,8 +144,8 @@ export function createDialog(container) {
   return dialog;
 }
 
-let entrance;
-export function enterPage(element) {
+let entrance: ReturnType<typeof animate> | undefined;
+export function enterPage(element: HTMLElement | null | undefined) {
   entrance?.stop();
   if (!element || matchMedia("(prefers-reduced-motion: reduce)").matches)
     return;
@@ -157,9 +158,16 @@ export function enterPage(element) {
 
 // Small adapters keep the existing content controller while Radix owns focus,
 // keyboard selection and control state. Content and labels are site data.
-export function mountFilters(container, options) {
+type FilterOptions = {
+  value: string;
+  label: string;
+  items: Array<{ value: string; label: string }>;
+  onChange: (value: string) => void;
+};
+
+export function mountFilters(container: Element, options: FilterOptions) {
   const root = createRoot(container);
-  const update = (value = options.value) =>
+  const update = (value: string = options.value) =>
     flushSync(() =>
       root.render(
         <ToggleGroup.Root
@@ -191,11 +199,27 @@ export function mountFilters(container, options) {
 // React Bits GlassSurface is the source of the visual card surface. The
 // existing content renderer can keep its semantic anchors and article markup;
 // this adapter mounts the published component inside each existing card.
-export function mountGlassSurface(container, html, className = "") {
+export function mountGlassSurface(container: Element, html: string, className = "") {
   const root = createRoot(container);
+  // The upstream component explicitly accepts CSS width/height strings.
+  const ResponsiveGlassSurface = GlassSurface as ComponentType<{
+    width: string | number;
+    height: string | number;
+    borderRadius: number;
+    borderWidth: number;
+    brightness: number;
+    opacity: number;
+    blur: number;
+    displace: number;
+    backgroundOpacity: number;
+    saturation: number;
+    distortionScale: number;
+    className: string;
+    children: React.ReactNode;
+  }>;
   flushSync(() =>
     root.render(
-      <GlassSurface
+      <ResponsiveGlassSurface
         width="100%"
         height="auto"
         borderRadius={0}
@@ -213,19 +237,27 @@ export function mountGlassSurface(container, html, className = "") {
           className="blog-third-party-glass-content"
           dangerouslySetInnerHTML={{ __html: html }}
         />
-      </GlassSurface>,
+      </ResponsiveGlassSurface>,
     ),
   );
   return () => root.unmount();
 }
 
-function TimezoneSelect({ value: initialValue, label, onChange, locale='zh-CN' }) {
+type TimezoneChoice = { value: string; label: string };
+type TimezoneSelectProps = {
+  value: string;
+  label: string;
+  onChange: (value: string) => void;
+  locale?: string;
+};
+
+function TimezoneSelect({ value: initialValue, label, onChange, locale='zh-CN' }: TimezoneSelectProps) {
   const [value,setValue]=useState(initialValue),[open,setOpen]=useState(false),[query,setQuery]=useState('');
-  const [cities,setCities]=useState([]),[searching,setSearching]=useState(false),[searchFailed,setSearchFailed]=useState(false),[active,setActive]=useState(0);
-  const trigger=useRef(),panel=useRef(),input=useRef(),wasOpen=useRef(false);
+  const [cities,setCities]=useState<TimezoneChoice[]>([]),[searching,setSearching]=useState(false),[searchFailed,setSearchFailed]=useState(false),[active,setActive]=useState(0);
+  const trigger=useRef<HTMLButtonElement>(null),panel=useRef<HTMLDivElement>(null),input=useRef<HTMLInputElement>(null),wasOpen=useRef(false);
   const zh=locale.startsWith('zh'),autoLabel=zh?'跟随设备时区':'Use device time zone';
   const results=[...(query.trim()?[]:[{value:'auto',label:autoLabel}]),...cities,...filterTimezones(query,locale)].filter((item,index,items)=>items.findIndex(x=>x.value===item.value)===index).slice(0,13);
-  const choose=(next)=>{setValue(next);setOpen(false);setQuery('');onChange(next);trigger.current?.focus();};
+  const choose=(next: string)=>{setValue(next);setOpen(false);setQuery('');onChange(next);trigger.current?.focus();};
   useEffect(()=>{
     setCities([]);setActive(0);setSearchFailed(false);
     if(!open||query.trim().length<2){setSearching(false);return;}
@@ -235,16 +267,17 @@ function TimezoneSelect({ value: initialValue, label, onChange, locale='zh-CN' }
   },[query,locale,open]);
   useEffect(()=>{
     if(!open)return;
+    if (!trigger.current) return;
     const doc=trigger.current.ownerDocument;
-    const surface=trigger.current.closest('.blog-third-party-glass'),previousInert=surface?.inert;
+    const surface=trigger.current.closest<HTMLElement>('.blog-third-party-glass'),previousInert=surface?.inert;
     if(surface)surface.inert=true;
-    const outside=event=>{if(!panel.current?.contains(event.target)&&!trigger.current?.contains(event.target))setOpen(false);};
+    const outside=(event: PointerEvent)=>{if(!panel.current?.contains(event.target as Node)&&!trigger.current?.contains(event.target as Node))setOpen(false);};
     input.current?.focus();doc.addEventListener('pointerdown',outside);
-    return ()=>{doc.removeEventListener('pointerdown',outside);if(surface)surface.inert=previousInert;};
+    return ()=>{doc.removeEventListener('pointerdown',outside);if(surface)surface.inert=previousInert ?? false;};
   },[open]);
   useEffect(()=>{if(wasOpen.current&&!open)trigger.current?.focus({preventScroll:true});wasOpen.current=open;},[open]);
-  useEffect(()=>{if(!open)return;const option=panel.current?.querySelector('#timezone-result-'+active),list=option?.parentElement;if(option&&list){if(option.offsetTop<list.scrollTop)list.scrollTop=option.offsetTop;else if(option.offsetTop+option.offsetHeight>list.scrollTop+list.clientHeight)list.scrollTop=option.offsetTop+option.offsetHeight-list.clientHeight;}},[active,open]);
-  const keydown=event=>{
+  useEffect(()=>{if(!open)return;const option=panel.current?.querySelector<HTMLElement>('#timezone-result-'+active),list=option?.parentElement;if(option&&list){if(option.offsetTop<list.scrollTop)list.scrollTop=option.offsetTop;else if(option.offsetTop+option.offsetHeight>list.scrollTop+list.clientHeight)list.scrollTop=option.offsetTop+option.offsetHeight-list.clientHeight;}},[active,open]);
+  const keydown=(event: KeyboardEvent<HTMLDivElement>)=>{
     if(event.nativeEvent?.isComposing||event.nativeEvent?.keyCode===229)return;
     if(event.key==='Escape'){event.stopPropagation();setOpen(false);trigger.current?.focus();}
     if(event.target===input.current&&(event.key==='ArrowDown'||event.key==='ArrowUp')){event.preventDefault();if(results.length)setActive(i=>(i+(event.key==='ArrowDown'?1:-1)+results.length)%results.length);}
@@ -258,10 +291,10 @@ function TimezoneSelect({ value: initialValue, label, onChange, locale='zh-CN' }
       <input ref={input} className="timezone-search-input" role="combobox" aria-label={zh?'搜索城市或时区':'Search city or time zone'} aria-expanded="true" aria-controls="timezone-results" aria-autocomplete="list" aria-activedescendant={results[active]?'timezone-result-'+active:undefined} value={query} onChange={event=>{setQuery(event.target.value);setCities([]);setActive(0);}} placeholder={zh?'搜索城市、地区或时区…':'Search cities, regions or time zones…'} autoComplete="off" />
       <div id="timezone-results" role="listbox" aria-label={zh?'匹配的时区':'Matching time zones'} className="timezone-search-results">{results.map((item,index)=><button key={item.value} id={'timezone-result-'+index} type="button" role="option" aria-selected={index===active} data-highlighted={index===active?'':undefined} className="timezone-option" tabIndex={-1} onPointerDown={event=>event.preventDefault()} onClick={()=>choose(item.value)} onMouseEnter={()=>setActive(index)}>{item.label}</button>)}</div>
       <p className="timezone-search-status" role="status">{!query?(zh?'输入城市或地区名称，支持中英文搜索。':'Enter a city or an IANA time zone.'):searching?(zh?'正在搜索城市…':'Searching cities…'):searchFailed?(zh?'城市搜索暂不可用，仍可搜索时区名称。':'City search unavailable; time zone names still work.'):results.length===0?(zh?'未找到匹配地区，请尝试其他名称。':'No matching places. Try another name.'):(zh?'时间会按所选地区及夏令时自动计算。':'Local time includes daylight saving where applicable.')}</p>
-    </div>,trigger.current.closest('.blog-date-card')||trigger.current.parentElement)}
+    </div>,trigger.current!.closest('.blog-date-card')||trigger.current!.parentElement!)}
   </>;
 }
-export function mountTimezoneSelect(container, options) {
+export function mountTimezoneSelect(container: Element, options: TimezoneSelectProps) {
   const root = createRoot(container);
   flushSync(() => root.render(<TimezoneSelect {...options} />));
   return () => root.unmount();

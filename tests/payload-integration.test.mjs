@@ -5,7 +5,7 @@ import {pipeline} from 'node:stream/promises';
 import {once} from 'node:events';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
-import {fileHash} from '../server/file-hash.mjs';
+import {fileHash} from '../server/file-hash.ts';
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm, readFile, open } from "node:fs/promises";

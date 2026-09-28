@@ -13,8 +13,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { loginEventsSchema } from '../server/payload/reader-migration.mjs';
 import { createLoginLedger } from '../server/login-ledger.mjs';
 import { createReaderRetention } from '../server/reader-retention.mjs';
-import { createReaderWorkflow, registrationLifetimeMs } from '../server/reader-workflow.mjs';
-import { readerUidsTableSql, readerUidsTriggerSql, createReaderUidStore } from '../server/reader-uids.mjs';
+import { createReaderWorkflow, registrationLifetimeMs } from '../server/reader-workflow.ts';
+import { readerUidsTableSql, readerUidsTriggerSql, createReaderUidStore } from '../server/reader-uids.ts';
 import sharp from 'sharp';
 import { createServer } from 'node:net';
 

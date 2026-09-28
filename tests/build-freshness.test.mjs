@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { verifySite } from "../scripts/verify-site.mjs";
 import { rewriteStaticHtml } from "../scripts/static-package.mjs";
 import { composeSiteStyles } from "../scripts/compose-site-styles.mjs";
+import { transform } from 'esbuild';
 import { loadingIcon } from '../dist/chapter-icons.mjs';
 
 const canonicalFiles = [
@@ -30,12 +31,15 @@ const canonicalFiles = [
   "author.css",
 ];
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
+const typedBrowserModules = new Set(['access-policy.mjs', 'core.mjs', 'image-sources.mjs', 'scene-delivery.mjs']);
 
 test("the single generated site stays synchronized with source and has all referenced assets", async () => {
   for (const file of canonicalFiles) {
     let source = file === "styles.css"
       ? await composeSiteStyles()
-      : await readFile(`src/${file}`);
+      : typedBrowserModules.has(file)
+        ? (await transform(await readFile(`src/${file.slice(0, -'.mjs'.length)}.ts`, 'utf8'), { loader: 'ts', format: 'esm', target: 'es2022' })).code
+        : await readFile(`src/${file}`);
     if(file==='index.html') {
       // The only HTML build substitution is the pinned Lucide boot icon;
       // validate the rest of the template byte for byte as before.
@@ -52,4 +56,16 @@ test("the single generated site stays synchronized with source and has all refer
     assert.equal(digest(await readFile(`dist/${output}`)), digest(await readFile(`src/${source}`)));
   }
   await verifySite("dist");
+});
+
+test('a typed browser module is emitted as runnable JavaScript', async () => {
+  const source = await readFile('src/access-policy.ts', 'utf8');
+  const output = await readFile('dist/access-policy.mjs', 'utf8');
+  assert.ok(source.includes('publicRoute'));
+  assert.ok(!output.includes('export * from'));
+  const { publicRoute, publicKind } = await import('../dist/access-policy.mjs');
+  assert.equal(publicRoute('note'), true);
+  assert.equal(publicRoute('resource-center'), false);
+  assert.equal(publicKind('notes'), true);
+  assert.equal(publicKind('books'), false);
 });

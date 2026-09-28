@@ -1,5 +1,5 @@
 import Plyr from "plyr";
-import { icons } from "./library-ui.jsx";
+import { icons } from "./library-ui.tsx";
 import { staticAssetUrl } from "./scene-delivery.mjs";
 import { createMusicAutoplay } from './music-autoplay.mjs';
 

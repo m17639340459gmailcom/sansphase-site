@@ -7,7 +7,8 @@
   "description": "SANSPHASE personal website with self-hosted Payload and frontend author mode.",
   "scripts": {
     "start": "node scripts/start.mjs",
-    "build": "node scripts/build-site.mjs",
+    "build": "pnpm check:types && node scripts/build-site.mjs",
+    "check:types": "tsc --noEmit",
     "dev": "node scripts/dev.mjs",
     "preview": "node scripts/dev.mjs",
     "test:publishing": "node --test tests/payload-integration.test.mjs",
@@ -22,11 +23,16 @@
   },
   "devDependencies": {
     "@react-three/test-renderer": "9.1.1",
+    "@types/node": "^24.19.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/three": "~0.186.0",
     "draco3d": "1.5.7",
     "esbuild": "0.28.2",
     "jsdom": "30.0.1",
     "postcss": "8.5.28",
-    "prettier": "3.9.6"
+    "prettier": "3.9.6",
+    "typescript": "5.9.3"
   },
   "dependencies": {
     "@fontsource/new-tegomin": "5.3.0",

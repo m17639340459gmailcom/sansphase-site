@@ -35,6 +35,7 @@ export function filterTimezones(query,locale='zh-CN'){
  if(validTimezone(query.trim())&&!result.some(x=>x.value===query.trim()))result.unshift({value:query.trim(),label:timezoneLabel(query.trim(),locale)});
  return result.slice(0,12);
 }
+/** @param {string} query @param {{locale?: string, fetcher?: typeof fetch, signal?: AbortSignal}} [options] */
 export async function searchTimezoneCities(query,{locale='zh-CN',fetcher=fetch,signal}={}){
  if(query.trim().length<2||query.includes('/'))return [];
  const params=new URLSearchParams({name:query.trim(),count:'10',language:locale.startsWith('zh')?'zh':'en',format:'json'});

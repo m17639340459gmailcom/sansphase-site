@@ -1,5 +1,5 @@
 import sanitizeHtml from "sanitize-html";
-import { MAX_BODY_LENGTH } from './content-limits.mjs';
+import { MAX_BODY_LENGTH } from './content-limits.ts';
 import {normalizeBodyLinks} from '../src/body-links.mjs';
 import { normalizeSocialLink } from "../src/social-links.mjs";
 import { richTextAttributes, richTextStyles } from "./rich-text-policy.mjs";
@@ -9,7 +9,7 @@ import {applyContentOrder,validateContentOrder,orderedContentKinds} from './cont
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { uuidPattern, safeLink } from "./content-service.mjs";
-import { clientAddress } from './client-ip.mjs';
+import { clientAddress } from './client-ip.ts';
 const cookieName = "sansphase_author_session";
 const kinds = {
   articles: { collection: "articles" },

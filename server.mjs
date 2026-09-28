@@ -1,4 +1,4 @@
-import {byteRange} from './server/http-range.mjs';
+import {byteRange} from './server/http-range.ts';
 import {publicBootstrap,publicPage,publicPageResponse} from './server/content-delivery.mjs';
 import {publicKind,visibleBootstrap} from './server/reader-access.mjs';
 import {bookManifest,bookPart} from './server/book-delivery.mjs';
