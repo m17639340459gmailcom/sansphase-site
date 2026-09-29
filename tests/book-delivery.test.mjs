@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {bookManifest,bookPart} from '../server/book-delivery.mjs';
-import {publicPage} from '../server/content-delivery.mjs';
+import {bookManifest,bookPart} from '../server/book-delivery.ts';
+import {publicPage} from '../server/content-delivery.ts';
 const body='<section data-book-chapter="chapter-one" data-book-title="第一章"><p data-book-block="paragraph-one">'+ '正文内容'.repeat(8000)+'</p></section><section data-book-chapter="chapter-two" data-book-title="第二章"><p data-book-block="paragraph-two">后续章节</p></section>';
 const item={id:'test-book',recordId:'book-record',title:'一本书',bodyHTML:body};
 test('chapter outline includes headings in unloaded fragments and stable jump anchors',()=>{

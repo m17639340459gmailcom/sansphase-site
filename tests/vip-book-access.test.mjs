@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPreviewServer } from '../server.mjs';
 import { visibleBootstrap } from '../server/reader-access.ts';
-import { publicPage } from '../server/content-delivery.mjs';
+import { publicPage } from '../server/content-delivery.ts';
 import { validateArticle } from '../server/author-service.ts';
 import { createContentService } from '../server/content-service.ts';
 import { migrateVipBooks } from '../server/payload/vip-book-migration.mjs';

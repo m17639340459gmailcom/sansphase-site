@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {publicBootstrap, publicPage} from '../server/content-delivery.mjs';
+import {publicBootstrap, publicPage} from '../server/content-delivery.ts';
 import {createPreviewServer} from '../server.mjs';
 
 const data={source:'cms',profile:{name:'Author'},announcements:[],notes:Array.from({length:1000},(_,i)=>({id:`note-${i}`,title:`Article ${i}`,summary:'Summary',category:i%2?'A':'B',tags:['tag'],bodyHTML:'<p>'+ 'Long article '.repeat(1000)+'</p>',attachments:[],coverSrc:'/api/media/cover'})),works:[],resources:[],software:[],'resource-center':[]};

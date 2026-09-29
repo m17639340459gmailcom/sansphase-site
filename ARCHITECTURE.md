@@ -61,7 +61,7 @@ v0.92 在 library_entries.kind 的已有选项 resources/software 中增加 work
 
 公开内容快照由 server/public-snapshot.mjs 在进程内复用，同时合并同一数据库版本的并发读取。运行时以独立、稳定的只读 SQLite 连接读取 PRAGMA data_version；每次访问均检查版本，Payload 或维护工具提交修改后立即重新构建。构建期间版本变化则重试，读取失败不退回旧权限；未来定时发布时间也是缓存截止时间。替换数据库文件需随运行时重启，不在原连接上热替换。HTTP 身份和作者预览只写入每次请求的独立对象，不能进入共享公开快照。
 
-公开传输由 server/content-delivery.mjs 分离：/api/content?view=bootstrap 返回站点资料与统计；view=list&kind=… 每页固定 12 条摘要，支持 page/category/q（搜索范围为整个栏目）；view=detail&kind=…&id=… 只返回指定公开文章。沿用既有发布顺序、净化和媒体权限；不增加数据库字段。不带 view 的旧接口暂为已打开的旧版本保留兼容，现版访客及作者刷新不使用它。标签和分类控件最多提供前 100 个选项，搜索仍覆盖全部条目。公开 API 沿用 no-store，撤回后重新访问必须复核权限。
+公开传输由 server/content-delivery.ts 分离：/api/content?view=bootstrap 返回站点资料与统计；view=list&kind=… 每页固定 12 条摘要，支持 page/category/q（搜索范围为整个栏目）；view=detail&kind=…&id=… 只返回指定公开文章。沿用既有发布顺序、净化和媒体权限；不增加数据库字段。不带 view 的旧接口暂为已打开的旧版本保留兼容，现版访客及作者刷新不使用它。标签和分类控件最多提供前 100 个选项，搜索仍覆盖全部条目。公开 API 沿用 no-store，撤回后重新访问必须复核权限。
 
 src/content-reader.mjs 取消过期导航请求，15 秒请求失败显示重试，不以空文章替代网络错误；搜索输入合并 200 毫秒内的请求，翻页只更新结果区域。首页不请求文章正文；第一幕准备完成后的内容图片预热最多 6 张，单并发、低优先级，不扫描正文；离开首页或隐藏标签页立即取消，节流网络或省流模式跳过。首页场景素材、模型准备、转场和音乐逻辑保持原有质量与顺序。
 
