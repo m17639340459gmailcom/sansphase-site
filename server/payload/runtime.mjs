@@ -4,7 +4,7 @@ import { getPayload } from "payload";
 import { makePayloadConfig } from "./config.mjs";
 import { createPayloadStore } from "./store.mjs";
 import { createAuthorService } from "../author-service.mjs";
-import { createReaderService } from '../reader-service.mjs';
+import { createReaderService } from '../reader-service.ts';
 import {createReaderAdminService} from '../reader-admin-service.mjs';
 import { createContentService } from "../content-service.mjs";
 import {createPublicationRevision} from './publication-revision.mjs';

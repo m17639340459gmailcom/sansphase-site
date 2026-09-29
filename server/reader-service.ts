@@ -1,4 +1,6 @@
 import { createLocalReq, logoutOperation } from 'payload';
+import type { Payload, TypedUser } from 'payload';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -10,74 +12,94 @@ import { withStreamUpload } from './stream-upload.mjs';
 import { createReaderWorkflow, registrationLifetimeMs } from './reader-workflow.ts';
 import { contactDetailReason } from './reader-profile-policy.ts';
 import { cleanReaderFiles } from './reader-file-cleanup.mjs';
+import type { createReaderUidStore } from './reader-uids.ts';
+
+type ReaderUser = {
+  id: string; collection?: string; email: string; nickname: string; phone?: string | null;
+  signature?: string | null; avatar?: string | null; disabled?: boolean; _verified?: boolean;
+  _verificationToken?: string | null; createdAt: string;
+  vip_until?: string | null; vip_started_at?: string | null;
+};
+type ReaderBody = Record<string, unknown>;
+type AuthorLogin = { loginCredentials: (res: ServerResponse, credentials: { email: string; password: unknown }, req: IncomingMessage) => Promise<Record<string, unknown>> };
+type LoginLedger = { record: (entry: { actorType: 'reader'; actorId: string; email: string; address: ReturnType<typeof clientAddress>; userAgent: string | undefined }) => unknown };
+type ReaderServiceOptions = {
+  payload: Payload; siteOrigin: string; directory: string; emailReady?: boolean;
+  authorService?: AuthorLogin; loginLedger?: LoginLedger;
+  uidStore: ReturnType<typeof createReaderUidStore>;
+  workflow?: ReturnType<typeof createReaderWorkflow>;
+};
+type ServiceError = Error & { status: number };
+const errorStatus = (error: unknown): number | undefined => error && typeof error === 'object' && 'status' in error && typeof error.status === 'number' ? error.status : undefined;
+const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
 const cookieName = 'sansphase_reader_session';
-const fail = (message, status = 400) => Object.assign(new Error(message), { status });
+const fail = (message: string, status = 400): ServiceError => Object.assign(new Error(message), { status });
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const nicknamePattern = /^[^\u0000-\u001f\u007f<>]{2,30}$/u;
 const phonePattern = /^1[3-9]\d{9}$/;
 
-export function createReaderService({ payload, siteOrigin, directory, emailReady = false, authorService, loginLedger, uidStore, workflow = createReaderWorkflow(directory, payload.config.secret) }) {
+export function createReaderService({ payload, siteOrigin, directory, emailReady = false, authorService, loginLedger, uidStore, workflow = createReaderWorkflow(directory, payload.config.secret) }: ReaderServiceOptions) {
   if (!payload || !siteOrigin || !directory || !uidStore) throw Error('Reader service requires Payload, site origin, private storage and UID store.');
-  const attempts = new Map();
+  const attempts = new Map<string, { count: number; until: number }>();
   const avatarDir = resolve(directory, 'uploads');
-  const avatarPath = id => resolve(avatarDir, `reader-avatar-${id}.webp`);
-  const pendingAvatarPath = id => resolve(avatarDir, `pending-reader-avatar-${id}.webp`);
+  const avatarPath = (id: string) => resolve(avatarDir, `reader-avatar-${id}.webp`);
+  const pendingAvatarPath = (id: string) => resolve(avatarDir, `pending-reader-avatar-${id}.webp`);
   const avatarLimits = { maxFileBytes: 4 * 1024 ** 2, maxImageBytes: 4 * 1024 ** 2, maxAudioBytes: 0 };
-  const avatarFormats = { 'image/jpeg': 'jpeg', 'image/png': 'png', 'image/webp': 'webp' };
-  let avatarQueue = Promise.resolve();
-  let verificationQueue = Promise.resolve();
-  const serializeVerification = operation => {
+  const avatarFormats: Record<string, string> = { 'image/jpeg': 'jpeg', 'image/png': 'png', 'image/webp': 'webp' };
+  let avatarQueue: Promise<unknown> = Promise.resolve();
+  let verificationQueue: Promise<unknown> = Promise.resolve();
+  const serializeVerification = <T>(operation: () => Promise<T>): Promise<T> => {
     const next = verificationQueue.then(operation);
     verificationQueue = next.catch(() => {});
     return next;
   };
-  const serializeAvatar = operation => {
+  const serializeAvatar = <T>(operation: () => Promise<T>): Promise<T> => {
     const next = avatarQueue.then(operation);
     avatarQueue = next.catch(() => {});
     return next;
   };
-  const session = req => req.headers.cookie?.split(';').map(value => value.trim())
+  const session = (req: IncomingMessage) => req.headers.cookie?.split(';').map(value => value.trim())
     .find(value => value.startsWith(cookieName + '='))?.slice(cookieName.length + 1) || '';
-  const cookie = token => `${cookieName}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${token ? 7 * 86400 : 0}${siteOrigin.startsWith('https:') ? '; Secure' : ''}`;
-  const client = req => clientAddress(req).ip || 'unknown';
-  const throttle = (key, limit, windowMs) => {
+  const cookie = (token: string) => `${cookieName}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${token ? 7 * 86400 : 0}${siteOrigin.startsWith('https:') ? '; Secure' : ''}`;
+  const client = (req: IncomingMessage) => clientAddress(req).ip || 'unknown';
+  const throttle = (key: string, limit: number, windowMs: number) => {
     const now = Date.now();
     if (attempts.size > 10000) for (const [name, state] of attempts) if (state.until <= now) attempts.delete(name);
     const state = attempts.get(key);
     if (!state || state.until <= now) { attempts.set(key, { count: 1, until: now + windowMs }); return; }
     if (++state.count > limit) throw fail('尝试过于频繁，请稍后再试。', 429);
   };
-  const origin = req => {
+  const origin = (req: IncomingMessage) => {
     if (req.headers.origin !== siteOrigin || req.headers['x-reader-request'] !== '1')
       throw fail('请求来源验证失败，请从本站操作。', 403);
   };
-  const json = async req => {
+  const json = async (req: IncomingMessage): Promise<ReaderBody> => {
     if (Number(req.headers['content-length']) > 16384) throw fail('请求内容过大。', 413);
-    let size = 0; const chunks = [];
+    let size = 0; const chunks: Buffer[] = [];
     for await (const chunk of req) { size += chunk.length; if (size > 16384) throw fail('请求内容过大。', 413); chunks.push(chunk); }
-    try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw fail('请求格式无效。'); }
+    try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) as ReaderBody; } catch { throw fail('请求格式无效。'); }
   };
-  const cleanEmail = value => {
+  const cleanEmail = (value: unknown) => {
     const email = String(value || '').trim().toLowerCase();
     if (email.length > 254 || !emailPattern.test(email)) throw fail('请填写有效的邮箱地址。');
     return email;
   };
-  const password = value => {
+  const password = (value: unknown) => {
     if (typeof value !== 'string' || value.length < 8 || value.length > 128) throw fail('密码需为 8 至 128 个字符。');
     return value;
   };
-  const nickname = value => {
+  const nickname = (value: unknown) => {
     const name = String(value || '').trim();
     if (!nicknamePattern.test(name)) throw fail('昵称需为 2 至 30 个可见字符。');
     return name;
   };
-  const phone = value => {
+  const phone = (value: unknown) => {
     const number = String(value || '').trim();
     if (!phonePattern.test(number)) throw fail('请输入正确的手机号：仅支持 1 开头的 11 位中国大陆手机号。');
     return number;
   };
-  const signature = value => {
+  const signature = (value: unknown) => {
     if (typeof value !== 'string') throw fail('请填写有效的个性签名。');
     const text = value.trim();
     if (text.length > 100 || /[\u0000-\u001f\u007f]/u.test(text)) throw fail('个性签名限 100 字，且不能换行。');
@@ -85,60 +107,62 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
     if (contact) throw fail(contact);
     return text;
   };
-  const dto = user => user && ({ id: user.id, uid: uidStore.get(user.id), nickname: user.nickname, email: user.email, phone: user.phone || '', signature: user.signature || '', avatar: uuidPattern.test(user.avatar || '') ? `/api/reader/avatar/${user.avatar}.webp` : null,
+  const dto = (user: ReaderUser | null) => user && ({ id: user.id, uid: uidStore.get(user.id), nickname: user.nickname, email: user.email, phone: user.phone || '', signature: user.signature || '', avatar: uuidPattern.test(user.avatar || '') ? `/api/reader/avatar/${user.avatar}.webp` : null,
     pendingSignature: workflow.profileFor(user.id, 'signature')?.proposed_value ?? null,
     pendingAvatar: Boolean(workflow.profileFor(user.id, 'avatar')),
     role: 'reader', ...membershipState(user) });
-  async function authenticated(req) {
+  async function authenticated(req: IncomingMessage): Promise<ReaderUser | null> {
     const token = session(req);
     if (!token) return null;
     try {
       const { user } = await payload.auth({ headers: new Headers({ Authorization: `JWT ${token}` }) });
-      return user?.collection === 'readers' && user._verified === true && !user.disabled ? user : null;
+      return user?.collection === 'readers' && user._verified === true && !user.disabled ? user as ReaderUser : null;
     } catch { return null; }
   }
-  async function findEmail(email, showHiddenFields = false) {
+  async function findEmail(email: string, showHiddenFields = false): Promise<ReaderUser | null> {
     const result = await payload.find({ collection: 'readers', where: { email: { equals: email } }, limit: 1, depth: 0, showHiddenFields });
-    return result.docs[0] || null;
+    return result.docs[0] as ReaderUser | undefined || null;
   }
-  async function ownerEmail(email) {
+  async function ownerEmail(email: string) {
     if (!authorService?.loginCredentials) return false;
     const result = await payload.find({ collection: 'authors', where: { email: { equals: email } }, limit: 1, depth: 0 });
     return result.docs.some(row => row.role === 'owner');
   }
-  const send = (res, body, status = 200) => {
+  const send = (res: ServerResponse, body: unknown, status = 200) => {
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify(body));
   };
-  const sendVerification = async (email, token) => {
+  // Payload's generic types do not know this site's readers collection fields.
+  const localReq = (user: object) => createLocalReq({ user: user as TypedUser }, payload);
+  const sendVerification = async (email: string, token: string) => {
     const link = `${siteOrigin}/#/verify/${encodeURIComponent(token)}`;
     await payload.sendEmail({ to: email, subject: '验证你的 SANSPHASE 账号',
       html: `<p>请在 5 分钟内验证邮箱并启用账号：</p><p><a href="${link}">验证邮箱</a></p><p>如果不是你注册的账号，可以忽略这封邮件。</p>` });
   };
-  const expireRegistration = request => {
+  const expireRegistration = (request: { id: string; expiresAt: string }) => {
     const delay = Math.max(0, Date.parse(request.expiresAt) - Date.now());
     const timer = setTimeout(() => {
       try { workflow.removeRegistration(request.id); }
-      catch (error) { process.stderr.write(JSON.stringify({ event: 'registration-expiry-error', message: error.message, at: new Date().toISOString() }) + '\n'); }
+      catch (error) { process.stderr.write(JSON.stringify({ event: 'registration-expiry-error', message: errorMessage(error), at: new Date().toISOString() }) + '\n'); }
     }, delay);
     timer.unref();
   };
-  const legacyExpired = row => row && row._verified !== true && Date.now() - Date.parse(row.createdAt) >= registrationLifetimeMs;
+  const legacyExpired = (row: ReaderUser | null) => row && row._verified !== true && Date.now() - Date.parse(row.createdAt) >= registrationLifetimeMs;
   return {
     registrationEnabled: Boolean(emailReady),
-    identity: async req => dto(await authenticated(req)),
-    async handle(req, res) {
-      const path = new URL(req.url, siteOrigin).pathname.slice('/api/reader/'.length);
+    identity: async (req: IncomingMessage) => dto(await authenticated(req)),
+    async handle(req: IncomingMessage, res: ServerResponse) {
+      const path = new URL(req.url || '', siteOrigin).pathname.slice('/api/reader/'.length);
       try {
         if (path === 'session' && req.method === 'GET') { send(res, dto(await authenticated(req))); return; }
-        if (path.startsWith('avatar/') && ['GET', 'HEAD'].includes(req.method)) {
+        if (path.startsWith('avatar/') && ['GET', 'HEAD'].includes(req.method || '')) {
           const id = path.slice('avatar/'.length).replace(/\.webp$/, '');
           const user = await authenticated(req);
           if (!user) throw fail('请先登录。', 401);
           if (!uuidPattern.test(id) || user.avatar !== id || !path.endsWith('.webp')) throw fail('头像不存在。', 404);
           let image;
           try { image = await readFile(avatarPath(id)); }
-          catch (error) { if (error.code === 'ENOENT') throw fail('头像不存在。', 404); throw error; }
+          catch (error) { if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') throw fail('头像不存在。', 404); throw error; }
           res.writeHead(200, { 'Content-Type': 'image/webp', 'Content-Length': image.length, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' });
           res.end(req.method === 'HEAD' ? undefined : image); return;
         }
@@ -148,7 +172,7 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
           const user = await authenticated(req);
           if (!user) throw fail('请先登录。', 401);
           if (!String(req.headers['content-type'] || '').startsWith('multipart/form-data;')) throw fail('请选择图片文件。', 415);
-          const result = await withStreamUpload(req, directory, async file => {
+          const result = await withStreamUpload(req, directory, async (file: { mimetype: string; tempFilePath: string }) => {
             if (!avatarFormats[file.mimetype]) throw fail('头像只支持 JPG、PNG 或 WebP 图片。', 415);
             let image;
             try {
@@ -157,7 +181,7 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
               if (metadata.format !== avatarFormats[file.mimetype] || !metadata.width || !metadata.height || metadata.width < 64 || metadata.height < 64)
                 throw fail('请选择至少 64 × 64 像素的有效图片。');
               image = await source.rotate().resize(320, 320, { fit: 'cover', position: 'centre', withoutEnlargement: false }).webp({ quality: 82, effort: 4 }).toBuffer();
-            } catch (error) { if (error.status) throw error; throw fail('图片无法读取，请换一张 JPG、PNG 或 WebP 图片。'); }
+            } catch (error) { if (errorStatus(error)) throw error; throw fail('图片无法读取，请换一张 JPG、PNG 或 WebP 图片。'); }
             return serializeAvatar(async () => {
               const current = await authenticated(req);
               if (!current || current.id !== user.id) throw fail('请重新登录后上传。', 401);
@@ -165,7 +189,7 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
               await mkdir(avatarDir, { recursive: true });
               await writeFile(path, image, { flag: 'wx', mode: 0o600 });
               let previous;
-              try { ({ previous } = workflow.putProfile(current.id, 'avatar', id)); }
+              try { ({ previous } = workflow.putProfile(String(current.id), 'avatar', id)); }
               catch (error) { await unlink(path).catch(() => {}); throw error; }
               if (previous && uuidPattern.test(previous.proposed_value)) {
                 workflow.queueFile(`pending-reader-avatar-${previous.proposed_value}.webp`, 'superseded-pending-avatar');
@@ -184,7 +208,7 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
           const email = cleanEmail(body.email), name = nickname(body.nickname), number = phone(body.phone), pass = password(body.password);
           throttle(`register-email:${email}`, 3, 3600000);
           const existing = await findEmail(email);
-          if (legacyExpired(existing)) await payload.delete({ collection: 'readers', id: existing.id });
+          if (existing && legacyExpired(existing)) await payload.delete({ collection: 'readers', id: existing.id });
           if ((!existing || legacyExpired(existing)) && !await ownerEmail(email)) {
             const pending = workflow.putRegistration({ email, nickname: name, phone: number, password: pass });
             try { await sendVerification(email, pending.token); }
@@ -211,8 +235,9 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
               return;
             }
             const match = await payload.find({ collection: 'readers', where: { _verificationToken: { equals: token } }, limit: 1, depth: 0 });
-            if (!match.docs[0] || match.docs[0]._verified === true || legacyExpired(match.docs[0])) throw fail('验证链接无效或已过期，请重新注册。');
-            uidStore.assignRandom(match.docs[0].id);
+            const legacy = match.docs[0] as ReaderUser | undefined;
+            if (!legacy || legacy._verified === true || legacyExpired(legacy)) throw fail('验证链接无效或已过期，请重新注册。');
+            uidStore.assignRandom(legacy.id);
             try { await payload.verifyEmail({ collection: 'readers', token }); }
             catch { throw fail('验证链接无效或已过期。'); }
           });
@@ -224,8 +249,8 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
           const email = cleanEmail(body.email);
           throttle(`resend-email:${email}`, 3, 3600000);
           const user = await findEmail(email, true);
-          if (!user && workflow.registrationByEmail(email)) {
-            const pending = workflow.registrationByEmail(email);
+          const pending = workflow.registrationByEmail(email);
+          if (!user && pending) {
             const renewed = workflow.putRegistration(pending);
             try { await sendVerification(email, renewed.token); }
             catch (error) { workflow.removeRegistration(renewed.id); throw error; }
@@ -241,32 +266,35 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
           const email = cleanEmail(body.email);
           if (await ownerEmail(email)) {
             try {
+              if (!authorService) throw fail('作者登录暂不可用。', 503);
               const identity = await authorService.loginCredentials(res, { email, password: body.password }, req);
               send(res, { ...identity, role: 'owner' });
-            } catch (error) { if (error.status === 503) throw error; throw fail('邮箱或密码不正确，或账号尚未验证。', 401); }
+            } catch (error) { if (errorStatus(error) === 503) throw error; throw fail('邮箱或密码不正确，或账号尚未验证。', 401); }
             return;
           }
           let result;
           try { result = await payload.login({ collection: 'readers', data: { email, password: String(body.password || '') } }); }
           catch { throw fail('邮箱或密码不正确，或账号尚未验证。', 401); }
-          if (result.user?.disabled || result.user?._verified !== true) {
-            await logoutOperation({ collection: payload.collections.readers, req: await createLocalReq({ user: result.user }, payload) });
+          if (!result.user) throw fail('登录会话暂不可用，请重试。', 503);
+          if (result.user.disabled || result.user._verified !== true) {
+            await logoutOperation({ collection: payload.collections.readers, req: await localReq(result.user) });
             throw fail('账号无法登录。', 403);
           }
           if (loginLedger) {
-            try { loginLedger.record({ actorType: 'reader', actorId: result.user.id, email, address: clientAddress(req), userAgent: req.headers['user-agent'] }); }
+            try { loginLedger.record({ actorType: 'reader', actorId: String(result.user.id), email, address: clientAddress(req), userAgent: req.headers['user-agent'] }); }
             catch (error) {
-              await logoutOperation({ collection: payload.collections.readers, req: await createLocalReq({ user: result.user }, payload) });
+              await logoutOperation({ collection: payload.collections.readers, req: await localReq(result.user) });
               throw error;
             }
           }
-          const identity = dto(result.user);
+          if (!result.token) throw fail('登录会话暂不可用，请重试。', 503);
+          const identity = dto(result.user as ReaderUser);
           res.setHeader('Set-Cookie', cookie(result.token));
           send(res, identity); return;
         }
         if (path === 'logout') {
           const user = await authenticated(req);
-          if (user) await logoutOperation({ collection: payload.collections.readers, req: await createLocalReq({ user }, payload) });
+          if (user) await logoutOperation({ collection: payload.collections.readers, req: await localReq(user) });
           res.setHeader('Set-Cookie', cookie(''));
           send(res, { ok: true }); return;
         }
@@ -286,12 +314,14 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
           if (token.length < 20 || token.length > 256) throw fail('重置链接无效或已过期。');
           const newPassword = password(body.password);
           let result;
-          try { result = await payload.resetPassword({ collection: 'readers', data: { token, password: newPassword } }); }
+          // Keep the existing Local API call shape; the generic type requires an
+          // overrideAccess field that was not part of this service's runtime call.
+          try { result = await payload.resetPassword({ collection: 'readers', data: { token, password: newPassword } } as Parameters<Payload['resetPassword']>[0]); }
           catch { throw fail('重置链接无效或已过期。'); }
           // Payload issues a new session on reset but retains old sessions.
           // Revoke all of them so a stolen cookie cannot outlive recovery.
           await logoutOperation({ collection: payload.collections.readers,
-            req: await createLocalReq({ user: result.user }, payload), allSessions: true });
+            req: await localReq(result.user), allSessions: true });
           send(res, { message: '密码已更新，请重新登录。' }); return;
         }
         if (path === 'profile') {
@@ -304,7 +334,7 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
             const previous = workflow.profileFor(user.id, 'signature');
             if (previous) workflow.removeProfile(previous.id);
           }
-          send(res, { ...dto(updated), reviewPending: proposed !== null && proposed !== (user.signature || '') }); return;
+          send(res, { ...dto(updated as ReaderUser), reviewPending: proposed !== null && proposed !== (user.signature || '') }); return;
         }
         if (path === 'avatar/remove') {
           const updated = await serializeAvatar(async () => {
@@ -324,11 +354,11 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
             await cleanReaderFiles({ workflow, payload, directory });
             return result;
           });
-          send(res, dto(updated)); return;
+          send(res, dto(updated as ReaderUser)); return;
         }
         throw fail('不存在的操作。', 404);
       } catch (error) {
-        send(res, { error: error.status ? error.message : '服务暂时不可用，请稍后重试。' }, error.status || 503);
+        send(res, { error: errorStatus(error) ? errorMessage(error) : '服务暂时不可用，请稍后重试。' }, errorStatus(error) || 503);
       }
     },
   };

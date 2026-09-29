@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { getPayload } from 'payload';
 import { makePayloadConfig } from '../server/payload/config.mjs';
-import { createReaderService } from '../server/reader-service.mjs';
+import { createReaderService } from '../server/reader-service.ts';
 import { createReaderAdminService } from '../server/reader-admin-service.mjs';
 import { createPreviewServer } from '../server.mjs';
 import { DatabaseSync } from 'node:sqlite';
