@@ -7,7 +7,7 @@ import { resolve } from 'node:path';
 import sharp from 'sharp';
 import { clientAddress } from './client-ip.ts';
 import { membershipState } from './reader-membership.ts';
-import { uuidPattern } from './content-service.mjs';
+import { uuidPattern } from './content-service.ts';
 import { withStreamUpload } from './stream-upload.mjs';
 import { createReaderWorkflow, registrationLifetimeMs } from './reader-workflow.ts';
 import { contactDetailReason } from './reader-profile-policy.ts';

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createContentService } from '../server/content-service.mjs';
+import { createContentService } from '../server/content-service.ts';
 import { createPreviewServer } from '../server.mjs';
 
 const shared = '11111111-1111-4111-8111-111111111111';

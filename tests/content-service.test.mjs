@@ -5,7 +5,7 @@ import {
   cleanBody,
   serializeContent,
   isPublished,
-} from "../server/content-service.mjs";
+} from "../server/content-service.ts";
 import { createPreviewServer } from "../server.mjs";
 const publishedId = "11111111-1111-4111-8111-111111111111";
 const draftId = "22222222-2222-4222-8222-222222222222";

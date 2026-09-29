@@ -9,8 +9,8 @@
 | public/ | 固定公开素材 |
 | dist/ | 唯一干净构建产物，禁止手改 |
 | server.mjs | 公开 HTTP 路由、安全响应、首次 HTML 数据 |
-| server/author-service.mjs | 作者操作验证、编辑稿／公开稿语义 |
-| server/content-service.mjs | 公开字段白名单、富文本清理、媒体引用授权 |
+| server/author-service.ts | 作者操作验证、编辑稿／公开稿语义 |
+| server/content-service.ts | 公开字段白名单、富文本清理、媒体引用授权 |
 | server/payload/config.mjs | Payload 数据集合、认证、访问权限与版本记录 |
 | server/payload/store.mjs | Payload Local API 存储适配 |
 | server/payload/runtime.mjs | 读取私有配置、启动和关闭 Payload |
@@ -33,7 +33,7 @@ app.mjs 管路由和访客交互；mobile-blog-order.mjs 管博客卡片在手�
 
 ## 后端边界
 
-Payload 使用官方 Local API 直接嵌入网站进程，SQLite 存储 UUID 主键。没有启用 Payload 自带的 Next.js 管理面板。作者内容管理使用前台作者台；读者账号、会员及审核由独立的后台界面和 `server/reader-admin-service.mjs` 管理。`cms:account` 仅用于受本机权限保护的作者账号维护，不能将其理解为全部用户管理入口。后台与网站属于同一应用，尚未独立部署。
+Payload 使用官方 Local API 直接嵌入网站进程，SQLite 存储 UUID 主键。没有启用 Payload 自带的 Next.js 管理面板。作者内容管理使用前台作者台；读者账号、会员及审核由独立的后台界面和 `server/reader-admin-service.ts` 管理。`cms:account` 仅用于受本机权限保护的作者账号维护，不能将其理解为全部用户管理入口。后台与网站属于同一应用，尚未独立部署。
 
 作者登录使用 Payload 认证与会话。只有配置中的 authorId 且属于 authors/owner 的账户获得作者权限。常规作者读写明确传入 `overrideAccess:false` 和验证后的用户。匿名不能直接访问集合；公开读取只运行固定服务端查询，不能传入任意查询条件。社区用户不会自动获得作者权限。
 

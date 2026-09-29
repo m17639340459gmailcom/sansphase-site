@@ -4,7 +4,7 @@ import { socialPlatform, tagTone } from '../src/blog-details.mjs';
 import {normalizeSocialLink} from '../src/social-links.mjs';
 import { cleanMusic, cleanAppearance } from '../server/profile-settings.mjs';
 import { validateArticle } from '../server/author-service.ts';
-import { cleanBody } from '../server/content-service.mjs';
+import { cleanBody } from '../server/content-service.ts';
 test('social identification uses actual hostname and rejects impersonation', () => {
   assert.equal(socialPlatform('https://v.douyin.com/E061MSnp8oM/').name, '抖音');
   assert.equal(socialPlatform('https://www.douyin.com/user/test').name, '抖音');

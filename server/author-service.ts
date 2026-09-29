@@ -8,7 +8,7 @@ import { backgroundLibrary, changeBackground } from "./background-library.mjs";
 import {applyContentOrder,validateContentOrder,orderedContentKinds} from './content-order.mjs';
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
-import { uuidPattern, safeLink } from "./content-service.mjs";
+import { uuidPattern, safeLink } from "./content-service.ts";
 import { clientAddress } from './client-ip.ts';
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http';
 import type { createPayloadStore } from './payload/store.mjs';

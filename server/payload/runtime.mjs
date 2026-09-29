@@ -6,7 +6,7 @@ import { createPayloadStore } from "./store.mjs";
 import { createAuthorService } from "../author-service.ts";
 import { createReaderService } from '../reader-service.ts';
 import {createReaderAdminService} from '../reader-admin-service.ts';
-import { createContentService } from "../content-service.mjs";
+import { createContentService } from "../content-service.ts";
 import {createPublicationRevision} from './publication-revision.mjs';
 import { smtpConfigured } from './smtp-settings.ts';
 import { createLoginLedger } from '../login-ledger.ts';

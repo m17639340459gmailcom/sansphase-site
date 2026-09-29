@@ -1,6 +1,6 @@
 import { appendFile, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { uuidPattern } from './content-service.mjs';
+import { uuidPattern } from './content-service.ts';
 import { cleanReaderFiles } from './reader-file-cleanup.ts';
 import type { createReaderWorkflow } from './reader-workflow.ts';
 import type { CleanupPayload } from './reader-file-cleanup.ts';

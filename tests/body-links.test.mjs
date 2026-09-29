@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
 import {normalizeBodyLinks} from '../src/body-links.mjs';
 import {validateArticle} from '../server/author-service.ts';
-import {cleanBody} from '../server/content-service.mjs';
+import {cleanBody} from '../server/content-service.ts';
 
 test('body URLs become links without altering labels, punctuation, existing links or code',()=>{
   const input='<p>官网：https://example.com/download?a=1&amp;b=2。另见 www.example.org。</p><p><a href="https://example.com/docs"><span style="color:#afe5d7;font-family:Georgia">官方文档</span></a></p><pre><code>https://example.com/code</code></pre><p><code>https://example.com/inline</code></p>';

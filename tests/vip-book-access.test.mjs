@@ -4,7 +4,7 @@ import { createPreviewServer } from '../server.mjs';
 import { visibleBootstrap } from '../server/reader-access.ts';
 import { publicPage } from '../server/content-delivery.mjs';
 import { validateArticle } from '../server/author-service.ts';
-import { createContentService } from '../server/content-service.mjs';
+import { createContentService } from '../server/content-service.ts';
 import { migrateVipBooks } from '../server/payload/vip-book-migration.mjs';
 import {DatabaseSync} from 'node:sqlite';
 import {mkdtemp,rm,access} from 'node:fs/promises';

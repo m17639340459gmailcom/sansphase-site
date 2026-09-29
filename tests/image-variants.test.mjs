@@ -7,7 +7,7 @@ import {randomUUID, createHash} from 'node:crypto';
 import sharp from 'sharp';
 import {createImageVariants} from '../server/image-variants.mjs';
 import {createPayloadStore} from '../server/payload/store.mjs';
-import {createContentService} from '../server/content-service.mjs';
+import {createContentService} from '../server/content-service.ts';
 import {createPreviewServer} from '../server.mjs';
 import {imageSources} from '../src/image-sources.mjs';
 sharp.cache({files:0});

@@ -6,6 +6,27 @@ import { normalizeSocialLink } from "../src/social-links.mjs";
 import { richTextAttributes, richTextStyles } from "./rich-text-policy.mjs";
 import { cleanMusic, cleanAppearance } from "./profile-settings.mjs";
 import {createPublicSnapshotCache} from './public-snapshot.mjs';
+import type { createPayloadStore } from './payload/store.mjs';
+
+type ImageSize = { width?: number; height?: number };
+type MediaFile = { id: string; title?: string; filename_download?: string; filesize?: number };
+type ContentRow = {
+  id: string; slug: string; status: string; kind?: string; title?: string; summary?: string;
+  category?: string; tags?: unknown[]; body?: string; cover?: string; showcase_cover?: string;
+  image?: string; link?: string; published_at?: string | null; date_created?: string;
+  vip_only?: boolean; imageDimensions?: Record<string, ImageSize>;
+  attachments?: Array<{ directus_files_id: MediaFile | null }>;
+  file?: MediaFile | null; external_url?: string;
+};
+type ProfileRow = { name?: string; signature?: string; bio?: string; avatar?: string; background?: string;
+  music_settings?: Parameters<typeof cleanMusic>[0]; appearance?: Parameters<typeof cleanAppearance>[0];
+  social_links?: Array<{ label?: string; url?: string }>;
+  content_order?: Record<string, string[]> };
+type PublicRows = [ContentRow[], ProfileRow | null, ContentRow[], ContentRow[], number?];
+type ContentStore = Pick<ReturnType<typeof createPayloadStore>, 'publicData' | 'preview' | 'readMedia'>;
+type ContentOptions = { url: string; token?: string; fetcher?: typeof fetch; store?: ContentStore; revision?: () => unknown };
+type LibraryKind = 'works' | 'resources' | 'software' | 'resource-center';
+type MediaOptions = { previewId?: string; cookie?: string; download?: boolean; range?: string; width?: number; presentation?: boolean; member?: boolean; vip?: boolean };
 export const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const articleFields =
@@ -21,18 +42,18 @@ const publishedFilter = {
     },
   ],
 };
-export const isPublished = (row, now = Date.now()) =>
+export const isPublished = (row: Pick<ContentRow, 'status' | 'published_at'>, now = Date.now()) =>
   row.status === "published" &&
   (!row.published_at || Date.parse(row.published_at) <= now);
-export function safeLink(value) {
+export function safeLink(value: unknown) {
   try {
-    const url = new URL(value);
+    const url = new URL(String(value));
     return ["http:", "https:"].includes(url.protocol) ? url.href : "";
   } catch {
     return "";
   }
 }
-export function cleanBody(body, origin, media, preview = "", dimensions = {}) {
+export function cleanBody(body: unknown, origin: string, media: Set<string>, preview = "", dimensions: Record<string, ImageSize> = {}) {
   return sanitizeHtml(normalizeBodyLinks(body), {
     allowedTags: [...sanitizeHtml.defaults.allowedTags, "img"],
     allowedAttributes: {
@@ -90,16 +111,16 @@ export function cleanBody(body, origin, media, preview = "", dimensions = {}) {
     },
   });
 }
-export function serializeContent(content) {
+export function serializeContent(content: object) {
   return JSON.stringify(content)
     .replaceAll("<", "\\u003c")
     .replaceAll("\u2028", "\\u2028")
     .replaceAll("\u2029", "\\u2029");
 }
-export function createContentService({ url, token, fetcher = fetch, store, revision }) {
+export function createContentService({ url, token, fetcher = fetch, store, revision }: ContentOptions) {
   const origin = new URL(url).origin;
-  const request = async (path, { cookie, raw = false } = {}) => {
-    const headers =
+  const request = async <T = unknown>(path: string, { cookie, raw = false }: { cookie?: string; raw?: boolean } = {}): Promise<T> => {
+    const headers: Record<string, string> =
       cookie === undefined
         ? { Authorization: `Bearer ${token}` }
         : { Cookie: cookie };
@@ -112,17 +133,17 @@ export function createContentService({ url, token, fetcher = fetch, store, revis
       throw Object.assign(new Error("Content service unavailable"), {
         status: response.status,
       });
-    return raw ? response : (await response.json()).data;
+    return (raw ? response : (await response.json()).data) as T;
   };
-  const mediaPath = (id, media, preview = "", width = 0) => {
-    if (!uuidPattern.test(id || "")) return "";
+  const mediaPath = (id: string | null | undefined, media: Set<string>, preview = "", width = 0) => {
+    if (!id || !uuidPattern.test(id)) return "";
     media.add(id);
     const params = new URLSearchParams();
     if (preview) params.set('preview', preview);
-    if (width) params.set('w', width);
+    if (width) params.set('w', String(width));
     return `/api/media/${id}${params.size ? `?${params}` : ''}`;
   };
-  const note = (row, media, preview = "") => ({
+  const note = (row: ContentRow, media: Set<string>, preview = "") => ({
     id: row.slug,
     recordId: row.id,
     title: row.title || "",
@@ -134,12 +155,12 @@ export function createContentService({ url, token, fetcher = fetch, store, revis
       : [],
     date: row.published_at || row.date_created,
     coverSrc: uuidPattern.test(row.cover || '') ? mediaPath(row.cover, media, preview, 960) + '&view=content' : '',
-    ...(['works','resources'].includes(row.kind) && uuidPattern.test(row.showcase_cover || '') ? {
+    ...(['works','resources'].includes(row.kind || '') && uuidPattern.test(row.showcase_cover || '') ? {
       showcaseSrc: mediaPath(row.showcase_cover, media, preview, 1280) + '&view=content',
-      showcaseWidth: row.imageDimensions?.[row.showcase_cover]?.width,
-      showcaseHeight: row.imageDimensions?.[row.showcase_cover]?.height,
+      showcaseWidth: row.showcase_cover ? row.imageDimensions?.[row.showcase_cover]?.width : undefined,
+      showcaseHeight: row.showcase_cover ? row.imageDimensions?.[row.showcase_cover]?.height : undefined,
     } : {}),
-    ...(row.imageDimensions?.[row.cover] ? {coverWidth:row.imageDimensions[row.cover].width,coverHeight:row.imageDimensions[row.cover].height} : {}),
+    ...(row.cover && row.imageDimensions?.[row.cover] ? {coverWidth:row.imageDimensions[row.cover].width,coverHeight:row.imageDimensions[row.cover].height} : {}),
     bodyHTML: cleanBody(row.body, origin, media, preview,row.imageDimensions),
     attachments: (row.attachments || []).flatMap(
       ({ directus_files_id: file }) =>
@@ -157,10 +178,10 @@ export function createContentService({ url, token, fetcher = fetch, store, revis
     ),
   });
   async function buildSnapshot() {
-    const [articles, profile, announcements, library, nextPublicationAt] = store
+    const [articles, profile, announcements, library, nextPublicationAt] = (store
       ? await store.publicData()
       : await Promise.all([
-          request(
+          request<ContentRow[]>(
             "/items/articles?" +
               new URLSearchParams({
                 fields: articleFields,
@@ -169,10 +190,10 @@ export function createContentService({ url, token, fetcher = fetch, store, revis
                 limit: "-1",
               }),
           ),
-          request(
+          request<ProfileRow | null>(
             "/items/site_profile?fields=name,signature,bio,avatar,background,social_links,music_settings,appearance",
           ),
-          request(
+          request<ContentRow[]>(
             "/items/announcements?" +
               new URLSearchParams({
                 fields: "status,title,summary,image,link,sort",
@@ -181,7 +202,7 @@ export function createContentService({ url, token, fetcher = fetch, store, revis
                 limit: "-1",
               }),
           ),
-          request(
+          request<ContentRow[]>(
             "/items/library_entries?" +
               new URLSearchParams({
                 fields:
@@ -191,16 +212,16 @@ export function createContentService({ url, token, fetcher = fetch, store, revis
                 limit: "-1",
               }),
           ),
-        ]);
-    const publicMedia = new Set();
-    const memberMedia = new Set();
-    const vipMedia = new Set();
+        ])) as PublicRows;
+    const publicMedia = new Set<string>();
+    const memberMedia = new Set<string>();
+    const vipMedia = new Set<string>();
     const data = {
       source: "cms",
-      works: [],
-      resources: [],
-      software: [],
-      "resource-center": [],
+      works: [] as Array<ReturnType<typeof note> & Record<string, unknown>>,
+      resources: [] as Array<ReturnType<typeof note> & Record<string, unknown>>,
+      software: [] as Array<ReturnType<typeof note> & Record<string, unknown>>,
+      "resource-center": [] as Array<ReturnType<typeof note> & Record<string, unknown>>,
       notes: applyContentOrder(articles || [],profile?.content_order?.articles)
         .filter((row) => isPublished(row))
         .filter((row) => /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(row.slug))
@@ -234,13 +255,13 @@ export function createContentService({ url, token, fetcher = fetch, store, revis
           link: safeLink(row.link),
         })),
     };
-    for (const track of data.profile?.music?.tracks || []) if(track.url.startsWith('/api/media/')) publicMedia.add(track.url.split('/').at(-1));
+    for (const track of data.profile?.music?.tracks || []) if(track.url.startsWith('/api/media/')) publicMedia.add(track.url.split('/').at(-1) as string);
     for (const row of library || []) {
-      if (!isPublished(row) || !["works", "resources", "software", "resource-center"].includes(row.kind))
+      if (!isPublished(row) || !["works", "resources", "software", "resource-center"].includes(row.kind || ''))
         continue;
       const protectedBook = row.kind === 'resource-center' && row.vip_only === true;
       const itemMedia = protectedBook ? vipMedia : memberMedia;
-      data[row.kind].push({
+      data[row.kind as LibraryKind].push({
         ...note(row, itemMedia),
         file: row.file?.filename_download || "",
         fileSize: row.file?.filesize || null,
@@ -254,20 +275,20 @@ export function createContentService({ url, token, fetcher = fetch, store, revis
       });
       // Cover art remains visible in the public catalogue while the body and
       // downloadable media require an active membership.
-      if (protectedBook && uuidPattern.test(row.cover || '')) memberMedia.add(row.cover);
+      if (protectedBook && row.cover && uuidPattern.test(row.cover)) memberMedia.add(row.cover);
     }
-    for(const kind of ['works','resources','software','resource-center'])
+    for(const kind of ['works','resources','software','resource-center'] as LibraryKind[])
       data[kind]=applyContentOrder(data[kind],profile?.content_order?.[kind],'recordId');
     return { data, media:new Set([...publicMedia,...memberMedia,...vipMedia]), publicMedia,
       memberMedia:new Set([...publicMedia,...memberMedia]), vipMedia, expiresAt:nextPublicationAt ?? Infinity };
   }
   const snapshot=revision ? createPublicSnapshotCache({load:buildSnapshot,revision}) : buildSnapshot;
-  async function preview(id, cookies = "", kind='articles') {
+  async function preview(id: string, cookies = "", kind='articles') {
     if (!uuidPattern.test(id))
       throw Object.assign(new Error("Invalid preview"), { status: 403 });
     if (store) {
-      const row = await store.preview(id, cookies, kind);
-      const media = new Set();
+      const row = await store.preview(id, cookies, kind) as ContentRow;
+      const media = new Set<string>();
       if(kind==='resource-center'){
         const item=note(row,media,id);
         // Private previews use the existing owner-authorized media route.
@@ -287,16 +308,16 @@ export function createContentService({ url, token, fetcher = fetch, store, revis
         status: 403,
       });
     // Never substitute the service token for an author preview session.
-    const row = await request(`/items/articles/${id}?fields=${articleFields}`, {
+    const row = await request<ContentRow>(`/items/articles/${id}?fields=${articleFields}`, {
       cookie: session,
     });
-    const media = new Set();
+    const media = new Set<string>();
     return { note: note(row, media, id), media };
   }
   return {
     snapshot,
     preview,
-    async media(id, { previewId, cookie = "", download = false, range, width, presentation = false, member = true, vip = true } = {}) {
+    async media(id: string, { previewId, cookie = "", download = false, range, width, presentation = false, member = true, vip = true }: MediaOptions = {}) {
       if (!uuidPattern.test(id))
         throw Object.assign(new Error("Not found"), { status: 404 });
       const state=previewId ? null : await snapshot();

@@ -6,7 +6,7 @@ import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
 import {createPublicSnapshotCache} from '../server/public-snapshot.mjs';
 import {createPublicationRevision} from '../server/payload/publication-revision.mjs';
-import {createContentService} from '../server/content-service.mjs';
+import {createContentService} from '../server/content-service.ts';
 import {createPreviewServer} from '../server.mjs';
 
 test('simultaneous media reads share a snapshot; a committed change invalidates immediately',async()=>{

@@ -2,7 +2,7 @@ import { readFile, rename } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Payload, Where } from 'payload';
-import { uuidPattern } from './content-service.mjs';
+import { uuidPattern } from './content-service.ts';
 import { addCalendarMonth, addMembershipDays, membershipState } from './reader-membership.ts';
 import { readerAudit, removeReaderAccount } from './reader-account-removal.ts';
 import { createReaderWorkflow, registrationLifetimeMs } from './reader-workflow.ts';

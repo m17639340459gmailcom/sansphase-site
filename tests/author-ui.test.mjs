@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { JSDOM, VirtualConsole } from "jsdom";
 import { validateArticle } from "../server/author-service.ts";
-import { cleanBody } from "../server/content-service.mjs";
+import { cleanBody } from "../server/content-service.ts";
 
 test("author hub groups actions; background editing preserves profile; back navigation protects unsaved work", async () => {
   const errors = [],

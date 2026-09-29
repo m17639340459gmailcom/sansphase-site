@@ -7,7 +7,7 @@ import {uploadTimeoutMs} from './src/upload-policy.mjs';
 import http from "node:http";
 import { open, readFile } from "node:fs/promises";
 import { Readable } from "node:stream";
-import { serializeContent } from "./server/content-service.mjs";
+import { serializeContent } from "./server/content-service.ts";
 import { pipeline } from "node:stream/promises";
 import { resolve, extname, sep } from "node:path";
 import { fileURLToPath } from "node:url";

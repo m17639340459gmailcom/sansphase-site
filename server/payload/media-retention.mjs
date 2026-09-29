@@ -3,7 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { basename, resolve } from 'node:path';
 import { stat, unlink } from 'node:fs/promises';
 import { imageWidths } from '../../src/image-sources.mjs';
-import { uuidPattern } from '../content-service.mjs';
+import { uuidPattern } from '../content-service.ts';
 
 const referenceTables = ['articles', '_articles_v', 'library_entries', '_library_entries_v', 'announcements', '_announcements_v', 'site_profile'];
 const idPattern = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;

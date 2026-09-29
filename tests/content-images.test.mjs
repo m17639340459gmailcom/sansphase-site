@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
 import {enhanceContentImages,setContentHTML} from '../src/content-images.mjs';
-import {cleanBody} from '../server/content-service.mjs';
+import {cleanBody} from '../server/content-service.ts';
 import {imageSourceSet} from '../src/image-sources.mjs';
 
 test('responsive images receive measured sizes before any source is activated',()=>{

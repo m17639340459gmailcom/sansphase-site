@@ -1,4 +1,4 @@
-import { uuidPattern } from "./content-service.mjs";
+import { uuidPattern } from "./content-service.ts";
 export function backgroundLibrary(profile = {}) {
   const seen = new Set();
   const entries = (Array.isArray(profile.background_library) ? profile.background_library : [])

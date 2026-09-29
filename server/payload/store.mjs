@@ -8,7 +8,7 @@ import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { basename, resolve } from "node:path";
-import { isPublished, uuidPattern } from "../content-service.mjs";
+import { isPublished, uuidPattern } from "../content-service.ts";
 import { createMediaRetention } from './media-retention.mjs';
 
 const fail = (message, status = 400) =>
