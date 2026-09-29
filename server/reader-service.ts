@@ -11,7 +11,7 @@ import { uuidPattern } from './content-service.mjs';
 import { withStreamUpload } from './stream-upload.mjs';
 import { createReaderWorkflow, registrationLifetimeMs } from './reader-workflow.ts';
 import { contactDetailReason } from './reader-profile-policy.ts';
-import { cleanReaderFiles } from './reader-file-cleanup.mjs';
+import { cleanReaderFiles } from './reader-file-cleanup.ts';
 import type { createReaderUidStore } from './reader-uids.ts';
 
 type ReaderUser = {

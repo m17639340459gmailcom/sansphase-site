@@ -5,7 +5,7 @@ import { makePayloadConfig } from "./config.mjs";
 import { createPayloadStore } from "./store.mjs";
 import { createAuthorService } from "../author-service.mjs";
 import { createReaderService } from '../reader-service.ts';
-import {createReaderAdminService} from '../reader-admin-service.mjs';
+import {createReaderAdminService} from '../reader-admin-service.ts';
 import { createContentService } from "../content-service.mjs";
 import {createPublicationRevision} from './publication-revision.mjs';
 import { smtpConfigured } from './smtp-settings.mjs';

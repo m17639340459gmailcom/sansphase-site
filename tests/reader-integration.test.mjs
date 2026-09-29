@@ -7,7 +7,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { getPayload } from 'payload';
 import { makePayloadConfig } from '../server/payload/config.mjs';
 import { createReaderService } from '../server/reader-service.ts';
-import { createReaderAdminService } from '../server/reader-admin-service.mjs';
+import { createReaderAdminService } from '../server/reader-admin-service.ts';
 import { createPreviewServer } from '../server.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { loginEventsSchema } from '../server/payload/reader-migration.mjs';

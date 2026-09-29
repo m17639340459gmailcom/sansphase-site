@@ -1,6 +1,6 @@
-import { readerAudit, removeReaderAccount } from './reader-account-removal.mjs';
+import { readerAudit, removeReaderAccount } from './reader-account-removal.ts';
 import { registrationLifetimeMs } from './reader-workflow.ts';
-import { cleanReaderFiles } from './reader-file-cleanup.mjs';
+import { cleanReaderFiles } from './reader-file-cleanup.ts';
 import type { createReaderWorkflow } from './reader-workflow.ts';
 
 type ReaderRow = { id: string; createdAt: string; _verified?: boolean; vip_until?: string | null };
