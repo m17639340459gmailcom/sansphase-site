@@ -1,5 +1,7 @@
 export const defaultCardColor = "#eff6ff";
-export const accentColors = { blue: "#bfdfff", violet: "#dac5ff", mint: "#afe5d7", peach: "#f3c9b1" };
+export const accentColors = { gold: "#d9c49c", blue: "#bfdfff", violet: "#dac5ff", mint: "#afe5d7", peach: "#f3c9b1" };
+// Used only when the author has never chosen an accent; a saved choice wins.
+export const defaultAccent = "gold";
 const hexColor = value => typeof value === "string" && /^#[\da-f]{6}$/i.test(value) ? value.toLowerCase() : "";
 export const colorConcentrations = {
   accentColor: {key:"accentOpacity", label:"文字与图标浓度", fallback:1, max:1},
@@ -35,7 +37,7 @@ export function applyCardAppearance(element, value) {
   element.dataset.customEdge = settings.cardBorderColor || settings.cardBorderOpacity !== .38 ? "true" : "false";
   element.style.setProperty("--accent-opacity",String(settings.accentOpacity));
   element.style.setProperty("--card-edge-opacity",String(settings.cardBorderOpacity));
-  element.style.setProperty("--custom-accent", settings.accentColor || accentColors[value?.accent] || accentColors.blue);
+  element.style.setProperty("--custom-accent", settings.accentColor || accentColors[value?.accent] || accentColors[defaultAccent]);
   element.style.setProperty("--card-edge-color", settings.cardBorderColor || "#e0edff");
   element.dataset.customArticleText = settings.articleTextColor || settings.articleTextOpacity !== 1 ? "true" : "false";
   element.dataset.customArticleBackground = settings.articleBackgroundColor || settings.articleBackgroundOpacity !== .64 ? "true" : "false";

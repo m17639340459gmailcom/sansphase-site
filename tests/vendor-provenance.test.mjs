@@ -93,27 +93,29 @@ test("active effects have pinned third-party source and preserved upstream origi
     !inputs.some((p) => /vendor\/react-bits\/(Ribbons|Galaxy)\.jsx$/.test(p)),
     "screen-space overlays must not return to the live scene",
   );
-  for (const name of ["Stars", "Float", "Text3D", "Fbo", "Effects", "Image"])
+  for (const name of ["Stars", "Fbo", "Effects", "Texture"])
     assert.ok(
       inputs.some((p) => p.includes("/drei/") && p.endsWith(`/${name}.js`)),
       `${name} must come from Drei`,
     );
+  // The opening is the in-house black hole; the R glass installation and its
+  // Quarks particles are detached from the live scene for now.
+  assert.ok(inputs.includes("src/library-black-hole.jsx"), "the black hole opening ships");
+  assert.ok(!inputs.includes("src/library-opening.jsx"), "the R installation is not in the live scene");
   assert.ok(
-    inputs.some((p) => p.includes("/three.quarks/")),
-    "orbital particles use the installed Quarks renderer",
-  );
-  assert.ok(
-    inputs.some((p) => p.includes("/quarks.core/")),
-    "particle trajectories use Quarks' behavior engine",
+    !inputs.some((p) => p.includes("/three.quarks/")),
+    "no particle engine ships without the installation that uses it",
   );
   assert.ok(
     !inputs.some((p) => p.includes("threejs-galaxy-shader")),
     "photographic skies replace procedural spirals in every chapter",
   );
-  assert.ok(inputs.some((p) => p.endsWith("vendor/space-3d/nebula.glsl")));
-  assert.ok(
-    inputs.some((p) => p.includes("/drei/") && p.endsWith("/RenderTexture.js")),
-  );
+  // Chapters 1-3 are one sky compositor over the unchanged ESO photographs;
+  // the always-covered Space-3D panorama is detached from the live scene.
+  assert.ok(inputs.includes("src/library-sky.jsx"), "the chapter sky compositor ships");
+  for (const photograph of ["eso0934a.jpg", "eso1105a.jpg", "eso1424a.jpg", "eso0932a.jpg"])
+    assert.ok(inputs.some((p) => p.endsWith(photograph)), `${photograph} ships unchanged`);
+  assert.ok(!inputs.some((p) => p.endsWith("vendor/space-3d/nebula.glsl")), "the covered panorama is detached");
   const sources = JSON.parse(
     await readFile("src/vendor/threejs-components/sources.json", "utf8"),
   );
@@ -143,8 +145,11 @@ test("active effects have pinned third-party source and preserved upstream origi
     !inputs.some((p) => /vendor\/threejs-components\//.test(p)),
     "the previous different cursor effect must not remain in the live scene",
   );
+  // The opening's cursor is the black hole's own gravitational lens; the glass
+  // tubes stay vendored and verified below but are not in the live scene.
   assert.ok(
-    inputs.some((p) => p.endsWith("vendor/active-theory-tubes/shaders.mjs")),
+    !inputs.some((p) => p.endsWith("vendor/active-theory-tubes/shaders.mjs")),
+    "the glass cursor tubes are detached with the R installation",
   );
   for (const folder of ["active-theory-tubes", "active-theory-glass"]) {
     const source = JSON.parse(

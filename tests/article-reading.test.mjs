@@ -58,8 +58,8 @@ test('reading sidebar has one responsive directory and preserves article content
   const directory=d.querySelector('.article-contents');
   assert(d.querySelector('.reading-sidebar .blog-identity'));
   assert(d.querySelector('.reading-sidebar .blog-music-card'));
-  assert.equal(d.querySelector('.reading-layout').firstElementChild,d.querySelector('.reading-sidebar'));
-  assert.equal(d.querySelector('.reading-sidebar').nextElementSibling,article);
+  assert.equal(d.querySelector('.reading-layout').firstElementChild,article,'the article is read before the rail');
+  assert.equal(article.nextElementSibling,d.querySelector('.reading-sidebar'));
   assert.equal(d.querySelector('.blog-identity').nextElementSibling,d.querySelector('.blog-music-card'));
   assert.equal(directory.parentElement.className,'reading-directory-slot');
   assert.equal(directory.open,true);assert.equal(d.querySelectorAll('.article-contents').length,1);
@@ -128,4 +128,12 @@ test('denied sharing offers a selectable URL instead of claiming success',async(
   assert.match(d.querySelector('[role=status]').textContent,/Copy this link/);
   d.querySelector('h1').click();assert.equal(d.querySelector('[role=status]').textContent,'');
   dispose();dom.window.close();
+});
+
+test('on wide screens the author and contents rail sits on the left of the article',async()=>{
+  const {readFile}=await import('node:fs/promises');
+  const css=await readFile('src/styles-reading.css','utf8');
+  assert.match(css,/\.reading-layout \{ display: grid; grid-template-columns: 280px minmax\(0, 1fr\)/);
+  assert.match(css,/\.reading-layout > \.reading-article \{ grid-column: 2;/);
+  assert.match(css,/\.reading-layout > \.reading-sidebar \{ grid-column: 1;/);
 });

@@ -3,7 +3,7 @@ import React, {useState} from "react";
 import {createRoot} from "react-dom/client";
 import {flushSync} from "react-dom";
 import {HexColorPicker, HexColorInput} from "react-colorful";
-import {cardAppearance, defaultCardColor, accentColors, colorConcentrations} from "./glass-theme.mjs";
+import {cardAppearance, defaultCardColor, accentColors, defaultAccent, colorConcentrations} from "./glass-theme.mjs";
 
 const targets = () => [
   ["accentColor", uiText("文字与图标", "Text and icons")],
@@ -13,11 +13,11 @@ const targets = () => [
   ["articleBackgroundColor", uiText("阅读区底色", "Reading background")],
 ];
 const presets = () => [
-  [uiText("星蓝", "Star blue"), "#bfdfff"], [uiText("淡紫", "Lavender"), "#dac5ff"], [uiText("薄荷", "Mint"), "#afe5d7"], [uiText("暖杏", "Apricot"), "#f3c9b1"],
+  [uiText("星辉金", "Starlight gold"), "#d9c49c"], [uiText("星蓝", "Star blue"), "#bfdfff"], [uiText("淡紫", "Lavender"), "#dac5ff"], [uiText("薄荷", "Mint"), "#afe5d7"], [uiText("暖杏", "Apricot"), "#f3c9b1"],
   [uiText("浅玫红", "Rose"), "#f4b8c8"], [uiText("月白", "Moon white"), "#eff6ff"], [uiText("雾灰", "Mist gray"), "#abb9cc"], [uiText("深空蓝", "Deep blue"), "#334968"],
 ];
 export function mountCardColorPicker(host, initial, onChange) {
-  let value = {...cardAppearance(initial), accent: Object.hasOwn(accentColors,initial?.accent) ? initial.accent : "blue"};
+  let value = {...cardAppearance(initial), accent: Object.hasOwn(accentColors,initial?.accent) ? initial.accent : defaultAccent};
   const root = createRoot(host);
   const background = document.querySelector("#blog-backdrop img")?.src;
   function Picker() {
@@ -30,7 +30,7 @@ export function mountCardColorPicker(host, initial, onChange) {
     const channelLabel=uiText(channel.label,({accentColor:"Text and icon opacity",cardColor:"Card background opacity",cardBorderColor:"Card border opacity",articleTextColor:"Article text opacity",articleBackgroundColor:"Reading background opacity"})[target]);
     const update = next => { value=next; setSettings(next); onChange(); };
     const changeColor = selectedColor => update({...settings,[target]:selectedColor});
-    const reset = () => update({...settings,[target]:"",[channel.key]:channel.fallback,...(target==="accentColor"?{accent:"blue"}:{})});
+    const reset = () => update({...settings,[target]:"",[channel.key]:channel.fallback,...(target==="accentColor"?{accent:defaultAccent}:{})});
     return <section className="author-card-colors" aria-label={uiText("统一调色", "Color settings")}>
       <div className="author-color-targets" role="group" aria-label={uiText("选择调色对象", "Choose a color target")}>
         {targets().map(([key,label])=><button type="button" key={key} aria-pressed={target===key} onClick={()=>setTarget(key)}>{label}</button>)}

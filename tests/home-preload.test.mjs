@@ -182,3 +182,27 @@ test("GPU preparation waits for texture uploads, asynchronous compilation and th
   assert.equal(done, true);
   assert.equal(calls.at(-1), "delete");
 });
+
+test("GPU preparation compiles layers that are hidden until later chapters, then restores them", async () => {
+  const hidden = { visible: false }, shown = { visible: true };
+  const seen = [];
+  const context = {
+    SYNC_GPU_COMMANDS_COMPLETE: 1, ALREADY_SIGNALED: 2, CONDITION_SATISFIED: 3, WAIT_FAILED: 4,
+    fenceSync: () => ({}), flush: () => {}, clientWaitSync: () => 2, deleteSync: () => {},
+    isContextLost: () => false,
+  };
+  const gl = {
+    initTexture: () => {},
+    compileAsync: () => {
+      seen.push(hidden.visible, shown.visible);
+      return Promise.resolve();
+    },
+    getContext: () => context,
+  };
+  const scene = { traverse: (fn) => [hidden, shown].forEach(fn) };
+  const pending = prepareScene({ gl, scene, camera: {}, nextFrame: () => Promise.resolve() });
+  await pending;
+  assert.deepEqual(seen, [true, true], "hidden layers are visible to the compiler");
+  assert.equal(hidden.visible, false, "and hidden again afterwards");
+  assert.equal(shown.visible, true);
+});

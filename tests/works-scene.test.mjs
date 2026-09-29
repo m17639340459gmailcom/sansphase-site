@@ -82,3 +82,27 @@ test("each adjacent chapter completes one full turn and settles facing forward",
     }
   }
 });
+
+test("chapter flights: each change flies through the current sky and opens the next from the centre", async () => {
+  const { skyChoreography } = await import("../src/library-layout.mjs");
+  const rest = skyChoreography(2);
+  assert.deepEqual([rest.a, rest.b, rest.iris, rest.streak], [1, 1, 0, 0], "a chapter at rest shows one photograph");
+  const mid = skyChoreography(1.5);
+  assert.deepEqual([mid.a, mid.b], [0, 1]);
+  assert.ok(mid.streak > 0.5 && mid.zoomA > 1.3, "the outgoing sky rushes past with speed lines");
+  assert.ok(mid.iris > 0.2 && mid.iris < 0.8 && mid.rim > 0.3, "the next opens as a rimmed iris");
+  // Arriving at a chapter from below and leaving it upwards meet seamlessly.
+  const below = skyChoreography(2 - 1e-6), above = skyChoreography(2 + 1e-6);
+  assert.ok(below.iris > 0.999 && below.streak < 1e-3 && Math.abs(below.zoomB - 1) < 1e-3);
+  assert.ok(above.iris < 1e-3 && above.streak < 1e-3 && Math.abs(above.zoomA - 1) < 1e-3);
+  assert.equal(below.b, above.a, "the same photograph on both sides of the chapter");
+  let previous = skyChoreography(1);
+  for (let p = 1.01; p < 1.995; p += 0.01) {
+    const now = skyChoreography(p);
+    assert.ok(now.iris >= previous.iris - 1e-9, "the iris only widens on the way forward");
+    previous = now;
+  }
+  assert.equal(skyChoreography(3).a, 2);
+  assert.ok(skyChoreography(0.5).zoomA > 1.2, "the first photograph waits close up behind the hole");
+  assert.equal(skyChoreography(1).zoomA, 1);
+});

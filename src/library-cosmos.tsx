@@ -26,6 +26,14 @@ export function createLibraryModel(reduced = false) {
     pointer: { x: 0, y: 0 },
     pointerActive: false,
     pointerAt: -10,
+    pulse: null as { x: number; y: number; at: number } | null,
+    // 1 = full black-hole detail; the frame-rate guard may lower it.
+    quality: 1,
+    // Set while a rail jump across several chapters is under way.
+    jump: null as { from: number; to: number } | null,
+    // Set when a link on the homepage is followed: the scene accelerates
+    // towards that point until the next page opens over it.
+    depart: null as { x: number; y: number; at: number } | null,
     gaze: { x: 0, y: 0 },
     time: 0,
     paused: false,
@@ -35,8 +43,8 @@ export function createLibraryModel(reduced = false) {
 }
 type LibraryModel = ReturnType<typeof createLibraryModel> & {
   preparing?: boolean;
-  particlesReady?: boolean;
-  panoramaReady?: boolean;
+  openingReady?: boolean;
+  skiesReady?: boolean;
 };
 type MountOptions = {
   onReady?: () => void;
@@ -181,6 +189,31 @@ export function mountCosmos(
     if (/cosmos\.bundle\.mjs/.test(event.filename || ""))
       fail(event.error || new Error(event.message));
   };
+  // Smoothness first: after a sustained stretch below 50 fps, give up detail
+  // one step at a time (ray-march budget, then canvas pixel ratio). It never
+  // raises quality again, so the scene cannot oscillate between settings.
+  const guard = { last: 0, frames: 0, time: 0, steps: 0 };
+  function watchFrameRate(state: RootState) {
+    if (model.preparing || model.paused || model.reduced || guard.steps >= 3) {
+      guard.last = 0;
+      return;
+    }
+    const now = performance.now();
+    if (guard.last && now - guard.last < 250) {
+      guard.time += now - guard.last;
+      guard.frames++;
+    }
+    guard.last = now;
+    if (guard.time < 2000) return;
+    const fps = (guard.frames * 1000) / guard.time;
+    guard.time = guard.frames = 0;
+    if (fps >= 50) return;
+    guard.steps++;
+    if (model.quality > 0.5) model.quality = 0.5;
+    else if (state.viewport.dpr > 1)
+      state.setDpr(Math.max(1, state.viewport.dpr - 0.25));
+    else guard.steps = 3;
+  }
   const sceneContent = () => (
     <VisualBoundary onError={fail}>
       <Scene
@@ -189,18 +222,14 @@ export function mountCosmos(
           const entrance = model.entrance.get().toFixed(3);
           if (stage.dataset.entrance !== entrance)
             stage.dataset.entrance = entrance;
+          watchFrameRate(state);
           onProgress(p);
-          const photosReady = [
-            "works-galactic-photograph",
-            "journal-nebula-photograph",
-            "community-galaxy-photograph",
-          ].every((name) => state.scene.getObjectByName(name));
-          if (!announced) onLoadProgress(model.particlesReady ? 0.35 : 0.1);
+          if (!announced) onLoadProgress(model.openingReady ? 0.35 : 0.1);
+          // The black hole's sky and all three chapter photographs are loaded.
           if (
             !announced &&
-            model.particlesReady === true &&
-            model.panoramaReady &&
-            photosReady
+            model.openingReady === true &&
+            model.skiesReady === true
           ) {
             announced = true;
             runPreparation({
@@ -284,9 +313,29 @@ export function mountCosmos(
     },
     pulse(x: number, y: number) {
       api.setPointer(x, y);
+      if (disposed || model.paused || model.progress.get() >= 0.01) return;
+      // A click on the opening sends one ripple through the lensed sky.
+      model.pulse = {
+        x: THREE.MathUtils.clamp(finite(x), -1, 1),
+        y: THREE.MathUtils.clamp(finite(y), -1, 1),
+        at: model.time,
+      };
+      store?.getState().invalidate();
     },
-    setChapter(value: number, { continuous = false, immediate = false } = {}) {
+    depart(x: number | null, y = 0) {
+      model.depart =
+        x === null || disposed
+          ? null
+          : {
+              x: THREE.MathUtils.clamp(finite(x), -1, 1),
+              y: THREE.MathUtils.clamp(finite(y), -1, 1),
+              at: performance.now(),
+            };
+      store?.getState().invalidate();
+    },
+    setChapter(value: number, { continuous = false, immediate = false, jump = null }: { continuous?: boolean; immediate?: boolean; jump?: { from: number; to: number } | null } = {}) {
       target = THREE.MathUtils.clamp(finite(value), 0, 3);
+      model.jump = jump;
       const pointerEnabled = target === 0;
       if (model.pointerEnabled !== pointerEnabled) {
         model.pointerEnabled = pointerEnabled;
@@ -348,7 +397,7 @@ export function mountCosmos(
     .configure({
       events,
       gl: { alpha: true, antialias: true, powerPreference: "high-performance" },
-      dpr: [1, 2],
+      dpr: [1, 1.5],
       camera: { fov: 42, near: 0.1, far: 180, position: [0, 0.15, 8.8] },
       frameloop: "never",
       onCreated(state) {

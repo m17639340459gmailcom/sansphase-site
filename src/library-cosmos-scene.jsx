@@ -1,15 +1,15 @@
-import React, { useEffect, useRef } from "react";
+import React, { Suspense, useEffect, useRef } from "react";
 import { useFrame, extend } from "@react-three/fiber";
 import { Stars } from "@react-three/drei/core/Stars.js";
 import { Environment } from "@react-three/drei/core/Environment.js";
 import { Lightformer } from "@react-three/drei/core/Lightformer.js";
 import { MathUtils, Vector2 } from "three";
-import { Opening } from "./library-opening.jsx";
-import { SpatialEffects } from "./library-spatial-effects.jsx";
+import { BlackHole } from "./library-black-hole.jsx";
+import { journeyStep } from "./journey.mjs";
 import { Effects } from "@react-three/drei/core/Effects.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
-import { SpaceBackdrop } from "./library-nebula.jsx";
+import { SkyCompositor } from "./library-sky.jsx";
 import { GlassSceneBuffer } from "./library-glass.jsx";
 extend({ UnrealBloomPass, OutputPass });
 import { cosmosFraming } from "./library-layout.mjs";
@@ -17,7 +17,13 @@ import { createEntrance, entranceDuration } from "./library-entrance.mjs";
 import { advanceReferenceTurn } from "./reference-rotation.mjs";
 
 // This file composes library components and binds our navigation state.
-// No custom shader, particle generator, material model, or trail solver.
+// The opening chapter is the ray-marched black hole in library-black-hole.jsx,
+// whose cursor is a small gravitational lens; everything else here is library
+// components and vendored reference programs. Chapters 1-3 are one sky
+// compositor (library-sky.jsx). Detached from the live scene for now: the R
+// glass installation (library-opening.jsx), its glass cursor tubes
+// (library-spatial-effects.jsx) and the panorama backdrop (library-nebula.jsx),
+// which the hole and the photographs always covered.
 export function LibraryCosmosScene({
   model,
   onFrame = () => {},
@@ -34,7 +40,7 @@ export function LibraryCosmosScene({
   }, [model]);
   useFrame((state, delta) => {
     if (model.paused) return;
-    if (!model.reduced && !model.preparing && model.particlesReady !== false)
+    if (!model.reduced && !model.preparing && model.openingReady !== false)
       model.time += Math.min(delta, 0.05);
     advanceReferenceTurn(model, delta);
     if (model.entrance && model.entrance.get() < 1) {
@@ -55,7 +61,7 @@ export function LibraryCosmosScene({
       // A gentle, continuous leftward panorama turn. The previous sway peaked
       // at 0.00176 rad/s; this is slightly faster and never reverses direction.
       // Hold this offset in other chapters so their photographs stay unchanged.
-      if (!model.reduced && !model.preparing && model.particlesReady !== false)
+      if (!model.reduced && !model.preparing && model.openingReady !== false)
         openingSkyDrift.current += Math.min(delta, 0.05) * 0.0022;
       const target = model.yaw.get() * 0.35;
       skyTurn.current = model.reduced
@@ -79,12 +85,18 @@ export function LibraryCosmosScene({
         skyTurn.current,
       -0.5,
     );
-    if (deepStars.current)
+    if (deepStars.current) {
       deepStars.current.rotation.set(
         Math.sin(model.time * 0.025) * 0.025,
         model.time * 0.002 + skyTurn.current,
         0,
       );
+      // Unlensed stars cannot sit in front of the event horizon; they return
+      // once the next chapter has opened (and draw behind the loader while it
+      // prepares, so their first use is not mid-journey).
+      deepStars.current.visible =
+        journeyStep(p, model.jump).virtual >= 0.95 || model.preparing === true;
+    }
     onFrame(p, state);
   }, -1);
   const Wrapper = lighting ? GlassSceneBuffer : React.Fragment;
@@ -149,7 +161,11 @@ export function LibraryCosmosScene({
           />
         </Environment>
       )}
-      {lighting && <SpaceBackdrop model={model} />}
+      {lighting && (
+        <Suspense fallback={null}>
+          <SkyCompositor model={model} />
+        </Suspense>
+      )}
       <group ref={deepStars} name="autonomous-stellar-field">
         <Stars
           name="library-deep-stars"
@@ -162,10 +178,9 @@ export function LibraryCosmosScene({
           speed={0.28}
         />
       </group>
-      <Opening model={model} gpu={lighting} />
-      <SpatialEffects model={model} gpu={lighting} />
+      <BlackHole model={model} gpu={lighting} />
       {lighting && (
-        <Effects disableGamma multisamping={2}>
+        <Effects disableGamma multisamping={0}>
           <unrealBloomPass args={[new Vector2(512, 512), 0.3, 0.4, 0.82]} />
           <outputPass />
         </Effects>

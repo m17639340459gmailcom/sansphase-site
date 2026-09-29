@@ -1,5 +1,5 @@
 const label = (value:unknown, max = 120) => String(value ?? "").trim().slice(0, max);
-import {cardAppearance, accentColors} from "../src/glass-theme.mjs";
+import {cardAppearance, accentColors, defaultAccent} from "../src/glass-theme.mjs";
 function httpsLink(value:unknown) {
   try { const url = new URL(String(value)); return url.protocol === "https:" ? url.href : ""; }
   catch { return ""; }
@@ -27,5 +27,5 @@ export function cleanMusic(value:MusicInput = {}) {
 }
 export const accents = accentColors;
 export function cleanAppearance(value:Record<string,unknown> = {}) {
-  return { accent: typeof value?.accent==='string' && Object.hasOwn(accents, value.accent) ? value.accent : "blue", ...cardAppearance(value) };
+  return { accent: typeof value?.accent==='string' && Object.hasOwn(accents, value.accent) ? value.accent : defaultAccent, ...cardAppearance(value) };
 }

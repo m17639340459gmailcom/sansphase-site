@@ -1,42 +1,22 @@
-import { parseRoute } from "./core.mjs";
 import { ensureRouteStyle } from "./route-styles.mjs";
 
 // Visitor startup must not download the private writing interface. Its existing
 // click handler is installed before replaying the first requested action.
+// (Content pages used to start an animated WebGL galaxy here; it was removed
+// because it cost most of the blog's frame rate while contributing almost
+// nothing visible under the page's sky veil.)
 export function mountRouteAssets(
   win,
   {
     loadAuthor = () => import("./author.bundle.mjs"),
     loadAuthorStyle = () => ensureRouteStyle(win.document, "author"),
-    loadBackground = () => import("./blog-galaxy.mjs"),
   } = {},
 ) {
   const doc = win.document;
-  let background,
-    author,
+  let author,
     authorReady = false,
     pendingClick = false,
     disposed = false;
-  const route = () => {
-    if (
-      ![
-        "notes",
-        "note",
-        "works",
-        "work",
-        "resources",
-        "software",
-        "resource-center",
-      ].includes(parseRoute(win.location.hash).page)
-    )
-      return;
-    if (!background)
-      background = Promise.resolve()
-        .then(loadBackground)
-        .catch(() => {
-          background = null;
-        });
-  };
   const click = async (event) => {
     const button = event.target.closest?.(
       "[data-author-login],[data-author-open]",
@@ -70,11 +50,8 @@ export function mountRouteAssets(
     }
   };
   doc.addEventListener("click", click, true);
-  win.addEventListener("hashchange", route);
-  route();
   return () => {
     disposed = true;
     doc.removeEventListener("click", click, true);
-    win.removeEventListener("hashchange", route);
   };
 }

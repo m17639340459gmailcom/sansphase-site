@@ -47,3 +47,46 @@ export function cosmosFraming(aspect = 1.7, progress = 0) {
     portrait,
   };
 }
+
+const ease = (x, low, high) => {
+  const t = MathUtils.clamp((x - low) / (high - low), 0, 1);
+  return t * t * (3 - 2 * t);
+};
+// Chapters 1-3 share one full-screen sky. Every change of chapter is a flight
+// through the current photograph: it rushes past with speed lines while the
+// next one opens from the centre like an iris, rimmed with a thin light, the
+// same grammar as leaving the black hole. A pure function of the shared
+// progress, so reverse scroll replays it exactly backwards.
+// Indices a/b are photographs 0..2 (chapters 1..3).
+export function skyChoreography(progress = 0) {
+  const p = MathUtils.clamp(finite(progress), 0, 3);
+  if (p < 1) {
+    // Emerging from the hole: the first photograph settles from close up.
+    return { a: 0, b: 0, zoomA: 1.3 - 0.3 * ease(p, 0.86, 1), zoomB: 1, streak: 0, iris: 0, rim: 0, shade: 0 };
+  }
+  const rest = (index) => ({ a: index, b: index, zoomA: 1, zoomB: 1, streak: 0, iris: 0, rim: 0, shade: 0 });
+  if (p >= 3) return rest(2);
+  const chapter = Math.floor(p),
+    t = p - chapter;
+  if (t <= 0) return rest(chapter - 1);
+  const open = ease(t, 0.25, 0.95);
+  return {
+    a: chapter - 1,
+    b: chapter,
+    zoomA: 1 + 0.9 * ease(t, 0, 0.9) ** 1.4,
+    zoomB: 0.9 + 0.1 * ease(t, 0.3, 1),
+    streak: ease(t, 0.05, 0.55) * (1 - ease(t, 0.8, 1)),
+    iris: open,
+    rim: Math.sin(Math.PI * open) * 0.55,
+    shade: 0.35 * ease(t, 0.2, 0.9),
+  };
+}
+// Slow idle drift of a resting photograph (screen-height units and a zoom).
+export function skyDrift(spec, time = 0) {
+  const phase = finite(time) * spec.rate + spec.phase;
+  return {
+    x: 0.025 * Math.sin(phase),
+    y: 0.018 * Math.sin(phase * 0.8),
+    zoom: 1.035 + 0.022 * Math.sin(phase * 0.7),
+  };
+}

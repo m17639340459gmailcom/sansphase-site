@@ -11,7 +11,8 @@ import {
 } from "node:fs/promises";
 import { dirname, resolve, basename, relative, isAbsolute } from "node:path";
 import { JSDOM } from "jsdom";
-import { createElement, ArrowRight, LoaderCircle } from "lucide";
+import { createElement, ArrowRight } from "lucide";
+import { loaderDial } from "../src/loader-dial.mjs";
 import { validateSceneCdnOrigin } from "../src/scene-delivery.mjs";
 import { composeSiteStyles } from "./compose-site-styles.mjs";
 import { typedBrowserModules } from './typed-browser-modules.mjs';
@@ -31,7 +32,6 @@ const result = await build({
   entryPoints: {
     "cosmos.bundle": "src/library-cosmos.tsx",
     "ui.bundle": "src/library-ui.tsx",
-    "blog-galaxy": "src/blog-galaxy.tsx",
     "author.bundle": "src/author-entry.mjs",
     "music.bundle": "src/music-player.mjs",
   },
@@ -90,6 +90,11 @@ for (const file of [
   "data.mjs",
   "universe.mjs",
   "universe-scenes.mjs",
+  "black-hole-view.mjs",
+  "route-transition.mjs",
+  "journey.mjs",
+  "nav-slider.mjs",
+  "loader-dial.mjs",
   "blog-background.css",
   "author.css",
 ]) {
@@ -172,10 +177,6 @@ await copyFile(
 await copyFile(
   "src/vendor/user-space-assets/sources.json",
   `${destination}/user-space-assets-sources.json`,
-);
-await copyFile(
-  "src/vendor/react-bits/Galaxy.css",
-  `${outdir}/blog-galaxy.css`,
 );
 await copyFile(
   "src/vendor/react-bits/GlassSurface.css",
@@ -289,13 +290,13 @@ const chapterArrow = createElement(ArrowRight, {
   "aria-hidden": "true",
   focusable: "false",
 }).outerHTML;
-const loadingIcon = createElement(LoaderCircle, {"aria-hidden":"true", focusable:"false"}).outerHTML;
-await writeFile(`${outdir}/index.html`, (await readFile(`${outdir}/index.html`, 'utf8')).replace('<span class="startup-icon" aria-hidden="true"></span>', loadingIcon));
+// The boot screen shows the same loading dial as the homepage loader.
+await writeFile(`${outdir}/index.html`, (await readFile(`${outdir}/index.html`, 'utf8')).replace('<span class="startup-icon" aria-hidden="true"></span>', loaderDial));
 delete globalThis.document;
 dom.window.close();
 await writeFile(
   `${outdir}/chapter-icons.mjs`,
-  `// Generated from lucide@1.45.0. See assets/licenses.\nexport const chapterArrow=${JSON.stringify(chapterArrow)};\nexport const loadingIcon=${JSON.stringify(loadingIcon)};\n`,
+  `// Generated from lucide@1.45.0. See assets/licenses.\nexport const chapterArrow=${JSON.stringify(chapterArrow)};\n`,
 );
 // Remove only obsolete, generated chunk files from this build's own directory.
 const chunkDir = await realpath(`${outdir}/chunks`),

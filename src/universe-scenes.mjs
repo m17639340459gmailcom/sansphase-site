@@ -3,8 +3,18 @@
 export const universeScenes = [
   {
     id: "welcome",
-    ariaLabel: "深空场景一",
-    ariaLabelEn: "Deep space view one",
+    ariaLabel: "深空场景一：黑洞",
+    ariaLabelEn: "Deep space view one: a black hole",
+    title: "無相",
+    titleEn: "無相",
+    label: "EVENT HORIZON",
+    description: "记录想法，分享作品，保留探索的轨迹。",
+    descriptionEn: "Notes, finished work and the traces of exploring.",
+    links: [
+      { href: "#/notes", zh: "阅读最新文章", en: "Read the latest" },
+      { href: "#/contact", zh: "合作与联系", en: "Work together" },
+    ],
+    rail: ["序章", "Prologue"],
   },
   {
     id: "notes",
@@ -16,6 +26,7 @@ export const universeScenes = [
     description: "记录学习、创作、建设过程。",
     descriptionEn: "Notes on learning, making and building.",
     links: [{ href: "#/notes", zh: "阅读博客", en: "Read the blog" }],
+    rail: ["博客", "Blog"],
   },
   {
     id: "works",
@@ -30,6 +41,7 @@ export const universeScenes = [
       { href: "#/works", zh: "浏览作品", en: "Explore works" },
       { href: "#/resources", zh: "查看资料", en: "Browse materials" },
     ],
+    rail: ["作品", "Works"],
   },
   {
     id: "community",
@@ -44,5 +56,6 @@ export const universeScenes = [
       { href: "#/community", zh: "进入社区", en: "Visit the community" },
       { href: "#/resource-center", zh: "资源中心", en: "Resource center" },
     ],
+    rail: ["社区", "Community"],
   },
 ];

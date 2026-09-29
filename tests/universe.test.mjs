@@ -16,6 +16,7 @@ async function setup({
   prepareContent,
   initiallyCovered = false,
   onPrepared,
+  chapterDetails,
 } = {}) {
   const dom = new JSDOM(universeMarkup(), {
     url: "http://localhost/",
@@ -90,6 +91,7 @@ async function setup({
     prepareContent,
     initiallyCovered,
     onPrepared,
+    chapterDetails,
   });
   await flush();
   const stage = root.querySelector(".universe-stage");
@@ -188,7 +190,8 @@ test("home loading indicator follows actual readiness without adding permanent v
     assert.equal(s.root.querySelector(".universe-status").textContent, "");
     assert.equal(s.root.getAttribute("aria-busy"), "true");
     assert.equal(s.root.querySelector('.universe-loader').getAttribute('aria-hidden'), 'false');
-    assert(s.root.querySelector('.universe-loader svg'), 'use the existing Lucide icon family');
+    assert(s.root.querySelector('.universe-loader .loader-dial .dial-arc-fill'), 'progress is drawn as the dial ring');
+    assert.equal(s.root.querySelector('.universe-loader .loader-dial').getAttribute('aria-hidden'), 'true');
     assert.ok(!s.root.classList.contains("is-ready"));
     s.ready();
     assert.equal(s.root.getAttribute("aria-busy"), "false");
@@ -206,6 +209,7 @@ test('entry waits for images after GPU readiness and only then reaches 100 perce
     s.callbacks().onLoadProgress(.5);s.ready();await flush();
     assert.equal(s.root.classList.contains('is-ready'),false);
     options.onProgress(.5);assert.equal(s.root.querySelector('[role="progressbar"]').getAttribute('aria-valuenow'),'82');
+    assert.equal(s.root.querySelector('.universe-loader').style.getPropertyValue('--load'),'0.82','the dial ring follows progress');
     options.onProgress(.1);assert.equal(s.root.querySelector('[role="progressbar"]').getAttribute('aria-valuenow'),'82','progress cannot run backwards');
     assert.equal(s.calls.some(([method])=>method==='startPresentation'),false);
     complete();await flush();
@@ -257,12 +261,19 @@ test('loading hides surrounding site controls and restores them only when ready 
   }finally{s.close();}
 });
 
-test("scroll progress introduces real section links with a quiet opening and finite ends", async (t) => {
+test("scroll progress introduces real section links from the opening headline and has finite ends", async (t) => {
   const s = await setup({ autoProgress: false });
   t.after(() => s.close());
   s.ready();
   const copy = s.root.querySelector(".chapter-copy");
-  assert.ok(copy.hidden, "the accepted opening must stay free of added copy");
+  assert.equal(copy.hidden, false, "the black-hole opening carries the site headline");
+  assert.equal(copy.querySelector("h2").textContent, "無相");
+  assert.deepEqual(
+    [...copy.querySelectorAll("a")].map((a) => a.hash),
+    ["#/notes", "#/contact"],
+    "opening actions lead to existing routes",
+  );
+  assert.match(copy.querySelector(".chapter-label").textContent, /^01 \/ 04 · EVENT HORIZON$/);
   s.key("ArrowUp");
   assert.equal(
     s.root.dataset.index,
@@ -297,7 +308,7 @@ test("scroll progress introduces real section links with a quiet opening and fin
   );
 });
 
-test("chapter links use the existing route without rotating the R; overlay and language changes keep the chapter", async (t) => {
+test("chapter links use the existing route without turning the view; overlay and language changes keep the chapter", async (t) => {
   const s = await setup({ reduced: true });
   t.after(() => s.close());
   s.ready();
@@ -320,7 +331,7 @@ test("chapter links use the existing route without rotating the R; overlay and l
   assert.equal(s.root.dataset.index, "1");
   assert.equal(copy.inert, false);
   s.key("ArrowUp");
-  assert.equal(copy.hidden, true);
+  assert.equal(copy.querySelector("h2").textContent, "無相", "returning shows the opening headline again");
 });
 
 test("covering or hiding during a chapter change settles its copy and cancels stale reveal timers", async (t) => {
@@ -1033,7 +1044,7 @@ test("one vertical touch swipe completes one chapter on release without orbiting
     assert.equal(Number(s.root.dataset.progress), 0, "the gesture must not leave a partial scene before release");
     s.pointer("pointerup", 510, 100, 1, "touch");
     assert.equal(Number(s.root.dataset.progress), 1);
-    assert.deepEqual(s.calls.filter(c=>c[0]==="setChapter").at(-1).slice(1), [1,{continuous:false}]);
+    assert.deepEqual(s.calls.filter(c=>c[0]==="setChapter").at(-1).slice(1), [1,{continuous:false,jump:null}]);
     assert.equal(s.calls.filter((c) => c[0] === "setOrbit").length, orbitCount);
     assert.equal(s.calls.filter((c) => c[0] === "pulse").length, 0);
     s.pointer("pointerup", 510, 100, 1, "touch");
@@ -1215,3 +1226,62 @@ test("hidden tabs suspend the first-frame deadline and cleanup releases an activ
 });
 
 
+
+test("chapters carry live facts and a rail that travels; no log sits beside the sky", async (t) => {
+  let latest = [];
+  const s = await setup({
+    chapterDetails: (id, english) =>
+      id === "notes" ? { facts: english ? "7 articles" : "07 篇文章", items: latest } : null,
+  });
+  t.after(() => s.close());
+  s.ready();
+  assert.equal(s.root.querySelector(".chapter-log"), null);
+  const rail = [...s.root.querySelectorAll(".universe-rail button")];
+  assert.deepEqual(rail.map((button) => button.textContent), ["01序章", "02博客", "03作品", "04社区"]);
+  assert.equal(rail[0].getAttribute("aria-current"), "step");
+  rail[1].click();
+  assert.deepEqual(s.calls.filter((call) => call[0] === "setChapter").at(-1).slice(0, 2), ["setChapter", 1]);
+  assert.equal(rail[1].getAttribute("aria-current"), "step", "the rail follows the journey");
+  assert.equal(rail[0].hasAttribute("aria-current"), false);
+  const copy = s.root.querySelector(".chapter-copy");
+  const title = copy.querySelector("h2");
+  assert.equal(title.textContent, "博客");
+  assert.equal(title.getAttribute("aria-label"), "博客", "the split title still reads as one word");
+  assert.equal(title.querySelectorAll(".chapter-char").length, 2);
+  assert.equal(copy.querySelector(".chapter-facts").textContent, "07 篇文章");
+  assert.equal(copy.querySelector(".chapter-latest"), null, "no list before articles arrive");
+  latest = [{ href: "#/note/a", title: "第一篇", meta: "2026.09.27" }];
+  s.clean.refreshDetails();
+  assert.equal(copy.querySelector(".chapter-latest a").getAttribute("href"), "#/note/a");
+  assert.equal(copy.querySelector(".chapter-latest-title").textContent, "第一篇");
+  s.clean.setLanguage(true);
+  assert.equal(copy.querySelector(".chapter-facts").textContent, "7 articles");
+  assert.equal(rail[1].textContent, "02Blog");
+});
+
+test("a rail jump across chapters plays one flight: no intermediate chapter surfaces", async (t) => {
+  const s = await setup({ autoProgress: false });
+  t.after(() => s.close());
+  s.ready();
+  const rail = [...s.root.querySelectorAll(".universe-rail button")];
+  const copy = s.root.querySelector(".chapter-copy");
+  s.key(" ");
+  s.callbacks().onProgress(1);
+  rail[3].click();
+  const travel = s.calls.filter((call) => call[0] === "setChapter").at(-1);
+  assert.equal(travel[1], 3);
+  assert.deepEqual(travel[2].jump, { from: 1, to: 3 }, "the renderer is told it is one flight");
+  for (const p of [1.2, 1.6, 2, 2.4]) {
+    s.callbacks().onProgress(p);
+    assert.notEqual(copy.querySelector("h2")?.textContent, "作品 资料", `chapter 3 copy must not appear at ${p}`);
+  }
+  s.callbacks().onProgress(2.2);
+  assert.equal(copy.querySelector("h2").textContent, "社区交流 资源中心", "past halfway the destination takes over");
+  rail[0].click();
+  assert.equal(s.calls.filter((call) => call[0] === "setChapter").at(-1)[1], 3, "no second travel while the jump flies");
+  s.callbacks().onProgress(3);
+  assert.equal(rail[3].getAttribute("aria-current"), "step");
+  s.key("ArrowUp");
+  const back = s.calls.filter((call) => call[0] === "setChapter").at(-1);
+  assert.deepEqual([back[1], back[2].jump], [2, null], "keys keep travelling one chapter at a time");
+});

@@ -105,6 +105,9 @@ test("local prototype DOM flows", async (t) => {
       return loadLibrary(new URL('../dist/catalog.mjs', import.meta.url));
     if (specifier === './content-images.mjs')
       return loadLibrary(new URL('../dist/content-images.mjs', import.meta.url));
+    // jsdom has no View Transitions API, so route changes take the plain path.
+    if (['./route-transition.mjs', './journey.mjs', './nav-slider.mjs'].includes(specifier))
+      return loadLibrary(new URL('../dist/' + specifier.slice(2), import.meta.url));
     if (['./reader-ui.mjs','./admin-readers.mjs','./access-policy.mjs'].includes(specifier))
       return loadLibrary(new URL('../dist/' + specifier.slice(2), import.meta.url));
     const exports =
@@ -454,15 +457,17 @@ test("local prototype DOM flows", async (t) => {
         assert.equal(q(".universe-home").dataset.index, "1");
         await new Promise((resolve) => setTimeout(resolve, 1220));
         const canvas = q(".universe-canvas");
-        click('.chapter-links a[href="#/notes"]');
-        await tick();
+        await clickRoute('.chapter-links a[href="#/notes"]');
         assert.equal(w.location.hash, "#/notes");
         assert.ok(d.body.classList.contains("content-open"));
         assert.equal(q(".universe-canvas"), canvas);
-        click(".brand");
-        await tick();
+        await clickRoute(".brand");
         assert.equal(q(".universe-home").dataset.index, "0");
-        assert.equal(q(".chapter-copy").hidden, true);
+        const openingCopy = q(".chapter-copy");
+        assert.ok(
+          openingCopy.hidden || openingCopy.querySelector("h2").textContent === "無相",
+          "the logo returns to the opening headline, never a later chapter's copy",
+        );
       },
     );
     await t.test(

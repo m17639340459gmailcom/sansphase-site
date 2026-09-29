@@ -30,7 +30,8 @@ test('music settings keep share links separate from playable tracks and reject u
   const result = cleanMusic({playlistUrl:'https://t1.kugou.com/1bKaRccG5V3', tracks:[{url:'javascript:bad'},{title:'测试',url:'https://example.com/a.mp3'}]});
   assert.equal(result.tracks.length, 1);
   assert.equal(result.playlistUrl, 'https://t1.kugou.com/1bKaRccG5V3');
-  assert.equal(cleanAppearance({accent:'url(evil)'}).accent, 'blue');
+  assert.equal(cleanAppearance({accent:'url(evil)'}).accent, 'gold');
+  assert.equal(cleanAppearance({accent:'blue'}).accent, 'blue', 'a saved accent is kept');
 });
 test('glass color settings preserve valid colors and constrain opacity', () => {
   assert.deepEqual(cleanAppearance({accent:'mint',cardColor:'#AABBDD',cardOpacity:.23}), {accent:'mint',accentColor:'',accentOpacity:1,cardBorderColor:'',cardBorderOpacity:.38,cardColor:'#aabbdd',cardOpacity:.23,articleTextColor:'',articleTextOpacity:1,articleBackgroundColor:'',articleBackgroundOpacity:.64});

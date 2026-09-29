@@ -55,6 +55,8 @@ export function GlassSceneBuffer({ children, model }) {
         object.visible = false;
       }
     });
+    // Nothing samples the refraction buffers: do not render the scene twice.
+    if (!glass.length && !tubes.length) return;
     const previous = gl.getRenderTarget(),
       tone = gl.toneMapping;
     try {

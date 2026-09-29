@@ -55,46 +55,90 @@
 .directory-link:hover {
   color: var(--accent);
 }
-.nav {
-  gap: clamp(16px, 1.7vw, 28px);
-}
 .nav a {
   white-space: nowrap;
-  min-height: 44px;
+  min-height: 40px;
 }
+.menu-button .menu-icon-close,
+.menu-button[aria-expanded="true"] .menu-icon-open {
+  display: none;
+}
+.menu-button[aria-expanded="true"] .menu-icon-close {
+  display: contents;
+}
+.menu-button > span {
+  display: contents;
+}
+/* Narrow screens fold the capsule into a full-screen sheet of numbered serif
+   entries. It stays inside the header's stacking context (z-index -1), so
+   the wordmark and the close button remain above it. */
 @media (max-width: 1200px) {
   .menu-button {
     display: inline-grid;
   }
+  #site-header:has(.nav.open) {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
   .nav {
+    counter-reset: site-nav;
     display: none;
-    position: absolute;
-    top: 100%;
-    left: 0;
-    right: 0;
-    max-height: calc(100dvh - 100px);
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    justify-self: stretch;
+    align-self: stretch;
     overflow-y: auto;
     overscroll-behavior: contain;
-    background: #090909f5;
-    border-bottom: 1px solid var(--line);
-    padding: 16px var(--page) 24px;
+    padding: calc(var(--header-h) + 24px) clamp(22px, 6vw, 64px) 40px;
     flex-direction: column;
     align-items: stretch;
     gap: 0;
-    backdrop-filter: blur(22px);
+    border: 0;
+    border-radius: 0;
+    background: rgb(5 7 11 / 94%);
+    box-shadow: none;
+    backdrop-filter: blur(24px) saturate(1.2);
+    -webkit-backdrop-filter: blur(24px) saturate(1.2);
   }
   .nav.open {
     display: flex;
   }
-  .nav a {
-    padding: 12px 4px;
-    font-size: 16px;
-    min-height: 48px;
+  .nav-indicator {
+    display: none;
   }
-  .nav a[aria-current="page"]:after {
-    left: auto;
-    right: 6px;
-    top: 26px;
+  .nav a {
+    counter-increment: site-nav;
+    display: flex;
+    align-items: baseline;
+    gap: 18px;
+    min-height: 68px;
+    padding: 14px 0;
+    border-radius: 0;
+    border-bottom: 1px solid var(--line);
+    background: none;
+    font-family: var(--font-serif);
+    font-size: clamp(28px, 7vw, 36px);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--text);
+  }
+  .nav a::before {
+    content: counter(site-nav, decimal-leading-zero);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 400;
+    letter-spacing: 0;
+    color: var(--dim);
+  }
+  .nav a:hover {
+    background: none;
+    color: #fff;
+  }
+  .nav a[aria-current="page"],
+  .nav a[aria-current="page"]::before {
+    color: var(--signal);
+    background: none;
   }
   .header-actions > .support-header {
     display: none;

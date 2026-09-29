@@ -1,14 +1,13 @@
 /* Blog theme. One material plane per card; no animated or asynchronous material swap. */
+/* Smoked glass: a dark, slightly lifted pane with a 7% top highlight. */
 body.blog-open {
-  --glass-fill: linear-gradient(135deg, rgb(239 246 255 / 8%), rgb(213 231 252 / 3%));
-  --glass-edge: rgb(224 237 255 / 38%);
-  --glass-shadow: inset 0 1px 0 rgb(255 255 255 / 16%), 0 10px 28px rgb(3 9 22 / 12%);
-  --control-fill: linear-gradient(155deg, rgb(242 248 255 / 13%), rgb(213 230 251 / 4%));
-  --control-edge: rgb(228 239 255 / 35%);
-  --content-cyan: #c2ddf3;
-  --content-line: rgb(216 233 252 / 24%);
-  --muted: #c3cddd;
-  --text: #f2f6fc;
+  --glass-fill: var(--smoked-fill);
+  --glass-edge: var(--smoked-edge);
+  --glass-shadow: var(--smoked-shadow);
+  --control-fill: rgb(5 7 11 / 40%);
+  --control-edge: rgb(238 233 224 / 14%);
+  --content-cyan: var(--blog-accent);
+  --content-line: var(--line);
   color-scheme: dark;
 }
 /* A saved tint changes only the card material. Layout and backdrop stay fixed. */
@@ -42,14 +41,24 @@ body.blog-open[data-custom-edge="true"] .blog-page :is(.blog-card, .blog-identit
   object-position: 54% 46%;
   filter: brightness(.94);
 }
-#blog-galaxy-field {
+/* The sky stays visible behind the masthead and settles into ink as the
+   reader scrolls, so hairline-only rows keep their contrast. */
+#blog-backdrop::after {
+  content: "";
   position: absolute;
   inset: 0;
-  opacity: .35;
-  pointer-events: none;
-  contain: strict;
+  background: linear-gradient(180deg, rgb(5 7 11 / 18%) 0%, rgb(5 7 11 / 55%) 55%, rgb(5 7 11 / 78%) 100%);
 }
-#blog-galaxy-field canvas { display: block; width: 100%; height: 100%; }
+@supports (animation-timeline: scroll()) {
+  #blog-backdrop::after {
+    animation: blog-backdrop-settle linear both;
+    animation-timeline: scroll(root);
+    animation-range: 0 90vh;
+  }
+  @keyframes blog-backdrop-settle {
+    to { background-color: rgb(5 7 11 / 58%); }
+  }
+}
 body.blog-open #blog-backdrop { visibility: visible; }
 body.blog-open #main { background: transparent; animation: none; transition: none; }
 /* The document already reserves a stable gutter. Radix's scroll lock must
@@ -58,9 +67,12 @@ body.blog-open[data-scroll-locked] { margin-right: 0 !important; }
 body.blog-open .fade-in { opacity: 1; transform: none; animation: none; }
 
 /* Semantic hosts own layout only. GlassSurface fills the entire host; its
-   portable CSS material is identical before and after SVG feature detection. */
+   portable CSS material is identical before and after SVG feature detection.
+   --card-radius is read once when the surface mounts. */
 .blog-page :is(.blog-card, .blog-identity, .blog-side-card, .blog-notice, .blog-toolbar) {
   --card-inset: 24px;
+  --card-radius: 24px;
+  border-radius: var(--card-radius);
   display: block;
   padding: 0;
   border: 0;
@@ -75,9 +87,9 @@ body.blog-open .fade-in { opacity: 1; transform: none; animation: none; }
   transform: none;
 }
 .blog-page .blog-card { --card-inset: 0; }
-.blog-page .blog-identity { --card-inset: 24px 22px 26px; }
+.blog-page .blog-identity { --card-inset: 28px; --card-radius: 28px; }
 .blog-page .blog-notice { --card-inset: 0; position: relative; }
-.blog-page .blog-toolbar { --card-inset: 12px 14px; }
+.blog-page .blog-toolbar { --card-inset: 0; --card-radius: 0; overflow: visible; }
 .blog-page .blog-results.is-grid .blog-card { --card-inset: 0; }
 .blog-page .blog-third-party-glass {
   outline: none;
@@ -86,17 +98,29 @@ body.blog-open .fade-in { opacity: 1; transform: none; animation: none; }
   height: auto;
   min-height: 100%;
   border: 1px solid var(--glass-edge);
-  border-radius: 0;
+  border-radius: var(--card-radius);
   background: var(--glass-fill);
   box-shadow: var(--glass-shadow);
-  backdrop-filter: blur(6px) saturate(1.06);
-  -webkit-backdrop-filter: blur(6px) saturate(1.06);
-  transition: none;
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  transition: border-color .25s ease;
   animation: none;
 }
-.blog-page :is(.blog-card, .blog-identity, .blog-side-card, .blog-notice, .blog-toolbar):is(:hover, :focus-within) {
-  --glass-edge: rgb(236 246 255 / 65%);
-  --glass-fill: linear-gradient(135deg, rgb(239 246 255 / 11%), rgb(213 231 252 / 5%));
+.blog-page :is(.blog-card, .blog-identity, .blog-side-card, .blog-notice):is(:hover, :focus-within) {
+  --glass-edge: rgb(238 233 224 / 24%);
+}
+/* The toolbar and the plain index rows carry no pane of their own. */
+.blog-page .blog-toolbar .blog-third-party-glass,
+.blog-page .blog-results:not(.is-grid) .blog-card:not(.is-featured) .blog-third-party-glass {
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+.blog-page .blog-results:not(.is-grid) .blog-card:not(.is-featured) .blog-third-party-glass {
+  border-bottom: 1px solid var(--line);
 }
 body.blog-open[data-glass-tint="custom"] .blog-page :is(.blog-card, .blog-identity, .blog-side-card, .blog-notice, .blog-toolbar):is(:hover, :focus-within) {
   --glass-fill: linear-gradient(135deg, color-mix(in srgb, var(--card-tint) calc(var(--card-opacity) * 100% + 3%), transparent), color-mix(in srgb, var(--card-tint) calc(var(--card-opacity) * 55% + 2%), transparent));
@@ -114,36 +138,37 @@ body.blog-open[data-glass-tint="custom"] .blog-page :is(.blog-card, .blog-identi
 .blog-page .blog-card-bottom .arrow,
 .blog-page .blog-card:hover .blog-card-bottom .arrow { transform: none; transition: none; }
 .blog-page :is(h1, h2, strong) { color: var(--text); }
-.blog-page :is(p, .subtle, .blog-date) { color: #d0dae7; }
-.blog-page :is(h1, h2, p, .subtle) { text-shadow: 0 1px 3px rgb(0 6 18 / 55%); }
-.blog-page :is(.blog-card, .blog-notice) h2 { color: #f5f8ff; }
+.blog-page :is(p, .subtle) { color: var(--muted); }
+.blog-page :is(h1, h2, p, .subtle) { text-shadow: 0 1px 3px rgb(0 0 0 / 45%); }
+.blog-page :is(.blog-card, .blog-notice) h2 { color: var(--text); }
+.blog-page .blog-card:is(:hover, :focus-visible) h2 { color: #fff; }
 .blog-page .blog-notice::after { content: none; }
 .blog-page .eyebrow { display: inline-flex; align-items: center; gap: 7px; }
 .blog-page .eyebrow svg { width: 14px; height: 14px; flex: none; }
 .blog-page .identity-mark {
-  background: linear-gradient(135deg, rgb(209 234 255 / 12%), rgb(175 203 238 / 3%));
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 18%);
+  background: var(--surface);
+  box-shadow: 0 0 0 1px rgb(238 233 224 / 16%), 0 0 0 5px rgb(5 7 11 / 60%), 0 0 0 6px var(--blog-accent);
 }
 
-/* Every in-content control shares one neutral material. Header controls keep
-   their own navigation styling. States use edge/contrast changes, never motion. */
+/* Every in-content control shares one neutral pill material. Header controls
+   keep their own navigation styling. States change edge and fill, never motion. */
 .blog-page :is(button, .identity-links a, .tag, .search, .timezone-select) {
-  color: var(--text);
+  color: #c9ccd3;
   background: var(--control-fill);
   border: 1px solid var(--control-edge);
-  border-radius: 0;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 14%);
-  backdrop-filter: blur(3px);
-  -webkit-backdrop-filter: blur(3px);
-  transition: none;
+  border-radius: var(--pill);
+  box-shadow: none;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: background .2s, border-color .2s, color .2s;
   animation: none;
   transform: none;
 }
 .blog-page :is(button, .identity-links a, .tag, .search):is(:hover, :focus-visible, :focus-within),
 .blog-page button[data-state="on"], .blog-page button[aria-expanded="true"] {
-  background: linear-gradient(155deg, rgb(242 248 255 / 22%), rgb(213 230 251 / 8%));
-  border-color: rgb(236 246 255 / 68%);
-  color: #fff;
+  background: rgb(238 233 224 / 10%);
+  border-color: rgb(238 233 224 / 28%);
+  color: var(--text);
 }
 .blog-page :is(button, a, input):focus-visible,
 .blog-timezone-menu :focus-visible { border-color: var(--focus-edge); }
@@ -170,9 +195,9 @@ body.blog-open[data-glass-tint="custom"] .blog-page :is(.blog-card, .blog-identi
   overflow: hidden;
   color: #f2f6fc;
   background: var(--dialog-fill);
-  border: 1px solid rgb(224 237 255 / 42%);
-  border-radius: 0;
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 14%), 0 12px 32px rgb(0 5 17 / 30%);
+  border: 1px solid var(--smoked-edge);
+  border-radius: 16px;
+  box-shadow: var(--dialog-shadow);
   backdrop-filter: var(--dialog-blur);
   font: inherit;
 }
@@ -188,9 +213,9 @@ body.blog-open[data-glass-tint="custom"] .blog-page :is(.blog-card, .blog-identi
   cursor: default;
   outline: none;
 }
-.timezone-option[data-state="checked"] { color: #c2ddf3; }
-.timezone-option[data-highlighted] { color: #fff; background: rgb(212 232 255 / 12%); }
-.timezone-scroll { display: grid; place-items: center; height: 22px; color: #c2ddf3; }
+.timezone-option[data-state="checked"] { color: var(--blog-accent, var(--signal)); }
+.timezone-option[data-highlighted] { color: #fff; background: rgb(238 233 224 / 10%); border-radius: 10px; }
+.timezone-scroll { display: grid; place-items: center; height: 22px; color: var(--muted); }
 .blog-date-card [data-clock-zone] { display: none; }
 .blog-date-card .calendar-body { margin-top: 18px; }
 
@@ -213,21 +238,34 @@ body.blog-open[data-glass-tint="custom"] .blog-page :is(.blog-card, .blog-identi
 .blog-notice .blog-third-party-glass-content { display: block; }
 .blog-notice-copy { padding: 25px 116px 26px 28px; min-height: 152px; }
 .blog-notice .blog-notice-side { position: absolute; right: 28px; bottom: 26px; width: 74px; gap: 28px; }
+/* Index rows: copy left, a small rounded cover right, one hairline below. */
 .blog-page .blog-results .blog-card.has-cover { --card-inset: 0; }
-.blog-results .blog-card .blog-third-party-glass-content { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 194px; }
-.blog-results .blog-card.has-cover .blog-third-party-glass-content { grid-template-columns: minmax(0, 1fr) 40%; }
-.blog-results .blog-card .blog-card-copy { padding: 22px; }
-.blog-results .blog-card .cover-frame { height: 100%; min-height: 194px; aspect-ratio: auto; clip-path: polygon(9% 0, 100% 0, 100% 100%, 0 100%); }
-.blog-results .blog-card .blog-post-cover { transition: transform .35s cubic-bezier(.22, .68, .25, 1), filter .35s ease; }
+.blog-page .blog-results:not(.is-grid) .blog-card:not(.is-featured) { --card-radius: 0; border-radius: 0; overflow: visible; }
+.blog-results .blog-card .blog-third-party-glass-content { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; align-items: center; padding: 34px 0; }
+.blog-results .blog-card.has-cover .blog-third-party-glass-content { grid-template-columns: minmax(0, 1fr) clamp(150px, 24%, 232px); }
+.blog-results .blog-card .cover-frame { height: 140px; aspect-ratio: auto; border-radius: 16px; box-shadow: inset 0 0 0 1px rgb(238 233 224 / 8%); }
+/* The newest entry is a cover story: full-width image, copy underneath. */
+.blog-page .blog-results .blog-card.is-featured { --card-radius: 28px; margin-bottom: 8px; }
+.blog-results .blog-card.is-featured .blog-third-party-glass-content { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 0; }
+.blog-results .blog-card.is-featured .blog-card-copy { padding: 28px 34px 32px; background: radial-gradient(420px circle at 72% 0%, rgb(238 233 224 / 7%), transparent 62%); }
+.blog-results .blog-card.is-featured .cover-frame { order: -1; height: clamp(220px, 28vw, 400px); border-radius: 0; box-shadow: none; }
+.blog-results .blog-card.is-featured .cover-frame::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 45%, rgb(5 7 11 / 55%)); pointer-events: none; }
+/* Grid view: every entry is a small cover card. */
+.blog-results.is-grid .blog-card .blog-third-party-glass-content { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 0; align-items: stretch; }
+.blog-results.is-grid .blog-card .cover-frame { order: -1; height: auto; aspect-ratio: 16 / 9; border-radius: 0; box-shadow: none; }
+.blog-results.is-grid .blog-card .blog-card-copy { padding: 20px 22px 24px; }
+.blog-results .blog-card .blog-post-cover { transition: transform .6s var(--ease), filter .6s ease; }
 @media(hover:hover) and (pointer:fine) {
-  .blog-results .blog-card .cover-frame:hover .blog-post-cover { transform: translateY(-3px) scale(1.065); filter: brightness(1.06); }
+  .blog-results .blog-card:hover .blog-post-cover { transform: scale(1.04); filter: brightness(1.05); }
 }
-.blog-results .blog-card:focus-visible .blog-post-cover { transform: scale(1.035); }
-.blog-results.is-grid .blog-card .blog-card-copy { padding: 16px; }
+.blog-results .blog-card:focus-visible .blog-post-cover { transform: scale(1.03); }
 @media(max-width: 600px) {
-  .blog-results .blog-card .blog-card-copy { padding: 16px 12px 16px 16px; }
-  .blog-results .blog-card.has-cover .blog-third-party-glass-content { grid-template-columns: minmax(0, 1fr) 35%; }
-  .blog-results .blog-card .cover-frame, .blog-results .blog-card .blog-third-party-glass-content { min-height: 184px; }
+  .blog-results .blog-card .blog-third-party-glass-content { gap: 16px; padding: 22px 0; }
+  .blog-results:not(.is-grid) .blog-card.has-cover:not(.is-featured) .blog-third-party-glass-content { grid-template-columns: minmax(0, 1fr) 92px; }
+  .blog-results:not(.is-grid) .blog-card:not(.is-featured) .cover-frame { height: 70px; border-radius: 12px; }
+  .blog-page .blog-results .blog-card.is-featured { --card-radius: 24px; }
+  .blog-results .blog-card.is-featured .cover-frame { height: 200px; border-radius: 0; }
+  .blog-results .blog-card.is-featured .blog-card-copy { padding: 18px 20px 22px; }
 }
 @media(prefers-reduced-motion:reduce) {
   .blog-results .blog-card .blog-post-cover { transition: none; }
@@ -238,26 +276,30 @@ body.blog-open[data-glass-tint="custom"] .blog-page :is(.blog-card, .blog-identi
 .blog-notice-slide { grid-area: 1 / 1; min-width: 0; }
 .blog-notice-slide[aria-hidden="true"] { visibility: hidden; pointer-events: none; }
 
-/* Long-form reading needs a local contrast floor over arbitrary author images. */
+/* Reading paper: a near-opaque ink surface with no frame, so body text keeps
+   a 7:1 contrast floor over any author background. */
 body.blog-open .article {
-  padding: clamp(28px, 4vw, 58px);
-  color: #eef4fc;
-  background: rgb(7 17 33 / 64%);
-  border: 1px solid var(--glass-edge);
-  border-radius: 0;
-  box-shadow: var(--glass-shadow);
-  backdrop-filter: blur(8px);
+  padding: clamp(28px, 5vw, 72px);
+  color: var(--text);
+  background: rgb(8 11 18 / 86%);
+  border: 1px solid rgb(238 233 224 / 6%);
+  border-radius: 28px;
+  box-shadow: 0 30px 80px rgb(0 0 0 / 35%);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
-body.blog-open .article :is(h1, h2) { color: #f5f8ff; }
+body.blog-open .article :is(h1, h2) { color: var(--text); }
 body.blog-open[data-glass-tint="custom"] .article {
   background: linear-gradient(color-mix(in srgb, var(--card-tint) calc(var(--card-opacity) * 100%), transparent), color-mix(in srgb, var(--card-tint) calc(var(--card-opacity) * 55%), transparent)), rgb(7 17 33 / 64%);
 }
-body.blog-open .article :is(p, li, .article-body) { color: #e2ecf9; }
-body.blog-open .article :is(.back-link, .subtle, .post-tags) { color: #c2d4eb; }
+body.blog-open .article :is(p, li, .article-body) { color: #dcd8cf; }
+body.blog-open .article .article-intro { color: #c9ccd3; }
+body.blog-open .article .article-body blockquote :is(p, li) { color: var(--text); }
+body.blog-open .article :is(.back-link, .subtle, .post-tags) { color: var(--muted); }
 body.blog-open .article-code-tools button { background: var(--control-fill); border: 1px solid var(--control-edge); color: var(--text); }
-body.blog-open .reading-article .article-body blockquote { background: rgb(200 225 255 / 4%); border-left-color: var(--blog-accent); }
-body.blog-open .reading-article .article-body :not(pre)>code { background: rgb(200 225 255 / 8%); }
-body.blog-open .reading-article .article-body pre { background: rgb(3 12 23 / 22%); border-color: var(--content-line); }
+body.blog-open .reading-article .article-body blockquote { background: none; }
+body.blog-open .reading-article .article-body :not(pre)>code { background: rgb(238 233 224 / 8%); }
+body.blog-open .reading-article .article-body pre { background: var(--surface); border-color: var(--line); }
 body.blog-open[data-custom-article-background="true"] .article {
   background: color-mix(in srgb, var(--article-background-color) calc(var(--article-background-opacity) * 100%), transparent);
 }
@@ -266,7 +308,8 @@ body.blog-open[data-custom-article-text="true"] .article :is(h1, h2, h3, h4, h5,
 }
 
 /* Restrained accent palette: shared by small icons and emphasis, not page fills. */
-body.blog-open { --blog-accent: #bfdfff; }
+body.blog-open { --blog-accent: #d9c49c; }
+body.blog-open[data-blog-accent="blue"] { --blog-accent: #bfdfff; }
 body.blog-open[data-blog-accent="violet"] { --blog-accent: #dac5ff; }
 body.blog-open[data-blog-accent="mint"] { --blog-accent: #afe5d7; }
 body.blog-open[data-blog-accent="peach"] { --blog-accent: #f3c9b1; }
@@ -280,7 +323,11 @@ body.blog-open[data-custom-accent="true"] { --blog-accent: color-mix(in srgb, va
 .blog-page .tag[data-tone="4"] { --tag-color: #ebc0cd; }
 .blog-page .tag[data-tone]::before { content: ""; width: 4px; height: 4px; flex: none; background: currentColor; }
 .blog-page .tag[data-tone]:hover { background: color-mix(in srgb, var(--tag-color) 19%, transparent); color: var(--tag-color); }
-.blog-tags button.tag { min-height: 30px; }
+/* Side-rail tags read as a two-column "#tag" index, not boxed chips. */
+.blog-page .blog-tags { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 18px; }
+.blog-page .blog-tags button.tag { display: flex; justify-content: flex-start; min-height: 36px; padding: 0 2px; font-size: 14px; color: #c9ccd3; text-align: left; background: none; border: 0; border-radius: 8px; backdrop-filter: none; -webkit-backdrop-filter: none; }
+.blog-page .blog-tags button.tag::before { content: "#"; width: auto; height: auto; background: none; color: var(--blog-accent); }
+.blog-page .blog-tags button.tag:is(:hover, :focus-visible) { color: var(--text); background: rgb(238 233 224 / 6%); }
 .blog-page .blog-card-bottom { flex-wrap: wrap; }
 .platform-icon { display: block; width: 18px; height: 18px; flex: none; }
 .blog-page .identity-links a { color: var(--blog-accent); }
@@ -297,17 +344,17 @@ body.blog-open[data-custom-accent="true"] { --blog-accent: color-mix(in srgb, va
 .music-error { font-size: 12px; line-height: 1.6; }
 .music-error:empty { display: none; }
 .reading-layout .reading-directory-card {
-  background: var(--glass-fill);
-  box-shadow: var(--glass-shadow);
-  backdrop-filter: blur(6px) saturate(1.06);
-  -webkit-backdrop-filter: blur(6px) saturate(1.06);
+  background: none;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 .reading-layout .reading-directory-card nav button {
-  color: var(--muted); background: transparent; border: 1px solid transparent;
+  color: var(--dim); background: transparent; border: 0; border-radius: 0;
   box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none;
 }
 .reading-layout .reading-directory-card nav button:is(:hover, :focus-visible, [aria-current="location"]) {
-  color: var(--text); background: rgb(193 218 248 / 10%); border-left-color: var(--blog-accent, var(--content-cyan));
+  color: var(--text); background: none;
 }
 .reading-layout .reading-directory-card nav button:focus-visible { box-shadow: inset 0 0 0 1px var(--focus-edge); }
 .reading-sidebar .blog-identity { --card-inset: 20px; }

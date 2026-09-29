@@ -4,6 +4,9 @@ import {enhanceContentImages,setContentHTML} from './content-images.mjs';
 import {siteCopy,createContentProjection} from './site-copy.mjs';
 import {preparePageImages} from './home-preload.mjs';
 import {mountNavigationPrefetch} from './navigation-prefetch.mjs';
+import {createRouteTransitions} from './route-transition.mjs';
+import {mountNavSlider} from './nav-slider.mjs';
+import {DEPART_MS} from './journey.mjs';
 import {createContentReader,contentQuery} from './content-reader.mjs';
 import {readerGate,readerPage,mountReaderUI} from './reader-ui.mjs';
 import {loadAdminReaders} from './admin-route.mjs';
@@ -49,7 +52,8 @@ let resources = siteContent?.resources ?? [];
 let resourceCenter = siteContent?.['resource-center'] ?? [];
 let software = siteContent?.software ?? [];
 let works = siteContent?.works ?? [];
-const noteDate = (item) => item.date ? new Intl.DateTimeFormat('zh-CN', {year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(item.date)) : ''; 
+// Dates read as a dotted scale (2026.09.27) in the monospaced figure font.
+const noteDate = (item) => item.date ? new Intl.DateTimeFormat('zh-CN', {year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(item.date)).replaceAll('/', '.') : ''; 
 const restoredView = window.sansphasePageSession?.view || {};
 let language = restoredView.language === "en" ? "en" : "zh";
 import { universeMarkup, mountUniverse } from "./universe.mjs";
@@ -171,6 +175,7 @@ function syncMenuBreakpoint() {
   }
 }
 menuMedia.addEventListener("change", syncMenuBreakpoint);
+let cleanNavSlider = () => {};
 function header(page) {
   const parent =
     { work: "works", note: "notes", post: "community" }[page] || page;
@@ -183,25 +188,66 @@ function header(page) {
       ? `<button type="button" class="account-button" data-author-login>${t('作者台','Author studio')}</button>`
       : `<a class="account-button" href="#/account" data-reader-return>${siteContent.reader ? esc(siteContent.reader.nickname) : t('登录 / 注册','Sign in / Register')}</a>`
     : '';
-  const homeNav =
-    page === "home"
-      ? ""
-      : `<a class="home-nav" href="#/home" aria-label="${t("返回首页", "Back to home")}">${t("首页", "Home")}</a>`;
   // The public-facing pages use one fixed space theme. Keep the theme state
   // for backwards-compatible routing, but do not expose a toggle in chrome.
   const themeToggle = "";
   document.querySelector("#site-header").innerHTML =
-    `<a href="#/home" class="brand ${page === "home" ? "" : "brand-hidden"}" ${page === "home" ? "" : 'aria-hidden="true" tabindex="-1"'} aria-label="${t("無相 · 返回首页", "無相 · Back to home")}"><strong>無相</strong></a><nav class="nav" id="navigation" aria-label="${t("主导航", "Main navigation")}">${siteSections
+    `<a href="#/home" class="brand" aria-label="${t("無相 · 返回首页", "無相 · Back to home")}"><strong>無相</strong><span class="brand-english" aria-hidden="true">SANSPHASE</span></a><nav class="nav" id="navigation" aria-label="${t("主导航", "Main navigation")}">${siteSections
       .map(
         ({ id, zh, en }) =>
           `<a href="#/${id}" ${parent === id ? 'aria-current="page"' : ""}>${t(zh, en)}</a>`,
       )
       .join(
         "",
-      )}</nav><div class="header-actions">${homeNav}${support}${themeToggle}${page==='home'?homeMusicControls():''}<button class="language" data-action="language" aria-label="${t("Switch to English", "切换到中文")}">${t("中 / EN", "EN / 中")}</button>${personalAccount}<button class="icon-button menu-button" data-action="menu" aria-controls="navigation" aria-expanded="false" aria-label="${t("打开菜单", "Open menu")}">${icons.menu}</button></div>`;
+      )}</nav><div class="header-actions">${support}${themeToggle}${page==='home'?homeMusicControls():''}<button class="language" data-action="language" aria-label="${t("Switch to English", "切换到中文")}">${t("中 / EN", "EN / 中")}</button>${personalAccount}<button class="icon-button menu-button" data-action="menu" aria-controls="navigation" aria-expanded="false" aria-label="${t("打开菜单", "Open menu")}"><span class="menu-icon-open">${icons.menu}</span><span class="menu-icon-close">${icons.close}</span></button></div>`;
+  cleanNavSlider();
+  cleanNavSlider = mountNavSlider(document.querySelector("#navigation"));
 }
 function home() {
   return "";
+}
+// Homepage chapters show real, published facts only: bootstrap totals, and the
+// three newest article summaries once the scene is ready (one small cached
+// list request, the same one the blog page reuses).
+let homeLatest = null;
+function homeChapterDetails(id, english) {
+  const tr = (zh, en) => (english ? en : zh);
+  const pad = (value) => String(value ?? 0).padStart(2, "0");
+  const collections = siteContent?.collections || {};
+  const count = (summary, unit) => summary?.totalPublished ? `${pad(summary.totalPublished)}${unit}` : tr("整理中", "in preparation");
+  if (id === "notes") {
+    const summary = collections.notes;
+    if (!summary) return null;
+    const latest = new Date(summary.latest || "");
+    const facts = [
+      `${pad(summary.totalPublished)} ${tr("篇文章", "articles")}`,
+      `${pad(summary.tagCount)} ${tr("个标签", "tags")}`,
+      Number.isNaN(latest.getTime()) ? "" : `${tr("最近更新", "updated")} ${pad(latest.getMonth() + 1)}.${pad(latest.getDate())}`,
+    ].filter(Boolean).join(" · ");
+    return { facts, items: (homeLatest || []).map((item) => ({ href: `#/note/${item.id}`, title: item.title, meta: noteDate(item) })) };
+  }
+  if (id === "works")
+    return collections.works || collections.resources
+      ? { facts: `${tr("作品", "Works")} ${count(collections.works, tr(" 项", ""))} · ${tr("资料", "Materials")} ${count(collections.resources, tr(" 份", ""))}` }
+      : null;
+  if (id === "community")
+    return collections["resource-center"]
+      ? { facts: `${tr("资源中心", "Resource center")} ${count(collections["resource-center"], tr(" 份", ""))}` }
+      : null;
+  return null;
+}
+function loadHomeLatest() {
+  if (homeLatest || navigator.connection?.saveData) return;
+  if (siteContent?.delivery !== "paged-v1") {
+    homeLatest = notes.slice(0, 3);
+    cleanStage.refreshDetails?.();
+    return;
+  }
+  contentReader.prefetch(contentQuery({ page: "notes" })).then((value) => {
+    if (!value?.items?.length) return;
+    homeLatest = value.items.slice(0, 3);
+    cleanStage.refreshDetails?.();
+  }).catch(() => {});
 }
 function setupStage() {
   if (homeRoot) return;
@@ -221,6 +267,7 @@ function setupStage() {
     // Homepage readiness includes its own scene and typography. Content-page
     // images are a low-priority warmup after entry, never a homepage barrier.
     prepareContent: () => document.fonts?.ready,
+    chapterDetails: homeChapterDetails,
     onPrepared: () => {
       if(parseRoute(location.hash).page==='home'&&siteContent?.profile?.music?.autoplay!==false)musicModule?.prepareSiteMusicPlayback();
       const warm = () => {
@@ -230,8 +277,9 @@ function setupStage() {
         homeWarmup=new AbortController();
         preparePageImages(document,siteContent,{concurrency:1,signal:homeWarmup.signal,shouldContinue:()=>parseRoute(location.hash).page==='home'}).catch(() => {});
       };
-      if(window.requestIdleCallback) window.requestIdleCallback(warm);
-      else window.setTimeout(warm, 0);
+      const warmAll = () => { loadHomeLatest(); warm(); };
+      if(window.requestIdleCallback) window.requestIdleCallback(warmAll);
+      else window.setTimeout(warmAll, 0);
     },
     isBlocked: () =>
       (menuMedia.matches && Boolean(document.querySelector(".nav.open"))),
@@ -430,7 +478,7 @@ function renderView({silent=false,preserveScroll=false,contentStatus}={}) {
   if(position) main.style.minHeight = `${main.getBoundingClientRect().height}px`;
   setupStage();
   musicModule?.parkSiteMusic();
-  document.body.dataset.blogAccent=siteContent?.profile?.appearance?.accent || "blue";
+  document.body.dataset.blogAccent=siteContent?.profile?.appearance?.accent || "gold";
   applyCardAppearance(document.body,siteContent?.profile?.appearance);
   const { page, id } = parseRoute(location.hash);
   const isList = !id && ["works", "notes", "resources", "software", "resource-center", "community"].includes(page);
@@ -799,17 +847,50 @@ document.addEventListener("keydown", (e) => {
     }
   }
 });
-window.addEventListener("hashchange", () => {
+const sectionParent = { work: "works", note: "notes", post: "community" };
+const routeTransitions = createRouteTransitions(document, {
+  sectionOf: (page) => siteSections.findIndex(({ id }) => id === (sectionParent[page] || page)),
+});
+// On the homepage a followed link first flies the scene towards the click for
+// DEPART_MS, while the destination's content is fetched; the page then opens
+// over that motion. Without view transitions or with reduced motion, links
+// behave as ordinary links.
+let departing = false;
+document.addEventListener("click", (event) => {
+  const link = event.target.closest?.('a[href^="#/"]');
+  if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  const target = parseRoute(link.getAttribute("href"));
+  if (parseRoute(location.hash).page !== "home" || target.page === "home" || typeof document.startViewTransition !== "function") return;
+  const rect = link.getBoundingClientRect();
+  const x = event.detail ? event.clientX : rect.left + rect.width / 2,
+    y = event.detail ? event.clientY : rect.top + rect.height / 2;
+  if (departing) { event.preventDefault(); return; }
+  if (!cleanStage.depart?.(x, y)) return;
+  event.preventDefault();
+  departing = true;
+  const query = siteContent?.delivery === "paged-v1" && contentQuery(target, target.id ? {} : catalogState());
+  if (query) contentReader.prefetch(query).catch(() => {});
+  setTimeout(() => {
+    departing = false;
+    location.hash = link.getAttribute("href");
+  }, DEPART_MS);
+});
+window.addEventListener("hashchange", (event) => {
   // Stop scheduling new warmup images, but let the one already in flight be
   // reused by the destination page instead of cancelling and downloading again.
   clearTimeout(searchTimer);
   loadedContentKey='';
-  render();
-  window.scrollTo({ top: 0, behavior: "instant" });
-  (parseRoute(location.hash).page === "home"
-    ? homeRoot.querySelector(".universe-stage")
-    : main
-  ).focus({ preventScroll: true });
+  const from = parseRoute(event.oldURL ? new URL(event.oldURL).hash : "").page;
+  const to = parseRoute(location.hash).page;
+  routeTransitions.run(from, to, () => {
+    const rendering = render();
+    window.scrollTo({ top: 0, behavior: "instant" });
+    (to === "home"
+      ? homeRoot.querySelector(".universe-stage")
+      : main
+    ).focus({ preventScroll: true });
+    return rendering;
+  });
 });
 window.addEventListener("pagehide", (e) => {
   homeWarmup?.abort();contentReader.cancel();

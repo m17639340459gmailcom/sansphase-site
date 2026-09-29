@@ -32,12 +32,11 @@ test("mobile blog order moves original cards and restores desktop order on clean
   media.dispatchEvent(new dom.window.Event("change"));
   assert.ok(layout.classList.contains("is-mobile-flow"));
   assert.deepEqual(
-    [...layout.children].filter((node) => node.matches?.(".blog-notice, .blog-identity, .blog-music-card, .blog-weather-card, .blog-date-card, .blog-article-area"))
+    [...layout.children].filter((node) => node.matches?.(".blog-notice, .blog-identity, .blog-music-card, .blog-tags-card, .blog-weather-card, .blog-date-card, .blog-article-area"))
       .map((node) => node.textContent.trim()),
-    ["notice", "profile", "music", "weather", "time", "tagsarticles"],
+    ["notice", "articles", "profile", "music", "tags", "weather", "time"],
+    "phones read the articles right after the notice",
   );
-  assert.equal(document.querySelector(".blog-tags-card").parentElement, document.querySelector(".blog-article-area"));
-  assert.equal(document.querySelector(".blog-article-area").firstElementChild.className, "blog-tags-card");
 
   media.matches = false;
   media.dispatchEvent(new dom.window.Event("change"));

@@ -1,13 +1,18 @@
 import { escapeHTML as esc } from "./core.mjs";
 import { universeScenes } from "./universe-scenes.mjs";
-import { chapterArrow, loadingIcon } from "./chapter-icons.mjs";
+import { chapterArrow } from "./chapter-icons.mjs";
+import { loaderDial, reticleScale } from "./loader-dial.mjs";
+import { blackHoleView, descentReadout } from "./black-hole-view.mjs";
+import { journeyStep } from "./journey.mjs";
 
 export function universeMarkup(english = false) {
   const s = universeScenes[0];
   return `<section class="universe-home" aria-busy="true" data-index="0" data-scene="${s.id}">
-    <div class="universe-stage" tabindex="0" role="region" aria-describedby="universe-instructions" aria-label="${english ? "Interactive universe" : "可交互的宇宙"}"><canvas class="universe-canvas" aria-hidden="true"></canvas><div class="chapter-shade" aria-hidden="true"></div><section class="chapter-copy" aria-labelledby="chapter-title" hidden></section></div>
+    <div class="universe-stage" tabindex="0" role="region" aria-describedby="universe-instructions" aria-label="${english ? "Interactive universe" : "可交互的宇宙"}"><canvas class="universe-canvas" aria-hidden="true"></canvas><div class="chapter-shade" aria-hidden="true"></div><section class="chapter-copy" aria-labelledby="chapter-title" hidden></section><svg class="chapter-reticle" viewBox="0 0 200 200" aria-hidden="true"><circle class="reticle-outer" cx="100" cy="100" r="93" pathLength="1"></circle><path class="reticle-scale" d="${reticleScale}"></path><circle class="reticle-ring" cx="100" cy="100" r="62" pathLength="1"></circle><path class="reticle-ticks" d="M100 0v36M100 164v36M0 100h36M164 100h36"></path><circle class="reticle-core" cx="100" cy="100" r="1.6"></circle></svg></div>
     <h1 class="sr-only">無相</h1>
-    <div class="universe-loader">${loadingIcon}<span class="universe-load-label" role="status" aria-live="polite">${english ? "Preparing your space" : "正在准备星空"}</span><div class="universe-load-track" role="progressbar" aria-label="${english ? "Page preparation" : "页面准备进度"}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span></span></div><span class="universe-load-percent" aria-hidden="true">0%</span></div>
+    <div class="universe-loader">${loaderDial}<p class="loader-caption"><span class="universe-load-label" role="status" aria-live="polite">${english ? "Preparing your space" : "正在准备星空"}</span><span class="universe-load-percent" aria-hidden="true">0%</span></p><div class="universe-load-track" role="progressbar" aria-label="${english ? "Page preparation" : "页面准备进度"}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span></span></div></div>
+    <nav class="universe-rail" aria-label="${english ? "Scenes" : "场景"}"><ol>${universeScenes.map((scene, i) => `<li><button type="button" data-chapter="${i}"${i === 0 ? ' aria-current="step"' : ""}><span class="rail-no">${String(i + 1).padStart(2, "0")}</span><span class="rail-name">${esc(english ? scene.rail[1] : scene.rail[0])}</span></button></li>`).join("")}</ol><span class="rail-track" aria-hidden="true"><span class="rail-fill"></span></span></nav>
+    <p class="universe-descent" aria-hidden="true"><span>DESCENT · ${english ? "FALLING IN" : "下潜"}</span><span class="universe-descent-value"></span></p>
     <p class="sr-only" id="universe-instructions" aria-live="polite">${esc(english ? s.ariaLabelEn : s.ariaLabel)}</p>
     <div class="universe-feedback" hidden><p class="universe-status" role="status" aria-live="polite"></p><button class="universe-retry" type="button" hidden></button><a class="universe-continue" href="#/notes">${english ? "Browse content" : "先浏览内容"}</a></div>
   </section>`;
@@ -23,6 +28,9 @@ export function mountUniverse(
     initiallyCovered = false,
     loadTimeoutMs = 15000,
     onPrepared = () => {},
+    // Optional live facts per chapter: (sceneId, english) =>
+    // { facts?: string, items?: [{ href, title, meta }] } | null
+    chapterDetails = () => null,
   } = {},
 ) {
   const doc = root.ownerDocument,
@@ -34,6 +42,23 @@ export function mountUniverse(
   const feedback = root.querySelector(".universe-feedback"),
     instructions = root.querySelector("#universe-instructions");
   const copy = root.querySelector(".chapter-copy");
+  const rail = root.querySelector(".universe-rail");
+  // Every element of the copy carries a stagger index (--n, --i per title
+  // character) so CSS can reveal it in sequence from the one continuous
+  // --chapter-visibility value: forwards on arrival, backwards on leaving.
+  function titleMarkup(title) {
+    let i = 0;
+    return title
+      .split(/[\s\u3000]+/)
+      .map((word) => `<span class="chapter-word">${[...word].map((char) => `<span class="chapter-char" style="--i:${i++}">${esc(char)}</span>`).join("")}</span>`)
+      .join(" ");
+  }
+  function copyMarkup(scene) {
+    const title = text(scene.title, scene.titleEn);
+    const details = chapterDetails(scene.id, english) || {};
+    const items = (details.items || []).slice(0, 3);
+    return `<p class="chapter-label" style="--n:0"><span class="chapter-count">${String(index + 1).padStart(2, "0")} / ${String(universeScenes.length).padStart(2, "0")}</span> · ${esc(scene.label)}</p><h2 id="chapter-title" aria-label="${esc(title)}">${titleMarkup(title)}</h2><p class="chapter-description" style="--n:2">${esc(text(scene.description, scene.descriptionEn))}</p><div class="chapter-links" style="--n:3">${scene.links.map((link) => `<a href="${esc(link.href)}">${esc(text(link.zh, link.en))}${chapterArrow}</a>`).join("")}</div>${details.facts ? `<p class="chapter-facts" style="--n:4">${esc(details.facts)}</p>` : ""}${items.length ? `<ol class="chapter-latest" aria-label="${esc(text("最新文章", "Latest articles"))}">${items.map((item, n) => `<li style="--n:${5 + n}"><a href="${esc(item.href)}"><span class="chapter-latest-meta">${esc(item.meta || "")}</span><span class="chapter-latest-title">${esc(item.title)}</span></a></li>`).join("")}</ol>` : ""}`;
+  }
   let copyKey = "",
     progress = 0,
     targetProgress = 0,
@@ -55,6 +80,8 @@ export function mountUniverse(
     orbitX = 0,
     orbitY = 0;
   let loadTimer, wheelTimer, returnSwapTimer, returnEndTimer;
+  // Set while a rail jump across several chapters flies as one step.
+  let jump = null;
   let returnState = "idle";
   const listeners = [];
   const touches = new Set();
@@ -112,8 +139,7 @@ export function mountUniverse(
     root
       .querySelector(".universe-load-track")
       .setAttribute("aria-valuenow", String(value));
-    root.querySelector(".universe-load-track span").style.transform =
-      `scaleX(${value / 100})`;
+    root.querySelector(".universe-loader").style.setProperty("--load", String(value / 100));
     root.querySelector(".universe-load-label").textContent =
       loadPhase === "images"
         ? text("正在准备页面图片", "Preparing page images")
@@ -130,24 +156,45 @@ export function mountUniverse(
     root.dataset.interactive = String(
       openingInteractive() && !covered && returnState === "idle",
     );
-    const distance = Math.abs(progress - index);
+    // Copy, shade and readouts follow the visual journey: during a rail jump
+    // that is one virtual step, so no intermediate chapter surfaces.
+    const visual = journeyStep(progress, jump).virtual;
+    const distance = Math.abs(visual - Math.round(visual));
     // The copy follows the actual scene position even after the wheel stops.
     const visibility = 1 - clamp((distance - 0.08) / 0.4, 0, 1);
     root.dataset.progress = progress.toFixed(4);
     root.style.setProperty("--chapter-visibility", visibility.toFixed(3));
-    root.style.setProperty("--chapter-shift", `${(progress - index) * -90}px`);
+    root.style.setProperty("--chapter-shift", `${(visual - Math.round(visual)) * -90}px`);
     root.style.setProperty(
       "--journey-shade",
-      clamp(progress / 0.6, 0, 1).toFixed(3),
+      clamp(visual / 0.6, 0, 1).toFixed(3),
     );
+    // The opening copy is pulled towards the hole while the camera dives; the
+    // readout only exists during the fall itself.
+    const hole = blackHoleView(visual, {
+      portrait: w.innerWidth / Math.max(1, w.innerHeight) < 0.85,
+    });
+    root.style.setProperty("--descent", hole.readout.toFixed(3));
+    const readout = hole.readout > 0 ? descentReadout(hole, english) : "";
+    const readoutNode = root.querySelector(".universe-descent-value");
+    if (readoutNode.textContent !== readout) readoutNode.textContent = readout;
+    root.querySelector(".universe-descent span").textContent = `DESCENT · ${text("下潜", "FALLING IN")}`;
     const chapterCopy = universeScenes[index];
     const nextCopyKey = `${index}:${english}`;
     if (copyKey !== nextCopyKey) {
       copyKey = nextCopyKey;
-      copy.innerHTML = chapterCopy.links
-        ? `<p class="chapter-label">${esc(chapterCopy.label)}</p><h2 id="chapter-title">${esc(text(chapterCopy.title, chapterCopy.titleEn))}</h2><p class="chapter-description">${esc(text(chapterCopy.description, chapterCopy.descriptionEn))}</p><div class="chapter-links">${chapterCopy.links.map((link) => `<a href="${esc(link.href)}">${esc(text(link.zh, link.en))}${chapterArrow}</a>`).join("")}</div>`
-        : "";
+      copy.innerHTML = chapterCopy.links ? copyMarkup(chapterCopy) : "";
+      rail.setAttribute("aria-label", text("场景", "Scenes"));
+      rail.querySelectorAll("button").forEach((button, i) => {
+        if (i === index) button.setAttribute("aria-current", "step");
+        else button.removeAttribute("aria-current");
+        button.querySelector(".rail-name").textContent = text(...universeScenes[i].rail);
+      });
     }
+    root.style.setProperty("--rail", (progress / (universeScenes.length - 1)).toFixed(4));
+    // 0 while resting on a chapter, 1 halfway between two: marks that only
+    // belong to the journey (the reticle) fade out once a chapter settles.
+    root.style.setProperty("--transit", Math.abs(Math.sin(Math.PI * visual)).toFixed(3));
     copy.hidden = !chapterCopy.links || !ready || failed;
     copy.inert =
       covered || returnState !== "idle" || visibility < 0.5 || copy.hidden;
@@ -205,6 +252,7 @@ export function mountUniverse(
     const needsSwap = returnState === "out";
     returnState = reveal ? "in" : "idle";
     if (needsSwap) {
+      jump = null;
       renderer?.setChapter(0, { immediate: true });
       updateProgress(0);
     }
@@ -220,7 +268,8 @@ export function mountUniverse(
     if (disposed || !Number.isFinite(value)) return;
     if (Math.abs(value - progress) < 0.0000001) return;
     progress = clamp(value, 0, universeScenes.length - 1);
-    index = Math.round(progress);
+    const journey = journeyStep(progress, jump);
+    index = journey.chapterOf(Math.round(journey.virtual));
     if (Math.abs(progress - targetProgress) < 0.0002 && !wheelTimer)
       scrolling = false;
     sync();
@@ -341,6 +390,7 @@ export function mountUniverse(
         return;
       }
       renderer = api;
+      jump = null;
       renderer.setChapter(targetProgress, { continuous: true });
       renderer.setOrbit(orbitX, orbitY);
       syncMotion();
@@ -349,12 +399,16 @@ export function mountUniverse(
       fail(token);
     }
   }
-  function setTravel(value, continuous = false) {
+  function setTravel(value, continuous = false, { rail = false } = {}) {
     if (!usable()) return;
+    // A rail jump owns the scene until it arrives.
+    if (jump && Math.abs(progress - targetProgress) >= 0.0002) return;
+    const from = Math.round(targetProgress);
     targetProgress = clamp(value, 0, universeScenes.length - 1);
+    jump = rail && Math.abs(targetProgress - from) > 1 ? { from, to: targetProgress } : null;
     if (targetProgress > 0) resetViewPointer();
     scrolling = !reduced;
-    renderer.setChapter(targetProgress, { continuous });
+    renderer.setChapter(targetProgress, { continuous, jump });
     if (reduced) updateProgress(targetProgress);
     sync();
   }
@@ -362,6 +416,12 @@ export function mountUniverse(
     setTravel(Math.round(targetProgress) + direction);
   }
   listen(retry, "click", start);
+  listen(rail, "click", (event) => {
+    const button = event.target.closest?.("button[data-chapter]");
+    // Jumps start from a settled chapter, never from the middle of a flight.
+    if (button && Math.abs(progress - targetProgress) < 0.0002)
+      setTravel(Number(button.dataset.chapter), false, { rail: true });
+  });
   listen(stage, "pointermove", (event) => {
     if (!usable() || multiTouch || (pointer && pointer.id !== event.pointerId))
       return;
@@ -595,9 +655,26 @@ export function mountUniverse(
     renderer?.dispose();
     renderer = null;
   }
+  // A homepage link was followed: accelerate towards it (the page itself
+  // opens over the scene from app.mjs). Returns false when not possible.
+  cleanup.depart = (clientX, clientY) => {
+    if (!usable() || reduced || !renderer?.depart) return false;
+    const r = stage.getBoundingClientRect();
+    renderer.depart(
+      clamp(((clientX - r.left) / Math.max(1, r.width)) * 2 - 1, -1, 1),
+      clamp(1 - ((clientY - r.top) / Math.max(1, r.height)) * 2, -1, 1),
+    );
+    root.classList.add("is-departing");
+    return true;
+  };
+  const endDeparture = () => {
+    root.classList.remove("is-departing");
+    renderer?.depart?.(null);
+  };
   cleanup.setCovered = (value) => {
     if (disposed) return;
     covered = Boolean(value);
+    if (!covered) endDeparture();
     if (!covered && !started) start();
     if (covered) {
       finishReturn();
@@ -615,6 +692,12 @@ export function mountUniverse(
     english = Boolean(value);
     sync();
   };
+  // Live facts (counts, latest articles) arrived: redraw the current copy.
+  cleanup.refreshDetails = () => {
+    if (disposed) return;
+    copyKey = "";
+    sync();
+  };
   cleanup.returnToOpening = () => {
     if (
       disposed ||
@@ -628,6 +711,8 @@ export function mountUniverse(
     touches.clear();
     multiTouch = false;
     targetProgress = 0;
+    jump = null;
+    endDeparture();
     scrolling = false;
     resetViewPointer();
     // Hide the scene before changing only its chapter. Manual rotation, sky

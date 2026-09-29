@@ -201,6 +201,10 @@ export function mountFilters(container: Element, options: FilterOptions) {
 // this adapter mounts the published component inside each existing card.
 export function mountGlassSurface(container: Element, html: string, className = "") {
   const root = createRoot(container);
+  // Each host declares its corner radius in CSS (--card-radius); the upstream
+  // component only accepts a number, so read it once at mount.
+  const view = container.ownerDocument.defaultView;
+  const radius = Number.parseFloat(view?.getComputedStyle(container).getPropertyValue("--card-radius") || "") || 0;
   // The upstream component explicitly accepts CSS width/height strings.
   const ResponsiveGlassSurface = GlassSurface as ComponentType<{
     width: string | number;
@@ -222,7 +226,7 @@ export function mountGlassSurface(container: Element, html: string, className = 
       <ResponsiveGlassSurface
         width="100%"
         height="auto"
-        borderRadius={0}
+        borderRadius={radius}
         borderWidth={0}
         brightness={28}
         opacity={0}

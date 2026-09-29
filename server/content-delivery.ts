@@ -35,7 +35,8 @@ export function publicPageResponse(data: PublicData,params: URLSearchParams) {
 const summary=({bodyHTML,attachments,...item}: PublicItem)=>item;
 const metadata=(items: PublicItem[])=>{
  const tags=[...new Set(items.flatMap(item=>item.tags||[]))];
- return {totalPublished:items.length,tagCount:tags.length,tags:tags.slice(0,100)};
+ const latest=items.reduce((newest,item)=>{const date=String(item.date||'');return date>newest?date:newest;},'');
+ return {totalPublished:items.length,tagCount:tags.length,tags:tags.slice(0,100),latest};
 };
 export function publicBootstrap(data: PublicData) {
  let bootstrap=bootstraps.get(data);

@@ -1,4 +1,4 @@
-import React, { Suspense, useEffect, useMemo, useRef } from "react";
+import React, { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { Environment } from "@react-three/drei/core/Environment.js";
 import { useTexture } from "@react-three/drei/core/Texture.js";
@@ -18,14 +18,7 @@ import {
 } from "three";
 import source from "./vendor/space-3d/nebula.glsl";
 import noise from "./vendor/space-3d/classic-noise-4d.glsl";
-import milkyWayPath from "./vendor/eso-milky-way/eso0932a.jpg";
-import galacticPath from "./vendor/eso-galactic-centre/eso0934a.jpg";
-import nebulaPath from "./vendor/eso-scene-photographs/eso1105a.jpg";
-import galaxyPath from "./vendor/eso-scene-photographs/eso1424a.jpg";
-import { sceneAssetUrl } from "./scene-delivery.mjs";
-
-const [milkyWayURL, galacticURL, nebulaURL, galaxyURL] =
-  [milkyWayPath, galacticPath, nebulaPath, galaxyPath].map((path) => sceneAssetUrl(path));
+import { milkyWayURL, galacticURL, nebulaURL, galaxyURL } from "./scene-images.mjs";
 
 // The existing Space-3D nebula shader is baked once by Drei's cube camera.
 // There is no model-generated shader or expensive full-screen noise each frame.
@@ -154,6 +147,22 @@ export function SpaceBackdrop({ model }) {
   const { camera, size, scene } = useThree();
   const photographs = useRef([]);
   const panorama = useRef();
+  // The opening's black hole and the chapter photographs cover the panorama
+  // almost everywhere. Render it once while loading (so its programs compile
+  // before the first dive), then only while it can actually be seen.
+  const [panoramaFrames, setPanoramaFrames] = useState(1);
+  const panoramaLive = useRef(false);
+  // A stable element: toggling the frame policy must not re-render the
+  // Environment inside, which would re-bake its nebula cube (~0.6 s).
+  const panoramaScene = useMemo(
+    () => (
+      <>
+        <PerspectiveCamera makeDefault fov={70} near={0.1} far={1000} />
+        <Panorama rotation={scene.backgroundRotation} model={model} />
+      </>
+    ),
+    [scene, model],
+  );
   const depth = 150;
   const height = 2 * Math.tan((camera.fov * Math.PI) / 360) * depth;
   const width = (height * size.width) / size.height;
@@ -170,9 +179,12 @@ export function SpaceBackdrop({ model }) {
       material.depthTest = false;
       const p = model.progress.get();
       const opacity = skyLayerOpacity(p, spec.chapter);
+      // While the loader still covers the stage, draw every photograph once
+      // (fully transparent) so the GPU's first use is not mid-journey.
       photograph.visible =
-        opacity > 0.0001 &&
-        (spec.chapter === 3 || skyLayerOpacity(p, spec.chapter + 1) < 1);
+        model.preparing === true ||
+        (opacity > 0.0001 &&
+          (spec.chapter === 3 || skyLayerOpacity(p, spec.chapter + 1) < 1));
       material.opacity = opacity;
       // Idle drift and the shared scroll progress drive the photograph.
       // Incoming/outgoing skies pass the lens at a different rate from the R.
@@ -187,10 +199,14 @@ export function SpaceBackdrop({ model }) {
       photograph.rotation.z = 0.012 * Math.sin(time * 0.55);
       material.zoom = 1.035 + 0.022 * Math.sin(time * 0.7);
     }
-    // Keep the panorama texture live for an immediate reverse transition, but
-    // do not draw its covered plane again in each refraction/final scene pass.
-    if (panorama.current)
-      panorama.current.visible = !photographsCoverPanorama(photographs.current);
+    // Do not draw the covered plane, nor refresh its texture, while hidden.
+    const uncovered = !photographsCoverPanorama(photographs.current);
+    if (panorama.current) panorama.current.visible = uncovered;
+    const live = uncovered && model.progress.get() >= 0.86;
+    if (live !== panoramaLive.current) {
+      panoramaLive.current = live;
+      setPanoramaFrames(live ? Infinity : 0);
+    }
   });
   return (
     <ScreenSpace depth={depth}>
@@ -205,13 +221,15 @@ export function SpaceBackdrop({ model }) {
         <meshBasicMaterial depthWrite={false} depthTest={false} fog={false}>
           <RenderTexture
             attach="map"
+            width={size.width * 0.6}
+            height={size.height * 0.6}
+            frames={panoramaFrames}
             samples={0}
             depthBuffer={false}
             renderPriority={-0.1}
             compute={() => false}
           >
-            <PerspectiveCamera makeDefault fov={70} near={0.1} far={1000} />
-            <Panorama rotation={scene.backgroundRotation} model={model} />
+            {panoramaScene}
           </RenderTexture>
         </meshBasicMaterial>
       </mesh>

@@ -6,7 +6,7 @@ import { verifySite } from "../scripts/verify-site.mjs";
 import { rewriteStaticHtml } from "../scripts/static-package.mjs";
 import { composeSiteStyles } from "../scripts/compose-site-styles.mjs";
 import { transform } from 'esbuild';
-import { loadingIcon } from '../dist/chapter-icons.mjs';
+import { loaderDial } from '../src/loader-dial.mjs';
 import { typedBrowserModules } from '../scripts/typed-browser-modules.mjs';
 
 const canonicalFiles = [
@@ -27,6 +27,11 @@ const canonicalFiles = [
   "data.mjs",
   "universe.mjs",
   "universe-scenes.mjs",
+  "black-hole-view.mjs",
+  "route-transition.mjs",
+  "journey.mjs",
+  "nav-slider.mjs",
+  "loader-dial.mjs",
   "styles.css",
   "blog-background.css",
   "author.css",
@@ -40,12 +45,12 @@ test("the single generated site stays synchronized with source and has all refer
         ? (await transform(await readFile(`src/${file.slice(0, -'.mjs'.length)}.ts`, 'utf8'), { loader: 'ts', format: 'esm', target: 'es2022' })).code
         : await readFile(`src/${file}`);
     if(file==='index.html') {
-      // The only HTML build substitution is the pinned Lucide boot icon;
+      // The only HTML build substitution is the shared loading dial;
       // validate the rest of the template byte for byte as before.
       const placeholder='<span class="startup-icon" aria-hidden="true"></span>';
       assert.equal(source.toString().split(placeholder).length,2);
-      assert.match(loadingIcon,/^<svg\b/);
-      source=Buffer.from(source.toString().replace(placeholder,loadingIcon));
+      assert.match(loaderDial,/^<span class="loader-dial" aria-hidden="true">/);
+      source=Buffer.from(source.toString().replace(placeholder,loaderDial));
       const delivery=await readFile('dist/static-delivery.json','utf8').then(JSON.parse).catch(error=>{if(error.code==='ENOENT')return null;throw error});
       source=Buffer.from(rewriteStaticHtml(source.toString(),delivery));
     }

@@ -10,18 +10,34 @@
   white-space: nowrap;
   border: 0;
 }
+/* 墨夜天文台: warm moonlight text over ink, one quiet signal colour, serif
+   display type and monospaced figures. Every family below is a locally
+   installed system font, so the palette costs no extra download. Body text
+   avoids the Windows Noto Sans SC variable font: Chrome renders it at its
+   heavy default instance whatever font-weight asks for. */
 :root {
   color-scheme: dark;
-  --bg: #090909;
-  --surface: #171717;
-  --surface-2: #252525;
-  --text: #f5f5f5;
-  --muted: #bdbdbd;
-  --accent: #e0e0e0;
-  --line: #ffffff36;
+  --bg: #05070b;
+  --surface: #0c1119;
+  --surface-2: #151b26;
+  --text: #eee9e0;
+  --muted: #aeb3bd;
+  --dim: #80868f;
+  --accent: #eee9e0;
+  --signal: #d9c49c;
+  --line: rgb(238 233 224 / 12%);
+  --line-strong: rgb(238 233 224 / 22%);
   --error: #ffb3a4;
-  --body-link: #dac5ff;
-  --radius: 2px;
+  --body-link: #e3cfa6;
+  --radius: 14px;
+  --radius-card: 24px;
+  --pill: 999px;
+  --smoked-fill: linear-gradient(160deg, rgb(28 34 48 / 58%), rgb(10 13 20 / 52%));
+  --smoked-edge: rgb(238 233 224 / 12%);
+  --smoked-shadow: inset 0 1px 0 rgb(255 255 255 / 7%), 0 24px 60px rgb(0 0 0 / 35%);
+  --font-serif: "Noto Serif SC", "Source Han Serif SC", "Source Han Serif CN", "Songti SC", "STSong", serif;
+  --font-mono: "JetBrains Mono", "Cascadia Mono", "SF Mono", ui-monospace, Consolas, monospace;
+  --header-h: 96px;
   --content-max: 1120px;
   --text-page: clamp(36px, 4.5vw, 64px);
   --space-2: 8px;
@@ -30,13 +46,13 @@
   --space-6: 48px;
   --space-8: 64px;
   --page: clamp(22px, 5vw, 88px);
-  --font: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  --font: "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
-  --focus-edge: rgb(228 242 255 / 88%);
-  --dialog-fill: linear-gradient(135deg, rgb(221 235 255 / 16%), rgb(64 85 118 / 28%));
-  --dialog-blur: blur(18px) saturate(1.08);
-  --dialog-shade: rgb(4 9 19 / 12%);
-  --dialog-shadow: inset 0 1px 0 rgb(255 255 255 / 18%), 0 18px 50px rgb(3 9 22 / 22%);
+  --focus-edge: var(--signal);
+  --dialog-fill: linear-gradient(160deg, rgb(28 34 48 / 82%), rgb(10 13 20 / 78%));
+  --dialog-blur: blur(24px) saturate(1.4);
+  --dialog-shade: rgb(3 4 8 / 40%);
+  --dialog-shadow: inset 0 1px 0 rgb(255 255 255 / 7%), 0 24px 60px rgb(0 0 0 / 45%);
 }
 * {
   box-sizing: border-box;
@@ -53,6 +69,17 @@ body {
   font-size: 16px;
   line-height: 1.65;
   -webkit-font-smoothing: antialiased;
+}
+/* Display type is serif; dates, counts and serial numbers use tabular figures. */
+:is(h1, h2, .page-heading h1, .brand strong) {
+  font-family: var(--font-serif);
+}
+.mono,
+time,
+.page-meta,
+.row-number {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 /* The static HTML has empty shells until the first route is rendered. Do not
    paint an empty footer at the old scroll position before that content exists. */
@@ -93,7 +120,7 @@ button {
 :focus { outline: none; }
 :is(button, input, textarea, select, [role="button"], [role="tab"], [role="radio"]):focus-visible {
   border-color: var(--focus-edge);
-  box-shadow: inset 0 -2px 0 var(--focus-edge);
+  box-shadow: inset 0 0 0 1.5px var(--focus-edge);
 }
 a:focus-visible { text-decoration: underline; text-underline-offset: 4px; }
 ::selection {
@@ -141,54 +168,63 @@ svg {
 .skip-link:focus {
   top: 10px;
 }
+/* Navigation highlight: one pill slides between items (nav-slider.mjs). */
+.nav-indicator {
+  position: absolute;
+  z-index: 0;
+  top: 6px;
+  bottom: 6px;
+  left: 0;
+  width: 0;
+  border-radius: var(--pill);
+  background: rgb(238 233 224 / 12%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 8%), 0 0 0 1px rgb(238 233 224 / 8%);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+    width 0.5s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.25s ease;
+}
+.nav-indicator.is-visible { opacity: 1; }
+.nav-indicator.is-instant { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .nav-indicator { transition: opacity 0.2s ease; }
+}
+/* Header: wordmark | smoked-glass navigation capsule | quiet actions. The
+   same three columns hold on every page; narrow screens fold the capsule
+   into the menu sheet defined in styles-reading.css. */
 #site-header {
   position: relative;
   z-index: 20;
-  height: 94px;
-  display: flex;
+  height: var(--header-h);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
-  padding: 0 var(--page);
-  border-bottom: 1px solid var(--line);
-  gap: 30px;
+  padding: 0 clamp(20px, 3.9vw, 56px);
+  border-bottom: 0;
+  gap: 24px;
   background: var(--bg);
 }
 .brand {
-  display: flex;
-  gap: 1px;
-  align-items: flex-start;
-  flex-direction: column;
-  font-size: 16px;
-  letter-spacing: 1px;
-  font-weight: 500;
+  justify-self: start;
+  display: inline-flex;
+  gap: 12px;
+  align-items: baseline;
   white-space: nowrap;
-}
-.brand-hidden {
-  display: none;
-}
-.home-nav {
-  font-size: 14px;
-  color: var(--muted);
-  position: relative;
-  padding: 10px 0;
-  white-space: nowrap;
-}
-.home-nav:hover,
-.home-nav[aria-current="page"] {
-  color: var(--text);
 }
 .brand strong {
-  font-size: 32px;
+  font-size: 26px;
   font-weight: 600;
-  line-height: 1.15;
-  letter-spacing: 9px;
-  color: #f5f5f5;
+  line-height: 1.2;
+  letter-spacing: 0.18em;
+  color: var(--text);
 }
 .brand-english {
-  font-family: "Bahnschrift", var(--font);
-  font-size: 12px;
-  letter-spacing: 3.2px;
-  color: #bdbdbd;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.3em;
+  color: var(--muted);
   line-height: 1.5;
 }
 .brand small {
@@ -200,81 +236,107 @@ svg {
   padding-left: 12px;
 }
 .nav {
+  position: relative;
+  justify-self: center;
   display: flex;
-  gap: 30px;
+  gap: 2px;
   align-items: center;
+  padding: 6px;
+  border: 1px solid var(--smoked-edge);
+  border-radius: var(--pill);
+  background: var(--smoked-fill);
+  box-shadow: var(--smoked-shadow);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
 }
 .nav a {
-  font-size: 14px;
-  color: var(--muted);
-  position: relative;
-  padding: 10px 0;
-}
-.nav a:hover,
-.nav a[aria-current="page"] {
-  color: var(--text);
-}
-.nav a[aria-current="page"]:after {
-  content: "";
-  height: 1px;
-  width: 18px;
-  border-radius: 0;
-  background: #eeeeee;
-  position: absolute;
-  bottom: 0;
-  left: calc(50% - 9px);
-}
-.header-actions {
-  display: flex;
-  gap: 22px;
+  display: inline-flex;
   align-items: center;
   font-size: 14px;
+  color: #c9ccd3;
+  position: relative;
+  padding: 0 18px;
+  min-height: 40px;
+  border-radius: var(--pill);
+  transition: color 0.2s, background 0.2s;
+}
+.nav a {
+  z-index: 1;
+}
+.nav a:hover {
+  color: var(--text);
+}
+.nav a[aria-current="page"] {
+  color: #fff;
+}
+.header-actions {
+  justify-self: end;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 14px;
+}
+.header-actions > :is(.home-nav, .support-header) {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 12px;
+  font-size: 13.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  transition: color 0.2s;
+}
+.header-actions > :is(.home-nav, .support-header):hover {
+  color: var(--text);
 }
 .account-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  min-height: 44px;
-  padding: 0 15px;
-  border: 1px solid #ffffff66;
-  border-radius: 3px;
-  background: #ffffff0d;
-  color: #f5f5f5;
-  font-size: 14px;
+  min-height: 40px;
+  margin-left: 6px;
+  padding: 0 18px;
+  border: 1px solid rgb(238 233 224 / 20%);
+  border-radius: var(--pill);
+  background: transparent;
+  color: var(--text);
+  font-size: 13.5px;
   white-space: nowrap;
   transition:
     background 0.2s,
     border-color 0.2s;
 }
 .account-button:hover {
-  border-color: #ffffffb3;
-  background: #ffffff1c;
+  border-color: rgb(238 233 224 / 42%);
+  background: rgb(238 233 224 / 6%);
 }
 .language {
-  font-size: 12px;
-  letter-spacing: 1px;
+  font-size: 12.5px;
+  letter-spacing: 0.08em;
   color: var(--muted);
+  border-radius: var(--pill);
 }
 .icon-button {
   border: 1px solid var(--line);
-  width: 39px;
-  height: 39px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   display: inline-grid;
   place-items: center;
 }
 .icon-button:hover {
-  background: var(--surface-2);
-  border-color: var(--muted);
+  background: rgb(238 233 224 / 6%);
+  border-color: var(--line-strong);
 }
 .menu-button {
   display: none;
 }
 .eyebrow {
+  font-family: var(--font-mono);
   font-size: 12px;
-  letter-spacing: 2.5px;
-  color: var(--accent);
+  letter-spacing: 0.26em;
+  color: var(--signal);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -298,8 +360,8 @@ svg {
   font-size: 14px;
 }
 .text-link:hover {
-  color: var(--accent);
-  border-color: var(--accent);
+  color: var(--signal);
+  border-color: var(--signal);
 }
 .button {
   display: inline-flex;
@@ -307,34 +369,34 @@ svg {
   justify-content: center;
   gap: 16px;
   min-height: 46px;
-  padding: 11px 23px;
+  padding: 11px 22px;
   background: var(--accent);
-  color: #090909;
+  color: var(--bg);
   border: 1px solid var(--accent);
-  border-radius: 2px;
-  font-size: 14px;
+  border-radius: var(--pill);
+  font-size: 14.5px;
   font-weight: 500;
   transition: background 0.2s;
 }
 .button:hover {
-  background: #eeeeee;
+  background: #fff;
 }
 .button.secondary {
   color: var(--text);
-  border-color: var(--line);
+  border-color: var(--line-strong);
   background: transparent;
 }
 .button.secondary:hover {
-  border-color: var(--muted);
-  background: var(--surface);
+  border-color: rgb(238 233 224 / 42%);
+  background: rgb(238 233 224 / 6%);
 }
 .tag {
   display: inline-block;
   font-size: 12px;
   color: var(--muted);
-  padding: 3px 9px;
+  padding: 3px 10px;
   border: 1px solid var(--line);
-  border-radius: 2px;
+  border-radius: var(--pill);
 }
 .pill {
   border-radius: 30px;
@@ -374,8 +436,9 @@ svg {
 }
 .page-heading h1 {
   font-size: var(--text-page);
-  letter-spacing: -1px;
-  line-height: 1.25;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.15;
 }
 .page-heading p {
   color: var(--muted);
@@ -386,8 +449,8 @@ svg {
 }
 .page-meta {
   font-size: 12px;
-  color: var(--muted);
-  letter-spacing: 1px;
+  color: var(--dim);
+  letter-spacing: 0.06em;
 }
 .toolbar {
   display: flex;
@@ -404,10 +467,10 @@ svg {
   flex-wrap: wrap;
 }
 .filter {
-  padding: 8px 17px;
-  font-size: 14px;
+  padding: 8px 18px;
+  font-size: 13.5px;
   color: var(--muted);
-  border-radius: 2px;
+  border-radius: var(--pill);
 }
 .filter[aria-pressed="true"] {
   background: var(--accent);
@@ -425,9 +488,10 @@ svg {
   display: flex;
   gap: 10px;
   align-items: center;
-  border: 1px solid var(--line);
-  padding: 9px 14px;
-  border-radius: 2px;
+  border: 1px solid rgb(238 233 224 / 14%);
+  padding: 9px 16px;
+  border-radius: var(--pill);
+  background: rgb(5 7 11 / 40%);
   min-width: 235px;
 }
 .search svg {
@@ -444,7 +508,7 @@ svg {
   min-width: 0;
 }
 .search:focus-within {
-  border-color: var(--accent);
+  border-color: var(--signal);
 }
 .search input::placeholder {
   color: var(--muted);
@@ -490,7 +554,7 @@ svg {
   place-items: center;
   background: var(--accent);
   color: var(--bg);
-  border-radius: 3px;
+  border-radius: 50%;
 }
 .work-info {
   display: flex;
@@ -766,4 +830,69 @@ svg {
   background: var(--surface);
   border: 1px solid var(--line);
   margin: 24px 0;
+}
+
+/* Route transitions (View Transitions API; see route-transition.mjs).
+   warp: the homepage flies on into its scene while the destination opens as
+   an iris from the clicked point. slide: sections sit side by side in
+   navigation order and the content slides towards the one chosen. page:
+   within a section, a short rise. The header (with its sliding highlight)
+   stays live on top; between content pages the sky stays put underneath. */
+html[data-route-transition] #site-header { view-transition-name: site-header; }
+html:is([data-route-transition="page"], [data-route-transition="slide"]) #blog-backdrop { view-transition-name: blog-backdrop; }
+/* The content snapshot must be see-through where the sky was taken out. */
+html:is([data-route-transition="page"], [data-route-transition="slide"]) body.blog-open { background: transparent; }
+::view-transition-group(blog-backdrop) { z-index: 0; }
+::view-transition-group(root) { z-index: 1; }
+::view-transition-group(site-header) { z-index: 2; }
+::view-transition-old(site-header) { animation: none; opacity: 0; }
+::view-transition-new(site-header) { animation: none; }
+/* The new page lies over the old one; the default additive cross-fade
+   blending would wash the iris out. */
+html[data-route-transition]::view-transition-old(root),
+html[data-route-transition]::view-transition-new(root) { mix-blend-mode: normal; }
+html[data-route-transition="warp"]::view-transition-old(root) {
+  animation: route-warp-out 0.85s cubic-bezier(0.33, 0, 0.67, 1) both;
+}
+html[data-route-transition="warp"]::view-transition-new(root) {
+  animation: route-iris-open 0.85s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+/* Behind the outgoing frame while it fades: ink, not the browser default. */
+html[data-route-transition="warp"]::view-transition { background: var(--bg); }
+html[data-route-transition="slide"]::view-transition-old(root) {
+  animation: route-slide-out 0.55s cubic-bezier(0.55, 0, 0.45, 1) both;
+}
+html[data-route-transition="slide"]::view-transition-new(root) {
+  animation: route-slide-in 0.6s cubic-bezier(0.22, 1, 0.36, 1) 0.05s both;
+}
+html[data-route-transition="page"]::view-transition-old(root) {
+  animation: route-page-out 0.32s ease-in both;
+}
+html[data-route-transition="page"]::view-transition-new(root) {
+  animation: route-page-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) 0.08s both;
+}
+::view-transition-group(blog-backdrop) { animation-duration: 0.35s; }
+@keyframes route-warp-out {
+  to { transform: scale(1.3); opacity: 0.35; }
+}
+@keyframes route-iris-open {
+  from { clip-path: circle(0 at var(--route-x, 50%) var(--route-y, 50%)); }
+  to { clip-path: circle(150% at var(--route-x, 50%) var(--route-y, 50%)); }
+}
+@keyframes route-slide-out {
+  to { opacity: 0; transform: translateX(calc(var(--route-dir, 1) * -9%)); }
+}
+@keyframes route-slide-in {
+  from { opacity: 0; transform: translateX(calc(var(--route-dir, 1) * 12%)); }
+}
+@keyframes route-page-out {
+  to { opacity: 0; transform: translateY(-14px); }
+}
+@keyframes route-page-in {
+  from { opacity: 0; transform: translateY(22px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) { animation: none !important; }
 }

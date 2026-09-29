@@ -3,28 +3,27 @@ import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { mountRouteAssets } from "../src/route-assets.mjs";
 
-test("home does not load blog or author code; navigation starts the background only once", async () => {
+test("home and content routes load no author code until it is asked for", async () => {
   const dom = new JSDOM("<button data-author-login>登录</button>", {
     url: "https://www.sansphase.com/#/home",
   });
-  let backgrounds = 0,
-    authors = 0;
+  let authors = 0;
   const dispose = mountRouteAssets(dom.window, {
-    loadBackground: async () => backgrounds++,
     loadAuthorStyle: async () => {},
     loadAuthor: async () => authors++,
   });
-  assert.equal(backgrounds, 0);
   assert.equal(authors, 0);
   dom.window.location.hash = "#/notes";
   await new Promise((r) => setTimeout(r, 10));
-  assert.equal(backgrounds, 1);
   assert.equal(authors, 0);
-  dom.window.location.hash = "#/works";
-  await new Promise((r) => setTimeout(r, 10));
-  assert.equal(backgrounds, 1);
   dispose();
   dom.window.close();
+});
+
+test("the site shell no longer starts a background WebGL layer", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const html = await readFile("src/index.html", "utf8");
+  assert.doesNotMatch(html, /blog-galaxy/);
 });
 
 test("a first login click waits for the editor and opens it exactly once", async () => {

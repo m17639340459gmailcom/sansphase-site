@@ -28,7 +28,26 @@ export async function prepareScene({
     await nextFrame();
   }
   signal?.throwIfAborted();
-  await gl.compileAsync(scene, camera);
+  // Three compiles only visible objects. Layers that first appear mid-journey
+  // (chapter photographs, the returning star field) would otherwise compile
+  // on that frame and stall it, so they are shown for the synchronous part of
+  // the call and restored before any frame is drawn.
+  const hidden = [];
+  scene.traverse((object) => {
+    if (object.visible === false) {
+      hidden.push(object);
+      object.visible = true;
+    }
+  });
+  let compiling;
+  try {
+    compiling = gl.compileAsync(scene, camera);
+  } finally {
+    hidden.forEach((object) => {
+      object.visible = false;
+    });
+  }
+  await compiling;
   signal?.throwIfAborted();
   onProgress(0.7);
   // Scene callbacks run before the composer's render. Yield beyond the current
