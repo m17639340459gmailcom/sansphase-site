@@ -5,7 +5,7 @@ import { addCalendarMonth, addMembershipDays, membershipState } from './reader-m
 import { readerAudit, removeReaderAccount } from './reader-account-removal.mjs';
 import { createReaderWorkflow, registrationLifetimeMs } from './reader-workflow.ts';
 import { cleanReaderFiles } from './reader-file-cleanup.mjs';
-import { contactDetailReason } from './reader-profile-policy.mjs';
+import { contactDetailReason } from './reader-profile-policy.ts';
 import { createMediaRetention } from './payload/media-retention.mjs';
 
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });

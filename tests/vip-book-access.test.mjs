@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createPreviewServer } from '../server.mjs';
-import { visibleBootstrap } from '../server/reader-access.mjs';
+import { visibleBootstrap } from '../server/reader-access.ts';
 import { publicPage } from '../server/content-delivery.mjs';
 import { validateArticle } from '../server/author-service.mjs';
 import { createContentService } from '../server/content-service.mjs';

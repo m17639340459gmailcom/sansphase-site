@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { readerCleanupDue, createReaderRetention } from '../server/reader-retention.mjs';
+import { readerCleanupDue, createReaderRetention } from '../server/reader-retention.ts';
 import { createLoginLedger } from '../server/login-ledger.mjs';
 
 test('30-day cleanup uses the last successful login and protects active VIP membership', () => {

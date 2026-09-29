@@ -3,7 +3,15 @@
 export { publicRoute, publicKind } from '../src/access-policy.mjs';
 
 const restrictedKinds = ['works', 'resources', 'software', 'resource-center'];
-export function visibleBootstrap(data, authenticated) {
+type BookPreview = {
+  id: string; recordId?: string; title: string; summary?: string; category?: string;
+  tags?: string[]; date?: string; coverSrc?: string; coverWidth?: number;
+  coverHeight?: number; vipOnly?: boolean; locked?: boolean;
+};
+type PublicData = Record<string, unknown> & { 'resource-center'?: BookPreview[] };
+type ReaderAccess = boolean | { role?: string; vip?: boolean };
+
+export function visibleBootstrap(data: PublicData, authenticated: ReaderAccess) {
   if (authenticated) {
     if (authenticated === true || authenticated.role === 'owner' || authenticated.vip) return data;
     return {
@@ -15,7 +23,7 @@ export function visibleBootstrap(data, authenticated) {
         : item),
     };
   }
-  const visible = { ...data };
+  const visible: Record<string, unknown> = { ...data };
   for (const kind of restrictedKinds) visible[kind] = [];
   return visible;
 }

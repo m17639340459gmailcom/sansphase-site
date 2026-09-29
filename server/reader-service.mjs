@@ -8,7 +8,7 @@ import { membershipState } from './reader-membership.ts';
 import { uuidPattern } from './content-service.mjs';
 import { withStreamUpload } from './stream-upload.mjs';
 import { createReaderWorkflow, registrationLifetimeMs } from './reader-workflow.ts';
-import { contactDetailReason } from './reader-profile-policy.mjs';
+import { contactDetailReason } from './reader-profile-policy.ts';
 import { cleanReaderFiles } from './reader-file-cleanup.mjs';
 
 const cookieName = 'sansphase_reader_session';

@@ -1,9 +1,26 @@
 import { readerAudit, removeReaderAccount } from './reader-account-removal.mjs';
 import { registrationLifetimeMs } from './reader-workflow.ts';
 import { cleanReaderFiles } from './reader-file-cleanup.mjs';
+import type { createReaderWorkflow } from './reader-workflow.ts';
+
+type ReaderRow = { id: string; createdAt: string; _verified?: boolean; vip_until?: string | null };
+type ReaderPayload = {
+  find?: (options: object) => Promise<{ docs: ReaderRow[] }>;
+  findByID: (options: { collection: string; id: string }) => Promise<ReaderRow | null>;
+  delete: (options: { collection: string; id: string }) => Promise<unknown>;
+};
+type LoginLedger = {
+  inactiveReaderIds: (cutoff: string, now: string, limit: number, offset: number) => string[];
+  latest: (actorType: string, id: string) => { at?: string } | null;
+};
+type RetentionOptions = {
+  payload: ReaderPayload; directory: string; uidStore: { get: (id: string) => string | null };
+  loginLedger: LoginLedger; workflow?: ReturnType<typeof createReaderWorkflow>;
+  mediaRetention?: { sweep: () => Promise<unknown> };
+};
 
 const thirtyDays = 30 * 24 * 60 * 60 * 1000;
-export const readerCleanupDue = (row, lastLoginAt, now = Date.now()) => {
+export const readerCleanupDue = (row: ReaderRow, lastLoginAt: string | null | undefined, now: number | string | Date = Date.now()) => {
   const time = typeof now === 'number' ? now : new Date(now).getTime();
   const anchor = Date.parse(lastLoginAt || row.createdAt);
   if (row._verified !== true) return Number.isFinite(time) && Number.isFinite(anchor) && time - anchor >= registrationLifetimeMs;
@@ -12,10 +29,12 @@ export const readerCleanupDue = (row, lastLoginAt, now = Date.now()) => {
     (!Number.isFinite(vipUntil) || vipUntil <= time);
 };
 
-export function createReaderRetention({ payload, directory, uidStore, loginLedger, workflow, mediaRetention }) {
+export function createReaderRetention({ payload, directory, uidStore, loginLedger, workflow, mediaRetention }: RetentionOptions) {
   if (!payload || !directory || !uidStore || !loginLedger) throw Error('Reader retention requires the private reader store and login ledger.');
   const audit = readerAudit(directory, 'system');
-  let initial, interval, pendingInitial, pendingInterval, activeRun = null, pendingRun = null;
+  let initial: NodeJS.Timeout | null = null, interval: NodeJS.Timeout | null = null;
+  let pendingInitial: NodeJS.Timeout | null = null, pendingInterval: NodeJS.Timeout | null = null;
+  let activeRun: Promise<void> | null = null, pendingRun: Promise<void> | null = null;
   const sweepPending = async (at = new Date(), limit = 1000) => {
     const result = { requests: 0, legacy: 0 };
     if (!workflow) return result;
@@ -30,7 +49,7 @@ export function createReaderRetention({ payload, directory, uidStore, loginLedge
     }
     return result;
   };
-  const sweep = async ({ now = new Date(), limit = 1000, dryRun = false } = {}) => {
+  const sweep = async ({ now = new Date(), limit = 1000, dryRun = false }: { now?: Date | string | number; limit?: number; dryRun?: boolean } = {}) => {
     const at = now instanceof Date ? now : new Date(now);
     if (Number.isNaN(at.getTime())) throw Error('Invalid cleanup time');
     const cutoff = new Date(at.getTime() - thirtyDays).toISOString();
@@ -61,7 +80,7 @@ export function createReaderRetention({ payload, directory, uidStore, loginLedge
         const result = await sweep();
         if (result.deleted) process.stdout.write(JSON.stringify({ event: 'reader-retention', ...result, at: new Date().toISOString() }) + '\n');
       } catch (error) {
-        process.stderr.write(JSON.stringify({ event: 'reader-retention-error', message: error.message, at: new Date().toISOString() }) + '\n');
+        process.stderr.write(JSON.stringify({ event: 'reader-retention-error', message: error instanceof Error ? error.message : String(error), at: new Date().toISOString() }) + '\n');
       } finally { activeRun = null; }
     })();
     return activeRun;
@@ -76,7 +95,7 @@ export function createReaderRetention({ payload, directory, uidStore, loginLedge
         }
         if (mediaRetention) await mediaRetention.sweep();
       } catch (error) {
-        process.stderr.write(JSON.stringify({ event: 'site-cleanup-error', message: error.message, at: new Date().toISOString() }) + '\n');
+        process.stderr.write(JSON.stringify({ event: 'site-cleanup-error', message: error instanceof Error ? error.message : String(error), at: new Date().toISOString() }) + '\n');
       } finally { pendingRun = null; }
     })();
     return pendingRun;
@@ -95,6 +114,6 @@ export function createReaderRetention({ payload, directory, uidStore, loginLedge
         pendingInitial.unref(); pendingInterval.unref();
       }
     },
-    async close() { clearTimeout(initial); clearInterval(interval); clearTimeout(pendingInitial); clearInterval(pendingInterval); initial = interval = pendingInitial = pendingInterval = null; await Promise.all([activeRun, pendingRun]); },
+    async close() { if (initial) clearTimeout(initial); if (interval) clearInterval(interval); if (pendingInitial) clearTimeout(pendingInitial); if (pendingInterval) clearInterval(pendingInterval); initial = interval = pendingInitial = pendingInterval = null; await Promise.all([activeRun, pendingRun]); },
   };
 }

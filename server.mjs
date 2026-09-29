@@ -1,6 +1,6 @@
 import {byteRange} from './server/http-range.ts';
 import {publicBootstrap,publicPage,publicPageResponse} from './server/content-delivery.mjs';
-import {publicKind,visibleBootstrap} from './server/reader-access.mjs';
+import {publicKind,visibleBootstrap} from './server/reader-access.ts';
 import {bookManifest,bookPart} from './server/book-delivery.mjs';
 import {imageSources} from './src/image-sources.mjs';
 import {uploadTimeoutMs} from './src/upload-policy.mjs';

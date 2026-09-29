@@ -11,7 +11,7 @@ import {createPublicationRevision} from './publication-revision.mjs';
 import { smtpConfigured } from './smtp-settings.mjs';
 import { createLoginLedger } from '../login-ledger.mjs';
 import { createReaderUidStore } from '../reader-uids.ts';
-import { createReaderRetention } from '../reader-retention.mjs';
+import { createReaderRetention } from '../reader-retention.ts';
 import { createReaderWorkflow } from '../reader-workflow.ts';
 import { createMediaRetention } from './media-retention.mjs';
 

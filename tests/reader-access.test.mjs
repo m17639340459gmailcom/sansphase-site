@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { publicRoute, publicKind, visibleBootstrap } from '../server/reader-access.mjs';
+import { publicRoute, publicKind, visibleBootstrap } from '../server/reader-access.ts';
 import { createPreviewServer } from '../server.mjs';
 import { JSDOM } from 'jsdom';
 import { readerPage, mountReaderUI } from '../src/reader-ui.mjs';
