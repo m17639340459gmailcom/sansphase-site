@@ -1,6 +1,6 @@
 import { createInterface } from "node:readline/promises";
 import { Writable } from "node:stream";
-import { createPayloadRuntime } from "../server/payload/runtime.mjs";
+import { createPayloadRuntime } from "../server/payload/runtime.ts";
 if (!process.stdin.isTTY)
   throw Error(
     "Run this account maintenance command in an interactive terminal.",

@@ -13,7 +13,7 @@
 | server/content-service.ts | 公开字段白名单、富文本清理、媒体引用授权 |
 | server/payload/config.ts | Payload 数据集合、认证、访问权限与版本记录 |
 | server/payload/store.ts | Payload Local API 存储适配 |
-| server/payload/runtime.mjs | 读取私有配置、启动和关闭 Payload |
+| server/payload/runtime.ts | 读取私有配置、启动和关闭 Payload |
 | .local/payload/ | 当前数据库、上传文件、迁移记录，不进 Git |
 | .local/payload-env.json | 密钥、作者 UUID、来源地址与站点地址，不公开 |
 | archive/release-cleanup-20260915/ | 历史 Directus、旧视觉实验和对应测试，仅本地保留，不参与正式版本 |

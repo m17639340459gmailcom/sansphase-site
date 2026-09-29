@@ -14,11 +14,12 @@ import { createReaderUidStore } from '../reader-uids.ts';
 import { createReaderRetention } from '../reader-retention.ts';
 import { createReaderWorkflow } from '../reader-workflow.ts';
 import { createMediaRetention } from './media-retention.mjs';
+type RuntimeSettings = {directory: string; secret: string; siteOrigin: string; sourceURL: string; authorId: string; smtp?: unknown; push?: boolean};
 
 export async function createPayloadRuntime(
   configPath = process.env.PAYLOAD_CONFIG_FILE || ".local/payload-env.json",
 ) {
-  const settings = JSON.parse(await readFile(resolve(configPath), "utf8"));
+  const settings = JSON.parse(await readFile(resolve(configPath), "utf8")) as RuntimeSettings;
   settings.directory = resolve(settings.directory);
   settings.siteOrigin = process.env.SITE_ORIGIN || settings.siteOrigin;
   const manifest = JSON.parse(
@@ -34,7 +35,7 @@ export async function createPayloadRuntime(
   const uidStore = createReaderUidStore(settings.directory);
   const workflow = createReaderWorkflow(settings.directory, settings.secret);
   const mediaRetention = createMediaRetention({ payload, directory: settings.directory });
-  const readerRetention = createReaderRetention({ payload, directory: settings.directory, uidStore, loginLedger, workflow, mediaRetention });
+  const readerRetention = createReaderRetention({ payload: payload as unknown as Parameters<typeof createReaderRetention>[0]['payload'], directory: settings.directory, uidStore, loginLedger, workflow, mediaRetention });
   const store = createPayloadStore(payload, { ...settings, mediaRetention });
   const publicationRevision=createPublicationRevision(settings.directory);
   const options = { ...settings, url: settings.sourceURL, store, loginLedger };
@@ -55,7 +56,7 @@ export async function createPayloadRuntime(
       loginLedger.close();
       uidStore.close();
       await payload.destroy();
-      payload.db.client.close();
+      (payload.db as unknown as {client: {close: () => void}}).client.close();
     },
   };
 }

@@ -1,4 +1,4 @@
-import { createPayloadRuntime } from "../server/payload/runtime.mjs";
+import { createPayloadRuntime } from "../server/payload/runtime.ts";
 import { createPreviewServer } from "../server.mjs";
 const runtime = await createPayloadRuntime();
 const server = createPreviewServer(runtime);

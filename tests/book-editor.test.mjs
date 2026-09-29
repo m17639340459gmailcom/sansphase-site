@@ -4,7 +4,7 @@ import {JSDOM} from 'jsdom';
 import {Editor} from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
-import {BookBlockIdentity,mountBookEditor} from '../src/book-editor.mjs';
+import {BookBlockIdentity,mountBookEditor} from '../src/book-editor.ts';
 import {validateArticle} from '../server/author-service.ts';
 import {cleanBody} from '../server/content-service.ts';
 test('chapter edits, reordering and stable paragraph identities survive publication sanitization',()=>{

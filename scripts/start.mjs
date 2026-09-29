@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import { productionOptions, verifyBuild, verifyPrivateConfig } from '../server/production-config.mjs';
-import { createPayloadRuntime } from '../server/payload/runtime.mjs';
+import { createPayloadRuntime } from '../server/payload/runtime.ts';
 import { createPreviewServer } from '../server.mjs';
 
 // The production entry never initializes a database or falls back to fixtures.
