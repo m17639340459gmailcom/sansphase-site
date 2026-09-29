@@ -31,7 +31,7 @@ const canonicalFiles = [
   "author.css",
 ];
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
-const typedBrowserModules = new Set(['access-policy.mjs', 'catalog.mjs', 'core.mjs', 'image-sources.mjs', 'scene-delivery.mjs']);
+const typedBrowserModules = new Set(['access-policy.mjs', 'catalog.mjs', 'core.mjs', 'image-sources.mjs', 'reader-ui.mjs', 'scene-delivery.mjs']);
 
 test("the single generated site stays synchronized with source and has all referenced assets", async () => {
   for (const file of canonicalFiles) {
