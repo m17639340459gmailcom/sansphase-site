@@ -1,7 +1,8 @@
 // Only public, sanitized content is shared. The database revision is checked
 // on every read, including media authorization and conditional HTTP requests.
-export function createPublicSnapshotCache({load,revision,now=Date.now}) {
-  let cached, pending;
+export function createPublicSnapshotCache<T extends {expiresAt?:number}, V>({load,revision,now=Date.now}:{load:()=>Promise<T>|T;revision:()=>V;now?:()=>number}):()=>Promise<T> {
+  let cached:{version:V;value:T;expiresAt:number}|undefined;
+  let pending:{version:V;promise:Promise<T>}|undefined;
   return async function snapshot() {
     for(let attempt=0;attempt<3;attempt++) {
       const version=revision();

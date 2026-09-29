@@ -2,10 +2,10 @@ import sanitizeHtml from "sanitize-html";
 import { MAX_BODY_LENGTH } from './content-limits.ts';
 import {normalizeBodyLinks} from '../src/body-links.mjs';
 import { normalizeSocialLink } from "../src/social-links.mjs";
-import { richTextAttributes, richTextStyles } from "./rich-text-policy.mjs";
-import { cleanMusic, cleanAppearance } from "./profile-settings.mjs";
-import { backgroundLibrary, changeBackground } from "./background-library.mjs";
-import {applyContentOrder,validateContentOrder,orderedContentKinds} from './content-order.mjs';
+import { richTextAttributes, richTextStyles } from "./rich-text-policy.ts";
+import { cleanMusic, cleanAppearance } from "./profile-settings.ts";
+import { backgroundLibrary, changeBackground } from "./background-library.ts";
+import {applyContentOrder,validateContentOrder,orderedContentKinds} from './content-order.ts';
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { uuidPattern, safeLink } from "./content-service.ts";
@@ -418,7 +418,7 @@ export function createAuthorService({
         if (parts[0] === "backgrounds" && req.method === "POST") {
           const input = await json(req);
           const profile = await store.profile(token);
-          const patch = changeBackground(profile, input.action, input.id);
+          const patch = changeBackground(profile, input.action as string, input.id as string);
           send(await store.saveProfile(patch, token));
           return;
         }

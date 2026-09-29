@@ -1,11 +1,11 @@
 import sanitizeHtml from "sanitize-html";
 import {normalizeBodyLinks} from '../src/body-links.mjs';
-import {applyContentOrder} from './content-order.mjs';
+import {applyContentOrder} from './content-order.ts';
 import {imageSourceSet} from '../src/image-sources.mjs';
 import { normalizeSocialLink } from "../src/social-links.mjs";
-import { richTextAttributes, richTextStyles } from "./rich-text-policy.mjs";
-import { cleanMusic, cleanAppearance } from "./profile-settings.mjs";
-import {createPublicSnapshotCache} from './public-snapshot.mjs';
+import { richTextAttributes, richTextStyles } from "./rich-text-policy.ts";
+import { cleanMusic, cleanAppearance } from "./profile-settings.ts";
+import {createPublicSnapshotCache} from './public-snapshot.ts';
 import type { createPayloadStore } from './payload/store.ts';
 
 type ImageSize = { width?: number; height?: number };
@@ -323,7 +323,7 @@ export function createContentService({ url, token, fetcher = fetch, store, revis
       const state=previewId ? null : await snapshot();
       const allowed = previewId
         ? (await preview(previewId, cookie)).media
-        : vip ? state.media : member ? (state.memberMedia || state.media) : (state.publicMedia || state.media);
+        : vip ? state!.media : member ? (state!.memberMedia || state!.media) : (state!.publicMedia || state!.media);
       if (!allowed.has(id))
         throw Object.assign(new Error("Not found"), { status: 404 });
       if (store) return store.readMedia(id,range, download ? undefined : width,{streaming:!download,presentation:!download && presentation});

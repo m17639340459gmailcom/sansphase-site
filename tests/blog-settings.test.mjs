@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { socialPlatform, tagTone } from '../src/blog-details.mjs';
 import {normalizeSocialLink} from '../src/social-links.mjs';
-import { cleanMusic, cleanAppearance } from '../server/profile-settings.mjs';
+import { cleanMusic, cleanAppearance } from '../server/profile-settings.ts';
 import { validateArticle } from '../server/author-service.ts';
 import { cleanBody } from '../server/content-service.ts';
 test('social identification uses actual hostname and rejects impersonation', () => {

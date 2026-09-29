@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {backgroundLibrary,changeBackground} from '../server/background-library.mjs';
+import {backgroundLibrary,changeBackground} from '../server/background-library.ts';
 const first='11111111-1111-4111-8111-111111111111', second='22222222-2222-4222-8222-222222222222';
 test('existing background is retained, uploads can be selected, deletion is recoverable',()=>{
   const profile={background:first,background_library:[{id:second,name:'星空'}]};
