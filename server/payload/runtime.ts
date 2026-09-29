@@ -7,13 +7,13 @@ import { createAuthorService } from "../author-service.ts";
 import { createReaderService } from '../reader-service.ts';
 import {createReaderAdminService} from '../reader-admin-service.ts';
 import { createContentService } from "../content-service.ts";
-import {createPublicationRevision} from './publication-revision.mjs';
+import {createPublicationRevision} from './publication-revision.ts';
 import { smtpConfigured } from './smtp-settings.ts';
 import { createLoginLedger } from '../login-ledger.ts';
 import { createReaderUidStore } from '../reader-uids.ts';
 import { createReaderRetention } from '../reader-retention.ts';
 import { createReaderWorkflow } from '../reader-workflow.ts';
-import { createMediaRetention } from './media-retention.mjs';
+import { createMediaRetention } from './media-retention.ts';
 type RuntimeSettings = {directory: string; secret: string; siteOrigin: string; sourceURL: string; authorId: string; smtp?: unknown; push?: boolean};
 
 export async function createPayloadRuntime(

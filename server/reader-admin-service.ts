@@ -8,7 +8,7 @@ import { readerAudit, removeReaderAccount } from './reader-account-removal.ts';
 import { createReaderWorkflow, registrationLifetimeMs } from './reader-workflow.ts';
 import { cleanReaderFiles } from './reader-file-cleanup.ts';
 import { contactDetailReason } from './reader-profile-policy.ts';
-import { createMediaRetention } from './payload/media-retention.mjs';
+import { createMediaRetention } from './payload/media-retention.ts';
 import type { createReaderUidStore } from './reader-uids.ts';
 
 type ReaderAdminRow = { id: string; email: string; nickname: string; phone?: string | null; _verified?: boolean; disabled?: boolean; createdAt: string; avatar?: string | null; vip_until?: string | null; vip_started_at?: string | null };

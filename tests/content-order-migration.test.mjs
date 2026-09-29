@@ -4,7 +4,7 @@ import {DatabaseSync} from 'node:sqlite';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
-import {migrateContentOrder} from '../server/payload/content-order-migration.mjs';
+import {migrateContentOrder} from '../server/payload/content-order-migration.ts';
 test('order migration backs up the old schema, preserves data, and is idempotent',async t=>{
   const dir=await mkdtemp(resolve(tmpdir(),'sansphase-order-migration-'));t.after(()=>rm(dir,{recursive:true,force:true}));
   await assert.rejects(migrateContentOrder(dir),{code:'ENOENT'});

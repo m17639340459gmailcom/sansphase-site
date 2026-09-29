@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import { productionOptions, verifyBuild, verifyPrivateConfig } from '../server/production-config.mjs';
+import { productionOptions, verifyBuild, verifyPrivateConfig } from '../server/production-config.ts';
 import { createPayloadRuntime } from '../server/payload/runtime.ts';
 import { createPreviewServer } from '../server.mjs';
 

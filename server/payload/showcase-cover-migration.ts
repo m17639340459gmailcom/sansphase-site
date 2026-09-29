@@ -4,7 +4,7 @@ import {resolve} from 'node:path';
 import {randomUUID} from 'node:crypto';
 
 // Explicit additive migration; normal Payload startup keeps push:false.
-export async function migrateShowcaseCover(directory) {
+export async function migrateShowcaseCover(directory:string) {
  const database=resolve(directory,'content.db');await stat(database);
  const db=new DatabaseSync(database);
  try {
@@ -13,7 +13,7 @@ export async function migrateShowcaseCover(directory) {
    const fields=db.prepare(`PRAGMA table_info("${table}")`).all();
    if(!fields.some(f=>f.name===required))throw Error(`Unexpected schema: ${table}`);
    const present=fields.find(f=>f.name===column);
-   if(present && present.type.toUpperCase()!=='TEXT')throw Error(`Unexpected column type: ${column}`);
+   if(present && String(present.type).toUpperCase()!=='TEXT')throw Error(`Unexpected column type: ${column}`);
    if(!present)additions.push(`ALTER TABLE "${table}" ADD COLUMN "${column}" TEXT`);
   }
   if(!additions.length)return {changed:false};

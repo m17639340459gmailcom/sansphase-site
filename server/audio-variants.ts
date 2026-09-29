@@ -5,10 +5,11 @@ import {mkdir,stat,rename,unlink} from 'node:fs/promises';
 import {resolve} from 'node:path';
 
 const execute=promisify(execFile);
-export function createAudioVariants(directory,{ffmpeg='ffmpeg'}={}) {
-  const cache=resolve(directory,'audio-cache'),pending=new Map(),failed=new Set();
-  let queue=Promise.resolve();
-  return async(source,mime)=>{
+const isMissing=(error:unknown)=>error instanceof Error && 'code' in error && error.code==='ENOENT';
+export function createAudioVariants(directory:string,{ffmpeg='ffmpeg'}:{ffmpeg?:string}={}) {
+  const cache=resolve(directory,'audio-cache'),pending=new Map<string,Promise<string|null>>(),failed=new Set<string>();
+  let queue:Promise<unknown>=Promise.resolve();
+  return async(source:string,mime:string)=>{
     if(!/^audio\/(mpeg|mp3)$/.test(mime))return null;
     const info=await stat(source);
     // A playback copy is optional; large downloads keep using the original.
@@ -16,7 +17,7 @@ export function createAudioVariants(directory,{ffmpeg='ffmpeg'}={}) {
     const key=createHash('sha256').update(`v1-mp3-index:${source}:${info.size}:${info.mtimeMs}`).digest('hex');
     const path=resolve(cache,`${key}.mp3`);
     if(failed.has(key))return null;
-    try{await stat(path);return path;}catch(error){if(error.code!=='ENOENT')throw error;}
+    try{await stat(path);return path;}catch(error){if(!isMissing(error))throw error;}
     if(!pending.has(key)){
       const job=queue.then(async()=>{
         const temporary=resolve(cache,`${key}-${randomUUID()}.tmp.mp3`);
@@ -30,13 +31,13 @@ export function createAudioVariants(directory,{ffmpeg='ffmpeg'}={}) {
           return path;
         }catch{
           // Missing FFmpeg or an unsupported file must never prevent playback.
-          failed.add(key);if(failed.size>128)failed.delete(failed.values().next().value);
+          failed.add(key);if(failed.size>128){const oldest=failed.values().next().value;if(oldest)failed.delete(oldest);}
           return null;
-        }finally{await unlink(temporary).catch(error=>{if(error.code!=='ENOENT')throw error;});}
+        }finally{await unlink(temporary).catch(error=>{if(!isMissing(error))throw error;});}
       });
       queue=job.catch(()=>{});pending.set(key,job);
       job.finally(()=>pending.delete(key)).catch(()=>{});
     }
-    return pending.get(key);
+    return pending.get(key)!;
   };
 }

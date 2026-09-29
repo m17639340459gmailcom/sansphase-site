@@ -23,11 +23,11 @@
 
 ## 前台边界
 
-app.mjs 管路由和访客交互；mobile-blog-order.mjs 管博客卡片在手机与桌面之间的原节点移动及离页恢复；library-ui.jsx 管第三方组件；blog-background.css 管博客材质和控件。页面布局的源码按原级联顺序分在 styles-foundation.css、styles-reading.css、styles-content.css、styles-blog.css 和 styles-controls.css；styles.css 仅列出这些源码的顺序，构建时合成为浏览器使用的单个 dist/styles.css。修改对应分区后运行构建及测试，不直接编辑生成文件。author-entry.mjs 使用 Tiptap 和 a11y-dialog；author.css 管作者菜单及弹窗。维护源文件，不叠加生成文件补丁。
+app.mjs 管路由和访客交互；mobile-blog-order.mjs 管博客卡片在手机与桌面之间的原节点移动及离页恢复；library-ui.tsx 管第三方组件；blog-background.css 管博客材质和控件。页面布局的源码按原级联顺序分在 styles-foundation.css、styles-reading.css、styles-content.css、styles-blog.css 和 styles-controls.css；styles.css 仅列出这些源码的顺序，构建时合成为浏览器使用的单个 dist/styles.css。修改对应分区后运行构建及测试，不直接编辑生成文件。author-entry.mjs 使用 Tiptap 和 a11y-dialog；author.css 管作者菜单及弹窗。维护源文件，不叠加生成文件补丁。
 
-`mobile-blog-order.mjs` 通过已有 `library-ui.jsx` 构建入口进入 UI 包；它是独立源码，但不会产生新的浏览器模块请求。
+`mobile-blog-order.mjs` 通过已有 `library-ui.tsx` 构建入口进入 UI 包；它是独立源码，但不会产生新的浏览器模块请求。
 
-作品、资料、软件推荐共用 catalog.mjs 的列表与详情渲染，catalog.css 只管理这些栏目的布局，复用博客的卡片材质、字体与控件。三栏分别筛选数据，作者入口统一在作者菜单。日常编辑说明见 [作者指南](docs/AUTHOR-GUIDE.md)。
+作品、资料、软件推荐共用 catalog.ts 的列表与详情渲染，构建后仍使用 catalog.mjs 的浏览器地址，catalog.css 只管理这些栏目的布局，复用博客的卡片材质、字体与控件。三栏分别筛选数据，作者入口统一在作者菜单。日常编辑说明见 [作者指南](docs/AUTHOR-GUIDE.md)。
 
 刷新由 page-session.js 统一恢复展开状态、搜索、时区和滚动。离页不拆除可见卡片，封面预留比例。首次 HTML 返回站点资料、公告和栏目统计；对应栏目或正文读取完成后恢复位置，不先显示样例数据。
 

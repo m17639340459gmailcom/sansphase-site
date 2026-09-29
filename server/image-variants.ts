@@ -5,26 +5,27 @@ import {resolve} from 'node:path';
 import {imageWidths} from '../src/image-sources.mjs';
 
 const widths = new Set(imageWidths);
-export function createImageVariants(directory) {
+const isMissing=(error:unknown)=>error instanceof Error && 'code' in error && error.code==='ENOENT';
+export function createImageVariants(directory:string) {
   const cache = resolve(directory, 'image-cache');
-  const pending = new Map();
-  let queue = Promise.resolve();
-  return async (source, requestedWidth, mime, presentation = false) => {
+  const pending = new Map<string,Promise<string|null>>();
+  let queue:Promise<unknown> = Promise.resolve();
+  return async (source:string, requestedWidth:unknown, mime:string, presentation = false) => {
     const width = Number(requestedWidth);
     if (!widths.has(width) || !/^image\/(jpeg|png|webp|avif)$/.test(mime)) return null;
     const info = await stat(source);
     const key = createHash('sha256').update(`${presentation ? 'v3-display-q92' : 'v2-lossless'}:${source}:${info.size}:${info.mtimeMs}:${width}`).digest('hex');
     const path = resolve(cache, `${key}.webp`);
     const originalMarker = resolve(cache, `${key}.original`);
-    try {await stat(originalMarker); return null;} catch(error) {if(error.code !== 'ENOENT') throw error;}
-    try {await stat(path); return path;} catch(error) {if(error.code !== 'ENOENT') throw error;}
+    try {await stat(originalMarker); return null;} catch(error) {if(!isMissing(error)) throw error;}
+    try {await stat(path); return path;} catch(error) {if(!isMissing(error)) throw error;}
     if (!pending.has(key)) {
       // Serialize libvips work on the small production server, and coalesce
       // concurrent requests for the same variant. Originals are never modified.
       const job = queue.then(async () => {
         const input = sharp(source, {limitInputPixels: 100000000});
         const metadata = await input.metadata();
-        if (metadata.pages > 1) return null;
+        if (metadata.pages && metadata.pages > 1) return null;
         await mkdir(cache, {recursive:true, mode:0o700});
         const temporary = resolve(cache, `${key}-${randomUUID()}.tmp`);
         try {
@@ -36,12 +37,12 @@ export function createImageVariants(directory) {
           }
           await rename(temporary, path);
           return path;
-        } finally {await unlink(temporary).catch(error => {if(error.code !== 'ENOENT') throw error;});}
+        } finally {await unlink(temporary).catch(error => {if(!isMissing(error)) throw error;});}
       });
       queue = job.catch(() => {});
       pending.set(key, job);
       job.finally(() => pending.delete(key)).catch(() => {});
     }
-    return pending.get(key);
+    return pending.get(key)!;
   };
 }

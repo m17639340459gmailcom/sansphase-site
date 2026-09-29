@@ -1,15 +1,15 @@
 import {byteRange} from '../http-range.ts';
-import {withStreamUpload,uploadLimits} from '../stream-upload.mjs';
+import {withStreamUpload,uploadLimits} from '../stream-upload.ts';
 import { createLocalReq, logoutOperation } from "payload";
 import { randomUUID, createHash } from "node:crypto";
-import { createImageVariants } from '../image-variants.mjs';
-import { createAudioVariants } from '../audio-variants.mjs';
+import { createImageVariants } from '../image-variants.ts';
+import { createAudioVariants } from '../audio-variants.ts';
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { basename, resolve } from "node:path";
 import { isPublished, uuidPattern } from "../content-service.ts";
-import { createMediaRetention } from './media-retention.mjs';
+import { createMediaRetention } from './media-retention.ts';
 import type { Payload } from 'payload';
 import type { IncomingMessage } from 'node:http';
 

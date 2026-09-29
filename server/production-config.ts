@@ -2,10 +2,10 @@ import { readFile, realpath, lstat } from 'node:fs/promises';
 import { resolve, sep, isAbsolute } from 'node:path';
 import { createHash } from 'node:crypto';
 
-export function productionOptions(env) {
+export function productionOptions(env:Record<string,string|undefined>) {
   if (env.NODE_ENV !== 'production') throw Error('NODE_ENV must be production');
   let origin;
-  try {origin=new URL(env.SITE_ORIGIN);} catch {throw Error('SITE_ORIGIN must be an HTTPS origin');}
+  try {origin=new URL(env.SITE_ORIGIN || '');} catch {throw Error('SITE_ORIGIN must be an HTTPS origin');}
   if(origin.protocol!=='https:' || origin.username || origin.password || origin.pathname!=='/' || origin.search || origin.hash)
     throw Error('SITE_ORIGIN must contain only an HTTPS origin');
   const configPath=env.PAYLOAD_CONFIG_FILE;
@@ -17,7 +17,7 @@ export function productionOptions(env) {
   return {origin:origin.origin,configPath,port,host};
 }
 
-export async function verifyBuild(root) {
+export async function verifyBuild(root:string) {
   const base=await realpath(root);
   const manifest=JSON.parse(await readFile(resolve(base,'build-info.json'),'utf8'));
   if(!manifest.release||!Array.isArray(manifest.files)||!manifest.files.length) throw Error('Build manifest is missing or invalid');
@@ -31,7 +31,7 @@ export async function verifyBuild(root) {
   return manifest;
 }
 
-export async function verifyPrivateConfig(configPath, root) {
+export async function verifyPrivateConfig(configPath:string, root:string) {
   const path=await realpath(configPath), publicRoot=await realpath(root);
   if(path===publicRoot||path.startsWith(publicRoot+sep)) throw Error('Private configuration cannot be in the public directory');
   const settings=JSON.parse(await readFile(path,'utf8'));

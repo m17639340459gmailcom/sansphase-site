@@ -5,7 +5,7 @@ import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
 import {randomUUID, createHash} from 'node:crypto';
 import sharp from 'sharp';
-import {createImageVariants} from '../server/image-variants.mjs';
+import {createImageVariants} from '../server/image-variants.ts';
 import {createPayloadStore} from '../server/payload/store.ts';
 import {createContentService} from '../server/content-service.ts';
 import {createPreviewServer} from '../server.mjs';

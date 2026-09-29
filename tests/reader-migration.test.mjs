@@ -7,7 +7,7 @@ import { randomBytes } from 'node:crypto';
 import { getPayload } from 'payload';
 import { DatabaseSync } from 'node:sqlite';
 import { makePayloadConfig } from '../server/payload/config.ts';
-import { migrateReaderAccounts } from '../server/payload/reader-migration.mjs';
+import { migrateReaderAccounts } from '../server/payload/reader-migration.ts';
 
 test('reader migration preserves the existing author database and is idempotent', { timeout: 60000 }, async () => {
   const directory = await mkdtemp(resolve(tmpdir(), 'sansphase-reader-migration-'));

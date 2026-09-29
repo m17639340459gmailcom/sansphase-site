@@ -5,7 +5,7 @@ import {randomUUID} from 'node:crypto';
 
 // Payload uses push:false in production. This explicit, backed-up migration
 // adds the book access flag without changing any existing publication.
-export async function migrateVipBooks(directory) {
+export async function migrateVipBooks(directory:string) {
   const database=resolve(directory,'content.db');
   await stat(database);
   const db=new DatabaseSync(database);
@@ -18,7 +18,7 @@ export async function migrateVipBooks(directory) {
       const fields=db.prepare(`PRAGMA table_info("${table}")`).all();
       if(!fields.some(field=>field.name===required))throw Error(`Unexpected schema: ${table}`);
       const present=fields.find(field=>field.name===column);
-      if(present && present.type.toUpperCase()!=='INTEGER')throw Error(`Unexpected column type: ${column}`);
+      if(present && String(present.type).toUpperCase()!=='INTEGER')throw Error(`Unexpected column type: ${column}`);
       if(!present)additions.push(`ALTER TABLE "${table}" ADD COLUMN "${column}" INTEGER DEFAULT 0`);
     }
     if(!additions.length)return {changed:false};

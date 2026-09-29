@@ -5,8 +5,13 @@ export const typedBrowserModules = new Set([
   'book-progress.mjs',
   'catalog.mjs',
   'content-reader.mjs',
+  'content-images.mjs',
   'core.mjs',
+  'home-preload.mjs',
   'image-sources.mjs',
+  'navigation-prefetch.mjs',
   'reader-ui.mjs',
+  'route-styles.mjs',
   'scene-delivery.mjs',
+  'site-copy.mjs',
 ]);

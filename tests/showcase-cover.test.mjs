@@ -5,7 +5,7 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
 import {validateArticle} from '../server/author-service.ts';
-import {migrateShowcaseCover} from '../server/payload/showcase-cover-migration.mjs';
+import {migrateShowcaseCover} from '../server/payload/showcase-cover-migration.ts';
 test('separate showcase cover validates only supported catalogs, including explicit clearing',()=>{
  const value={title:'Test',slug:'test',showcase_cover:'10000000-0000-4000-8000-000000000001'};
  for(const kind of ['works','resources']) {

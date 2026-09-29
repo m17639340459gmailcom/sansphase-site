@@ -8,7 +8,7 @@ import sharp from 'sharp';
 import { clientAddress } from './client-ip.ts';
 import { membershipState } from './reader-membership.ts';
 import { uuidPattern } from './content-service.ts';
-import { withStreamUpload } from './stream-upload.mjs';
+import { withStreamUpload } from './stream-upload.ts';
 import { createReaderWorkflow, registrationLifetimeMs } from './reader-workflow.ts';
 import { contactDetailReason } from './reader-profile-policy.ts';
 import { cleanReaderFiles } from './reader-file-cleanup.ts';

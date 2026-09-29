@@ -4,13 +4,17 @@ import { basename, resolve } from 'node:path';
 import { stat, unlink } from 'node:fs/promises';
 import { imageWidths } from '../../src/image-sources.mjs';
 import { uuidPattern } from '../content-service.ts';
+import type {Payload} from 'payload';
 
 const referenceTables = ['articles', '_articles_v', 'library_entries', '_library_entries_v', 'announcements', '_announcements_v', 'site_profile'];
 const idPattern = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+type MediaCleanupRow={id:string;media_id:string};
+type VersionCleanupRow={id:string;collection:string;parent_id:string};
+const isMissing=(error:unknown)=>error instanceof Error && 'code' in error && error.code==='ENOENT';
 
-export function createMediaRetention({ payload, directory }) {
+export function createMediaRetention({ payload, directory }:{payload:Payload;directory:string}) {
   const file = resolve(directory, 'content.db');
-  const withDb = operation => {
+  const withDb = <T>(operation:(db:DatabaseSync)=>T):T => {
     const db = new DatabaseSync(file);
     try { db.exec('PRAGMA busy_timeout = 5000'); return operation(db); }
     finally { db.close(); }
@@ -23,25 +27,25 @@ export function createMediaRetention({ payload, directory }) {
     id TEXT PRIMARY KEY, collection TEXT NOT NULL, parent_id TEXT NOT NULL,
     created_at TEXT NOT NULL, last_error TEXT, UNIQUE(collection,parent_id)
   );`));
-  const list = (limit = 100) => withDb(db => db.prepare('SELECT * FROM content_media_cleanup ORDER BY created_at LIMIT ?').all(Math.min(1000, Math.max(1, limit))));
-  const versions = (limit = 100) => withDb(db => db.prepare('SELECT * FROM content_version_cleanup ORDER BY created_at LIMIT ?').all(Math.min(1000, Math.max(1, limit))));
-  const remove = id => withDb(db => db.prepare('DELETE FROM content_media_cleanup WHERE id=?').run(id));
-  const fail = (id, error) => withDb(db => db.prepare('UPDATE content_media_cleanup SET last_error=? WHERE id=?').run(String(error).slice(0, 300), id));
-  const referenced = mediaId => withDb(db => {
+  const list = (limit = 100) => withDb(db => db.prepare('SELECT * FROM content_media_cleanup ORDER BY created_at LIMIT ?').all(Math.min(1000, Math.max(1, limit)))) as MediaCleanupRow[];
+  const versions = (limit = 100) => withDb(db => db.prepare('SELECT * FROM content_version_cleanup ORDER BY created_at LIMIT ?').all(Math.min(1000, Math.max(1, limit)))) as VersionCleanupRow[];
+  const remove = (id:string) => withDb(db => db.prepare('DELETE FROM content_media_cleanup WHERE id=?').run(id));
+  const fail = (id:string, error:unknown) => withDb(db => db.prepare('UPDATE content_media_cleanup SET last_error=? WHERE id=?').run(String(error).slice(0, 300), id));
+  const referenced = (mediaId:string) => withDb(db => {
     for (const table of referenceTables) {
       if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table)) continue;
-      const columns = db.prepare(`PRAGMA table_info("${table}")`).all().filter(column => !['id', 'created_at', 'updated_at'].includes(column.name));
+      const columns = (db.prepare(`PRAGMA table_info("${table}")`).all() as Array<{name:string}>).filter(column => !['id', 'created_at', 'updated_at'].includes(column.name));
       const where = columns.map(column => `instr(CAST("${column.name.replaceAll('"', '""')}" AS TEXT), ?) > 0`).join(' OR ');
       if (where && db.prepare(`SELECT 1 FROM "${table}" WHERE ${where} LIMIT 1`).get(...columns.map(() => mediaId))) return true;
     }
     return false;
   });
-  const removeVariants = async row => {
+  const removeVariants = async (row:{filename?:string|null}) => {
     if (!row.filename || basename(row.filename) !== row.filename) throw Error('Unsafe media filename');
     const original = resolve(directory, 'uploads', row.filename);
-    const info = await stat(original).catch(error => error.code === 'ENOENT' ? null : Promise.reject(error));
+    const info = await stat(original).catch(error => isMissing(error) ? null : Promise.reject(error));
     if (!info) return;
-    const paths = [];
+    const paths:string[] = [];
     for (const width of imageWidths) for (const mode of ['v2-lossless', 'v3-display-q92']) {
       const key = createHash('sha256').update(`${mode}:${original}:${info.size}:${info.mtimeMs}:${width}`).digest('hex');
       paths.push(resolve(directory, 'image-cache', `${key}.webp`), resolve(directory, 'image-cache', `${key}.original`));
@@ -53,12 +57,12 @@ export function createMediaRetention({ payload, directory }) {
   return {
     list,
     versions,
-    queueVersions(collection, parentId) {
+    queueVersions(collection:string, parentId:string) {
       if (!referenceTables.includes(collection) || collection.startsWith('_') || !uuidPattern.test(parentId)) throw Error('Invalid content version cleanup target');
       withDb(db => db.prepare(`INSERT INTO content_version_cleanup (id,collection,parent_id,created_at) VALUES (?,?,?,?)
         ON CONFLICT(collection,parent_id) DO NOTHING`).run(randomUUID(), collection, parentId, new Date().toISOString()));
     },
-    async sweepVersions({ ids = null, limit = 100 } = {}) {
+    async sweepVersions({ ids = null, limit = 100 }:{ids?:string[]|null;limit?:number} = {}) {
       const selected = ids ? new Set(ids) : null;
       const result = { cleaned: 0, failed: 0 };
       for (const row of versions(limit).filter(item => !selected || selected.has(item.id))) {
@@ -72,13 +76,13 @@ export function createMediaRetention({ payload, directory }) {
           withDb(db => db.prepare('DELETE FROM content_version_cleanup WHERE id=?').run(row.id));
           result.cleaned++;
         } catch (error) {
-          withDb(db => db.prepare('UPDATE content_version_cleanup SET last_error=? WHERE id=?').run(String(error.message).slice(0, 300), row.id));
+          withDb(db => db.prepare('UPDATE content_version_cleanup SET last_error=? WHERE id=?').run(String(error instanceof Error ? error.message : error).slice(0, 300), row.id));
           result.failed++;
         }
       }
       return result;
     },
-    async queueFromDeleted(row) {
+    async queueFromDeleted(row:unknown) {
       const ids = [...new Set(JSON.stringify(row || {}).match(idPattern) || [])].filter(id => uuidPattern.test(id));
       for (const id of ids) {
         const media = await payload.find({ collection: 'media', limit: 1, depth: 0, where: { id: { equals: id } } });
@@ -88,7 +92,7 @@ export function createMediaRetention({ payload, directory }) {
       }
       return ids.length;
     },
-    async sweep({ ids = null, limit = 100 } = {}) {
+    async sweep({ ids = null, limit = 100 }:{ids?:string[]|null;limit?:number} = {}) {
       const selection = ids ? new Set(ids) : null;
       const result = { cleaned: 0, shared: 0, failed: 0 };
       await this.sweepVersions();
@@ -98,12 +102,12 @@ export function createMediaRetention({ payload, directory }) {
           if (referenced(item.media_id)) { remove(item.id); result.shared++; continue; }
           const found = await payload.find({ collection: 'media', limit: 1, depth: 0, where: { id: { equals: item.media_id } } });
           if (found.docs.length) {
-            const cachePaths = await removeVariants(found.docs[0]);
-            if (cachePaths) for (const path of cachePaths) await unlink(path).catch(error => { if (error.code !== 'ENOENT') throw error; });
+            const cachePaths = await removeVariants(found.docs[0] as {filename?:string|null});
+            if (cachePaths) for (const path of cachePaths) await unlink(path).catch(error => { if (!isMissing(error)) throw error; });
             await payload.delete({ collection: 'media', id: item.media_id });
           }
           remove(item.id); result.cleaned++;
-        } catch (error) { fail(item.id, error.message); result.failed++; }
+        } catch (error) { fail(item.id, error instanceof Error ? error.message : error); result.failed++; }
       }
       return result;
     },

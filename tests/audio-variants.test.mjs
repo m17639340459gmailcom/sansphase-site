@@ -5,7 +5,7 @@ import {promisify} from 'node:util';
 import {mkdtemp,readFile,writeFile,readdir,rm} from 'node:fs/promises';
 import {resolve} from 'node:path';
 import {tmpdir} from 'node:os';
-import {createAudioVariants} from '../server/audio-variants.mjs';
+import {createAudioVariants} from '../server/audio-variants.ts';
 const run=promisify(execFile);
 test('MP3 playback index preserves encoded audio and coalesces concurrent work',async t=>{
   try{await run('ffmpeg',['-version'],{windowsHide:true});}catch{t.skip('FFmpeg is optional locally; release server must run this test');return;}

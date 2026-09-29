@@ -4,11 +4,11 @@ import { resolve } from 'node:path';
 import { readerUidsTableSql, readerUidsTriggerSql } from '../reader-uids.ts';
 
 const required = ['authors', 'authors_sessions', 'site_profile', 'library_entries', '_library_entries_v', 'payload_locked_documents_rels', 'payload_preferences_rels'];
-const column = (db, table, name) => db.prepare(`PRAGMA table_info(${table})`).all().some(row => row.name === name);
-const table = (db, name) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
-const trigger = (db, name) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?").get(name));
-const missingUid = db => !table(db, 'reader_uids') || Boolean(db.prepare('SELECT 1 FROM readers r WHERE NOT EXISTS (SELECT 1 FROM reader_uids u WHERE u.reader_id=r.id) LIMIT 1').get());
-const ensureUids = db => {
+const column = (db:DatabaseSync, table:string, name:string) => db.prepare(`PRAGMA table_info(${table})`).all().some(row => row.name === name);
+const table = (db:DatabaseSync, name:string) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
+const trigger = (db:DatabaseSync, name:string) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?").get(name));
+const missingUid = (db:DatabaseSync) => !table(db, 'reader_uids') || Boolean(db.prepare('SELECT 1 FROM readers r WHERE NOT EXISTS (SELECT 1 FROM reader_uids u WHERE u.reader_id=r.id) LIMIT 1').get());
+const ensureUids = (db:DatabaseSync) => {
   if (!table(db, 'reader_uids')) db.exec(readerUidsTableSql);
   db.exec('INSERT INTO reader_uids (reader_id) SELECT r.id FROM readers r WHERE NOT EXISTS (SELECT 1 FROM reader_uids u WHERE u.reader_id=r.id) ORDER BY r.created_at, r.id');
   if (!trigger(db, 'reader_uids_on_insert')) db.exec(readerUidsTriggerSql);
@@ -26,7 +26,7 @@ export const loginEventsSchema = `CREATE TABLE login_events (
 );
 CREATE INDEX login_events_actor_time_idx ON login_events(actor_type, actor_id, happened_at DESC);`;
 
-export async function migrateReaderAccounts(directory) {
+export async function migrateReaderAccounts(directory:string) {
   const root = resolve(directory);
   const dbPath = resolve(root, 'content.db');
   await access(resolve(root, 'migration-complete.json'));

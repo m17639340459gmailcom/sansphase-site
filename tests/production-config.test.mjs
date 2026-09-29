@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { productionOptions, verifyBuild, verifyPrivateConfig } from '../server/production-config.mjs';
+import { productionOptions, verifyBuild, verifyPrivateConfig } from '../server/production-config.ts';
 import { createBuildManifest } from '../scripts/build-manifest.mjs';
 
 test('production rejects insecure origins, public listeners and relative private paths',()=>{

@@ -4,7 +4,7 @@ import {Readable} from 'node:stream';
 import {mkdtemp,readFile,readdir,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {withStreamUpload,uploadLimits} from '../server/stream-upload.mjs';
+import {withStreamUpload,uploadLimits} from '../server/stream-upload.ts';
 
 test('upload policy permits 15 GiB attachments and keeps media limits',()=>{
   assert.deepEqual(uploadLimits,{maxFileBytes:15*1024**3,maxImageBytes:25*1024**2,maxAudioBytes:100*1024**2});

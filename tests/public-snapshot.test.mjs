@@ -5,7 +5,7 @@ import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
 import {createPublicSnapshotCache} from '../server/public-snapshot.ts';
-import {createPublicationRevision} from '../server/payload/publication-revision.mjs';
+import {createPublicationRevision} from '../server/payload/publication-revision.ts';
 import {createContentService} from '../server/content-service.ts';
 import {createPreviewServer} from '../server.mjs';
 

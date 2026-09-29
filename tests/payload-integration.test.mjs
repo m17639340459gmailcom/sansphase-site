@@ -16,7 +16,7 @@ import { getPayload } from "payload";
 import sharp from "sharp";
 import { makePayloadConfig } from "../server/payload/config.ts";
 import { createPayloadStore } from "../server/payload/store.ts";
-import {createPublicationRevision} from '../server/payload/publication-revision.mjs';
+import {createPublicationRevision} from '../server/payload/publication-revision.ts';
 import { createAuthorService } from "../server/author-service.ts";
 import { createContentService } from "../server/content-service.ts";
 import { createPreviewServer } from "../server.mjs";

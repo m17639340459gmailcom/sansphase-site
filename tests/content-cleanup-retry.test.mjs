@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { createMediaRetention } from '../server/payload/media-retention.mjs';
+import { createMediaRetention } from '../server/payload/media-retention.ts';
 
 test('a failed historical-version cleanup defers media deletion until a successful retry', async () => {
   const directory = await mkdtemp(resolve(tmpdir(), 'sansphase-content-cleanup-'));

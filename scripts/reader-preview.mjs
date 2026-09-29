@@ -1,10 +1,10 @@
 import { DatabaseSync, backup } from 'node:sqlite';
 import { mkdtemp, mkdir, readdir, copyFile, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { migrateContentOrder } from '../server/payload/content-order-migration.mjs';
-import { migrateShowcaseCover } from '../server/payload/showcase-cover-migration.mjs';
-import { migrateReaderAccounts } from '../server/payload/reader-migration.mjs';
-import { migrateVipBooks } from '../server/payload/vip-book-migration.mjs';
+import { migrateContentOrder } from '../server/payload/content-order-migration.ts';
+import { migrateShowcaseCover } from '../server/payload/showcase-cover-migration.ts';
+import { migrateReaderAccounts } from '../server/payload/reader-migration.ts';
+import { migrateVipBooks } from '../server/payload/vip-book-migration.ts';
 
 // Local-only isolated preview: no changes to the current database or website.
 const sourceSettings = JSON.parse(await readFile(process.env.PAYLOAD_CONFIG_FILE || '.local/payload-env.json', 'utf8'));
