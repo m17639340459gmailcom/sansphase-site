@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { setTimeout as pause } from 'node:timers/promises';
 import { getPayload } from 'payload';
-import { makePayloadConfig } from '../server/payload/config.mjs';
+import { makePayloadConfig } from '../server/payload/config.ts';
 import { migrateReaderAccounts } from '../server/payload/reader-migration.mjs';
 
 test('production entry starts with an isolated restored database and exposes only public routes',{timeout:60000},async()=>{

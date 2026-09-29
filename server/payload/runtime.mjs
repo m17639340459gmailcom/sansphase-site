@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { getPayload } from "payload";
-import { makePayloadConfig } from "./config.mjs";
+import { makePayloadConfig } from "./config.ts";
 import { createPayloadStore } from "./store.ts";
 import { createAuthorService } from "../author-service.ts";
 import { createReaderService } from '../reader-service.ts';

@@ -1,6 +1,6 @@
 import { isIP } from 'node:net';
 const address = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-type SmtpSettings = { host: string; user: string; password: string; from: string; port?: string | number; connectAddress?: string | null };
+type SmtpSettings = { host: string; user: string; password: string; from: string; name?: string; port?: string | number; connectAddress?: string | null };
 
 // A partial private configuration must never make public registration appear usable.
 export function smtpConfigured(smtp: unknown): smtp is SmtpSettings {

@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { getPayload } from 'payload';
 import { DatabaseSync } from 'node:sqlite';
-import { makePayloadConfig } from '../server/payload/config.mjs';
+import { makePayloadConfig } from '../server/payload/config.ts';
 import { migrateReaderAccounts } from '../server/payload/reader-migration.mjs';
 
 test('reader migration preserves the existing author database and is idempotent', { timeout: 60000 }, async () => {

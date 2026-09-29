@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { getPayload } from 'payload';
-import { makePayloadConfig } from '../server/payload/config.mjs';
+import { makePayloadConfig } from '../server/payload/config.ts';
 import { createReaderService } from '../server/reader-service.ts';
 import { createReaderAdminService } from '../server/reader-admin-service.ts';
 import { createPreviewServer } from '../server.mjs';

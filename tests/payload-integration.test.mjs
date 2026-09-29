@@ -14,7 +14,7 @@ import { resolve, sep } from "node:path";
 import { randomUUID, randomBytes } from "node:crypto";
 import { getPayload } from "payload";
 import sharp from "sharp";
-import { makePayloadConfig } from "../server/payload/config.mjs";
+import { makePayloadConfig } from "../server/payload/config.ts";
 import { createPayloadStore } from "../server/payload/store.ts";
 import {createPublicationRevision} from '../server/payload/publication-revision.mjs';
 import { createAuthorService } from "../server/author-service.ts";

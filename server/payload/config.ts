@@ -1,4 +1,5 @@
 import { buildConfig } from "payload";
+import type { Access, Field, TextField, JSONField } from 'payload';
 import { sqliteAdapter } from "@payloadcms/db-sqlite";
 import { nodemailerAdapter } from '@payloadcms/email-nodemailer';
 import sharp from "sharp";
@@ -6,12 +7,12 @@ import { resolve } from "node:path";
 import { MAX_BODY_LENGTH } from '../content-limits.ts';
 import { smtpConfigured, smtpTransportOptions } from './smtp-settings.ts';
 
-const owner = ({ req }) =>
+const owner: Access = ({ req }) =>
   req.user?.collection === "authors" && req.user?.role === "owner";
 const access = { read: owner, create: owner, update: owner, delete: owner };
-const text = (name, extra = {}) => ({ name, type: "text", ...extra });
-const json = (name) => ({ name, type: "json" });
-const common = () => [
+const text = (name: string, extra: Partial<TextField> = {}): TextField => ({ name, type: "text", ...extra }) as TextField;
+const json = (name: string): JSONField => ({ name, type: "json" });
+const common = (): Field[] => [
   text("title", { required: true }),
   {
     name: "status",
@@ -25,7 +26,7 @@ const common = () => [
   text("date_created"),
   text("date_updated"),
 ];
-const content = () => [
+const content = (): Field[] => [
   ...common(),
   text("slug", { required: true, unique: true }),
   text("category"),
@@ -35,7 +36,7 @@ const content = () => [
   text("published_at"),
 ];
 
-export function makePayloadConfig({ directory, secret, push = false, siteOrigin = 'http://127.0.0.1:4176', smtp, emailAdapter, includeReaders = true }) {
+export function makePayloadConfig({ directory, secret, push = false, siteOrigin = 'http://127.0.0.1:4176', smtp, emailAdapter, includeReaders = true }: {directory: string; secret: string; push?: boolean; siteOrigin?: string; smtp?: unknown; emailAdapter?: NonNullable<Parameters<typeof buildConfig>[0]['email']>; includeReaders?: boolean}) {
   if (!secret || secret.length < 32)
     throw new Error("Payload secret is missing or too short.");
   return buildConfig({
@@ -96,11 +97,11 @@ export function makePayloadConfig({ directory, secret, push = false, siteOrigin 
         auth: {
           verify: {
             generateEmailSubject: () => '验证你的 SANSPHASE 账号',
-            generateEmailHTML: ({ token }) => `<p>点击链接验证邮箱并启用账号：</p><p><a href="${siteOrigin}/#/verify/${encodeURIComponent(token)}">验证邮箱</a></p><p>如果不是你注册的账号，可以忽略这封邮件。</p>`,
+            generateEmailHTML: ({ token }: {token: string}) => `<p>点击链接验证邮箱并启用账号：</p><p><a href="${siteOrigin}/#/verify/${encodeURIComponent(token)}">验证邮箱</a></p><p>如果不是你注册的账号，可以忽略这封邮件。</p>`,
           },
           forgotPassword: {
             generateEmailSubject: () => '重置你的 SANSPHASE 密码',
-            generateEmailHTML: ({ token }) => `<p>点击链接重置密码：</p><p><a href="${siteOrigin}/#/reset/${encodeURIComponent(token)}">重置密码</a></p><p>如果不是你申请的，可以忽略这封邮件。</p>`,
+            generateEmailHTML: ({ token }: {token?: string} = {}) => `<p>点击链接重置密码：</p><p><a href="${siteOrigin}/#/reset/${encodeURIComponent(String(token))}">重置密码</a></p><p>如果不是你申请的，可以忽略这封邮件。</p>`,
           },
           tokenExpiration: 7 * 86400,
           useSessions: true,
@@ -116,7 +117,7 @@ export function makePayloadConfig({ directory, secret, push = false, siteOrigin 
           text('avatar'),
           text('vip_started_at'),
           text('vip_until'),
-          { name: 'disabled', type: 'checkbox', defaultValue: false },
+          { name: 'disabled', type: 'checkbox' as const, defaultValue: false },
         ],
       }] : []),
       {
