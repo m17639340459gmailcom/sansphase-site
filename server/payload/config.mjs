@@ -4,7 +4,7 @@ import { nodemailerAdapter } from '@payloadcms/email-nodemailer';
 import sharp from "sharp";
 import { resolve } from "node:path";
 import { MAX_BODY_LENGTH } from '../content-limits.ts';
-import { smtpConfigured, smtpTransportOptions } from './smtp-settings.mjs';
+import { smtpConfigured, smtpTransportOptions } from './smtp-settings.ts';
 
 const owner = ({ req }) =>
   req.user?.collection === "authors" && req.user?.role === "owner";

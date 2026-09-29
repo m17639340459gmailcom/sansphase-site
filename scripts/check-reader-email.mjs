@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import nodemailer from 'nodemailer';
-import { smtpConfigured, smtpTransportOptions } from '../server/payload/smtp-settings.mjs';
+import { smtpConfigured, smtpTransportOptions } from '../server/payload/smtp-settings.ts';
 
 // This is a manual release check. It never sends a message without --send-to.
 const args = process.argv.slice(2);

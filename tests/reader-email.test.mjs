@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { smtpConfigured, smtpTransportOptions } from '../server/payload/smtp-settings.mjs';
+import { smtpConfigured, smtpTransportOptions } from '../server/payload/smtp-settings.ts';
 
 const complete = { host: 'smtp.example.test', port: 465, user: 'reader', password: 'private-key', from: 'hello@example.test' };
 

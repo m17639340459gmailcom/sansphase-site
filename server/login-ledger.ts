@@ -2,8 +2,15 @@ import { DatabaseSync } from 'node:sqlite';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
+import type { clientAddress } from './client-ip.ts';
 
-export function createLoginLedger(directory) {
+type LoginAddress = ReturnType<typeof clientAddress>;
+type RecordLogin = { actorType: string; actorId: string | number; email: string; address: LoginAddress; userAgent?: string };
+type LatestLogin = { at: string; ip: string; source: string };
+type LoginEvent = { id: string; at: string; ip: string; peerIp: string; source: string; userAgent: string };
+type ReaderId = { id: string };
+
+export function createLoginLedger(directory: string) {
   const db = new DatabaseSync(resolve(directory, 'content.db'));
   db.exec('PRAGMA busy_timeout=10000');
   if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='login_events'").get()) {
@@ -11,22 +18,22 @@ export function createLoginLedger(directory) {
     throw Error('Login audit migration is required before starting the site.');
   }
   return {
-    record({ actorType, actorId, email, address, userAgent }) {
+    record({ actorType, actorId, email, address, userAgent }: RecordLogin) {
       if (!['reader', 'owner'].includes(actorType) || !actorId || !isIP(address?.ip || '')) throw Error('Cannot audit login without a verified network address and account.');
       const event = { id: randomUUID(), at: new Date().toISOString(), actorType, actorId: String(actorId), email: String(email).toLowerCase(), ip: address.ip, peerIp: address.peerIp || '', source: address.source, userAgent: String(userAgent || '').slice(0, 300) };
       db.prepare('INSERT INTO login_events (id, happened_at, actor_type, actor_id, email, ip, peer_ip, source, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
         .run(event.id, event.at, event.actorType, event.actorId, event.email, event.ip, event.peerIp, event.source, event.userAgent);
       return event;
     },
-    latest(actorType, actorId) {
-      const row = db.prepare('SELECT happened_at AS at, ip, source FROM login_events WHERE actor_type=? AND actor_id=? ORDER BY happened_at DESC, rowid DESC LIMIT 1').get(actorType, String(actorId));
+    latest(actorType: string, actorId: string | number): LatestLogin | null {
+      const row = db.prepare('SELECT happened_at AS at, ip, source FROM login_events WHERE actor_type=? AND actor_id=? ORDER BY happened_at DESC, rowid DESC LIMIT 1').get(actorType, String(actorId)) as LatestLogin | undefined;
       return row || null;
     },
-    list(actorType, actorId, limit = 20) {
+    list(actorType: string, actorId: string | number, limit = 20): LoginEvent[] {
       return db.prepare('SELECT id, happened_at AS at, ip, peer_ip AS peerIp, source, user_agent AS userAgent FROM login_events WHERE actor_type=? AND actor_id=? ORDER BY happened_at DESC, rowid DESC LIMIT ?')
-        .all(actorType, String(actorId), Math.max(1, Math.min(100, Number(limit) || 20)));
+        .all(actorType, String(actorId), Math.max(1, Math.min(100, Number(limit) || 20))) as LoginEvent[];
     },
-    inactiveReaderIds(cutoff, now, limit = 100, offset = 0) {
+    inactiveReaderIds(cutoff: string, now: string, limit = 100, offset = 0): string[] {
       return db.prepare(`SELECT r.id FROM readers r
         WHERE (r.vip_until IS NULL OR r.vip_until <= ?)
           AND COALESCE(
@@ -34,7 +41,7 @@ export function createLoginLedger(directory) {
             r.created_at
           ) <= ?
         ORDER BY r.created_at, r.id LIMIT ? OFFSET ?`)
-        .all(now, cutoff, Math.max(1, Math.min(1000, Number(limit) || 100)), Math.max(0, Number(offset) || 0)).map(row => row.id);
+        .all(now, cutoff, Math.max(1, Math.min(1000, Number(limit) || 100)), Math.max(0, Number(offset) || 0)).map(row => (row as ReaderId).id);
     },
     close() { db.close(); },
   };

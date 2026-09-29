@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { readerCleanupDue, createReaderRetention } from '../server/reader-retention.ts';
-import { createLoginLedger } from '../server/login-ledger.mjs';
+import { createLoginLedger } from '../server/login-ledger.ts';
 
 test('30-day cleanup uses the last successful login and protects active VIP membership', () => {
   const now = Date.parse('2026-10-31T12:00:00.000Z');

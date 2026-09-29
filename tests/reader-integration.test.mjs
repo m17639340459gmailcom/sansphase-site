@@ -11,7 +11,7 @@ import { createReaderAdminService } from '../server/reader-admin-service.ts';
 import { createPreviewServer } from '../server.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { loginEventsSchema } from '../server/payload/reader-migration.mjs';
-import { createLoginLedger } from '../server/login-ledger.mjs';
+import { createLoginLedger } from '../server/login-ledger.ts';
 import { createReaderRetention } from '../server/reader-retention.ts';
 import { createReaderWorkflow, registrationLifetimeMs } from '../server/reader-workflow.ts';
 import { readerUidsTableSql, readerUidsTriggerSql, createReaderUidStore } from '../server/reader-uids.ts';
