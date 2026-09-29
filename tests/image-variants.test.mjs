@@ -6,7 +6,7 @@ import {resolve} from 'node:path';
 import {randomUUID, createHash} from 'node:crypto';
 import sharp from 'sharp';
 import {createImageVariants} from '../server/image-variants.mjs';
-import {createPayloadStore} from '../server/payload/store.mjs';
+import {createPayloadStore} from '../server/payload/store.ts';
 import {createContentService} from '../server/content-service.ts';
 import {createPreviewServer} from '../server.mjs';
 import {imageSources} from '../src/image-sources.mjs';
@@ -79,4 +79,3 @@ test('resized media and 304 responses require current publication; downloads rem
   assert.equal((await fetch(url,{headers:{'If-None-Match':etag}})).status,404);
  } finally {if(server)await new Promise(r=>{server.close(r);server.closeAllConnections();});await rm(dir,{recursive:true,force:true});}
 });
-

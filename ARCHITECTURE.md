@@ -12,7 +12,7 @@
 | server/author-service.ts | 作者操作验证、编辑稿／公开稿语义 |
 | server/content-service.ts | 公开字段白名单、富文本清理、媒体引用授权 |
 | server/payload/config.mjs | Payload 数据集合、认证、访问权限与版本记录 |
-| server/payload/store.mjs | Payload Local API 存储适配 |
+| server/payload/store.ts | Payload Local API 存储适配 |
 | server/payload/runtime.mjs | 读取私有配置、启动和关闭 Payload |
 | .local/payload/ | 当前数据库、上传文件、迁移记录，不进 Git |
 | .local/payload-env.json | 密钥、作者 UUID、来源地址与站点地址，不公开 |

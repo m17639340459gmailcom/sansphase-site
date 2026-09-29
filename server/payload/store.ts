@@ -10,15 +10,23 @@ import { Readable } from "node:stream";
 import { basename, resolve } from "node:path";
 import { isPublished, uuidPattern } from "../content-service.ts";
 import { createMediaRetention } from './media-retention.mjs';
+import type { Payload } from 'payload';
+import type { IncomingMessage } from 'node:http';
 
-const fail = (message, status = 400) =>
+// Payload's runtime collections share this adapter. Schema-specific fields are
+// validated by Payload; the adapter keeps the dynamic field boundary here.
+type CmsRecord = Record<string, any>;
+type ContentCollection = 'articles' | 'announcements' | 'library_entries';
+type StreamFile = {name: string; mimetype: string; size: number; tempFilePath: string; data: Buffer};
+
+const fail = (message: string, status = 400) =>
   Object.assign(new Error(message), { status });
 const collections = new Set(["articles", "announcements", "library_entries"]);
-export function createPayloadStore(payload, { directory, authorId, mediaRetention = createMediaRetention({ payload, directory }) }) {
+export function createPayloadStore(payload: Payload, { directory, authorId, mediaRetention = createMediaRetention({ payload, directory }) }: {directory: string; authorId: string; mediaRetention?: ReturnType<typeof createMediaRetention>}) {
   const imageVariant = createImageVariants(directory);
   const audioVariant = createAudioVariants(directory);
   let activeUploads=0;
-  async function identity(token) {
+  async function identity(token: string | undefined) {
     if (!token) throw fail("请先登录作者账号。", 401);
     const { user } = await payload.auth({
       headers: new Headers({ Authorization: `JWT ${token}` }),
@@ -32,15 +40,15 @@ export function createPayloadStore(payload, { directory, authorId, mediaRetentio
       throw fail("请重新登录作者账号。", 401);
     return user;
   }
-  const authorized = async (token) => ({
+  const authorized = async (token: string | undefined) => ({
     user: await identity(token),
     overrideAccess: false,
   });
-  async function mediaRecord(id) {
+  async function mediaRecord(id: string) {
     if (!uuidPattern.test(id || "")) throw fail("文件不存在。", 404);
     return payload.findByID({ collection: "media", id });
   }
-  async function readMedia(id,rangeHeader, imageWidth,{streaming=false,presentation=false}={}) {
+  async function readMedia(id: string,rangeHeader: string | undefined, imageWidth: string | number | null | undefined,{streaming=false,presentation=false}: {streaming?: boolean; presentation?: boolean}={}) {
     // Internal only: callers must authorize the owner or check published references first.
     const row = await mediaRecord(id);
     if (!row.filename || basename(row.filename) !== row.filename)
@@ -54,7 +62,7 @@ export function createPayloadStore(payload, { directory, authorId, mediaRetentio
     const etag = '"' + createHash('sha256').update(`${path}:${size}:${info.mtimeMs}`).digest('hex') + '"';
     const range=byteRange(rangeHeader,size);
     if(range===false) return new Response(null,{status:416,headers:{'Content-Range':`bytes */${size}`,'Content-Length':'0'}});
-    return new Response(Readable.toWeb(createReadStream(path,range||undefined)), {
+    return new Response(Readable.toWeb(createReadStream(path,range||undefined)) as ReadableStream, {
       status:range?206:200,
       headers: {
         "Content-Type": variant ? 'image/webp' : audio ? 'audio/mpeg' : row.mimeType || "application/octet-stream",
@@ -66,7 +74,7 @@ export function createPayloadStore(payload, { directory, authorId, mediaRetentio
       },
     });
   }
-  const fileDTO = (row) =>
+  const fileDTO = (row: CmsRecord | null) =>
     row && {
       id: row.id,
       title: row.title,
@@ -74,20 +82,20 @@ export function createPayloadStore(payload, { directory, authorId, mediaRetentio
       type: row.mimeType,
       filesize: row.filesize,
     };
-  async function hydrate(row) {
+  async function hydrate(row: CmsRecord) {
     const ids = new Set([row.cover, row.showcase_cover, ...String(row.body || '').matchAll(/\/(?:assets|api\/media)\/([0-9a-f-]{36})/gi)].map(value=>Array.isArray(value)?value[1]:value).filter(id=>uuidPattern.test(id || '')));
-    const imageDimensions = {};
+    const imageDimensions: Record<string, {width: number; height: number}> = {};
     await Promise.all([...ids].map(async id=>{
       try {
         const file = await mediaRecord(id);
         if(file.width > 0 && file.height > 0) imageDimensions[id] = {width:file.width,height:file.height};
-      } catch(error) {if(error.status !== 404) throw error;}
+      } catch(error) {if((error as {status?: number}).status !== 404) throw error;}
     }));
     return {
       ...row,
       imageDimensions,
       attachments: await Promise.all(
-        (row.attachments || []).map(async (item) => ({
+        (row.attachments || []).map(async (item: CmsRecord) => ({
           id: item.id,
           directus_files_id: fileDTO(
             await mediaRecord(
@@ -99,7 +107,7 @@ export function createPayloadStore(payload, { directory, authorId, mediaRetentio
       ...(row.file ? { file: fileDTO(await mediaRecord(row.file)) } : {}),
     };
   }
-  async function profile(token) {
+  async function profile(token: string | undefined) {
     const result = await payload.find({
       collection: "site_profile",
       limit: 1,
@@ -108,7 +116,7 @@ export function createPayloadStore(payload, { directory, authorId, mediaRetentio
     if (!result.docs[0]) throw fail("作者资料不存在。", 404);
     return result.docs[0];
   }
-  async function validateFiles(data) {
+  async function validateFiles(data: CmsRecord) {
     const ids = [
       data.cover,
       data.showcase_cover,
@@ -137,13 +145,13 @@ export function createPayloadStore(payload, { directory, authorId, mediaRetentio
   return {
     mediaPrefix: "/api/media",
     uploadLimits,
-    async uploadRequest(req,token) {
+    async uploadRequest(req: IncomingMessage,token: string | undefined) {
       const auth=await authorized(token);
       // One upload, including Payload's final copy, at a time on this single-
       // process server: two 15 GiB uploads must not reserve the same disk space.
       if(activeUploads>=1) throw fail('已有文件正在上传，请等待完成后再上传下一个。',429);
       activeUploads++;
-      try { return await withStreamUpload(req,directory,async(file,fields)=>{
+      try { return await withStreamUpload(req,directory,async(file: StreamFile,fields: CmsRecord)=>{
         if(fields.purpose==='background' && !/^image\/(png|jpeg|webp|gif|avif)$/.test(file.mimetype)) throw fail('背景请选择图片。');
         if(fields.purpose==='music' && !/^audio\/(mpeg|mp3|mp4|x-m4a|aac|ogg|wav|wave|x-wav|flac|webm)$/.test(file.mimetype)) throw fail('请选择 MP3、M4A、OGG、WAV 或 FLAC 音频。');
         const saved=await payload.create({collection:'media',data:{title:file.name,originalName:file.name},file,...auth});
@@ -153,31 +161,32 @@ export function createPayloadStore(payload, { directory, authorId, mediaRetentio
       }); } finally {activeUploads--;}
     },
     identity,
-    async login(data) {
+    async login(data: {email: string; password: string}) {
       try {
         const result = await payload.login({ collection: "authors", data });
+        if (!result.token) throw fail("账号或密码不正确，或账号暂时锁定。", 401);
         await identity(result.token);
         return result.token;
       } catch {
         throw fail("账号或密码不正确，或账号暂时锁定。", 401);
       }
     },
-    async logout(token) {
+    async logout(token: string | undefined) {
       const user = await identity(token);
       await logoutOperation({
         collection: payload.collections.authors,
         req: await createLocalReq({ user }, payload),
       });
     },
-    async get(collection, id, token) {
+    async get(collection: string, id: string, token: string | undefined) {
       if (!collections.has(collection)) throw fail("内容不存在。", 404);
-      return payload.findByID({ collection, id, ...(await authorized(token)) });
+      return payload.findByID({ collection: collection as ContentCollection, id, ...(await authorized(token)) });
     },
-    async list(collection, { kind, sort }, token) {
+    async list(collection: string, { kind, sort }: {kind?: string; sort?: string | string[]}, token: string | undefined) {
       if (!collections.has(collection)) throw fail("内容不存在。", 404);
       return (
         await payload.find({
-          collection,
+          collection: collection as ContentCollection,
           pagination: false,
           sort,
           where: kind ? { kind: { equals: kind } } : undefined,
@@ -185,49 +194,50 @@ export function createPayloadStore(payload, { directory, authorId, mediaRetentio
         })
       ).docs;
     },
-    async remove(collection,id,expectedUpdated,token) {
+    async remove(collection: string,id: string,expectedUpdated: string | number,token: string | undefined) {
       if(!collections.has(collection)||!uuidPattern.test(id))throw fail('内容不存在。',404);
       const auth = await authorized(token);
-      const current = await payload.findByID({ collection, id, ...auth });
+      const current = await payload.findByID({ collection: collection as ContentCollection, id, ...auth });
       await mediaRetention.queueFromDeleted(current);
-      const versions = await payload.findVersions({ collection, where: { parent: { equals: id } }, pagination: false, depth: 0, ...auth });
+      const versions = await payload.findVersions({ collection: collection as ContentCollection, where: { parent: { equals: id } }, pagination: false, depth: 0, ...auth });
       for (const version of versions.docs) await mediaRetention.queueFromDeleted(version);
-      const result=await payload.delete({collection,where:{and:[
+      const result=await payload.delete({collection: collection as ContentCollection,where:{and:[
         {id:{equals:id}},{updatedAt:{equals:expectedUpdated}},
       ]},...auth});
       if(result.errors?.length)throw fail('删除失败，请稍后重试。',503);
       if(result.docs.length!==1)throw fail('内容已在其他窗口修改，请重新打开后编辑。',409);
       mediaRetention.queueVersions(collection, id);
-      const remaining = await payload.findVersions({ collection, where: { parent: { equals: id } }, limit: 1, depth: 0, ...auth });
-      if (remaining.totalDocs) await payload.db.deleteVersions({ collection, where: { parent: { equals: id } } });
-      const afterCleanup = await payload.findVersions({ collection, where: { parent: { equals: id } }, limit: 1, depth: 0, ...auth });
+      const remaining = await payload.findVersions({ collection: collection as ContentCollection, where: { parent: { equals: id } }, limit: 1, depth: 0, ...auth });
+      if (remaining.totalDocs) await payload.db.deleteVersions({ collection: collection as ContentCollection, where: { parent: { equals: id } } });
+      const afterCleanup = await payload.findVersions({ collection: collection as ContentCollection, where: { parent: { equals: id } }, limit: 1, depth: 0, ...auth });
       if (afterCleanup.totalDocs) throw fail('内容已删除，但历史版本清理失败；请联系管理员检查。', 503);
       await mediaRetention.sweepVersions();
       await mediaRetention.sweep();
     },
-    async save(collection, id, values, token) {
+    async save(collection: string, id: string | undefined, values: CmsRecord, token: string | undefined) {
       if (!collections.has(collection)) throw fail("内容不存在。", 404);
       const auth = await authorized(token);
       await validateFiles(values);
-      const data = { ...values, date_updated: new Date().toISOString() };
+      const data: CmsRecord = { ...values, date_updated: new Date().toISOString() };
       if (!id) data.date_created = data.date_updated;
       if (data.attachments)
         data.attachments = (
           Array.isArray(data.attachments)
             ? data.attachments
             : data.attachments.create || []
-        ).map((item) => ({
-          id: item.id || randomUUID(),
+        ).map((item: string | CmsRecord) => ({
+          id: (typeof item === 'string' ? undefined : item.id) || randomUUID(),
           directus_files_id:
             typeof item === "string" ? item : item.directus_files_id,
         }));
       try {
         return id
-          ? await payload.update({ collection, id, data, ...auth })
-          : await payload.create({ collection, data, ...auth });
+          ? await payload.update({ collection: collection as ContentCollection, id, data, ...auth })
+          : await payload.create({ collection: collection as ContentCollection, data, ...auth });
       } catch (error) {
-        if (error.status === 400 || error.name === "ValidationError") {
-          const fields = new Set((Array.isArray(error.data?.errors) ? error.data.errors : []).map(field => field.path));
+        const failure = error as {status?: number; name?: string; data?: {errors?: Array<{path: string}>}};
+        if (failure.status === 400 || failure.name === "ValidationError") {
+          const fields = new Set((Array.isArray(failure.data?.errors) ? failure.data.errors : []).map(field => field.path));
           if (fields.has('body'))
             throw fail('正文校验未通过，请检查正文长度与格式。');
           if (fields.has('slug'))
@@ -238,7 +248,7 @@ export function createPayloadStore(payload, { directory, authorId, mediaRetentio
       }
     },
     profile,
-    async saveProfile(data, token) {
+    async saveProfile(data: CmsRecord, token: string | undefined) {
       const row = await profile(token);
       await validateFiles(data);
       return payload.update({
@@ -248,9 +258,9 @@ export function createPayloadStore(payload, { directory, authorId, mediaRetentio
         ...(await authorized(token)),
       });
     },
-    async upload(form, token) {
+    async upload(form: FormData, token: string | undefined) {
       const auth = await authorized(token),
-        file = form.get("file");
+        file = form.get("file") as File | null;
       if (!file || typeof file.arrayBuffer !== "function")
         throw fail("请选择文件。");
       const data = Buffer.from(await file.arrayBuffer());
@@ -272,7 +282,7 @@ export function createPayloadStore(payload, { directory, authorId, mediaRetentio
       });
       return fileDTO(saved);
     },
-    async media(id, token, imageWidth) {
+    async media(id: string, token: string | undefined, imageWidth?: string | number | null) {
       await identity(token);
       return readMedia(id, undefined, imageWidth);
     },
@@ -303,19 +313,19 @@ export function createPayloadStore(payload, { directory, authorId, mediaRetentio
       ]);
       return [
         await Promise.all(
-          articles.docs.filter((row) => isPublished(row)).map(hydrate),
+          articles.docs.filter((row) => isPublished(row as unknown as {status: string; published_at?: string})).map(hydrate),
         ),
         profile.docs[0],
         announcements.docs,
         await Promise.all(
-          library.docs.filter((row) => isPublished(row)).map(hydrate),
+          library.docs.filter((row) => isPublished(row as unknown as {status: string; published_at?: string})).map(hydrate),
         ),
         Math.min(Infinity,...[...articles.docs,...library.docs]
           .filter(row=>row.status==='published')
           .map(row=>Date.parse(row.published_at)).filter(time=>time>snapshotStartedAt)),
       ];
     },
-    async preview(id, cookie, kind='articles') {
+    async preview(id: string, cookie: string, kind='articles') {
       if(!['articles','resource-center'].includes(kind))throw Object.assign(new Error('Invalid preview kind'),{status:400});
       const token = cookie
         .split(";")
@@ -332,7 +342,7 @@ export function createPayloadStore(payload, { directory, authorId, mediaRetentio
       if(kind==='resource-center'&&row.kind!==kind)throw Object.assign(new Error('Not found'),{status:404});
       const draft = { ...row, ...row.pending_content };
       if (row.pending_content?.attachments)
-        draft.attachments = row.pending_content.attachments.map((id) => ({
+        draft.attachments = row.pending_content.attachments.map((id: string) => ({
           directus_files_id: id,
         }));
       return hydrate(draft);

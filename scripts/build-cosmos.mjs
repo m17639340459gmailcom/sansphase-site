@@ -55,7 +55,7 @@ const result = await build({
 });
 // Site pages and their styles have one source of truth under src/. The build
 // output is disposable; it is never edited by hand.
-const typedBrowserModules = new Set(['access-policy.mjs', 'catalog.mjs', 'core.mjs', 'image-sources.mjs', 'reader-ui.mjs', 'scene-delivery.mjs']);
+const typedBrowserModules = new Set(['access-policy.mjs', 'book-progress.mjs', 'catalog.mjs', 'core.mjs', 'image-sources.mjs', 'reader-ui.mjs', 'scene-delivery.mjs']);
 for (const file of [
   "index.html",
   "app.mjs",

@@ -11,7 +11,7 @@ import { pipeline } from "node:stream/promises";
 import { uuidPattern, safeLink } from "./content-service.ts";
 import { clientAddress } from './client-ip.ts';
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http';
-import type { createPayloadStore } from './payload/store.mjs';
+import type { createPayloadStore } from './payload/store.ts';
 
 type ContentKind = 'articles' | 'works' | 'resources' | 'software' | 'resource-center' | 'announcements';
 type ContentRow = {
@@ -260,7 +260,7 @@ export function createAuthorService({
           }
         : (values.attachments || []).map((id) => ({ directus_files_id: id }));
     const saved = await store.save(spec.collection, id, payload, token);
-    return rowForEditor(await getItem(kind, saved.id, token));
+    return rowForEditor(await getItem(kind, String(saved.id), token));
   }
   return {
     async loginCredentials(res: ServerResponse, { email, password }: { email?: unknown; password?: unknown }, req: IncomingMessage) {
@@ -447,7 +447,7 @@ export function createAuthorService({
             if(input.confirmId!==id)throw fail('请确认要删除的内容。');
             if(!input.expectedUpdated || input.expectedUpdated!==contentRevision(row))
               throw fail('内容已在其他窗口修改，请重新打开后编辑。',409);
-            await store.remove(spec.collection,id,input.expectedUpdated,token);
+            await store.remove(spec.collection,id,input.expectedUpdated as string,token);
             send({deleted:true,id});return;
           }
           if (

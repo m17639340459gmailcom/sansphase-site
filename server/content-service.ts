@@ -6,7 +6,7 @@ import { normalizeSocialLink } from "../src/social-links.mjs";
 import { richTextAttributes, richTextStyles } from "./rich-text-policy.mjs";
 import { cleanMusic, cleanAppearance } from "./profile-settings.mjs";
 import {createPublicSnapshotCache} from './public-snapshot.mjs';
-import type { createPayloadStore } from './payload/store.mjs';
+import type { createPayloadStore } from './payload/store.ts';
 
 type ImageSize = { width?: number; height?: number };
 type MediaFile = { id: string; title?: string; filename_download?: string; filesize?: number };
