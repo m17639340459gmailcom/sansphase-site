@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createAuthorService } from '../server/author-service.mjs';
+import { createAuthorService } from '../server/author-service.ts';
 
 test('owner login records the observed address before releasing the cookie', async () => {
   const events = [], response = { headers: {}, setHeader(name, value) { this.headers[name] = value; } };

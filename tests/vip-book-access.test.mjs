@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createPreviewServer } from '../server.mjs';
 import { visibleBootstrap } from '../server/reader-access.ts';
 import { publicPage } from '../server/content-delivery.mjs';
-import { validateArticle } from '../server/author-service.mjs';
+import { validateArticle } from '../server/author-service.ts';
 import { createContentService } from '../server/content-service.mjs';
 import { migrateVipBooks } from '../server/payload/vip-book-migration.mjs';
 import {DatabaseSync} from 'node:sqlite';

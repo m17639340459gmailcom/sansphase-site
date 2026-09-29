@@ -17,7 +17,7 @@ import sharp from "sharp";
 import { makePayloadConfig } from "../server/payload/config.mjs";
 import { createPayloadStore } from "../server/payload/store.mjs";
 import {createPublicationRevision} from '../server/payload/publication-revision.mjs';
-import { createAuthorService } from "../server/author-service.mjs";
+import { createAuthorService } from "../server/author-service.ts";
 import { createContentService } from "../server/content-service.mjs";
 import { createPreviewServer } from "../server.mjs";
 

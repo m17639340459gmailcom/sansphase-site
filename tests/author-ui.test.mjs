@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { JSDOM, VirtualConsole } from "jsdom";
-import { validateArticle } from "../server/author-service.mjs";
+import { validateArticle } from "../server/author-service.ts";
 import { cleanBody } from "../server/content-service.mjs";
 
 test("author hub groups actions; background editing preserves profile; back navigation protects unsaved work", async () => {

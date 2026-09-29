@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
 import {applyContentOrder,validateContentOrder,orderedContentKinds} from '../server/content-order.mjs';
-import {createAuthorService} from '../server/author-service.mjs';
+import {createAuthorService} from '../server/author-service.ts';
 import {createContentService} from '../server/content-service.mjs';
 import {createPreviewServer} from '../server.mjs';
 

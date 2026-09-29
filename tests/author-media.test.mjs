@@ -6,7 +6,7 @@ import {resolve,sep} from 'node:path';
 import {randomUUID,createHash} from 'node:crypto';
 import sharp from 'sharp';
 import {createPayloadStore} from '../server/payload/store.mjs';
-import {createAuthorService} from '../server/author-service.mjs';
+import {createAuthorService} from '../server/author-service.ts';
 import {createContentService} from '../server/content-service.mjs';
 import {createPreviewServer} from '../server.mjs';
 import {imageSources} from '../src/image-sources.mjs';

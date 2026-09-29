@@ -5,7 +5,7 @@ import {Editor} from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
 import {BookBlockIdentity,mountBookEditor} from '../src/book-editor.mjs';
-import {validateArticle} from '../server/author-service.mjs';
+import {validateArticle} from '../server/author-service.ts';
 import {cleanBody} from '../server/content-service.mjs';
 test('chapter edits, reordering and stable paragraph identities survive publication sanitization',()=>{
  const dom=new JSDOM('<main><div class="author-editor-wrap"><div id="editor"></div></div></main>',{pretendToBeVisual:true});

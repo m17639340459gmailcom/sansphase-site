@@ -4,7 +4,7 @@ import {
   validateArticle,
   assertAuthorOrigin,
   createAuthorService,
-} from "../server/author-service.mjs";
+} from "../server/author-service.ts";
 test("author writes reject untrusted origins, absent intent headers and injected CMS fields", () => {
   assert.throws(() =>
     assertAuthorOrigin(

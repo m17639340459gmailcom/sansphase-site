@@ -10,8 +10,24 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { uuidPattern, safeLink } from "./content-service.mjs";
 import { clientAddress } from './client-ip.ts';
+import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http';
+import type { createPayloadStore } from './payload/store.mjs';
+
+type ContentKind = 'articles' | 'works' | 'resources' | 'software' | 'resource-center' | 'announcements';
+type ContentRow = {
+  id: string; kind?: string; status?: string; updatedAt?: string; date_updated?: string;
+  published_at?: string | null; body?: string; pending_content?: Record<string, unknown> | null;
+  attachments?: Array<{ id: string; directus_files_id: string | { id?: string } | null }>;
+  [key: string]: unknown;
+};
+type AuthorInput = Record<string, unknown>;
+type ValidatedContent = { title: string; summary: string; body?: string; attachments?: string[]; [key: string]: unknown };
+type LoginLedger = { record: (entry: { actorType: 'owner'; actorId: string; email: string; address: ReturnType<typeof clientAddress>; userAgent: string | undefined }) => unknown };
+type AuthorOptions = { url: string; authorId: string; siteOrigin?: string; store: ReturnType<typeof createPayloadStore>; loginLedger?: LoginLedger };
+const errorStatus = (error: unknown): number | undefined => error && typeof error === 'object' && 'status' in error && typeof error.status === 'number' ? error.status : undefined;
+const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
 const cookieName = "sansphase_author_session";
-const kinds = {
+const kinds: Record<string, { collection: string; kind?: string }> = {
   articles: { collection: "articles" },
   works: { collection: "library_entries", kind: "works" },
   resources: { collection: "library_entries", kind: "resources" },
@@ -19,28 +35,28 @@ const kinds = {
   "resource-center": {collection:"library_entries",kind:"resource-center"},
   announcements: { collection: "announcements" },
 };
-const fail = (message, status = 400) =>
+const fail = (message: string, status = 400) =>
   Object.assign(new Error(message), { status });
-export function assertAuthorOrigin(headers, origin) {
+export function assertAuthorOrigin(headers: IncomingHttpHeaders, origin: string) {
   if (headers.origin !== origin || headers["x-author-request"] !== "1")
     throw fail("请求来源验证失败，请从本站操作。", 403);
 }
-const text = (value, max = 200) =>
+const text = (value: unknown, max = 200) =>
   String(value ?? "")
     .trim()
     .slice(0, max);
-const file = (value) =>
+const file = (value: unknown): string | null =>
   value === null || value === ""
     ? null
-    : uuidPattern.test(value || "")
+    : typeof value === 'string' && uuidPattern.test(value)
       ? value
       : (() => {
           throw fail("文件编号无效。");
       })();
 // Payload maintains updatedAt for every write, including imported records whose
 // legacy date_updated is empty. Keep the editor's existing transport field.
-const contentRevision = (row) => row.updatedAt || row.date_updated;
-export function validateArticle(input, kind) {
+const contentRevision = (row: ContentRow) => row.updatedAt || row.date_updated;
+export function validateArticle(input: AuthorInput, kind: ContentKind): ValidatedContent {
   const title = text(input.title),
     slug = text(input.slug, 120);
   if (!title) throw fail("请填写标题。");
@@ -48,7 +64,7 @@ export function validateArticle(input, kind) {
     throw fail("网址名称请使用小写英文、数字和短横线。");
   if (typeof input.body === "string" && input.body.length > MAX_BODY_LENGTH)
     throw fail("正文超过当前长度限制。");
-  const result = { title, summary: text(input.summary, 2000) };
+  const result: ValidatedContent = { title, summary: text(input.summary, 2000) };
   if (kind === "announcements")
     return {
       ...result,
@@ -92,7 +108,7 @@ export function validateArticle(input, kind) {
     )
       .slice(0, 20)
       .map((value) => file(value))
-      .filter(Boolean);
+      .filter((value): value is string => Boolean(value));
   else
     Object.assign(result, {
       file: file(input.file || null),
@@ -106,25 +122,25 @@ export function createAuthorService({
   siteOrigin = "http://127.0.0.1:4176",
   store,
   loginLedger,
-}) {
+}: AuthorOptions) {
   const cms = new URL(url).origin;
-  const session = (req) =>
+  const session = (req: IncomingMessage) =>
     req.headers.cookie
       ?.split(";")
       .map((x) => x.trim())
       .find((x) => x.startsWith(cookieName + "="))
       ?.slice(cookieName.length + 1) || "";
-  const cookieHeader = (token) =>
+  const cookieHeader = (token: string) =>
     `${cookieName}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${token ? 86400 : 0}${siteOrigin.startsWith("https:") ? "; Secure" : ""}`;
   if (!store) throw new Error('Author storage must be explicitly configured.');
-  let orderQueue=Promise.resolve();
-  async function orderedRows(kind,token) {
+  let orderQueue: Promise<unknown> = Promise.resolve();
+  async function orderedRows(kind: string,token: string): Promise<ContentRow[]> {
     const spec=kinds[kind];
-    const rows=await store.list(spec.collection,{kind:spec.kind,sort:kind==='announcements'?'sort':['-published_at',kind==='articles'?'-date_created':'date_created']},token);
+    const rows=await store.list(spec.collection,{kind:spec.kind,sort:kind==='announcements'?'sort':['-published_at',kind==='articles'?'-date_created':'date_created']},token) as ContentRow[];
     if(!orderedContentKinds.includes(kind))return rows;
     return applyContentOrder(rows,(await store.profile(token)).content_order?.[kind]);
   }
-  async function reorder(kind,input,token) {
+  async function reorder(kind: string,input: unknown,token: string) {
     if(!orderedContentKinds.includes(kind))throw fail('不支持的内容类型。',404);
     // Serialize the single metadata write across kinds in this single-process site.
     const operation=orderQueue.then(async()=>{
@@ -136,17 +152,17 @@ export function createAuthorService({
     orderQueue=operation.catch(()=>{});
     return operation;
   }
-  async function authorize(token) {
+  async function authorize(token: string) {
     if (!token || !authorId) throw fail("请先登录作者账号。", 401);
     const user = await store.identity(token);
     if (user.id !== authorId)
       throw fail("这个账号没有个人网站的作者权限。", 403);
     return { name: user.first_name || "作者" };
   }
-  const readBody = async (req, max = 1024 * 1024) => {
+  const readBody = async (req: IncomingMessage, max = 1024 * 1024) => {
     if (Number(req.headers["content-length"]) > max)
       throw fail("请求内容太大。", 413);
-    const chunks = [];
+    const chunks: Buffer[] = [];
     let length = 0;
     for await (const chunk of req) {
       length += chunk.length;
@@ -155,15 +171,15 @@ export function createAuthorService({
     }
     return Buffer.concat(chunks);
   };
-  const json = async (req) => {
+  const json = async (req: IncomingMessage): Promise<AuthorInput> => {
     try {
-      return JSON.parse((await readBody(req)).toString("utf8"));
+      return JSON.parse((await readBody(req)).toString("utf8")) as AuthorInput;
     } catch (error) {
-      if (error.status) throw error;
+      if (errorStatus(error)) throw error;
       throw fail("请求格式无效。");
     }
   };
-  const editorBody = (value) =>
+  const editorBody = (value: unknown) =>
     String(value || "")
       .replace(/\/api\/media\/([0-9a-f-]+)/g, "/api/author/media/$1")
       .replace(
@@ -173,12 +189,12 @@ export function createAuthorService({
         ),
         "/api/author/media/$1",
       );
-  const persistedBody = (value) =>
+  const persistedBody = (value: unknown) =>
     String(value || "").replace(
       /(?:https?:\/\/[^/"'\s]+)?\/api\/author\/media\/([0-9a-f-]+)/g,
       `${store.mediaPrefix || `${cms}/assets`}/$1`,
     );
-  const rowForEditor = (row) => ({
+  const rowForEditor = (row: ContentRow) => ({
     ...row,
     ...(row.pending_content || {}),
     date_updated: contentRevision(row),
@@ -186,22 +202,25 @@ export function createAuthorService({
     attachments:
       row.pending_content?.attachments ??
       (row.attachments || []).map(
-        (x) => x.directus_files_id?.id || x.directus_files_id,
+        (x) => {
+          const linked = x.directus_files_id;
+          return linked && typeof linked === 'object' ? linked.id || linked : linked;
+        },
       ),
     pending_content: undefined,
   });
-  async function getItem(kind, id, token) {
+  async function getItem(kind: string, id: string, token: string): Promise<ContentRow> {
     const spec = kinds[kind];
     if (!spec || !uuidPattern.test(id)) throw fail("内容不存在。", 404);
-    const row = await store.get(spec.collection, id, token);
+    const row = await store.get(spec.collection, id, token) as ContentRow;
     if (spec.kind && row.kind !== spec.kind) throw fail("内容不存在。", 404);
     return row;
   }
-  async function save(kind, id, body, token) {
+  async function save(kind: string, id: string | undefined, body: AuthorInput, token: string) {
     const spec = kinds[kind];
     if (!spec) throw fail("不支持的内容类型。", 404);
     const action = body.action;
-    if (!["draft", "publish", "unpublish"].includes(action))
+    if (typeof action !== 'string' || !["draft", "publish", "unpublish"].includes(action))
       throw fail("请选择保存草稿或发布。");
     const previous = id ? await getItem(kind, id, token) : null;
     if (action === "unpublish") {
@@ -214,13 +233,13 @@ export function createAuthorService({
       contentRevision(previous) !== body.expectedUpdated
     )
       throw fail("内容已在其他窗口修改，请重新打开后编辑。", 409);
-    const values = validateArticle(body, kind);
+    const values = validateArticle(body, kind as ContentKind);
     if (values.body !== undefined) values.body = persistedBody(values.body);
     if (action === "draft" && previous?.status === "published") {
       await store.save(spec.collection, id, { pending_content: values }, token);
-      return rowForEditor(await getItem(kind, id, token));
+      return rowForEditor(await getItem(kind, id!, token));
     }
-    const payload = {
+    const payload: Record<string, unknown> = {
       ...values,
       ...(spec.kind ? { kind: spec.kind } : {}),
       pending_content: null,
@@ -236,43 +255,43 @@ export function createAuthorService({
     if (kind === "articles")
       payload.attachments = id
         ? {
-            delete: (previous.attachments || []).map((x) => x.id),
-            create: values.attachments.map((id) => ({ directus_files_id: id })),
+            delete: (previous!.attachments || []).map((x) => x.id),
+            create: (values.attachments || []).map((id) => ({ directus_files_id: id })),
           }
-        : values.attachments.map((id) => ({ directus_files_id: id }));
+        : (values.attachments || []).map((id) => ({ directus_files_id: id }));
     const saved = await store.save(spec.collection, id, payload, token);
     return rowForEditor(await getItem(kind, saved.id, token));
   }
   return {
-    async loginCredentials(res, { email, password }, req) {
+    async loginCredentials(res: ServerResponse, { email, password }: { email?: unknown; password?: unknown }, req: IncomingMessage) {
       const token = await store.login({ email: text(email, 254), password: String(password || '') });
       const identity = await authorize(token);
       if (loginLedger) {
-        try { loginLedger.record({ actorType: 'owner', actorId: authorId, email, address: clientAddress(req), userAgent: req.headers['user-agent'] }); }
+        try { loginLedger.record({ actorType: 'owner', actorId: authorId, email: email as string, address: clientAddress(req), userAgent: req.headers['user-agent'] }); }
         catch (error) { await store.logout(token); throw fail('登录记录暂时无法保存，请稍后再试。', 503); }
       }
       res.setHeader('Set-Cookie', cookieHeader(token));
       return identity;
     },
-    async identity(req) {
+    async identity(req: IncomingMessage) {
       try {
         return await authorize(session(req));
       } catch (error) {
-        if ([401, 403].includes(error.status)) return null;
+        if ([401, 403].includes(errorStatus(error) || 0)) return null;
         throw error;
       }
     },
-    async handle(req, res) {
-      const parsed = new URL(req.url, siteOrigin),
+    async handle(req: IncomingMessage, res: ServerResponse) {
+      const parsed = new URL(req.url || '', siteOrigin),
         parts = parsed.pathname.slice("/api/author/".length).split("/");
-      const send = (data, status = 200) => {
+      const send = (data: unknown, status = 200) => {
         res.writeHead(status, {
           "Content-Type": "application/json; charset=utf-8",
         });
         res.end(JSON.stringify(data));
       };
       try {
-        if (!["GET", "POST", "PATCH", "DELETE"].includes(req.method))
+        if (!["GET", "POST", "PATCH", "DELETE"].includes(req.method || ''))
           throw fail("不支持的操作。", 405);
         if (req.method !== "GET") assertAuthorOrigin(req.headers, siteOrigin);
         let token = session(req);
@@ -302,7 +321,7 @@ export function createAuthorService({
             const buffer=await readBody(req,25*1024*1024);
             const input=await new Request(siteOrigin,{method:'POST',headers:{'Content-Type':req.headers['content-type']||''},body:buffer}).formData();
             const upload=input.get('file');
-            if(!upload || typeof upload.arrayBuffer!=='function') throw fail('请选择文件。');
+            if(!upload || typeof upload === 'string' || typeof upload.arrayBuffer!=='function') throw fail('请选择文件。');
             if(input.get('purpose')==='background' && !/^image\/(png|jpeg|webp|gif|avif)$/.test(upload.type)) throw fail('背景请选择 PNG、JPEG、WebP、GIF 或 AVIF 图片。');
             saved={...await store.upload(input,token),purpose:input.get('purpose')};
           }
@@ -356,8 +375,9 @@ export function createAuthorService({
           } else
             res.setHeader("Content-Disposition", "attachment");
           if (upstream.headers.has('content-length'))
-            res.setHeader('Content-Length', upstream.headers.get('content-length'));
-          await pipeline(Readable.fromWeb(upstream.body), res);
+            res.setHeader('Content-Length', upstream.headers.get('content-length')!);
+          if (!upstream.body) throw fail('媒体暂不可用。', 503);
+          await pipeline(Readable.fromWeb(upstream.body as unknown as import('node:stream/web').ReadableStream), res);
           return;
         }
         if (parts[0] === "profile") {
@@ -374,15 +394,15 @@ export function createAuthorService({
               avatar: file(input.avatar || null),
               background: file(input.background || null),
               ...(Object.hasOwn(input, "music_settings")
-                ? { music_settings: cleanMusic(input.music_settings) }
+                ? { music_settings: cleanMusic(input.music_settings as Parameters<typeof cleanMusic>[0]) }
                 : {}),
               ...(Object.hasOwn(input, "appearance")
-                ? { appearance: cleanAppearance(input.appearance) }
+                ? { appearance: cleanAppearance(input.appearance as Parameters<typeof cleanAppearance>[0]) }
                 : {}),
-              social_links: (Array.isArray(input.social_links)
+              social_links: ((Array.isArray(input.social_links)
                 ? input.social_links
                 : []
-              )
+              ) as Array<{ label?: unknown; url?: unknown }>)
                 .slice(0, 12)
                 .map((link) => ({
                   label: text(link.label, 40),
@@ -446,11 +466,11 @@ export function createAuthorService({
         }
         send(
           {
-            error: error.status
-              ? error.message
+            error: errorStatus(error)
+              ? errorMessage(error)
               : "服务暂时不可用，请稍后重试。",
           },
-          error.status || 503,
+          errorStatus(error) || 503,
         );
       }
     },

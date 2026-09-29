@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
 import {normalizeBodyLinks} from '../src/body-links.mjs';
-import {validateArticle} from '../server/author-service.mjs';
+import {validateArticle} from '../server/author-service.ts';
 import {cleanBody} from '../server/content-service.mjs';
 
 test('body URLs become links without altering labels, punctuation, existing links or code',()=>{
