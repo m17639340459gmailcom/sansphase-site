@@ -1,9 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { mkdtemp, writeFile, rm, readFile } from 'node:fs/promises';
+import { resolve, dirname, relative } from 'node:path';
 import { tmpdir } from 'node:os';
-import { scanPublication } from '../scripts/publication-files.mjs';
+import { publicationFiles, scanPublication } from '../scripts/publication-files.mjs';
+
+test('publication includes relative imports of every shipped build and runtime script',async()=>{
+  const root=resolve('.');
+  const files=new Set(await publicationFiles(root));
+  for(const file of files) {
+    if(!file.startsWith('scripts/')||!file.endsWith('.mjs'))continue;
+    const text=await readFile(resolve(root,file),'utf8');
+    for(const match of text.matchAll(/\b(?:from\s*|import\s*\()\s*['"](\.[^'"]+\.mjs)['"]/g)) {
+      const dependency=relative(root,resolve(dirname(resolve(root,file)),match[1])).replaceAll('\\','/');
+      assert.ok(files.has(dependency),`${file} imports missing publication file ${dependency}`);
+    }
+  }
+});
 
 test('publication scan rejects credentials without revealing their values',async t=>{
   const root=await mkdtemp(resolve(tmpdir(),'sansphase-publication-'));
