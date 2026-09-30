@@ -6,7 +6,7 @@ export { mountMobileBlogOrder } from "./mobile-blog-order.mjs";
 export { createBlogNotice } from "./blog-notice.mjs";
 export { createBlogClock } from "./blog-clock.mjs";
 export { createBlogWeather } from "./blog-weather.mjs";
-export { createBlogPage } from "./blog-page.mjs";
+export { createBlogPage } from "./blog-page.ts";
 import { createRoot } from "react-dom/client";
 import { flushSync, createPortal } from "react-dom";
 import * as ToggleGroup from "@radix-ui/react-toggle-group";

@@ -1,9 +1,9 @@
 /* Blog theme. One material plane per card; no animated or asynchronous material swap. */
-/* Smoked glass: a dark, slightly lifted pane with a 7% top highlight. */
+/* Smoked glass: a dark, lifted pane with an even outline on all sides. */
 body.blog-open {
   --glass-fill: var(--smoked-fill);
   --glass-edge: var(--smoked-edge);
-  --glass-shadow: var(--smoked-shadow);
+  --glass-shadow: 0 24px 60px rgb(0 0 0 / 35%);
   --control-fill: rgb(5 7 11 / 40%);
   --control-edge: rgb(238 233 224 / 14%);
   --content-cyan: var(--blog-accent);
@@ -66,12 +66,16 @@ body.blog-open #main { background: transparent; animation: none; transition: non
 body.blog-open[data-scroll-locked] { margin-right: 0 !important; }
 body.blog-open .fade-in { opacity: 1; transform: none; animation: none; }
 
-/* Semantic hosts own layout only. GlassSurface fills the entire host; its
+/* Hosts paint one continuous outline above the clipped material. Keeping the
+   outline outside GlassSurface prevents rounded image clips from covering it.
+   GlassSurface fills the entire host; its
    portable CSS material is identical before and after SVG feature detection.
    --card-radius is read once when the surface mounts. */
 .blog-page :is(.blog-card, .blog-identity, .blog-side-card, .blog-notice, .blog-toolbar) {
   --card-inset: 24px;
   --card-radius: 24px;
+  position: relative;
+  isolation: isolate;
   border-radius: var(--card-radius);
   display: block;
   padding: 0;
@@ -81,7 +85,7 @@ body.blog-open .fade-in { opacity: 1; transform: none; animation: none; }
   backdrop-filter: none;
   min-width: 0;
   min-height: 0;
-  overflow: hidden;
+  overflow: visible;
   animation: none;
   transition: none;
   transform: none;
@@ -91,36 +95,47 @@ body.blog-open .fade-in { opacity: 1; transform: none; animation: none; }
 .blog-page .blog-notice { --card-inset: 0; position: relative; }
 .blog-page .blog-toolbar { --card-inset: 0; --card-radius: 0; overflow: visible; }
 .blog-page .blog-results.is-grid .blog-card { --card-inset: 0; }
+.blog-page :is(.blog-card, .blog-identity, .blog-side-card, .blog-notice)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--glass-edge);
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 2;
+  transition: border-color .25s ease;
+}
 .blog-page .blog-third-party-glass {
   outline: none;
   display: block;
   width: 100%;
   height: auto;
   min-height: 100%;
-  border: 1px solid var(--glass-edge);
+  border: 2px solid transparent;
+  z-index: 0;
   border-radius: var(--card-radius);
+  overflow: hidden;
   background: var(--glass-fill);
   box-shadow: var(--glass-shadow);
   backdrop-filter: blur(24px) saturate(1.4);
   -webkit-backdrop-filter: blur(24px) saturate(1.4);
-  transition: border-color .25s ease;
+  transition: none;
   animation: none;
 }
 .blog-page :is(.blog-card, .blog-identity, .blog-side-card, .blog-notice):is(:hover, :focus-within) {
   --glass-edge: rgb(238 233 224 / 24%);
 }
-/* The toolbar and the plain index rows carry no pane of their own. */
-.blog-page .blog-toolbar .blog-third-party-glass,
-.blog-page .blog-results:not(.is-grid) .blog-card:not(.is-featured) .blog-third-party-glass {
+.blog-page :where(.catalog-grid:not(.is-list)) .catalog-poster:is(:hover, :focus-within) {
+  --glass-edge: var(--blog-accent);
+}
+/* The toolbar alone has no card material. Article cards stay consistent. */
+.blog-page .blog-toolbar .blog-third-party-glass {
   background: none;
   border: 0;
   border-radius: 0;
   box-shadow: none;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
-}
-.blog-page .blog-results:not(.is-grid) .blog-card:not(.is-featured) .blog-third-party-glass {
-  border-bottom: 1px solid var(--line);
 }
 body.blog-open[data-glass-tint="custom"] .blog-page :is(.blog-card, .blog-identity, .blog-side-card, .blog-notice, .blog-toolbar):is(:hover, :focus-within) {
   --glass-fill: linear-gradient(135deg, color-mix(in srgb, var(--card-tint) calc(var(--card-opacity) * 100% + 3%), transparent), color-mix(in srgb, var(--card-tint) calc(var(--card-opacity) * 55% + 2%), transparent));
@@ -132,6 +147,7 @@ body.blog-open[data-glass-tint="custom"] .blog-page :is(.blog-card, .blog-identi
   padding: var(--card-inset);
   background: none;
   border: 0;
+  border-radius: 0;
   box-shadow: none;
 }
 .blog-third-party-glass-content { width: 100%; min-width: 0; }
@@ -142,7 +158,6 @@ body.blog-open[data-glass-tint="custom"] .blog-page :is(.blog-card, .blog-identi
 .blog-page :is(h1, h2, p, .subtle) { text-shadow: 0 1px 3px rgb(0 0 0 / 45%); }
 .blog-page :is(.blog-card, .blog-notice) h2 { color: var(--text); }
 .blog-page .blog-card:is(:hover, :focus-visible) h2 { color: #fff; }
-.blog-page .blog-notice::after { content: none; }
 .blog-page .eyebrow { display: inline-flex; align-items: center; gap: 7px; }
 .blog-page .eyebrow svg { width: 14px; height: 14px; flex: none; }
 .blog-page .identity-mark {
@@ -238,20 +253,14 @@ body.blog-open[data-glass-tint="custom"] .blog-page :is(.blog-card, .blog-identi
 .blog-notice .blog-third-party-glass-content { display: block; }
 .blog-notice-copy { padding: 25px 116px 26px 28px; min-height: 152px; }
 .blog-notice .blog-notice-side { position: absolute; right: 28px; bottom: 26px; width: 74px; gap: 28px; }
-/* Index rows: copy left, a small rounded cover right, one hairline below. */
-.blog-page .blog-results .blog-card.has-cover { --card-inset: 0; }
-.blog-page .blog-results:not(.is-grid) .blog-card:not(.is-featured) { --card-radius: 0; border-radius: 0; overflow: visible; }
-.blog-results .blog-card .blog-third-party-glass-content { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; align-items: center; padding: 34px 0; }
-.blog-results .blog-card.has-cover .blog-third-party-glass-content { grid-template-columns: minmax(0, 1fr) clamp(150px, 24%, 232px); }
-.blog-results .blog-card .cover-frame { height: 140px; aspect-ratio: auto; border-radius: 16px; box-shadow: inset 0 0 0 1px rgb(238 233 224 / 8%); }
-/* The newest entry is a cover story: full-width image, copy underneath. */
-.blog-page .blog-results .blog-card.is-featured { --card-radius: 28px; margin-bottom: 8px; }
-.blog-results .blog-card.is-featured .blog-third-party-glass-content { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 0; }
-.blog-results .blog-card.is-featured .blog-card-copy { padding: 28px 34px 32px; background: radial-gradient(420px circle at 72% 0%, rgb(238 233 224 / 7%), transparent 62%); }
-.blog-results .blog-card.is-featured .cover-frame { order: -1; height: clamp(220px, 28vw, 400px); border-radius: 0; box-shadow: none; }
-.blog-results .blog-card.is-featured .cover-frame::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 45%, rgb(5 7 11 / 55%)); pointer-events: none; }
+/* Uniform list layout. Border and clipping belong to the shared surface above. */
+.blog-results:not(.is-grid) .blog-card .blog-third-party-glass-content { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 194px; align-items: stretch; }
+.blog-results:not(.is-grid) .blog-card.has-cover .blog-third-party-glass-content { grid-template-columns: minmax(0, 1fr) 40%; }
+.blog-results:not(.is-grid) .blog-card .blog-card-copy { padding: 22px; }
+.blog-page .blog-results:not(.is-grid) .blog-card-bottom { flex-wrap: nowrap; }
+.blog-results:not(.is-grid) .blog-card .cover-frame { height: 100%; min-height: 194px; aspect-ratio: auto; border-radius: 0; box-shadow: none; }
 /* Grid view: every entry is a small cover card. */
-.blog-results.is-grid .blog-card .blog-third-party-glass-content { grid-template-columns: minmax(0, 1fr); gap: 0; padding: 0; align-items: stretch; }
+.blog-results.is-grid .blog-card .blog-third-party-glass-content { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; padding: 0; align-items: stretch; }
 .blog-results.is-grid .blog-card .cover-frame { order: -1; height: auto; aspect-ratio: 16 / 9; border-radius: 0; box-shadow: none; }
 .blog-results.is-grid .blog-card .blog-card-copy { padding: 20px 22px 24px; }
 .blog-results .blog-card .blog-post-cover { transition: transform .6s var(--ease), filter .6s ease; }
@@ -260,12 +269,9 @@ body.blog-open[data-glass-tint="custom"] .blog-page :is(.blog-card, .blog-identi
 }
 .blog-results .blog-card:focus-visible .blog-post-cover { transform: scale(1.03); }
 @media(max-width: 600px) {
-  .blog-results .blog-card .blog-third-party-glass-content { gap: 16px; padding: 22px 0; }
-  .blog-results:not(.is-grid) .blog-card.has-cover:not(.is-featured) .blog-third-party-glass-content { grid-template-columns: minmax(0, 1fr) 92px; }
-  .blog-results:not(.is-grid) .blog-card:not(.is-featured) .cover-frame { height: 70px; border-radius: 12px; }
-  .blog-page .blog-results .blog-card.is-featured { --card-radius: 24px; }
-  .blog-results .blog-card.is-featured .cover-frame { height: 200px; border-radius: 0; }
-  .blog-results .blog-card.is-featured .blog-card-copy { padding: 18px 20px 22px; }
+  .blog-results:not(.is-grid) .blog-card .blog-card-copy { padding: 16px; }
+  .blog-results:not(.is-grid) .blog-card.has-cover .blog-third-party-glass-content { grid-template-columns: minmax(0, 1fr) 35%; }
+  .blog-results:not(.is-grid) .blog-card .cover-frame { min-height: 184px; }
 }
 @media(prefers-reduced-motion:reduce) {
   .blog-results .blog-card .blog-post-cover { transition: none; }

@@ -11,6 +11,7 @@ export const typedBrowserModules = new Set([
   'image-sources.mjs',
   'navigation-prefetch.mjs',
   'reader-ui.mjs',
+  'reader-membership.mjs',
   'route-styles.mjs',
   'scene-delivery.mjs',
   'site-copy.mjs',

@@ -16,7 +16,10 @@ export function blackHoleView(progress = 0, { portrait = false, entrance = 1 } =
     arrival = 1 - smooth(0, 1, finite(entrance, 1));
   const distance = 14 - 6 * approach - 6 * plunge + 10 * arrival;
   // A dolly zoom: the lens widens while the camera closes in.
-  const focal = (1.8 * (14 - 6 * approach)) / 14;
+  // Leave a little more sky around the opening without changing its orbit.
+  // Rejoin the existing lens before the plunge, in either scroll direction.
+  const openingFraming = 0.9 + 0.1 * approach;
+  const focal = ((1.8 * (14 - 6 * approach)) / 14) * openingFraming;
   const centre = smooth(0.1, 0.6, p);
   return {
     progress: p,

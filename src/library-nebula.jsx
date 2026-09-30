@@ -8,48 +8,18 @@ import { PerspectiveCamera } from "@react-three/drei/core/PerspectiveCamera.js";
 import { Image } from "@react-three/drei/core/Image.js";
 import { skyLayerOpacity, skyLayerOffset, photographsCoverPanorama } from "./library-layout.mjs";
 import {
-  ShaderMaterial,
-  Matrix4,
-  Vector3,
-  BackSide,
-  AdditiveBlending,
   EquirectangularReflectionMapping,
   SRGBColorSpace,
 } from "three";
-import source from "./vendor/space-3d/nebula.glsl";
-import noise from "./vendor/space-3d/classic-noise-4d.glsl";
+import { createNebulaMaterial, openingSkyLayers, openingSkyIntensity, openingPhotoIntensity } from "./opening-sky.ts";
 import { milkyWayURL, galacticURL, nebulaURL, galaxyURL } from "./scene-images.mjs";
 
 // The existing Space-3D nebula shader is baked once by Drei's cube camera.
 // There is no model-generated shader or expensive full-screen noise each frame.
-const [vertexShader, fragmentShader] = source
-  .replace(/#version 100/g, "")
-  .replace("__noise4d__", noise)
-  .replace("vec3 displace;", "vec3 displace = vec3(0.0);")
-  .split("__split__");
 function NebulaLayer({ color, offset, scale, intensity, falloff }) {
   const mesh = useRef();
   const material = useMemo(
-    () =>
-      new ShaderMaterial({
-        vertexShader,
-        fragmentShader,
-        side: BackSide,
-        transparent: true,
-        blending: AdditiveBlending,
-        depthWrite: false,
-        depthTest: false,
-        uniforms: {
-          uModel: { value: new Matrix4() },
-          uView: { value: new Matrix4() },
-          uProjection: { value: new Matrix4() },
-          uColor: { value: new Vector3(...color) },
-          uOffset: { value: new Vector3(...offset) },
-          uScale: { value: scale },
-          uIntensity: { value: intensity },
-          uFalloff: { value: falloff },
-        },
-      }),
+    () => createNebulaMaterial({ color, offset, scale, intensity, falloff }),
     [color, offset, scale, intensity, falloff],
   );
   useEffect(() => () => material.dispose(), [material]);
@@ -72,10 +42,6 @@ function NebulaLayer({ color, offset, scale, intensity, falloff }) {
     </mesh>
   );
 }
-const blue = [0.045, 0.22, 0.65],
-  violet = [0.32, 0.06, 0.38];
-const blueOffset = [12.3, 28.1, 6.8],
-  violetOffset = [-21.7, 11.4, 40.2];
 function Panorama({ rotation, model }) {
   const map = useTexture(milkyWayURL);
   const width = useThree((state) => state.size.width);
@@ -94,23 +60,10 @@ function Panorama({ rotation, model }) {
       frames={1}
       resolution={width < 700 ? 1024 : 1536}
       backgroundBlurriness={0}
-      backgroundIntensity={0.72}
+      backgroundIntensity={openingSkyIntensity}
     >
-      <Environment map={map} background="only" backgroundIntensity={0.8} />
-      <NebulaLayer
-        color={blue}
-        offset={blueOffset}
-        scale={0.55}
-        intensity={1.05}
-        falloff={5.5}
-      />
-      <NebulaLayer
-        color={violet}
-        offset={violetOffset}
-        scale={0.8}
-        intensity={1.05}
-        falloff={6}
-      />
+      <Environment map={map} background="only" backgroundIntensity={openingPhotoIntensity} />
+      {openingSkyLayers.map((layer, index) => <NebulaLayer key={index} {...layer} />)}
     </Environment>
   );
 }

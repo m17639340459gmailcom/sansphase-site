@@ -115,7 +115,9 @@ test("active effects have pinned third-party source and preserved upstream origi
   assert.ok(inputs.includes("src/library-sky.jsx"), "the chapter sky compositor ships");
   for (const photograph of ["eso0934a.jpg", "eso1105a.jpg", "eso1424a.jpg", "eso0932a.jpg"])
     assert.ok(inputs.some((p) => p.endsWith(photograph)), `${photograph} ships unchanged`);
-  assert.ok(!inputs.some((p) => p.endsWith("vendor/space-3d/nebula.glsl")), "the covered panorama is detached");
+  assert.ok(inputs.includes("src/opening-sky.ts"), "the opening restores the legacy sky through a one-time bake");
+  assert.ok(inputs.some((p) => p.endsWith("vendor/space-3d/nebula.glsl")), "the original nebula shader is reused without edits");
+  assert.ok(!inputs.includes("src/library-nebula.jsx"), "the old full panorama renderer stays detached");
   const sources = JSON.parse(
     await readFile("src/vendor/threejs-components/sources.json", "utf8"),
   );

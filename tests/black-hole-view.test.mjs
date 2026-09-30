@@ -38,6 +38,19 @@ test("the entrance flies in from further out while the disk warms up", () => {
   assert.equal(end.heat, 1);
 });
 
+test("opening framing is ten percent smaller and rejoins the existing dive smoothly", () => {
+  const legacyFocal = p => {
+    const t = Math.min(1, Math.max(0, p / 0.35));
+    return 1.8 * (14 - 6 * t * t * (3 - 2 * t)) / 14;
+  };
+  assert.ok(Math.abs(blackHoleView(0).focal / legacyFocal(0) - 0.9) < 1e-9);
+  assert.equal(blackHoleView(0, { portrait: true }).focal, blackHoleView(0).focal);
+  for (const p of [0.35, 0.5, 0.9, 1]) {
+    assert.equal(blackHoleView(p).focal, legacyFocal(p), 'later dive framing remains unchanged');
+  }
+  assert.ok(Math.abs(blackHoleView(0.35 - 1e-5).focal - blackHoleView(0.35).focal) < 1e-7);
+});
+
 test("the descent readout is plain text in both languages", () => {
   const view = blackHoleView(0.5);
   assert.match(descentReadout(view), /^r \d+\.\d Rs · 时间流速 0\.\d\d× · 视场 \d+°$/);

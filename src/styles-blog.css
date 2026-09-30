@@ -211,7 +211,7 @@
 }
 .blog-results {
   display: grid;
-  gap: 0;
+  gap: 16px;
   padding-top: 20px;
 }
 .blog-results.is-grid {
@@ -299,20 +299,17 @@
 .blog-results .blog-card-bottom { margin-top: 2px; flex-wrap: nowrap; }
 .blog-card-tags { display: flex; gap: 6px 16px; overflow: hidden; min-width: 0; font-size: 13px; color: var(--muted); white-space: nowrap; }
 .blog-card-tag::before { content: "#"; color: var(--blog-accent, var(--signal)); }
-.blog-card-more { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; font-size: 13.5px; color: var(--text); white-space: nowrap; }
-.blog-card-badge { position: absolute; z-index: 1; left: 24px; top: 22px; display: inline-flex; align-items: center; height: 28px; padding: 0 12px; border-radius: var(--pill); font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.16em; color: var(--bg); background: var(--blog-accent, var(--signal)); }
 .blog-results .blog-card .arrow { width: 16px; flex: none; }
-.blog-results .blog-card.is-featured h2 { font-size: clamp(26px, 2.4vw, 34px); line-height: 1.4; }
-.blog-results .blog-card.is-featured p { font-size: 16px; line-height: 1.85; }
 .blog-results.is-grid .blog-card h2 { font-size: 19px; }
 .blog-results.is-grid .blog-card p { font-size: 14px; }
+.blog-results:not(.is-grid) .blog-card h2 { font-size: 20px; line-height: 1.5; min-height: 3em; }
+.blog-results:not(.is-grid) .blog-card p { font-size: 13px; line-height: 1.75; min-height: 3.5em; }
 @media(max-width: 600px) {
   .blog-results .blog-card h2 { font-size: 17px; line-height: 1.55; }
   .blog-results .blog-card p { font-size: 13.5px; }
-  .blog-results .blog-card.is-featured h2 { font-size: 21px; line-height: 1.5; }
-  .blog-results .blog-card.is-featured p { font-size: 14.5px; }
+  .blog-results:not(.is-grid) .blog-card h2 { font-size: 17px; }
+  .blog-results:not(.is-grid) .blog-card p { font-size: 12px; }
   .blog-card-meta { font-size: 11px; }
-  .blog-card-badge { left: 16px; top: 14px; height: 24px; font-size: 10.5px; }
 }
 .blog-card-bottom {
   justify-content: flex-start;

@@ -1,4 +1,5 @@
 import { escapeHTML as esc } from './core.mjs';
+import { renderMembership, mountMembershipClock } from './reader-membership.mjs';
 
 type ReaderMode = 'login' | 'register' | 'forgot' | 'resend';
 type ReaderIdentity = {
@@ -36,7 +37,7 @@ export function readerPage(page: string, id: string, reader: ReaderIdentity | nu
     const avatarControl = `<div class="reader-avatar-anchor"><button class="reader-profile-avatar" type="button" data-reader-avatar-trigger aria-label="${tr('修改头像', 'Edit avatar')}" aria-expanded="false" aria-controls="reader-avatar-panel"><span aria-hidden="true">${avatarFace}</span></button><div class="reader-avatar-panel" id="reader-avatar-panel" data-reader-avatar-panel role="group" aria-label="${tr('头像设置', 'Avatar settings')}" hidden><strong>${tr('修改头像', 'Edit avatar')}</strong><p>${reader.pendingAvatar ? tr('新头像正在审核，当前头像会保持显示。', 'The new avatar is pending review; the current one remains visible.') : tr('JPG、PNG 或 WebP，最多 4 MB；审核通过后更新。请勿包含手机号、微信号或二维码。', 'JPG, PNG or WebP, up to 4 MB. Updated after review. Do not include phone numbers, WeChat contacts or QR codes.')}</p><input type="file" accept="image/jpeg,image/png,image/webp" data-reader-avatar-file hidden><div class="reader-avatar-actions"><button type="button" data-reader-avatar-pick>${tr(avatar ? '更换图片' : '上传图片', avatar ? 'Change image' : 'Upload image')}</button>${avatar || reader.pendingAvatar ? `<button type="button" data-reader-avatar-remove>${tr(avatar ? '恢复默认' : '取消待审核', avatar ? 'Use default' : 'Cancel pending')}</button>` : ''}</div><p data-reader-avatar-message role="status" aria-live="polite"></p></div></div>`;
     const profileCard = `<section class="reader-profile-card${reader.vip ? ' reader-profile-card--vip' : ''}" aria-label="${tr('个人资料卡', 'Profile card')}"><div class="reader-profile-card-head"><span>${tr('个人资料', 'PROFILE')}</span><span class="reader-profile-status${reader.vip ? ' reader-profile-status--vip' : ''}">${reader.vip ? `<span aria-hidden="true">✦</span> ${tr('VIP 会员', 'VIP MEMBER')}` : tr('普通读者', 'Reader')}</span></div><div class="reader-profile-person">${avatarControl}<div><strong>${esc(reader.nickname)}</strong><span class="reader-account-uid">UID ${esc(reader.uid || '—')}</span></div></div><p class="reader-profile-signature">${signature}</p><dl class="reader-profile-facts"><div><dt>${tr('登录邮箱', 'Email')}</dt><dd>${esc(reader.email)}</dd></div>${reader.vip && reader.vipUntil ? `<div><dt>${tr('会员有效至', 'VIP until')}</dt><dd>${esc(new Date(reader.vipUntil).toLocaleString(english ? 'en-US' : 'zh-CN'))}</dd></div>` : ''}</dl></section>`;
     const profileForm = `<form class="reader-profile-form" data-reader-form="profile">${field('nickname', tr('昵称', 'Nickname'), 'text', 'nickname', `minlength="2" maxlength="30" value="${esc(reader.nickname)}"`)}<label class="reader-field"><span>${tr('个性签名', 'Signature')}</span><input name="signature" type="text" maxlength="100" autocomplete="off" placeholder="${tr('写一句介绍自己或记录此刻的心情', 'A few words about yourself')}" aria-describedby="reader-signature-hint" value="${esc(reader.pendingSignature ?? reader.signature ?? '')}"><small id="reader-signature-hint">${reader.pendingSignature !== null && reader.pendingSignature !== undefined ? tr('当前修改待审核；上方仍显示已通过的个签。', 'Pending review; the card still shows the approved signature.') : tr('最多 100 字，可留空；审核通过后生效。请勿填写手机号或微信号。', 'Up to 100 characters. Changes appear after review. Do not include phone or WeChat contacts.')}</small></label>${field('phone', tr('中国大陆手机号（11 位，未经短信验证）', 'Mainland China mobile number (11 digits, not SMS-verified)'), 'tel', 'tel', `data-reader-phone inputmode="numeric" pattern="1[3-9][0-9]{9}" minlength="11" maxlength="11" value="${esc(reader.phone || '')}"`)}${submit(tr('保存资料', 'Save profile'))}</form>`;
-    return shell(`<div class="reader-heading reader-heading--profile"><span class="reader-kicker">YOUR SPACE</span><h1>${tr('我的账号', 'My account')}</h1><p>${tr('管理你的个人资料与阅读身份。', 'Manage your profile and reading identity.')}</p></div>${profileCard}<div class="reader-profile-edit-title"><div><h2>${tr('编辑个人资料', 'Edit profile')}</h2><p>${tr('个签和头像需审核通过后更新上方资料卡。', 'Signature and avatar changes appear after approval.')}</p></div></div>${profileForm}<p data-reader-message role="status"></p><button class="reader-quiet-link" type="button" data-reader-logout>${tr('退出登录', 'Sign out')}</button>`, english, 'reader-card--profile');
+    return shell(`<div class="reader-heading reader-heading--profile"><span class="reader-kicker">YOUR SPACE</span><h1>${tr('我的账号', 'My account')}</h1><p>${tr('管理你的个人资料与阅读身份。', 'Manage your profile and reading identity.')}</p></div>${profileCard}${renderMembership(reader,english)}<div class="reader-profile-edit-title"><div><h2>${tr('编辑个人资料', 'Edit profile')}</h2><p>${tr('个签和头像需审核通过后更新上方资料卡。', 'Signature and avatar changes appear after approval.')}</p></div></div>${profileForm}<p data-reader-message role="status"></p><button class="reader-quiet-link" type="button" data-reader-logout>${tr('退出登录', 'Sign out')}</button>`, english, 'reader-card--profile');
   }
   if (!registrationEnabled && ['forgot', 'resend'].includes(mode)) mode = 'login';
   const heading = { login: tr('账号登录', 'Sign in'), register: registrationEnabled ? tr('加入阅读', 'Join the journey') : tr('注册暂未开放', 'Registration is coming soon'), forgot: tr('找回密码', 'Reset password'), resend: tr('重发验证邮件', 'Resend verification') }[mode];
@@ -57,6 +58,7 @@ export function readerPage(page: string, id: string, reader: ReaderIdentity | nu
 
 export function mountReaderUI({ render, onIdentity, english = () => false }: { render: ReaderRender; onIdentity: (reader: ReaderIdentity | null) => void; english?: () => boolean }) {
   const tr = (zh: string, en: string) => english() ? en : zh;
+  const membershipClock = mountMembershipClock(document, english);
   const checkPhone = (input: HTMLInputElement) => input.setCustomValidity(input.value && !/^1[3-9]\d{9}$/.test(input.value) ? tr('请输入正确的手机号', 'Enter a valid mainland China mobile number') : '');
   async function api(path: string, body: Record<string, unknown>): Promise<ApiResult> {
     const response = await fetch('/api/reader/' + path, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Reader-Request': '1' }, body: JSON.stringify(body) });
@@ -181,7 +183,7 @@ export function mountReaderUI({ render, onIdentity, english = () => false }: { r
           if (alreadyThere) render({ silent: true });
         }
       }
-      else if (action === 'reset') { mode = 'login'; history.replaceState(history.state, '', location.pathname + location.search + '#/account'); render({ silent: true }); message(tr('密码已更新，请登录。', 'Password updated. Please sign in.')); }
+      else if (action === 'reset') { mode = 'login'; history.replaceState(history.state, '', location.pathname + location.search + '#/account'); await render({ silent: true }); message(tr('密码已更新，请登录。', 'Password updated. Please sign in.')); }
       else if (action === 'profile') { onIdentity(value); message(value.reviewPending ? tr('资料已保存，个性签名待审核。', 'Profile saved; signature pending review.') : tr('资料已保存。', 'Profile saved.')); }
       else message(value.message || '');
     } catch (error) { message(errorMessage(error)); }
@@ -190,6 +192,7 @@ export function mountReaderUI({ render, onIdentity, english = () => false }: { r
   let lastVerification = '';
   return {
     route(page: string, id: string) {
+      membershipClock.update();
       if (page !== 'verify' || !id || id === lastVerification) return;
       lastVerification = id;
       const button = document.querySelector<HTMLButtonElement>('[data-reader-verify]');

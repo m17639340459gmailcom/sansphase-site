@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {JSDOM} from 'jsdom';
 import {escapeHTML,filterItems} from '../src/core.mjs';
-import {createBlogPage} from '../src/blog-page.mjs';
+import {createBlogPage} from '../src/blog-page.ts';
 
 const icons={calendar:'CAL',document:'DOC',search:'SEARCH',grid:'GRID',music:'MUSIC',tags:'TAGS',user:'USER',link:'LINK',right:'RIGHT'};
 const first={id:'first',title:'第一篇 <记录>',summary:'关于阅读 & 写作',category:'写作与记录',date:'2026-09-17',tags:['阅读'],coverSrc:'/first.jpg',coverWidth:960,coverHeight:540};
@@ -41,6 +41,21 @@ test('blog cards preserve filtering, escaped content, images and remote paginati
   assert.equal(document.querySelector('[data-catalog-page="1"]').disabled,false);
   assert.equal(document.querySelector('[data-catalog-page="3"]').disabled,false);
   dom.window.close();
+});
+
+test('blog entries keep the same compact card on the first page, later pages and search',()=>{
+  const {page,state}=setup();
+  state.notes=[first,{...first,id:'third',title:'另一篇文章'}];
+  for (const [view,pageNumber,query] of [['list',1,''],['list',2,''],['list',1,'第一篇'],['grid',1,'']]) {
+    state.blogView=view;state.remotePage={page:pageNumber,pages:3};state.activeQuery=query;
+    const dom=new JSDOM(page.results());
+    const cards=[...dom.window.document.querySelectorAll('.blog-card')];
+    assert.ok(cards.length>0);
+    assert.equal(dom.window.document.querySelector('.is-featured'),null,'first result must not become a cover story');
+    assert.ok(cards.every(card=>card.className===cards[0].className),'all covered articles use the same presentation');
+    assert.ok(cards.every(card=>card.querySelector('.cover-frame') && card.querySelector('h2')));
+    dom.window.close();
+  }
 });
 
 test('blog layout keeps notice, article area and side cards in their existing order',()=>{

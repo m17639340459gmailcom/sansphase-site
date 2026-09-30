@@ -53,6 +53,11 @@
   --dialog-blur: blur(24px) saturate(1.4);
   --dialog-shade: rgb(3 4 8 / 40%);
   --dialog-shadow: inset 0 1px 0 rgb(255 255 255 / 7%), 0 24px 60px rgb(0 0 0 / 45%);
+  --manage-panel: linear-gradient(155deg, rgb(26 36 54 / 97%), rgb(14 20 33 / 98%));
+  --manage-surface: #182235;
+  --manage-inset: #111a29;
+  --manage-edge: rgb(196 211 236 / 16%);
+  --manage-muted: #aebed2;
 }
 * {
   box-sizing: border-box;
@@ -118,9 +123,13 @@ button {
 }
 /* A focused control uses its own edge. Never add a second outer frame. */
 :focus { outline: none; }
-:is(button, input, textarea, select, [role="button"], [role="tab"], [role="radio"]):focus-visible {
+:is(button, [role="button"], [role="tab"], [role="radio"]):focus-visible {
   border-color: var(--focus-edge);
   box-shadow: inset 0 0 0 1.5px var(--focus-edge);
+}
+:is(input, textarea, select, [contenteditable="true"]):focus-visible {
+  border-color: var(--focus-edge);
+  box-shadow: none;
 }
 a:focus-visible { text-decoration: underline; text-underline-offset: 4px; }
 ::selection {

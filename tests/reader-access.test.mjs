@@ -13,6 +13,26 @@ const data = {
   resources: [], software: [], 'resource-center': [{ id: 'book', title: 'Private book', bodyHTML: '<p>Private chapter</p>', tags: [] }],
 };
 
+test('password reset success stays visible after asynchronous account rendering', async () => {
+  const dom=new JSDOM('<!doctype html><body></body>',{url:'http://localhost/#/reset/test-reset-token'});
+  const keys=['window','document','location','history','FormData','fetch'];
+  const originals=Object.fromEntries(keys.map(key=>[key,globalThis[key]]));
+  Object.assign(globalThis,{window:dom.window,document:dom.window.document,location:dom.window.location,history:dom.window.history,FormData:dom.window.FormData,fetch:async()=>({ok:true,json:async()=>({message:'Password updated'})})});
+  let releaseRender;
+  const rendered=new Promise(resolve=>{releaseRender=resolve;});
+  try {
+    document.body.innerHTML=readerPage('reset','test-reset-token',null);
+    mountReaderUI({render:async()=>{await rendered;document.body.innerHTML=readerPage('account','',null);},onIdentity:()=>{}});
+    document.querySelector('[name="password"]').value='example-test-password';
+    document.querySelector('form').dispatchEvent(new dom.window.Event('submit',{bubbles:true,cancelable:true}));
+    await new Promise(resolve=>setTimeout(resolve,0));
+    releaseRender();
+    await new Promise(resolve=>setTimeout(resolve,0));
+    assert(document.querySelector('[data-reader-form="login"]'));
+    assert.match(document.querySelector('[data-reader-message]').textContent,/密码已更新/);
+  } finally {releaseRender();Object.assign(globalThis,originals);dom.window.close();}
+});
+
 test('successful email verification returns the previous registration form to sign-in mode', async () => {
   const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://127.0.0.1:4203/#/account' });
   const originals = Object.fromEntries(['window', 'document', 'location', 'fetch'].map(key => [key, globalThis[key]]));

@@ -62,6 +62,7 @@ for (const file of [
   "visitor-controls.css",
   "reader.css",
   "reader-ui.mjs",
+  "reader-membership.mjs",
   "admin-readers.mjs",
   "admin-route.mjs",
   "visitor-location.mjs",
