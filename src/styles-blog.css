@@ -874,7 +874,8 @@ body.theme-light .calendar-day.is-today { color: #071725; background: #a9dcff; b
   .blog-left { grid-template-areas: "identity" "music" "tags"; }
 }
 
-/* Mobile blog: announcement, search and articles, then profile/music/tags/weather/time. */
+/* Mobile blog: announcement, profile, music, weather and time; tags follow
+   search controls inside the article area, before article results. */
 @media (max-width: 900px) {
   .blog-layout.is-mobile-flow { grid-template-areas: none; }
   .blog-layout.is-mobile-flow > :is(.blog-main, .blog-left, .blog-sidebar) { display: none; }

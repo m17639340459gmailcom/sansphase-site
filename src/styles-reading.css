@@ -1,7 +1,6 @@
 /* Shared long-form typography: one reading surface, the author and contents
-   rail on the left (as on the blog list). The article stays first in the
-   document, so keyboard, screen-reader and phone order still reach the text
-   before the rail. */
+   rail on the left (as on the blog list). The rail precedes the article in
+   document order and remains first on phones. */
 .page.reading-page { max-width: 1480px; padding: 48px 32px 72px; }
 .reading-layout { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: clamp(28px, 4vw, 56px); align-items: stretch; }
 .reading-layout > .reading-article { grid-column: 2; grid-row: 1; min-width: 0; width: 100%; max-width: none; margin: 0; }

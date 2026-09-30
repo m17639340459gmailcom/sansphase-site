@@ -14,7 +14,7 @@ test("mobile ordering shares the existing UI entry without another startup modul
 
 test("mobile blog order moves original cards and restores desktop order on cleanup", () => {
   const dom = new JSDOM(`<div class="blog-layout">
-    <section class="blog-main"><div class="blog-notice">notice</div><div class="blog-article-area"><div id="results">articles</div></div></section>
+    <section class="blog-main"><div class="blog-notice">notice</div><div class="blog-article-area"><div class="blog-search">search</div><div id="results">articles</div></div></section>
     <aside class="blog-left"><div class="blog-identity">profile</div><div class="blog-music-card">music</div><div class="blog-tags-card">tags</div></aside>
     <aside class="blog-sidebar"><div class="blog-weather-card">weather</div><div class="blog-date-card">time</div></aside>
   </div>`);
@@ -32,11 +32,14 @@ test("mobile blog order moves original cards and restores desktop order on clean
   media.dispatchEvent(new dom.window.Event("change"));
   assert.ok(layout.classList.contains("is-mobile-flow"));
   assert.deepEqual(
-    [...layout.children].filter((node) => node.matches?.(".blog-notice, .blog-identity, .blog-music-card, .blog-tags-card, .blog-weather-card, .blog-date-card, .blog-article-area"))
+    [...layout.children].filter((node) => node.matches?.(".blog-notice, .blog-identity, .blog-music-card, .blog-weather-card, .blog-date-card, .blog-article-area"))
       .map((node) => node.textContent.trim()),
-    ["notice", "articles", "profile", "music", "tags", "weather", "time"],
-    "phones read the articles right after the notice",
+    ["notice", "profile", "music", "weather", "time", "searchtagsarticles"],
+    "phones show the announcement and side information before articles",
   );
+  assert.equal(document.querySelector(".blog-tags-card").parentElement, document.querySelector(".blog-article-area"));
+  assert.equal(document.querySelector(".blog-tags-card").previousElementSibling.className, "blog-search");
+  assert.equal(document.querySelector(".blog-tags-card").nextElementSibling.id, "results");
 
   media.matches = false;
   media.dispatchEvent(new dom.window.Event("change"));

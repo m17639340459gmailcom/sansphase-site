@@ -1,19 +1,19 @@
 // Move the existing cards instead of cloning them, so the player and form state
 // survive a breakpoint change. Markers restore the original desktop order.
-// Phones read the notice and the articles first; profile, music, tags,
-// weather and time follow as a single column underneath.
+// Phones read the notice, profile, music, weather and time before articles.
+// Tags remain immediately below the search controls, above the results.
 export function mountMobileBlogOrder(layout) {
   if (!layout) return () => {};
   const doc = layout.ownerDocument;
   const media = doc.defaultView.matchMedia("(max-width: 900px)");
   const selectors = [
     ".blog-notice",
-    ".blog-article-area",
     ".blog-identity",
     ".blog-music-card",
-    ".blog-tags-card",
     ".blog-weather-card",
     ".blog-date-card",
+    ".blog-article-area",
+    ".blog-tags-card",
   ];
   const entries = selectors.flatMap((selector) => {
     const node = layout.querySelector(selector);
@@ -29,7 +29,12 @@ export function mountMobileBlogOrder(layout) {
   const restore = () => entries.forEach(({ node, marker }) => move(marker.parentNode, node, marker));
   const update = () => {
     layout.classList.toggle("is-mobile-flow", media.matches);
-    if (media.matches) entries.forEach(({ node }) => move(layout, node));
+    if (media.matches) entries.forEach(({ node }) => {
+      const articleArea = layout.querySelector(".blog-article-area");
+      if (node.matches(".blog-tags-card") && articleArea)
+        move(articleArea, node, articleArea.querySelector("#results"));
+      else move(layout, node);
+    });
     else restore();
   };
   media.addEventListener("change", update);

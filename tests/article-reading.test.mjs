@@ -58,8 +58,8 @@ test('reading sidebar has one responsive directory and preserves article content
   const directory=d.querySelector('.article-contents');
   assert(d.querySelector('.reading-sidebar .blog-identity'));
   assert(d.querySelector('.reading-sidebar .blog-music-card'));
-  assert.equal(d.querySelector('.reading-layout').firstElementChild,article,'the article is read before the rail');
-  assert.equal(article.nextElementSibling,d.querySelector('.reading-sidebar'));
+  assert.equal(d.querySelector('.reading-layout').firstElementChild,d.querySelector('.reading-sidebar'),'the profile and music precede the article on phones');
+  assert.equal(d.querySelector('.reading-sidebar').nextElementSibling,article);
   assert.equal(d.querySelector('.blog-identity').nextElementSibling,d.querySelector('.blog-music-card'));
   assert.equal(directory.parentElement.className,'reading-directory-slot');
   assert.equal(directory.open,true);assert.equal(d.querySelectorAll('.article-contents').length,1);

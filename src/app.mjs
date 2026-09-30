@@ -53,7 +53,7 @@ let resourceCenter = siteContent?.['resource-center'] ?? [];
 let software = siteContent?.software ?? [];
 let works = siteContent?.works ?? [];
 // Dates read as a dotted scale (2026.09.27) in the monospaced figure font.
-const noteDate = (item) => item.date ? new Intl.DateTimeFormat('zh-CN', {year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(item.date)).replaceAll('/', '.') : ''; 
+const noteDate = (item) => item.date ? new Intl.DateTimeFormat('zh-CN', {year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(item.date)).replaceAll('/', '.') : '';
 const restoredView = window.sansphasePageSession?.view || {};
 let language = restoredView.language === "en" ? "en" : "zh";
 import { universeMarkup, mountUniverse } from "./universe.mjs";
