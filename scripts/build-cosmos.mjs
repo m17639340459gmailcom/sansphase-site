@@ -98,6 +98,8 @@ for (const file of [
   "loader-dial.mjs",
   "blog-background.css",
   "author.css",
+  "community.mjs",
+  "community.css",
 ]) {
   if (typedBrowserModules.has(file)) {
     const stem = file.slice(0, -'.mjs'.length);

@@ -15,6 +15,7 @@ import {bookShell} from './book-shell.mjs';
 import {vipBookGate,mountVipBookPrompt} from './vip-book-prompt.mjs';
 import {mountRouteAssets} from './route-assets.mjs';
 import {ensureRouteStyle} from './route-styles.mjs';
+import {communityView,inCommunityArea,communityHeaderHTML,communityAccountHTML,communityHomeHTML,communityPlaceholderHTML,communityLandingHTML,isCommunitySort} from './community.mjs';
 mountRouteAssets(window);
 import {
   escapeHTML as esc,
@@ -77,7 +78,7 @@ let activeQuery = typeof restoredView.query === "string" ? restoredView.query : 
 let blogView = restoredView.blogView === "grid" ? "grid" : "list";
 let catalogView = restoredView.catalogView === 'list' ? 'list' : 'grid';
 let catalogPageNumber = Number.isInteger(restoredView.catalogPage) ? Math.max(1, restoredView.catalogPage) : 1;
-const personalPage = (page) => ['notes','note','works','work','resources','software','resource-center','account','verify','reset','admin'].includes(page);
+const personalPage = (page) => ['notes','note','works','work','resources','software','resource-center','community','post','account','verify','reset','admin'].includes(page);
 const catalogUI = () => ({t, icons, tagTone});
 let remotePage=null, loadedContentKey='', renderGeneration=0, searchTimer;
 let readerUI;
@@ -191,6 +192,19 @@ function header(page) {
   // The public-facing pages use one fixed space theme. Keep the theme state
   // for backwards-compatible routing, but do not expose a toggle in chrome.
   const themeToggle = "";
+  const languageButton = `<button class="language" data-action="language" aria-label="${t("Switch to English", "切换到中文")}">${t("中 / EN", "EN / 中")}</button>`;
+  const menuButton = `<button class="icon-button menu-button" data-action="menu" aria-controls="navigation" aria-expanded="false" aria-label="${t("打开菜单", "Open menu")}"><span class="menu-icon-open">${icons.menu}</span><span class="menu-icon-close">${icons.close}</span></button>`;
+  const view = communityView(page, parseRoute(location.hash).id);
+  if (inCommunityArea(view)) {
+    // The community is its own area: its own navigation, and a way back to the main site.
+    const account = siteContent ? communityAccountHTML({t, esc, icons, nickname: siteContent.reader?.nickname, author: Boolean(siteContent.author)}) : '';
+    document.querySelector("#site-header").innerHTML = communityHeaderHTML({view, t, icons, actionsHTML: `${languageButton}${account}${menuButton}`});
+    document.querySelector("#site-header").classList.add('community-header');
+    cleanNavSlider();
+    cleanNavSlider = mountNavSlider(document.querySelector("#navigation"));
+    return;
+  }
+  document.querySelector("#site-header").classList.remove('community-header');
   document.querySelector("#site-header").innerHTML =
     `<a href="#/home" class="brand" aria-label="${t("無相 · 返回首页", "無相 · Back to home")}"><strong>無相</strong><span class="brand-english" aria-hidden="true">SANSPHASE</span></a><nav class="nav" id="navigation" aria-label="${t("主导航", "Main navigation")}">${siteSections
       .map(
@@ -199,7 +213,7 @@ function header(page) {
       )
       .join(
         "",
-      )}</nav><div class="header-actions">${support}${themeToggle}${page==='home'?homeMusicControls():''}<button class="language" data-action="language" aria-label="${t("Switch to English", "切换到中文")}">${t("中 / EN", "EN / 中")}</button>${personalAccount}<button class="icon-button menu-button" data-action="menu" aria-controls="navigation" aria-expanded="false" aria-label="${t("打开菜单", "Open menu")}"><span class="menu-icon-open">${icons.menu}</span><span class="menu-icon-close">${icons.close}</span></button></div>`;
+      )}</nav><div class="header-actions">${support}${themeToggle}${page==='home'?homeMusicControls():''}${languageButton}${personalAccount}${menuButton}</div>`;
   cleanNavSlider();
   cleanNavSlider = mountNavSlider(document.querySelector("#navigation"));
 }
@@ -361,8 +375,29 @@ function resourceCenterPage() {
 function closedPage(section, title, message) {
   return `<section class="page catalog-page" data-section="${section}">${pageHeading(section.toUpperCase(),title,message)}<div class="empty" data-content-state="not-open"><p>${t('你可以先浏览博客、作品与资料。','Explore the blog, projects and learning materials.')}</p><a class="button" href="#/notes">${t('浏览博客','Read the blog')} ${arrow}</a></div></section>`;
 }
+// Community posts have no data source yet; the home page lists none until the
+// community service exists. The other community tabs are placeholders.
+let communitySort = 'active';
+// The community account menu (with the way back to the main site). The header
+// is rebuilt on every route, so a route change also closes it.
+function setCommunityAccountMenu(open) {
+  const button = document.querySelector('[data-action="community-account"]');
+  const menu = document.querySelector('#community-account-menu');
+  if (!button || !menu) return false;
+  const wasOpen = !menu.hidden;
+  button.setAttribute('aria-expanded', String(open));
+  menu.hidden = !open;
+  return wasOpen;
+}
+document.addEventListener('click', (event) => {
+  if (!event.target.closest?.('.community-account')) setCommunityAccountMenu(false);
+});
+let communityStyleReady = false;
 function communityPage() {
-  return closedPage('community',t('社区交流','Community'),t('社区正在准备中，暂未开放注册与讨论。','The community is being prepared. Registration and discussions are not open yet.'));
+  const view = communityView('community', parseRoute(location.hash).id);
+  if (view === 'landing') return communityLandingHTML(t, icons);
+  if (view === 'home') return communityHomeHTML({topics: [], sort: communitySort, t, esc});
+  return view === 'unknown' ? notFound() : communityPlaceholderHTML(view, t);
 }
 function sectionsHTML(item) {
   if (typeof item.bodyHTML === 'string') return item.bodyHTML;
@@ -376,7 +411,7 @@ function articlePage(kind, id) {
   if (!item) return notFound();
   return `<section class="page fade-in"><article class="article ${isWork ? "" : "reading-article"}"><a class="back-link" href="#/${isWork ? "works" : "notes"}">${icons.left} ${t(isWork ? "返回作品集" : "返回博客", isWork ? "Back to work" : "Back to blog")}</a><div class="eyebrow">${isWork ? "PROJECT ARCHIVE" : "FIELD NOTES"} / ${esc(categoryLabel(item.category, isWork ? works : notes))}</div><h1>${esc(displayTitle(item))}</h1><div class="post-tags"><span>${esc(siteContent?.profile?.name || "無相")}</span>${item.date ? `<time datetime="${esc(item.date)}">${esc(noteDate(item))}</time>` : ""}${(item.tags||[]).map(tag=>`<span class="article-meta-tag">${esc(tag)}</span>`).join("")}</div><p class="article-intro">${esc(displaySummary(item))}</p>${item.coverSrc ? `<div class="cover-frame"><img class="article-cover" src="${esc(item.coverSrc)}" ${imageSources(item.coverSrc, '(max-width: 960px) 100vw, 960px',item.coverWidth)} width="${Number(item.coverWidth)||960}" height="${Number(item.coverHeight)||540}" decoding="async" alt="${esc(t(item.coverAlt || item.title, item.coverAltEn || item.en || item.title))}"></div>` : ""}<div class="article-body">${siteContent?.preview === item ? `<p class="article-preview-label" role="status">${t("作者预览 · 此预览仅登录作者可见","Author preview · Visible only to the signed-in author")}</p>` : ""}${sectionsHTML(item)}${item.attachments?.length ? `<section class="article-attachments"><h2>${t("附件下载","Attachments")}</h2>${item.attachments.map(file=>`<a class="text-link" href="${esc(file.url)}" download>${icons.download}${esc(file.name)}</a>`).join("")}</section>` : ""}</div><div class="article-bottom"><a class="text-link article-more" href="#/${isWork ? "works" : "notes"}">${t("浏览更多", "Browse more")}${arrow}</a></div></article></section>`;
 }
-function postPage() { return communityPage(); }
+function postPage() { return communityPlaceholderHTML('post', t); }
 function supportPage() {
   return closedPage('support',t('赞助与支持','Support'),t('感谢你的关注。赞助渠道暂未开放。','Thank you for your interest. Support channels are not open yet.'));
 }
@@ -424,6 +459,10 @@ async function render(options={}) {
   return;
  }
  const bookStyle = route.page==='resource-center' && route.id ? ensureRouteStyle(document,'book').then(()=>true,()=>false) : null;
+ // Wait for the community stylesheet only on the first visit; later renders
+ // (language switch, sorting) stay synchronous. A failed load still renders.
+ const communityStyle = !communityStyleReady && communityView(route.page, route.id) !== 'unknown'
+  ? ensureRouteStyle(document,'community').then(()=>{communityStyleReady=true;},()=>{}) : null;
  if(!route.id&&['notes','works','resources','software','resource-center'].includes(route.page)&&filterPage!==route.page) {
   activeCategory='all';activeQuery='';catalogPageNumber=1;filterPage=route.page;
  }
@@ -456,6 +495,10 @@ async function render(options={}) {
   const ready=await bookStyle;
   if(generation!==renderGeneration) return;
   if(!ready) {renderView({...options,contentStatus:'error'});return;}
+ }
+ if(communityStyle) {
+  await communityStyle;
+  if(generation!==renderGeneration) return;
  }
  renderView(options);
  window.sansphasePageSession?.commit();
@@ -788,6 +831,19 @@ document.addEventListener("click", (e) => {
       blogWeather.toggleDetails(a);
       break;
     }
+    case "community-account": {
+      const open = a.getAttribute('aria-expanded') !== 'true';
+      setCommunityAccountMenu(open);
+      if (open) document.querySelector('#community-account-menu [role="menuitem"]')?.focus();
+      break;
+    }
+    case "community-sort":
+      if (isCommunitySort(a.dataset.sort) && a.dataset.sort !== communitySort) {
+        communitySort = a.dataset.sort;
+        renderView({silent:true,preserveScroll:true});
+        main.querySelector(`[data-action="community-sort"][data-sort="${communitySort}"]`)?.focus({preventScroll:true});
+      }
+      break;
     case "blog-notice-prev":
       blogNotice.rotate(-1);
       break;
@@ -833,6 +889,11 @@ document.addEventListener("input", (e) => {
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     if (e.defaultPrevented || document.querySelector('.blog-timezone-menu[data-state="open"]')) return;
+    if (setCommunityAccountMenu(false)) {
+      e.preventDefault();
+      document.querySelector('[data-action="community-account"]')?.focus();
+      return;
+    }
     const nav = document.querySelector(".nav");
     if (nav?.classList.contains("open")) {
       e.preventDefault();
@@ -880,8 +941,11 @@ window.addEventListener("hashchange", (event) => {
   // reused by the destination page instead of cancelling and downloading again.
   clearTimeout(searchTimer);
   loadedContentKey='';
-  const from = parseRoute(event.oldURL ? new URL(event.oldURL).hash : "").page;
-  const to = parseRoute(location.hash).page;
+  const fromRoute = parseRoute(event.oldURL ? new URL(event.oldURL).hash : "");
+  const toRoute = parseRoute(location.hash);
+  const from = fromRoute.page, to = toRoute.page;
+  // From the landing page into the community area: its own entrance.
+  const entering = communityView(from, fromRoute.id) === 'landing' && inCommunityArea(communityView(to, toRoute.id));
   routeTransitions.run(from, to, () => {
     const rendering = render();
     window.scrollTo({ top: 0, behavior: "instant" });
@@ -890,7 +954,7 @@ window.addEventListener("hashchange", (event) => {
       : main
     ).focus({ preventScroll: true });
     return rendering;
-  });
+  }, entering ? 'enter' : undefined);
 });
 window.addEventListener("pagehide", (e) => {
   homeWarmup?.abort();contentReader.cancel();

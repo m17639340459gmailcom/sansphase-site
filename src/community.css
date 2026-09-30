@@ -1,0 +1,310 @@
+/* 社区：顶栏、首页和占位页。只在 #/community 与 #/post 路由加载。 */
+
+/* 顶栏：左边回主站和社区字标，中间社区导航，右边发帖 */
+.community-header::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgb(217 196 156 / 40%), transparent);
+  pointer-events: none;
+}
+.community-brand-group {
+  justify-self: start;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.community-brand {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  white-space: nowrap;
+}
+.community-brand strong { font-family: var(--font-serif); font-size: 22px; font-weight: 600; line-height: 1.2; letter-spacing: 0.2em; color: var(--text); }
+.community-brand span { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.3em; color: var(--signal); }
+.community-post {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  margin-right: 6px;
+  padding: 0 15px;
+  border-radius: var(--pill);
+  background: var(--signal);
+  color: #1a1409;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 0.2s;
+}
+.community-post .ui-icon { width: 15px; height: 15px; }
+.community-post:hover { background: #e9d8b4; }
+
+/* 主站导航“社区交流”进来的落地页 */
+.community-landing {
+  position: relative;
+  isolation: isolate;
+  width: min(760px, calc(100% - 32px));
+  margin: clamp(48px, 12vh, 130px) auto 90px;
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  text-align: center;
+}
+.community-landing .eyebrow { justify-content: center; }
+.community-landing h1 {
+  margin-right: -0.2em;
+  font-size: clamp(46px, 8vw, 104px);
+  font-weight: 600;
+  line-height: 1.05;
+  letter-spacing: 0.2em;
+  text-shadow: 0 0 60px rgb(217 196 156 / 22%);
+}
+.community-landing p { max-width: 32em; font-size: 15.5px; line-height: 1.8; color: var(--muted); }
+.community-landing-actions { margin-top: 6px; }
+.community-enter {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 22px;
+  border-radius: var(--pill);
+  background: var(--signal);
+  color: #1a1409;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 10px 30px rgb(217 196 156 / 22%);
+  transition: background 0.2s, transform 0.2s;
+}
+.community-enter .ui-icon { width: 17px; height: 17px; }
+.community-enter:hover { background: #e9d8b4; }
+.community-enter:active { transform: translateY(1px); }
+.community-orbits {
+  position: absolute;
+  left: 50%;
+  top: 46%;
+  z-index: -1;
+  width: 540px;
+  height: 540px;
+  max-width: 92vw;
+  max-height: 92vw;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.community-orbits i { position: absolute; inset: 0; border-radius: 50%; border: 1px solid rgb(217 196 156 / 26%); }
+.community-orbits i:nth-child(2) { inset: 70px; border-color: rgb(159 184 224 / 22%); }
+.community-orbits i:nth-child(3) { inset: 150px; border-color: rgb(238 233 224 / 14%); background: radial-gradient(circle, rgb(217 196 156 / 9%), transparent 70%); }
+.community-orbits i:first-child::after,
+.community-orbits i:nth-child(2)::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 0, var(--signal) 0 3px, transparent 4px);
+  animation: community-orbit 28s linear infinite;
+}
+.community-orbits i:nth-child(2)::after { background: radial-gradient(circle at 50% 0, #c9d6ff 0 2px, transparent 3px); animation-duration: 18s; animation-direction: reverse; }
+@keyframes community-orbit { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .community-orbits i::after { animation: none; } }
+
+/* 账号菜单：账号和“返回無相主站” */
+.community-account { position: relative; }
+.community-account .account-button { gap: 6px; }
+.community-account .account-button > span { max-width: 12em; overflow: hidden; text-overflow: ellipsis; }
+.community-account .account-button .ui-icon { width: 14px; height: 14px; color: var(--muted); transition: transform 0.2s; }
+.community-account .account-button[aria-expanded="true"] .ui-icon { transform: rotate(180deg); }
+.community-account-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 40;
+  min-width: 200px;
+  padding: 6px;
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  background: rgb(14 19 28 / 97%);
+  box-shadow: 0 22px 50px rgb(0 0 0 / 55%);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+.community-account-menu[hidden] { display: none; }
+.community-account-menu :is(a, button) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: var(--muted);
+  font-size: 13.5px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.community-account-menu :is(a, button):is(:hover, :focus-visible) { background: rgb(238 233 224 / 7%); color: var(--text); }
+.community-account-menu .ui-icon { width: 15px; height: 15px; }
+.community-account-menu a[href="#/home"] { border-top: 1px solid var(--line); border-radius: 0 0 9px 9px; margin-top: 4px; padding-top: 11px; }
+
+/* 页面 */
+.community-page {
+  width: min(var(--content-max), calc(100% - 32px));
+  margin: 0 auto;
+  padding: 32px 0 80px;
+  display: grid;
+  gap: 22px;
+}
+.community-banner {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px 32px;
+  padding: 26px 30px;
+  border: 1px solid var(--smoked-edge);
+  border-radius: 20px;
+  background: linear-gradient(100deg, rgb(217 196 156 / 7%), transparent 45%), var(--smoked-fill);
+  box-shadow: var(--smoked-shadow);
+  backdrop-filter: blur(20px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+}
+.community-banner-text { min-width: 0; max-width: 640px; display: grid; gap: 6px; }
+.community-banner h1 { font-size: clamp(26px, 2.6vw, 32px); line-height: 1.25; letter-spacing: 0.12em; }
+.community-banner p { color: var(--muted); font-size: 14px; }
+.community-stats { display: flex; gap: 26px; margin: 0; }
+.community-stats dt { font-size: 11.5px; color: var(--dim); }
+.community-stats dd { margin: 0; font-family: var(--font-mono); font-size: 22px; font-variant-numeric: tabular-nums; }
+
+.community-layout {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+.community-aside { display: grid; gap: 16px; }
+.community-main { min-width: 0; display: grid; gap: 14px; align-content: start; }
+.community-card {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--smoked-edge);
+  border-radius: 18px;
+  background: var(--smoked-fill);
+  backdrop-filter: blur(20px) saturate(1.3);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+}
+.community-card h2 { font-size: 16px; letter-spacing: 0.06em; }
+.community-muted { font-size: 13px; line-height: 1.7; color: var(--dim); }
+.community-hot { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.community-hot li { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 8px; font-size: 13.5px; line-height: 1.5; }
+.community-hot-rank { font-family: var(--font-mono); font-size: 12px; color: var(--dim); }
+.community-hot li:nth-child(-n + 3) .community-hot-rank { color: var(--signal); }
+.community-hot a { color: var(--muted); }
+.community-hot a:hover { color: var(--text); }
+.community-boards { display: grid; gap: 2px; }
+.community-board-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 14px;
+  color: var(--muted);
+  transition: background 0.2s, color 0.2s;
+}
+.community-board-link i { width: 8px; height: 8px; border-radius: 50%; background: var(--board); box-shadow: 0 0 10px var(--board); }
+.community-board-link:hover { background: rgb(238 233 224 / 6%); color: var(--text); }
+.community-board-count { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--dim); }
+
+/* 排序栏：原“写点什么”那一栏的位置；发帖统一走顶栏 */
+.community-sort {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 16px 6px 6px;
+  border: 1px solid var(--smoked-edge);
+  border-radius: 16px;
+  background: var(--smoked-fill);
+}
+.community-sort-tabs { display: flex; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.community-sort-tabs::-webkit-scrollbar { display: none; }
+.community-sort-tabs button {
+  padding: 7px 16px;
+  border: 0;
+  border-radius: var(--pill);
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+  transition: background 0.2s, color 0.2s;
+}
+.community-sort-tabs button:hover { color: var(--text); }
+.community-sort-tabs button[aria-pressed="true"] { background: rgb(238 233 224 / 12%); color: var(--text); }
+.community-count { flex-shrink: 0; font-size: 12.5px; color: var(--dim); white-space: nowrap; }
+
+.community-topics {
+  overflow: hidden;
+  border: 1px solid var(--smoked-edge);
+  border-radius: 18px;
+  background: var(--smoked-fill);
+}
+.community-topic {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 16px 18px;
+  border-top: 1px solid var(--line);
+}
+.community-topic:first-child { border-top: 0; }
+.community-topic::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 16px;
+  bottom: 16px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--board);
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.community-topic:hover::before { opacity: 0.9; }
+.community-topic-main { min-width: 0; display: grid; gap: 6px; }
+.community-topic h3 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-family: var(--font); font-size: 15.5px; font-weight: 500; line-height: 1.5; }
+.community-topic h3 a:hover { text-decoration: underline; text-underline-offset: 4px; text-decoration-color: var(--line-strong); }
+.community-flag { padding: 0 8px; border-radius: 6px; background: rgb(238 233 224 / 8%); font-size: 11.5px; line-height: 20px; color: var(--muted); }
+.community-flag.is-featured { background: rgb(217 196 156 / 13%); color: var(--signal); }
+.community-topic-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12.5px; color: var(--dim); }
+.community-topic-board { color: var(--muted); }
+.community-topic-replies { min-width: 40px; text-align: center; font-family: var(--font-mono); font-size: 15px; color: var(--text); }
+.community-empty { margin: 0; padding: 48px 24px; border: 1px dashed var(--line-strong); border-radius: 18px; background: rgb(11 15 23 / 55%); }
+
+@media (max-width: 1200px) {
+  /* 导航收进菜单后只剩两列：左边回主站和字标，右边操作按钮 */
+  #site-header.community-header { grid-template-columns: minmax(0, 1fr) auto; }
+  .community-brand-group { overflow: hidden; }
+  .community-post span { display: none; }
+  .community-post { width: 36px; padding: 0; justify-content: center; }
+}
+@media (max-width: 860px) {
+  .community-layout { grid-template-columns: minmax(0, 1fr); }
+  .community-aside { order: 2; }
+}
+@media (max-width: 640px) {
+  .community-page { padding-top: 20px; }
+  .community-banner { padding: 20px; }
+  .community-brand span { display: none; }
+  .community-brand-group { gap: 8px; }
+  .community-count { display: none; }
+  .community-sort { padding-right: 6px; }
+}

@@ -1,6 +1,6 @@
 import { staticAssetUrl } from "./scene-delivery.mjs";
 
-const files = Object.freeze({ book: "book-reader.css", author: "author.css" });
+const files = Object.freeze({ book: "book-reader.css", author: "author.css", community: "community.css" });
 const pendingByDocument = new WeakMap<Document,Map<string,Promise<void>>>();
 
 // Keep the same cascade order as the former links in index.html, regardless of

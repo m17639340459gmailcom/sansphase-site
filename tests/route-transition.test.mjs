@@ -71,3 +71,20 @@ test("between sections the content slides towards the one chosen, in navigation 
   transitions.dispose();
   w.close();
 });
+
+test("a caller can name the transition: entering the community opens from the clicked button", async () => {
+  const s = setup();
+  s.doc.dispatchEvent(new s.w.MouseEvent("pointerdown", { clientX: 720, clientY: 510 }));
+  let updated = 0;
+  await s.transitions.run("community", "community", () => { updated++; }, "enter");
+  assert.equal(updated, 1);
+  assert.deepEqual(s.started[0], { kind: "enter", x: "720px" });
+  await s.transitions.run("community", "community", () => { updated++; });
+  assert.equal(s.started[1].kind, "page", "without a name the usual rules apply");
+  s.transitions.dispose();
+  s.close();
+  const reduced = setup({ reduced: true });
+  assert.equal(reduced.transitions.run("community", "community", () => "plain", "enter"), "plain", "reduced motion still skips it");
+  assert.equal(reduced.started.length, 0);
+  reduced.close();
+});

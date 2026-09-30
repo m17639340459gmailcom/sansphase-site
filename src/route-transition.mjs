@@ -7,6 +7,7 @@
 // scene's own return animation. Without the API, while hidden, or with
 // reduced motion, the update simply runs as before.
 // `sectionOf(page)` gives a page's position in the navigation (or -1).
+// A caller may name the kind instead (entering the community: "enter").
 export function createRouteTransitions(doc = document, { settle = 220, sectionOf = () => -1 } = {}) {
   const win = doc.defaultView;
   const root = doc.documentElement;
@@ -16,13 +17,13 @@ export function createRouteTransitions(doc = document, { settle = 220, sectionOf
   };
   doc.addEventListener("pointerdown", remember, { capture: true, passive: true });
 
-  function run(fromPage, toPage, update) {
+  function run(fromPage, toPage, update, named) {
     const reduced = win.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
     if (typeof doc.startViewTransition !== "function" || reduced || doc.hidden || toPage === "home")
       return update();
     const from = sectionOf(fromPage),
       to = sectionOf(toPage);
-    const kind = fromPage === "home" ? "warp" : from >= 0 && to >= 0 && from !== to ? "slide" : "page";
+    const kind = named || (fromPage === "home" ? "warp" : from >= 0 && to >= 0 && from !== to ? "slide" : "page");
     root.style.setProperty("--route-dir", to < from ? "-1" : "1");
     // A click within the last second is where the iris opens; keyboard
     // navigation opens it from the centre.

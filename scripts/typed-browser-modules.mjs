@@ -4,6 +4,7 @@ export const typedBrowserModules = new Set([
   'admin-readers.mjs',
   'book-progress.mjs',
   'catalog.mjs',
+  'community.mjs',
   'content-reader.mjs',
   'content-images.mjs',
   'core.mjs',

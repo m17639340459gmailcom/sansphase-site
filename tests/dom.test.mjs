@@ -101,6 +101,8 @@ test("local prototype DOM flows", async (t) => {
       return loadLibrary(new URL("../dist/ui.bundle.mjs", import.meta.url));
     if (specifier === './book-shell.mjs' || specifier === './vip-book-prompt.mjs')
       return loadLibrary(new URL('../dist/' + specifier.slice(2), import.meta.url));
+    if (specifier === './community.mjs')
+      return loadLibrary(new URL('../dist/community.mjs', import.meta.url));
     if (specifier === './catalog.mjs')
       return loadLibrary(new URL('../dist/catalog.mjs', import.meta.url));
     if (specifier === './content-images.mjs')
@@ -509,7 +511,7 @@ test("local prototype DOM flows", async (t) => {
       },
     );
     await t.test(
-      "six navigation destinations share a catalog shell and remain available from the menu",
+      "six navigation destinations remain available from the menu; five share a catalog shell and the community opens a landing page",
       async () => {
         const destinations = [
           ["notes", "博客"],
@@ -529,9 +531,12 @@ test("local prototype DOM flows", async (t) => {
             q('.nav [aria-current="page"]').getAttribute("href"),
             `#/${route}`,
           );
-          assert.equal(d.querySelectorAll("main .catalog-page").length, 1);
           assert.equal(d.querySelectorAll("main h1").length, 1);
-          assert.equal(q(".catalog-page").dataset.section, route);
+          if (route === "community") assert.ok(q('[data-community="landing"]'));
+          else {
+            assert.equal(d.querySelectorAll("main .catalog-page").length, 1);
+            assert.equal(q(".catalog-page").dataset.section, route);
+          }
           click('[data-action="menu"]');
           assert.equal(q(".nav").classList.contains("open"), true);
           assert.equal(q(`.nav a[href="#/${route}"]`).textContent, label);
@@ -661,8 +666,57 @@ test("local prototype DOM flows", async (t) => {
         }
       },
     );
-    await t.test('closed community routes never offer fake publishing actions; account is real', async()=>{
-      for(const route of ['community','post/old-demo','contact','support']) {
+    await t.test('the community is its own area: home, placeholder tabs and a way back', async()=>{
+      await navigate('notes');
+      click('.nav a[href="#/community"]');
+      await tick();
+      assert.ok(!q('#site-header').classList.contains('community-header'), 'the landing page keeps the main navigation');
+      assert.equal(q('.nav [aria-current="page"]').getAttribute('href'),'#/community');
+      assert.match(q('main h1').textContent,/無相社区/);
+      click('.community-enter');
+      await tick();
+      assert.ok(q('#site-header').classList.contains('community-header'));
+      assert.deepEqual(Array.from(d.querySelectorAll('#navigation a'), a=>a.getAttribute('href')),
+        ['#/community/home','#/community/boards','#/community/checkin','#/community/shop','#/community/rank']);
+      assert.equal(q('#navigation [aria-current="page"]').getAttribute('href'),'#/community/home');
+      assert.equal(d.querySelector('.community-back,.community-brand-group a[href="#/home"]'),null,'no back link in the corner');
+      assert.equal(q('.community-brand').getAttribute('href'),'#/community/home');
+      const account=q('[data-action="community-account"]');
+      assert.equal(q('#community-account-menu').hidden,true);
+      click('[data-action="community-account"]');
+      assert.equal(account.getAttribute('aria-expanded'),'true');
+      assert.equal(q('#community-account-menu').hidden,false);
+      assert.equal(d.activeElement,q('#community-account-menu [role="menuitem"]'));
+      d.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+      assert.equal(q('#community-account-menu').hidden,true);
+      assert.equal(d.activeElement,account);
+      click('[data-action="community-account"]');
+      click('main');
+      assert.equal(q('#community-account-menu').hidden,true,'a click elsewhere closes it');
+      assert.equal(q('#community-account-menu a[href="#/home"]').textContent.trim(),'返回無相主站');
+      assert.equal(q('.community-post').getAttribute('href'),'#/community/new');
+      assert.ok(q('[data-community="home"]'));
+      assert.match(q('main h1').textContent,/社区/);
+      assert.equal(d.querySelectorAll('.community-board-link').length,6);
+      assert.equal(q('[data-action="community-sort"][aria-pressed="true"]').dataset.sort,'active');
+      click('[data-action="community-sort"][data-sort="hot"]');
+      assert.equal(q('[data-action="community-sort"][aria-pressed="true"]').dataset.sort,'hot');
+      assert.equal(d.activeElement,q('[data-action="community-sort"][data-sort="hot"]'));
+      assert.equal(d.querySelector('#compose-form,#reply-form,[data-action="checkin"]'),null);
+      for(const tab of ['boards','checkin','shop','rank','new']) {
+        await navigate('community/'+tab);
+        assert.ok(q('[data-content-state="not-open"]'));
+        assert.equal(q('.community-empty a').getAttribute('href'),'#/community/home');
+        if(tab!=='new') assert.equal(q('#navigation [aria-current="page"]').getAttribute('href'),'#/community/'+tab);
+      }
+      await navigate('community/nope');
+      assert.match(q('main').textContent,/这个角落还没有内容/);
+      await navigate('notes');
+      assert.ok(!q('#site-header').classList.contains('community-header'));
+      assert.equal(q('.nav a[href="#/community"]').textContent,'社区交流');
+    });
+    await t.test('closed routes never offer fake publishing actions; account is real', async()=>{
+      for(const route of ['post/old-demo','contact','support']) {
         await navigate(route);
         assert.ok(d.querySelector('[data-content-state="not-open"]'));
         assert.equal(d.querySelector('#demo-login,#compose-form,#reply-form,#contact-form,[data-action="checkin"],[data-action="account"]'),null);
@@ -687,7 +741,12 @@ test("local prototype DOM flows", async (t) => {
         );
         assert.match(q(".article-body").textContent, /本地/);
         await navigate("community");
-        assert.match(q("main").textContent, /not open yet/);
+        assert.match(q("main h1").textContent, /Community/);
+        assert.match(q(".community-enter").textContent, /Enter the community/);
+        await navigate("community/home");
+        assert.match(q("main").textContent, /No posts yet/);
+        await navigate("community/shop");
+        assert.match(q("main").textContent, /Coming soon/);
         click("[data-action=language]");
         assert.equal(d.documentElement.lang, "zh-CN");
       },
