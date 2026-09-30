@@ -8,6 +8,8 @@ import {
   HalfFloatType,
   LinearFilter,
   MathUtils,
+  Matrix3,
+  Matrix4,
   Mesh,
   OrthographicCamera,
   Scene,
@@ -20,6 +22,7 @@ import {
 } from "three";
 import { blackHoleView } from "./black-hole-view.mjs";
 import { milkyWayURL } from "./scene-images.mjs";
+import { bakeOpeningSky, openingSkyIntensity, openingSkyResolution } from "./opening-sky.ts";
 import { departure, journeyStep } from "./journey.mjs";
 
 // The opening's own renderer: a Schwarzschild black hole. Two passes keep it
@@ -126,29 +129,17 @@ void main() {
 // widening "far side" opening over the next chapter's photograph.
 const compositeFragment = /* glsl */ `
 #define PI 3.14159265
-uniform sampler2D tDisk; uniform sampler2D tEscape; uniform sampler2D uSky;
+uniform sampler2D tDisk; uniform sampler2D tEscape; uniform samplerCube uSky;
+uniform mat3 uSkyRotation;
 uniform vec2 uViewport; uniform float uSkyGain; uniform float uWarp; uniform vec3 uFwd;
 uniform float uBlackout; uniform float uEmerge;
 uniform vec4 uWave; uniform float uWaveWidth;
 varying vec2 vUv;
-${noiseChunk}
-vec3 starField(vec3 d, float density, float threshold) {
-  vec3 q = d * density; vec3 id = floor(q);
-  float h = hash(id);
-  vec3 centre = 0.25 + 0.5 * vec3(hash(id + 1.7), hash(id + 4.3), hash(id + 8.9));
-  float s = pow(max(0.0, 1.0 - length(fract(q) - centre) * 2.6), 7.0) * step(threshold, h);
-  vec3 tint = mix(vec3(1.0, 0.86, 0.72), vec3(0.78, 0.86, 1.0), hash(id + 2.2));
-  return tint * s * (0.25 + 1.1 * hash(id + 3.1));
-}
 vec3 milkyWay(vec3 d) {
-  vec2 uv = vec2(atan(d.z, d.x) / (2.0 * PI) + 0.5, asin(clamp(d.y, -1.0, 1.0)) / PI + 0.5);
-  // Unwrap the longitude seam so mip selection never sees a jump of one.
-  vec2 dx = dFdx(uv), dy = dFdy(uv);
-  dx.x -= floor(dx.x + 0.5); dy.x -= floor(dy.x + 0.5);
-  return textureGrad(uSky, uv, dx, dy).rgb * uSkyGain;
+  return textureCube(uSky, uSkyRotation * d).rgb * uSkyGain;
 }
 vec3 sky(vec3 d) {
-  return milkyWay(d) + starField(d, 260.0, 0.962) + 0.5 * starField(d, 520.0, 0.985);
+  return milkyWay(d);
 }
 void main() {
   vec2 frag = gl_FragCoord.xy; vec2 src = frag;
@@ -191,19 +182,22 @@ export function holeBufferSize(width, height, quality = 1) {
 // without GPU textures (gpu=false), as they do for the rest of the home.
 function SkyBinding({ model, parts }) {
   const gl = useThree((state) => state.gl);
+  const resolution = useThree((state) => openingSkyResolution(state.size.width, state.gl.capabilities.maxCubemapSize));
   const sky = useTexture(milkyWayURL);
   useEffect(() => {
     sky.colorSpace = SRGBColorSpace;
     sky.anisotropy = Math.min(4, gl.capabilities.getMaxAnisotropy());
     sky.needsUpdate = true;
-    parts.composite.uniforms.uSky.value = sky;
+    const baked = bakeOpeningSky(gl, sky, resolution);
+    parts.composite.uniforms.uSky.value = baked.texture;
     gl.compile(parts.scene, parts.camera);
     model.openingReady = true;
     return () => {
       model.openingReady = false;
       parts.composite.uniforms.uSky.value = null;
+      baked.dispose();
     };
-  }, [gl, model, parts, sky]);
+  }, [gl, model, parts, sky, resolution]);
   return null;
 }
 
@@ -242,8 +236,9 @@ export function BlackHole({ model, gpu = true }) {
         tDisk: { value: target.textures[0] },
         tEscape: { value: target.textures[1] },
         uSky: { value: null },
+        uSkyRotation: { value: new Matrix3() },
         uViewport: { value: new Vector2(1, 1) },
-        uSkyGain: { value: 0.5 },
+        uSkyGain: { value: openingSkyIntensity },
         uWarp: { value: 0 },
         uFwd: { value: new Vector3(0, 0, 1) },
         uBlackout: { value: 0 },
@@ -260,7 +255,7 @@ export function BlackHole({ model, gpu = true }) {
     scene.add(quad);
     return { target, ray, composite, geometry, scene, camera: new OrthographicCamera(-1, 1, 1, -1, 0, 1) };
   }, []);
-  const motion = useRef({ disk: 40, last: 0, gazeX: 0, gazeY: 0 });
+  const motion = useRef({ disk: 40, last: 0, gazeX: 0, gazeY: 0, skyRotation: new Matrix4() });
   useEffect(() => {
     if (gpu) return;
     model.openingReady = true;
@@ -317,6 +312,7 @@ export function BlackHole({ model, gpu = true }) {
     u.uHeat.value = view.heat;
     u.uGlow.value = view.glow;
     const c = parts.composite.uniforms;
+    c.uSkyRotation.value.setFromMatrix4(m.skyRotation.makeRotationFromEuler(state.scene.backgroundRotation)).transpose();
     state.gl.getDrawingBufferSize(c.uViewport.value);
     const vw = c.uViewport.value.x,
       vh = c.uViewport.value.y,

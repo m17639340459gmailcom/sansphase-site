@@ -13,6 +13,6 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["server/**/*.ts", "src/**/*.ts", "src/**/*.tsx", "scripts/**/*.ts"],
+  "include": ["server/**/*.ts", "src/**/*.ts", "src/**/*.tsx", "scripts/**/*.ts", "previews/**/*.ts"],
   "exclude": ["src/vendor", "node_modules", "dist", ".local", "archive"]
 }

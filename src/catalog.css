@@ -493,9 +493,6 @@
   color: #fff;
   text-decoration: none;
 }
-.catalog-grid:not(.is-list) .catalog-poster:is(:hover, :focus-within) .blog-third-party-glass {
-  border-color: var(--blog-accent);
-}
 .catalog-grid:not(.is-list) .catalog-poster:is(:hover, :focus-within) .catalog-card-copy {
   background: linear-gradient(to top left,
     color-mix(in srgb, var(--blog-accent) 25%, rgb(4 10 18 / 86%)),
