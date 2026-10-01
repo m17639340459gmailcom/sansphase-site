@@ -16,7 +16,7 @@ type EditorOptions = {
 export const BookBlockIdentity=Extension.create({
  name:'bookBlockIdentity',
  addGlobalAttributes(){return [{types:['paragraph','heading','blockquote','bulletList','orderedList','codeBlock','image','table'],attributes:{bookBlock:{default:null,parseHTML:el=>el.getAttribute('data-book-block'),renderHTML:attrs=>attrs.bookBlock?{'data-book-block':attrs.bookBlock}:{}}}}];},
- addProseMirrorPlugins(){return [new Plugin({appendTransaction(transactions,old,state){if(!transactions.some(t=>t.docChanged))return;const seen=new Set();const tr=state.tr;state.doc.descendants((node,pos)=>{if(!Object.hasOwn(node.attrs,'bookBlock'))return;const id=node.attrs.bookBlock;if(!id||seen.has(id)){const next=newId();tr.setNodeMarkup(pos,undefined,{...node.attrs,bookBlock:next});seen.add(next);}else seen.add(id);});return tr.docChanged?tr:null;}})];},
+ addProseMirrorPlugins(){return [new Plugin({appendTransaction(transactions,_old,state){if(!transactions.some(t=>t.docChanged))return;const seen=new Set();const tr=state.tr;state.doc.descendants((node,pos)=>{if(!Object.hasOwn(node.attrs,'bookBlock'))return;const id=node.attrs.bookBlock;if(!id||seen.has(id)){const next=newId();tr.setNodeMarkup(pos,undefined,{...node.attrs,bookBlock:next});seen.add(next);}else seen.add(id);});return tr.docChanged?tr:null;}})];},
 });
 export function parseBookChapters(html: string,doc: Document=document): Chapter[] {
  const container=doc.createElement('div');container.innerHTML=html||'';

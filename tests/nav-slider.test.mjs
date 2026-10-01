@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 
-// Each mount gets a fresh module so the remembered position starts empty.
+// Keep test module instances isolated across independent navigation fixtures.
 let copies = 0;
 const load = () => import(`../src/nav-slider.mjs?copy=${copies++}`);
 
@@ -49,7 +49,7 @@ test("one highlight sits on the current section and follows the pointer and focu
   w.close();
 });
 
-test("a re-rendered header starts where the highlight was and glides to the new section", async () => {
+test("a re-rendered header is already on its current section before a route snapshot", async () => {
   const { mountNavSlider } = await load();
   const first = nav(0);
   const disposeFirst = mountNavSlider(first.el);
@@ -59,13 +59,26 @@ test("a re-rendered header starts where the highlight was and glides to the new 
   const next = nav(2);
   const dispose = mountNavSlider(next.el);
   const indicator = next.el.querySelector(".nav-indicator");
-  assert.equal(indicator.style.transform, "translateX(8px)", "starts from the previous section");
+  assert.equal(indicator.style.transform, "translateX(168px)", "never snapshots an old hover/route position");
   assert(indicator.classList.contains("is-visible"));
   assert(!indicator.classList.contains("is-instant"));
   await frame(next.w);
   assert.equal(indicator.style.transform, "translateX(168px)");
   dispose();
   next.w.close();
+});
+
+test("a route outside the navigation never flashes a remembered hover highlight", async () => {
+  const { mountNavSlider } = await load();
+  const first = nav(0);
+  const cleanup = mountNavSlider(first.el);
+  await frame(first.w);
+  first.el.querySelectorAll('a')[2].dispatchEvent(new first.w.Event('pointerover', { bubbles:true }));
+  cleanup();
+  const next = nav();
+  const dispose = mountNavSlider(next.el);
+  assert(!next.el.querySelector('.nav-indicator').classList.contains('is-visible'));
+  dispose(); first.w.close(); next.w.close();
 });
 
 test("pages outside the navigation show no highlight", async () => {

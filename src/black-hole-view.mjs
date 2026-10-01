@@ -8,13 +8,12 @@ const smooth = (low, high, x) => {
 };
 const finite = (value, fallback = 0) => (Number.isFinite(value) ? value : fallback);
 
-export function blackHoleView(progress = 0, { portrait = false, entrance = 1 } = {}) {
+export function blackHoleView(progress = 0, { portrait = false } = {}) {
   const p = Math.min(1, Math.max(0, finite(progress)));
   const approach = smooth(0, 0.35, p),
-    plunge = smooth(0.35, 0.86, p),
-    // The entrance flies in from further out while the disk warms up.
-    arrival = 1 - smooth(0, 1, finite(entrance, 1));
-  const distance = 14 - 6 * approach - 6 * plunge + 10 * arrival;
+    plunge = smooth(0.35, 0.86, p);
+  // Formation takes place at the final framing; scrolling owns the dolly.
+  const distance = 14 - 6 * approach - 6 * plunge;
   // A dolly zoom: the lens widens while the camera closes in.
   // Leave a little more sky around the opening without changing its orbit.
   // Rejoin the existing lens before the plunge, in either scroll direction.
@@ -30,8 +29,6 @@ export function blackHoleView(progress = 0, { portrait = false, entrance = 1 } =
     azimuth: 0.42 + 0.6 * plunge,
     // Gravitational time dilation for a static observer at this radius.
     timeRate: Math.sqrt(Math.max(0.05, 1 - 1 / distance)),
-    heat: smooth(0.15, 1, finite(entrance, 1)),
-    glow: 2 * plunge,
     blackout: smooth(0.78, 0.9, p),
     emerge: smooth(0.88, 1, p),
     readout: smooth(0.01, 0.08, p) * (1 - smooth(0.86, 0.95, p)),

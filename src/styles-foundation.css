@@ -36,6 +36,9 @@
   --smoked-edge: rgb(238 233 224 / 12%);
   --smoked-shadow: inset 0 1px 0 rgb(255 255 255 / 7%), 0 24px 60px rgb(0 0 0 / 35%);
   --font-serif: "Noto Serif SC", "Source Han Serif SC", "Source Han Serif CN", "Songti SC", "STSong", serif;
+  /* Keep the two brand glyphs in the same Song family; locally installed
+     partial Heavy fonts must not replace just one of them. */
+  --font-wordmark: "SimSun", "Songti SC", "STSong", "Noto Serif CJK SC", "Noto Serif SC", serif;
   --font-mono: "JetBrains Mono", "Cascadia Mono", "SF Mono", ui-monospace, Consolas, monospace;
   --header-h: 96px;
   --content-max: 1120px;
@@ -223,6 +226,7 @@ svg {
   white-space: nowrap;
 }
 .brand strong {
+  font-family: var(--font-wordmark);
   font-size: 26px;
   font-weight: 600;
   line-height: 1.2;

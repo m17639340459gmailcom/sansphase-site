@@ -93,14 +93,18 @@ test("active effects have pinned third-party source and preserved upstream origi
     !inputs.some((p) => /vendor\/react-bits\/(Ribbons|Galaxy)\.jsx$/.test(p)),
     "screen-space overlays must not return to the live scene",
   );
-  for (const name of ["Stars", "Fbo", "Effects", "Texture"])
+  for (const name of ["Stars", "Effects", "Texture"])
     assert.ok(
       inputs.some((p) => p.includes("/drei/") && p.endsWith(`/${name}.js`)),
       `${name} must come from Drei`,
     );
-  // The opening is the in-house black hole; the R glass installation and its
-  // Quarks particles are detached from the live scene for now.
+  // The opening is the in-house black hole; retired R glass/cursor effects
+  // are archived and must not re-enter the release graph.
   assert.ok(inputs.includes("src/library-black-hole.jsx"), "the black hole opening ships");
+  for (const retired of ["library-glass.jsx", "library-spatial-effects.jsx", "library-orbital-particles.jsx"])
+    assert.ok(!inputs.includes(`src/${retired}`), `${retired} must not allocate obsolete effect resources`);
+  assert.ok(!inputs.some(p => p.includes('/vendor/active-theory-glass/')),
+    'retired refraction shaders must not leak into the active bundle');
   assert.ok(!inputs.includes("src/library-opening.jsx"), "the R installation is not in the live scene");
   assert.ok(
     !inputs.some((p) => p.includes("/three.quarks/")),
