@@ -9,6 +9,7 @@ const singles=['.gitignore','package.json','pnpm-lock.yaml','pnpm-workspace.yaml
 export async function publicationFiles(root=resolve('.')) {
   const result=[...singles,'scripts/migrate-content-order.mjs','scripts/migrate-showcase-cover.mjs','scripts/migrate-reader-accounts.mjs','scripts/migrate-vip-books.mjs','scripts/reader-preview.mjs','scripts/check-reader-email.mjs','scripts/static-package.mjs','scripts/catalog-fixture-preview.mjs','scripts/fixtures/catalog-data.mjs','scripts/fixtures/music-demo.mjs','scripts/fixtures/reading-demo.mjs','docs/CATALOG-DEMO.md','docs/READER-ACCESS.md','.gitattributes','.github/workflows/check.yml'];
   result.push('scripts/publication-retention.mjs','scripts/preview.ps1','启动预览.cmd','docs/MAINTENANCE.md','AGENTS.md');
+  result.push('CONTRIBUTING.md','docs/README.md','docs/CODE-MAP.md','.github/pull_request_template.md');
   async function visit(directory) {
     for(const entry of await readdir(directory,{withFileTypes:true})) {
       const path=resolve(directory,entry.name);

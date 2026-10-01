@@ -25,6 +25,7 @@ export function createLibraryModel(reduced = false) {
     pointerEnabled: true,
     pointer: { x: 0, y: 0 },
     pointerActive: false,
+    orbiting: false,
     pointerAt: -10,
     pulse: null as { x: number; y: number; at: number } | null,
     // 1 = full black-hole detail; the frame-rate guard may lower it.
@@ -288,7 +289,7 @@ export function mountCosmos(
       model.pointerAt = model.time;
       store?.getState().invalidate();
     },
-    setOrbit(x: number, y = 0, { dragging = false } = {}) {
+    setOrbit(x: number, _y = 0, { dragging = false } = {}) {
       if (dragging && !model.reduced && !model.paused) {
         model.turnInput.pending += finite(x) - orbit.x;
         orbit.x = finite(x);
@@ -303,12 +304,14 @@ export function mountCosmos(
       return { x: model.yaw.get(), y: model.pitch.get() };
     },
     beginOrbit() {
+      model.orbiting = true;
       tweens.get("yaw")?.stop();
       tweens.get("pitch")?.stop();
       orbit.x = model.yaw.get();
       model.turnInput.pending = 0;
     },
     endOrbit({ cancel = false } = {}) {
+      model.orbiting = false;
       if (cancel) resetTurnInput(model.turnInput);
     },
     pulse(x: number, y: number) {

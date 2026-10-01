@@ -4,6 +4,7 @@ import { useTexture } from "@react-three/drei/core/Texture.js";
 import {
   BufferAttribute,
   BufferGeometry,
+  Euler,
   GLSL3,
   HalfFloatType,
   LinearFilter,
@@ -24,6 +25,11 @@ import { blackHoleView } from "./black-hole-view.mjs";
 import { milkyWayURL } from "./scene-images.mjs";
 import { bakeOpeningSky, openingSkyIntensity, openingSkyResolution } from "./opening-sky.ts";
 import { departure, journeyStep } from "./journey.mjs";
+import { rayFragment, diskReconstruction } from "./black-hole-shaders.ts";
+import { holeBufferSize, advanceHoleClock, advanceHoleOrbit } from "./black-hole-render.ts";
+import { cinematicHolePose } from "./black-hole-cinema.ts";
+import { blackHoleFormation } from "./black-hole-formation.ts";
+import { advanceSkyParallax } from "./black-hole-background.ts";
 
 // The opening's own renderer: a Schwarzschild black hole. Two passes keep it
 // both sharp and affordable:
@@ -40,118 +46,44 @@ const fullScreen = () => {
     "position",
     new BufferAttribute(new Float32Array([-1, -1, 0, 3, -1, 0, -1, 3, 0]), 3),
   );
-  geometry.setAttribute(
-    "uv",
-    new BufferAttribute(new Float32Array([0, 0, 2, 0, 0, 2]), 2),
-  );
   return geometry;
 };
 const clipVertex = /* glsl */ `
-varying vec2 vUv;
-void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
-
-const noiseChunk = /* glsl */ `
-float hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
-float noise(vec3 x) {
-  vec3 i = floor(x); vec3 f = fract(x); f = f * f * (3.0 - 2.0 * f);
-  return mix(mix(mix(hash(i), hash(i + vec3(1, 0, 0)), f.x), mix(hash(i + vec3(0, 1, 0)), hash(i + vec3(1, 1, 0)), f.x), f.y),
-             mix(mix(hash(i + vec3(0, 0, 1)), hash(i + vec3(1, 0, 1)), f.x), mix(hash(i + vec3(0, 1, 1)), hash(i + vec3(1, 1, 1)), f.x), f.y), f.z);
-}`;
-
-const rayFragment = /* glsl */ `
-uniform vec2 uCenter; uniform float uScale;
-uniform float uTime; uniform vec3 uCam; uniform float uFocal;
-uniform float uHeat; uniform float uGlow;
-layout(location = 0) out vec4 outDisk;
-layout(location = 1) out vec4 outEscape;
-${noiseChunk}
-float fbm(vec3 p) { float a = 0.5; float s = 0.0; for (int i = 0; i < 5; i++) { s += a * noise(p); p *= 2.07; a *= 0.5; } return s; }
-vec4 disk(vec3 p, float r) {
-  float phi = atan(p.z, p.x);
-  float a = phi + uTime * 0.9 * pow(r, -1.5);
-  vec3 q = vec3(r * 2.3, cos(a) * 1.7, sin(a) * 1.7);
-  float n = fbm(q + vec3(0.0, 0.0, uTime * 0.03));
-  float streak = fbm(vec3(r * 7.0, cos(a) * 0.6, sin(a) * 0.6));
-  float inner = smoothstep(2.3, 3.1, r); float outer = 1.0 - smoothstep(5.8, 10.5, r);
-  float dens = inner * outer * (0.25 + 0.95 * n * n + 0.35 * streak);
-  float heat = clamp(1.9 / (r - 1.5), 0.0, 1.0);
-  vec3 c = mix(vec3(1.0, 0.36, 0.08), vec3(1.0, 0.82, 0.55), heat);
-  c = mix(c, vec3(1.0, 0.97, 0.92), heat * heat * 0.7);
-  vec3 v = normalize(vec3(-p.z, 0.0, p.x));
-  float dop = clamp(1.0 + 0.5 * dot(v, normalize(uCam - p)), 0.35, 1.6);
-  float I = dens * 0.62 * uHeat * dop * dop * dop * (0.4 + 1.6 / (r * 0.55));
-  return vec4(c * I, clamp(dens * 1.1, 0.0, 0.96));
-}
-void main() {
-  vec2 uv = (gl_FragCoord.xy - uCenter) / uScale;
-  vec3 fwd = normalize(-uCam); vec3 right = normalize(cross(vec3(0.0, 1.0, 0.0), fwd)); vec3 up = cross(fwd, right);
-  vec3 dir = normalize(fwd * uFocal + right * uv.x + up * uv.y);
-  vec3 pos = uCam; vec3 vel = dir;
-  vec3 hv = cross(pos, vel); float h2 = dot(hv, hv);
-  // Inward photons with an impact parameter below 3*sqrt(3)/2 Rs (b^2 < 27/4)
-  // are captured. Deciding this analytically gives the shadow an exact edge
-  // instead of one that depends on the integration step.
-  bool captured = h2 < 6.75 && dot(pos, dir) < 0.0;
-  bool done = captured;
-  // Near the critical impact parameter the higher-order disk images and the
-  // lensed sky become thinner than a buffer texel. Fade them into the smooth
-  // photon ring below, so every quantity is continuous across the shadow's
-  // edge and upscales without steps or shimmer.
-  float edge = smoothstep(0.08, 1.1, abs(h2 - 6.75));
-  vec3 col = vec3(0.0); float trans = 1.0; float crossings = 0.0;
-  for (int i = 0; i < 220; i++) {
-    float r2 = dot(pos, pos); float r = sqrt(r2);
-    float dt = clamp(0.07 * r, 0.025, 0.9);
-    vec3 p0 = pos;
-    vel += -1.5 * h2 * pos / (r2 * r2 * r) * dt; pos += vel * dt;
-    if (p0.y * pos.y < 0.0) {
-      float t = p0.y / (p0.y - pos.y); vec3 pc = mix(p0, pos, t); float rr = length(pc.xz);
-      if (rr > 2.3 && rr < 10.5) {
-        vec4 d = disk(pc, rr);
-        d.a *= crossings < 0.5 ? 1.0 : edge;
-        col += d.rgb * d.a * trans; trans *= 1.0 - d.a;
-      }
-      crossings += 1.0;
-    }
-    if (dot(pos, pos) < 1.0) { captured = true; done = true; break; }
-    if (r > 45.0 || trans < 0.02) { done = true; break; }
-  }
-  // Rays still circling the photon sphere have no settled direction yet.
-  float escape = captured || !done ? 0.0 : smoothstep(0.05, 0.8, h2 - 6.75);
-  // Photon ring: rays that skim the photon sphere, continuous across the edge
-  // (a slower fall-off outside, a quick one into the shadow).
-  float ring = (h2 > 6.75 ? exp(-(h2 - 6.75) * 1.4) : exp(-(6.75 - h2) * 7.0)) * 0.09 * uHeat * (1.0 + uGlow);
-  outDisk = vec4(col + vec3(1.0, 0.72, 0.42) * ring * trans, trans);
-  outEscape = vec4(normalize(vel), escape);
-}`;
+void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }`;
 
 // Full-resolution sky, the click ripple, the horizon blackout and the
 // widening "far side" opening over the next chapter's photograph.
 const compositeFragment = /* glsl */ `
 #define PI 3.14159265
 uniform sampler2D tDisk; uniform sampler2D tEscape; uniform samplerCube uSky;
+uniform vec2 uDiskTexel;
 uniform mat3 uSkyRotation;
+uniform float uSkyParallax;
 uniform vec2 uViewport; uniform float uSkyGain; uniform float uWarp; uniform vec3 uFwd;
 uniform float uBlackout; uniform float uEmerge;
 uniform vec4 uWave; uniform float uWaveWidth;
-varying vec2 vUv;
 vec3 milkyWay(vec3 d) {
-  return textureCube(uSky, uSkyRotation * d).rgb * uSkyGain;
+  // Opening-only exposure, shared by normal and dive samples to avoid a flash.
+  // Counter-parallax is tied to actual observer movement, not a second clock.
+  float c = cos(uSkyParallax), s = sin(uSkyParallax);
+  d = vec3(c * d.x + s * d.z, d.y, -s * d.x + c * d.z);
+  return textureCube(uSky, uSkyRotation * d).rgb * uSkyGain * 0.48;
 }
 vec3 sky(vec3 d) {
   return milkyWay(d);
 }
+${diskReconstruction}
 void main() {
   vec2 frag = gl_FragCoord.xy; vec2 src = frag;
   float glint = 0.0;
-  // A click sends one gravitational-wave ripple outwards.
+  // Artistic click feedback, not a simulation of gravitational waves.
   if (uWave.w > 0.0) {
     vec2 d = frag - uWave.xy; float r = length(d); float k = (r - uWave.z) / uWaveWidth;
     src += d / max(r, 1.0) * uWave.w * sin(k * PI) * exp(-k * k) * uWaveWidth * 0.45;
     glint += uWave.w * 0.35 * exp(-k * k * 4.0);
   }
   vec2 uv = src / uViewport;
-  vec4 disk = texture2D(tDisk, uv); vec4 escape = texture2D(tEscape, uv);
+  vec4 disk = sampleDisk(uv); vec4 escape = texture2D(tEscape, uv);
   vec3 direction = normalize(escape.xyz + vec3(0.0, 1e-4, 0.0));
   vec3 s = sky(direction);
   // Speed streaks while diving: two extra Milky Way taps, no extra stars.
@@ -167,16 +99,6 @@ void main() {
   float opening = uEmerge > 0.0 ? 1.0 - smoothstep(radius, radius + 0.16 * diagonal, length(frag - 0.5 * uViewport)) : 0.0;
   gl_FragColor = vec4(c, 1.0 - opening);
 }`;
-
-// Ray-marching is priced per pixel: keep a fixed sample budget whatever the
-// device pixel ratio (280k at full quality, 210k once the frame-rate guard
-// steps in). Only the disk and escape directions live at this size; the sky
-// itself is looked up at full resolution.
-export function holeBufferSize(width, height, quality = 1) {
-  const budget = 140000 + 140000 * Math.min(1, Math.max(0.5, quality));
-  const scale = Math.min(0.7, Math.sqrt(budget / Math.max(1, width * height)));
-  return [Math.max(1, Math.round(width * scale)), Math.max(1, Math.round(height * scale))];
-}
 
 // The lensed sky is the one texture this renderer loads. Tests run the scene
 // without GPU textures (gpu=false), as they do for the rest of the home.
@@ -223,7 +145,9 @@ export function BlackHole({ model, gpu = true }) {
         uCam: { value: new Vector3() },
         uFocal: { value: 1.8 },
         uHeat: { value: 1 },
-        uGlow: { value: 0 },
+        uRoll: { value: 0 },
+        uFormation: { value: new Vector4(1, 1, 0, 0) },
+        uFormationTurn: { value: 0 },
       },
     });
     const composite = new ShaderMaterial({
@@ -235,10 +159,16 @@ export function BlackHole({ model, gpu = true }) {
       uniforms: {
         tDisk: { value: target.textures[0] },
         tEscape: { value: target.textures[1] },
+        uDiskTexel: { value: new Vector2(1, 1) },
         uSky: { value: null },
-        uSkyRotation: { value: new Matrix3() },
+        // Fixed base star-map orientation. Opening-only counter-parallax is
+        // applied separately from actual observer deltas; no independent timer.
+        uSkyRotation: { value: new Matrix3().setFromMatrix4(
+          new Matrix4().makeRotationFromEuler(new Euler(0.32, Math.PI / 2, -0.5)),
+        ).transpose() },
         uViewport: { value: new Vector2(1, 1) },
         uSkyGain: { value: openingSkyIntensity },
+        uSkyParallax: { value: 0 },
         uWarp: { value: 0 },
         uFwd: { value: new Vector3(0, 0, 1) },
         uBlackout: { value: 0 },
@@ -255,7 +185,9 @@ export function BlackHole({ model, gpu = true }) {
     scene.add(quad);
     return { target, ray, composite, geometry, scene, camera: new OrthographicCamera(-1, 1, 1, -1, 0, 1) };
   }, []);
-  const motion = useRef({ disk: 40, last: 0, gazeX: 0, gazeY: 0, skyRotation: new Matrix4() });
+  const motion = useRef({ disk: 40, orbit: 0, last: 0, gazeX: 0, gazeY: 0,
+    lastYaw: model.yaw.get(), manualUntil: -Infinity, idleBlend: 1, orbitDirection: 1,
+    lastPointerAt: -Infinity, lastViewAngle: 0, skyParallax: 0 });
   useEffect(() => {
     if (gpu) return;
     model.openingReady = true;
@@ -280,7 +212,6 @@ export function BlackHole({ model, gpu = true }) {
     const { width, height } = state.size;
     const view = blackHoleView(p, {
       portrait: width / Math.max(1, height) < 0.85,
-      entrance: model.entrance ? model.entrance.get() : 1,
     });
     mesh.current.visible = view.visible;
     const m = motion.current;
@@ -292,11 +223,41 @@ export function BlackHole({ model, gpu = true }) {
     // visitor left the camera.
     const interactive = model.pointerEnabled !== false && p < 0.01;
     const pointing = interactive && model.pointerActive;
-    m.gazeX = MathUtils.damp(m.gazeX, pointing ? model.pointer.x : 0, 3, step);
-    m.gazeY = MathUtils.damp(m.gazeY, pointing ? model.pointer.y : 0, 3, step);
-    if (!model.reduced && !model.preparing) m.disk += step * view.timeRate ** 3;
-    const azimuth = view.azimuth + model.yaw.get() * 0.5 + (model.reduced ? 0 : 0.06 * Math.sin(model.time * 0.07)) + 0.06 * m.gazeX;
-    const tilt = view.tilt + 0.03 * m.gazeY;
+    const yaw = model.yaw.get();
+    const yawDelta = yaw - m.lastYaw;
+    if (interactive && Math.abs(yawDelta) > 1e-6) m.orbitDirection = Math.sign(yawDelta);
+    if (interactive && (model.orbiting || Math.abs(yawDelta) > 1e-6)) {
+      m.manualUntil = model.time + 1.2;
+      m.idleBlend = 0;
+    }
+    m.lastYaw = yaw;
+    const manual = model.time < m.manualUntil;
+    // Hold the selected angle on pointer leave and throughout a drag/dive.
+    // Recentering would turn the sky backwards just as idle motion resumes.
+    if (!manual && pointing && model.pointerAt > m.manualUntil) {
+      if (model.pointerAt > m.lastPointerAt && Math.abs(model.pointer.x - m.gazeX) > 1e-4) {
+        m.orbitDirection = Math.sign(model.pointer.x - m.gazeX);
+      }
+      m.gazeX = MathUtils.damp(m.gazeX, model.pointer.x, 3, step);
+      m.gazeY = MathUtils.damp(m.gazeY, model.pointer.y, 3, step);
+    }
+    // Do not replay stale hover samples after the manual input hold expires.
+    m.lastPointerAt = model.pointerAt;
+    if (!model.reduced && !model.preparing && model.openingReady !== false) {
+      m.disk = advanceHoleClock(m.disk, step, view.timeRate);
+      const hoverMoving = pointing && model.time - model.pointerAt < 0.15;
+      if (!manual && !hoverMoving && p < 0.01 && (!model.entrance || model.entrance.get() >= 1)) {
+        m.idleBlend = MathUtils.damp(m.idleBlend, 1, 1.8, step);
+        m.orbit = advanceHoleOrbit(m.orbit, step * m.idleBlend, m.orbitDirection);
+      } else m.idleBlend = 0;
+    }
+    const viewAngle = yaw * 0.5 + m.orbit + 0.06 * m.gazeX;
+    if (p < 0.01 && !model.preparing && model.openingReady !== false)
+      m.skyParallax = advanceSkyParallax(m.skyParallax, viewAngle, m.lastViewAngle);
+    m.lastViewAngle = viewAngle;
+    const azimuth = view.azimuth + viewAngle;
+    const cinema = cinematicHolePose(p);
+    const tilt = view.tilt + cinema.tilt + 0.03 * m.gazeY;
     const [w, h] = holeBufferSize(width, height, model.quality ?? 1);
     if (parts.target.width !== w || parts.target.height !== h) parts.target.setSize(w, h);
     const u = parts.ray.uniforms;
@@ -309,10 +270,14 @@ export function BlackHole({ model, gpu = true }) {
       -Math.cos(azimuth) * Math.cos(tilt) * view.distance,
     );
     u.uFocal.value = view.focal;
-    u.uHeat.value = view.heat;
-    u.uGlow.value = view.glow;
+    const formation = blackHoleFormation(model.entrance ? model.entrance.get() : 1);
+    u.uHeat.value = formation.disk;
+    u.uFormation.value.set(formation.mass, formation.disk, formation.skyTurn, formation.skySpread);
+    u.uFormationTurn.value = formation.turn;
+    u.uRoll.value = cinema.roll;
     const c = parts.composite.uniforms;
-    c.uSkyRotation.value.setFromMatrix4(m.skyRotation.makeRotationFromEuler(state.scene.backgroundRotation)).transpose();
+    c.uSkyParallax.value = m.skyParallax;
+    c.uDiskTexel.value.set(1 / w, 1 / h);
     state.gl.getDrawingBufferSize(c.uViewport.value);
     const vw = c.uViewport.value.x,
       vh = c.uViewport.value.y,
@@ -322,8 +287,7 @@ export function BlackHole({ model, gpu = true }) {
     c.uWarp.value = model.reduced ? 0 : Math.min(1, Math.max(velocity * 0.8, leave));
     c.uBlackout.value = Math.max(view.blackout, 0.94 * leave);
     c.uEmerge.value = view.emerge;
-    // A click on the opening sends one ripple through the lensed sky; reduced
-    // motion keeps the sky still.
+    // Preserve the opening's artistic click feedback; reduced motion disables it.
     const pulse = model.pulse,
       age = pulse ? model.time - pulse.at : Infinity;
     if (interactive && !model.reduced && age >= 0 && age < 1.3)

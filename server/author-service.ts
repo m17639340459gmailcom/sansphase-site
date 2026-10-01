@@ -304,7 +304,7 @@ export function createAuthorService({
           send(await this.identity(req));
           return;
         }
-        const identity = await authorize(token);
+        await authorize(token);
         if (parts[0] === "logout" && req.method === "POST") {
           await store.logout(token);
           res.setHeader("Set-Cookie", cookieHeader(""));

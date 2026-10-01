@@ -10,20 +10,15 @@ import { Effects } from "@react-three/drei/core/Effects.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { SkyCompositor } from "./library-sky.jsx";
-import { GlassSceneBuffer } from "./library-glass.jsx";
 extend({ UnrealBloomPass, OutputPass });
 import { cosmosFraming } from "./library-layout.mjs";
 import { createEntrance, entranceDuration } from "./library-entrance.mjs";
 import { advanceReferenceTurn } from "./reference-rotation.mjs";
 
 // This file composes library components and binds our navigation state.
-// The opening chapter is the ray-marched black hole in library-black-hole.jsx,
-// whose cursor is a small gravitational lens; everything else here is library
-// components and vendored reference programs. Chapters 1-3 are one sky
-// compositor (library-sky.jsx). Detached from the live scene for now: the R
-// glass installation (library-opening.jsx), its glass cursor tubes
-// (library-spatial-effects.jsx) and the panorama backdrop (library-nebula.jsx),
-// which the hole and the photographs always covered.
+// The opening is the ray-marched black hole in library-black-hole.jsx.
+// Chapters 1-3 share the photographic compositor in library-sky.jsx.
+// Retired glass/cursor effects are archived; no refraction buffers are mounted.
 export function LibraryCosmosScene({
   model,
   onFrame = () => {},
@@ -99,9 +94,8 @@ export function LibraryCosmosScene({
     }
     onFrame(p, state);
   }, -1);
-  const Wrapper = lighting ? GlassSceneBuffer : React.Fragment;
   return (
-    <Wrapper {...(lighting ? { model } : {})}>
+    <>
       {!lighting && <color attach="background" args={["#04080d"]} />}
       <fog attach="fog" args={["#04080d", 28, 100]} />
       <ambientLight intensity={0.14} />
@@ -185,6 +179,6 @@ export function LibraryCosmosScene({
           <outputPass />
         </Effects>
       )}
-    </Wrapper>
+    </>
   );
 }

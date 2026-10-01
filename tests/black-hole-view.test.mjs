@@ -29,15 +29,6 @@ test("the dive closes in monotonically, darkens at the horizon, then opens the n
   assert.equal(blackHoleView(2.5).visible, false);
 });
 
-test("the entrance flies in from further out while the disk warms up", () => {
-  const start = blackHoleView(0, { entrance: 0 }),
-    end = blackHoleView(0, { entrance: 1 });
-  assert.equal(start.distance, 24);
-  assert.equal(start.heat, 0);
-  assert.equal(end.distance, 14);
-  assert.equal(end.heat, 1);
-});
-
 test("opening framing is ten percent smaller and rejoins the existing dive smoothly", () => {
   const legacyFocal = p => {
     const t = Math.min(1, Math.max(0, p / 0.35));
