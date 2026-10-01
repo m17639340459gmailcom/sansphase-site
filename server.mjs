@@ -33,6 +33,7 @@ export function createPreviewServer({
   authorService,
   readerService,
   readerAdminService,
+  communityService,
   healthCheck = async () => {},
   release = 'development',
   requestLogger,
@@ -67,6 +68,10 @@ export function createPreviewServer({
       }
       if (req.url.startsWith('/api/reader/') && readerService) {
         await readerService.handle(req, res);
+        return;
+      }
+      if (req.url.startsWith('/api/community/') && communityService) {
+        await communityService.handle(req, res);
         return;
       }
       if (req.url.startsWith('/api/manage/') && readerAdminService) {

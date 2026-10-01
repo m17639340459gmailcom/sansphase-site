@@ -96,3 +96,15 @@ test('dispose cancels motion and leaves updates functional without new animation
   assert.equal(s.transitions.run('works', 'notes', () => 'done'), 'done');
   assert.equal(s.animations.length, 1); s.close();
 });
+
+test('community entrance uses live content and remains immediately interruptible', () => {
+  const s = setup();
+  try {
+    let updated = 0;
+    assert.equal(s.transitions.run('community', 'community', () => ++updated), 1);
+    assert.equal(s.snapshots(), 0);
+    assert.equal(s.animations.length, 1);
+    s.doc.dispatchEvent(new s.win.Event('pointerdown'));
+    assert.equal(s.animations[0].cancelled, 1);
+  } finally { s.close(); }
+});

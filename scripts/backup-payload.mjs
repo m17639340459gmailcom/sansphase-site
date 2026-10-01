@@ -24,11 +24,14 @@ try {
 const snapshot = new DatabaseSync(resolve(target, "content.db"), {
   readOnly: true,
 });
-let files, readerAvatars = [];
+let files, readerAvatars = [], communityImages = [];
 try {
   files = snapshot.prepare("SELECT filename FROM media").all();
   if (snapshot.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='readers'").get())
     readerAvatars = snapshot.prepare("SELECT avatar FROM readers WHERE avatar IS NOT NULL AND avatar <> ''").all();
+  // Community images, including ones taken out of posts (kept for moderation).
+  if (snapshot.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='community_images'").get())
+    communityImages = snapshot.prepare("SELECT id, topic_id FROM community_images").all();
 } finally {
   snapshot.close();
 }
@@ -56,6 +59,15 @@ for (const { avatar } of readerAvatars) {
   const filename = `reader-avatar-${avatar}.webp`;
   await copyFile(resolve(source, 'uploads', filename), resolve(target, 'uploads', filename));
   paths.push(`uploads/${filename}`);
+}
+for (const { id, topic_id } of communityImages) {
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) continue;
+  for (const filename of [`community-image-${id}.webp`, `community-thumb-${id}.webp`]) {
+    // An upload not yet attached to a post may be swept at any moment.
+    try { await copyFile(resolve(source, 'uploads', filename), resolve(target, 'uploads', filename)); }
+    catch (error) { if (topic_id || error?.code !== 'ENOENT') throw error; continue; }
+    paths.push(`uploads/${filename}`);
+  }
 }
 const manifest = {
   provider: "payload",

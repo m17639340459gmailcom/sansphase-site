@@ -37,12 +37,16 @@ import {
   Disc3,
   Tags,
   Bell,
+  MessagesSquare,
   Clock3,
   ChevronDown,
   ChevronUp,
   Check,
   Image as ImageIcon,
   Play, Pause, SkipBack, SkipForward, Volume2, VolumeX,
+  CircleHelp, Box, Feather, Megaphone, Coffee, TrendingUp, MessageSquare, ChevronRight, BookOpen, Users, Lock, Pin, Award, Trash2, Send, Star, Copy,
+  Eye, Flag, Gift, PenLine, ThumbsUp, Bookmark, Sunrise, ImagePlus, ShieldCheck,
+  AtSign, LockOpen, ExternalLink, TriangleAlert, Ban, FolderInput, Ellipsis, Trophy, Crown, Bold, Code, Quote, Upload, Truck, Sparkles, Package, RotateCcw, Inbox,
 } from "lucide";
 
 const family = {
@@ -67,12 +71,20 @@ const family = {
   disc: Disc3,
   tags: Tags,
   bell: Bell,
+  message: MessagesSquare,
   clock: Clock3,
   "chevron-down": ChevronDown,
   "chevron-up": ChevronUp,
   check: Check,
   image: ImageIcon,
   play: Play, pause: Pause, previous: SkipBack, next: SkipForward, volume: Volume2, muted: VolumeX,
+  // Community boards and actions.
+  help: CircleHelp, box: Box, feather: Feather, megaphone: Megaphone, coffee: Coffee, trending: TrendingUp,
+  reply: MessageSquare, "chevron-right": ChevronRight, book: BookOpen, users: Users, lock: Lock, pin: Pin,
+  award: Award, trash: Trash2, send: Send, star: Star, copy: Copy,
+  eye: Eye, flag: Flag, gift: Gift, pen: PenLine, like: ThumbsUp, bookmark: Bookmark, sunrise: Sunrise, "image-plus": ImagePlus, shield: ShieldCheck,
+  at: AtSign, unlock: LockOpen, external: ExternalLink, alert: TriangleAlert, ban: Ban, move: FolderInput, more: Ellipsis, trophy: Trophy, crown: Crown,
+  bold: Bold, code: Code, quote: Quote, upload: Upload, truck: Truck, sparkles: Sparkles, package: Package, restore: RotateCcw, inbox: Inbox,
 };
 export const icon = (name: keyof typeof family, classes = "") =>
   createElement(family[name], {
