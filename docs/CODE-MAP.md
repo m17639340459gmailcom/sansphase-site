@@ -4,7 +4,7 @@
 
 | 想修改什么 | 主要源码 | 验证入口 |
 | --- | --- | --- |
-| 页面路由、顶栏导航 | `src/app.mjs`、`nav-slider.ts`、`route-transition.mjs` | nav-slider、dom 测试 |
+| 页面路由、顶栏导航 | `src/app.mjs`、`nav-slider.ts`、`route-transition.ts` | nav-slider、route-transition、dom 测试 |
 | 首页章节、滚动与手势 | `src/universe.mjs`、`library-cosmos.tsx`、`library-cosmos-scene.jsx` | universe、library-scene 测试 |
 | 黑洞 | `src/black-hole-plasma.ts` 材质、`black-hole-shaders.ts` 光线、`black-hole-formation.ts` 出场、`black-hole-background.ts` 视差；`library-black-hole.jsx` 挂载 | black-hole 系列、场景测试 |
 | 排版和公共样式 | `src/styles-*.css`；`styles.css` 声明组合顺序 | 构建、DOM、实际浏览器 |
