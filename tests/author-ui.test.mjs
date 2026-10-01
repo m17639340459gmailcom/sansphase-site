@@ -251,7 +251,13 @@ test("author hub groups actions; background editing preserves profile; back navi
         files: [],
       } });
       bodyEditor.dispatchEvent(event);
+      return event;
     };
+    bodyEditor.focus();
+    assert.equal(paste('').defaultPrevented, true, 'empty clipboard is consumed without the legacy hidden-input fallback');
+    assert.equal(d.activeElement, bodyEditor, 'empty paste never transfers focus away from the editor');
+    await settle();
+    assert.equal(bodyEditor.textContent, '', 'empty paste leaves the document untouched');
     paste('阅读[内部链接说明](https://obsidian.md/help/links) · [反向链接说明](https://obsidian.md/help/plugins/backlinks)。');
     await settle();
     assert.deepEqual([...bodyEditor.querySelectorAll('a')].map(a => [a.textContent, a.getAttribute('href')]), [

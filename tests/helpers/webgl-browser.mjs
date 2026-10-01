@@ -1,11 +1,11 @@
-// Optional GPU tests use a fresh browser profile; never attach to user tabs.
+// Optional GPU and UI tests use a fresh browser profile; never attach to user tabs.
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-export async function evaluateInWebGLBrowser(browserPath, expression) {
+export async function evaluateInWebGLBrowser(browserPath, expression, pageUrl = 'about:blank') {
   const prefix = join(tmpdir(), 'sansphase-webgl-test-');
   const profile = await mkdtemp(prefix);
   const browser = spawn(browserPath, ['--headless=new', '--no-first-run',
@@ -23,15 +23,27 @@ export async function evaluateInWebGLBrowser(browserPath, expression) {
       if (port) break;
       await delay(100);
     }
-    if (!port) throw new Error('GPU test browser did not start');
+    if (!port) throw new Error('Test browser did not start');
     const tabs = await fetch(`http://127.0.0.1:${port}/json/list`).then(r => r.json());
     socket = new WebSocket(tabs.find(tab => tab.type === 'page').webSocketDebuggerUrl);
     await new Promise((resolve, reject) => {
       socket.addEventListener('open', resolve, { once: true });
       socket.addEventListener('error', reject, { once: true });
     });
+    if (pageUrl !== 'about:blank') await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => { socket.removeEventListener('message', receive); reject(new Error('Test page load timed out')); }, 30000);
+      const receive = event => {
+        const message = JSON.parse(event.data);
+        if (message.id === 90) socket.send(JSON.stringify({ id: 91, method: 'Page.navigate', params: { url: pageUrl } }));
+        if (message.method === 'Page.loadEventFired') {
+          clearTimeout(timer); socket.removeEventListener('message', receive); resolve();
+        }
+      };
+      socket.addEventListener('message', receive);
+      socket.send(JSON.stringify({ id: 90, method: 'Page.enable' }));
+    });
     const result = await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('GPU evaluation timed out')), 30000);
+      const timer = setTimeout(() => reject(new Error('Browser evaluation timed out')), 30000);
       socket.addEventListener('message', event => {
         const message = JSON.parse(event.data);
         if (message.id !== 1) return;

@@ -14,6 +14,7 @@ export const typedBrowserModules = new Set([
   'reader-ui.mjs',
   'reader-membership.mjs',
   'route-styles.mjs',
+  'route-transition.mjs',
   'scene-delivery.mjs',
   'site-copy.mjs',
 ]);

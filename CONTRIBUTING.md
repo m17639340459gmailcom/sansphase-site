@@ -42,6 +42,7 @@ node --input-type=module -e "import {createPreviewServer} from './server.mjs'; c
 - 修改前补必要回归用例，至少运行对应测试；提交候选前运行 `pnpm build`、`pnpm test`。
 - 维护脚本需执行 `python -m unittest discover -s tests -p maintenance_test.py`；Windows 跳过的 Linux 用例在 Linux 补验。
 - 真实 GPU 用例需将 `SANSPHASE_WEBGL_TEST_BROWSER` 设置为本机 Chrome 可执行文件路径，再运行 `node --test tests/black-hole-material-gpu.test.mjs`。默认明确跳过，不能记为 GPU 验证通过。
+- 编辑器滚动用例需将 `SANSPHASE_UI_TEST_BROWSER` 设置为 Chrome 路径，运行 `node --test tests/author-editor-browser.test.mjs`；它使用独立浏览器和无数据库测试页面，检查五类正文编辑器的空粘贴、长文粘贴、正常输入与弹窗滚动边界。
 - UI 检查桌面、窄屏与键盘；动画检查初始、持续运行、离页返回、减少动态效果和资源释放。
 
 ## 提交与发布

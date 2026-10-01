@@ -28,7 +28,6 @@ import {
   socialIcon, socialPlatform, tagTone, applyCardAppearance,
   enhanceArticleReading,
   arrow,
-  enterPage,
   mountFilters,
   mountGlassSurface,
   mountMobileBlogOrder,
@@ -110,7 +109,6 @@ let blogTheme = (() => {
   }
 })();
 let filterPage = typeof restoredView.filterPage === "string" ? restoredView.filterPage : "";
-let hasRenderedOnce = false;
 const t = (zh, en) => (language === "zh" ? zh : en);
 const copy = value => siteCopy(value,language);
 const blogNotice = createBlogNotice({
@@ -460,7 +458,7 @@ async function render(options={}) {
  renderView(options);
  window.sansphasePageSession?.commit();
 }
-function renderView({silent=false,preserveScroll=false,contentStatus}={}) {
+function renderView({preserveScroll=false,contentStatus}={}) {
   vipBookPrompt=vipBookPrompt?.updateLanguage(language==='en');
   syncContentCollections();
   const position = preserveScroll ? {left:window.scrollX,top:window.scrollY} : null;
@@ -563,10 +561,6 @@ function renderView({silent=false,preserveScroll=false,contentStatus}={}) {
   blogClock.sync(page);
   blogWeather.sync(page);
   connectFilters(page);
-  // Initial rendering and blog navigation must not run an entrance transform.
-  // Other route changes retain their short entrance motion.
-  if (!silent && hasRenderedOnce && !personalPage(page)) enterPage(main.firstElementChild);
-  hasRenderedOnce = true;
   document.title =
     page === "home"
       ? t("無相 · 博客与作品", "無相 · Blog and work")
@@ -753,7 +747,7 @@ document.addEventListener("click", (e) => {
     }
     case "language":
       language = language === "zh" ? "en" : "zh";
-      render({silent:true,preserveScroll:true});
+      render({preserveScroll:true});
       blogWeather.refreshCityLabel();
       document.querySelector('[data-action="language"]').focus({preventScroll:true});
       break;
@@ -847,20 +841,16 @@ document.addEventListener("keydown", (e) => {
     }
   }
 });
-const sectionParent = { work: "works", note: "notes", post: "community" };
-const routeTransitions = createRouteTransitions(document, {
-  sectionOf: (page) => siteSections.findIndex(({ id }) => id === (sectionParent[page] || page)),
-});
+const routeTransitions = createRouteTransitions(document);
 // On the homepage a followed link first flies the scene towards the click for
-// DEPART_MS, while the destination's content is fetched; the page then opens
-// over that motion. Without view transitions or with reduced motion, links
-// behave as ordinary links.
+// DEPART_MS, while the destination's content is fetched. The destination uses
+// a live fade, with no snapshot overlay. Reduced motion keeps ordinary links.
 let departing = false;
 document.addEventListener("click", (event) => {
   const link = event.target.closest?.('a[href^="#/"]');
   if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   const target = parseRoute(link.getAttribute("href"));
-  if (parseRoute(location.hash).page !== "home" || target.page === "home" || typeof document.startViewTransition !== "function") return;
+  if (parseRoute(location.hash).page !== "home" || target.page === "home") return;
   const rect = link.getBoundingClientRect();
   const x = event.detail ? event.clientX : rect.left + rect.width / 2,
     y = event.detail ? event.clientY : rect.top + rect.height / 2;
@@ -908,13 +898,13 @@ window.addEventListener('author:identity',event=>{
   if(!siteContent)return;
   contentReader.clear();loadedContentKey='';
   siteContent.author=event.detail;
-  render({silent:true,preserveScroll:true});
+  render({preserveScroll:true});
 });
 window.addEventListener('reader:identity',event=>{
   if(!siteContent)return;
   contentReader.clear();loadedContentKey='';remotePage=null;
   siteContent.reader=event.detail;
-  render({silent:true});
+  render();
 });
 readerUI=mountReaderUI({render,onIdentity(value){
   window.dispatchEvent(new CustomEvent('reader:identity',{detail:value}));
@@ -927,7 +917,7 @@ window.addEventListener('author:content',async event=>{
   loadedContentKey='';remotePage=null;
   const background=siteContent.profile?.background||'./assets/materials/blog-space.png';
   if(blogPhoto&&blogPhoto.getAttribute('src')!==background){const photo=new Image();photo.sizes='100vw';photo.srcset=imageSourceSet(background);photo.src=background;try{await photo.decode();blogPhoto.sizes=photo.sizes;blogPhoto.srcset=photo.srcset;blogPhoto.src=background;}catch{}}
-  await render({silent:true,preserveScroll:true});window.scrollTo({top:y,behavior:'instant'});
+  await render({preserveScroll:true});window.scrollTo({top:y,behavior:'instant'});
 });
 
 blogWeather.bind();

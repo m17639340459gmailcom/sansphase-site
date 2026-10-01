@@ -13,7 +13,6 @@ import * as ToggleGroup from "@radix-ui/react-toggle-group";
 import {filterTimezones,searchTimezoneCities,timezoneLabel} from './timezone-search.mjs';
 import { Toaster, toast } from "sonner";
 import A11yDialog from "a11y-dialog";
-import { animate } from "motion";
 import GlassSurface from "./vendor/react-bits/GlassSurface.jsx";
 import {
   createElement,
@@ -142,18 +141,6 @@ export function createDialog(container: HTMLElement) {
   dialog.on("hide", () => setBackground(false));
   dialog.on("destroy", () => setBackground(false));
   return dialog;
-}
-
-let entrance: ReturnType<typeof animate> | undefined;
-export function enterPage(element: HTMLElement | null | undefined) {
-  entrance?.stop();
-  if (!element || matchMedia("(prefers-reduced-motion: reduce)").matches)
-    return;
-  entrance = animate(
-    element,
-    { opacity: [0, 1], y: [12, 0] },
-    { duration: 0.45, ease: [0.22, 0.8, 0.22, 1] },
-  );
 }
 
 // Small adapters keep the existing content controller while Radix owns focus,

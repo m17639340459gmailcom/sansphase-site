@@ -19,7 +19,8 @@
   height: var(--header-h);
   border: 0;
   border-bottom: 1px solid transparent;
-  background: linear-gradient(180deg, rgb(5 7 11 / 66%), rgb(5 7 11 / 0%));
+  /* Keep the fade from tiling into the transparent bottom border. */
+  background: linear-gradient(180deg, rgb(5 7 11 / 66%), rgb(5 7 11 / 0%)) no-repeat;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }

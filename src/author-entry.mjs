@@ -1,6 +1,7 @@
 import {uiText} from './ui-language.mjs';
 import {normalizeBodyLinks} from './body-links.mjs';
 import {mountEditorToolbar} from './author-editor-toolbar.mjs';
+import {AuthorEditorViewport} from './author-editor-viewport.ts';
 import {mountBookEditor,BookBlockIdentity} from './book-editor.ts';
 import {captureImagePosition,insertImageAtPosition} from './editor-image-position.mjs';
 import {mountDiscardSurface} from './author-discard-surface.mjs';
@@ -51,11 +52,11 @@ shell.className = "dialog-shell author-dialog";
 shell.setAttribute("aria-hidden", "true");
 shell.setAttribute("aria-labelledby", "author-dialog-title");
 shell.innerHTML =
-  `<div class="author-dialog-backdrop" aria-hidden="true"></div><section class="author-panel" role="document"><button class="author-close" type="button" data-author-close aria-label="${uiText("关闭作者窗口", "Close author panel")}">` +
+  `<div class="author-dialog-backdrop" aria-hidden="true"></div><div class="author-frame"><section class="author-panel" role="document"><button class="author-close" type="button" data-author-close aria-label="${uiText("关闭作者窗口", "Close author panel")}">` +
   icons.close +
   '</button><button class="author-back" type="button" data-author-back hidden>' +
   icons.left +
-  `${uiText(" 返回作者模式", " Back to author mode")}</button><div id="author-dialog-content"></div><div class="author-discard" hidden role="alertdialog" aria-modal="true" aria-labelledby="author-discard-message"><p id="author-discard-message">${uiText("还有未保存的修改。继续编辑，或放弃修改后离开。", "You have unsaved changes. Keep editing, or discard them before leaving.")}</p><button type="button" data-keep-editing>${uiText("继续编辑", "Keep editing")}</button><button type="button" data-discard>${uiText("放弃修改", "Discard changes")}</button></div></section>`;
+  `${uiText(" 返回作者模式", " Back to author mode")}</button><div id="author-dialog-content"></div><div class="author-discard" hidden role="alertdialog" aria-modal="true" aria-labelledby="author-discard-message"><p id="author-discard-message">${uiText("还有未保存的修改。继续编辑，或放弃修改后离开。", "You have unsaved changes. Keep editing, or discard them before leaving.")}</p><button type="button" data-keep-editing>${uiText("继续编辑", "Keep editing")}</button><button type="button" data-discard>${uiText("放弃修改", "Discard changes")}</button></div></section></div>`;
 document.body.append(shell);
 const dialog = createDialog(shell),
   host = shell.querySelector("#author-dialog-content");
@@ -316,6 +317,7 @@ async function edit(selected, id) {
     editor = new Editor({
       element: host.querySelector(".author-editor"),
       extensions: [
+        AuthorEditorViewport,
         StarterKit.configure({ link: { openOnClick: false, markdownLinks: true, autolink: true, linkOnPaste: true, defaultProtocol: 'https' } }),
         Image.configure({ allowBase64: false }),
         TableKit,

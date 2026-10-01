@@ -105,7 +105,7 @@ test("local prototype DOM flows", async (t) => {
       return loadLibrary(new URL('../dist/catalog.mjs', import.meta.url));
     if (specifier === './content-images.mjs')
       return loadLibrary(new URL('../dist/content-images.mjs', import.meta.url));
-    // jsdom has no View Transitions API, so route changes take the plain path.
+    // jsdom has no native Element.animate, so route changes take the plain path.
     if (['./route-transition.mjs', './journey.mjs', './nav-slider.mjs'].includes(specifier))
       return loadLibrary(new URL('../dist/' + specifier.slice(2), import.meta.url));
     if (['./reader-ui.mjs','./admin-readers.mjs','./access-policy.mjs'].includes(specifier))
