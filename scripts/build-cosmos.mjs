@@ -99,6 +99,11 @@ for (const file of [
   "blog-background.css",
   "author.css",
   "community.mjs",
+  "community-ui.mjs",
+  "community-post.mjs",
+  "community-pages.mjs",
+  "community-rules.mjs",
+  "community-sky.mjs",
   "community.css",
 ]) {
   if (typedBrowserModules.has(file)) {

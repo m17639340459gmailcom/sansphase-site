@@ -14,6 +14,7 @@ import { createReaderUidStore } from '../reader-uids.ts';
 import { createReaderRetention } from '../reader-retention.ts';
 import { createReaderWorkflow } from '../reader-workflow.ts';
 import { createMediaRetention } from './media-retention.ts';
+import { createCommunityRuntime } from '../community-runtime.ts';
 type RuntimeSettings = {directory: string; secret: string; siteOrigin: string; sourceURL: string; authorId: string; smtp?: unknown; push?: boolean};
 
 export async function createPayloadRuntime(
@@ -35,24 +36,37 @@ export async function createPayloadRuntime(
   const uidStore = createReaderUidStore(settings.directory);
   const workflow = createReaderWorkflow(settings.directory, settings.secret);
   const mediaRetention = createMediaRetention({ payload, directory: settings.directory });
-  const readerRetention = createReaderRetention({ payload: payload as unknown as Parameters<typeof createReaderRetention>[0]['payload'], directory: settings.directory, uidStore, loginLedger, workflow, mediaRetention });
   const store = createPayloadStore(payload, { ...settings, mediaRetention });
   const publicationRevision=createPublicationRevision(settings.directory);
   const options = { ...settings, url: settings.sourceURL, store, loginLedger };
   const authorService=createAuthorService(options);
+  const readerService=createReaderService({payload,siteOrigin:settings.siteOrigin,directory:settings.directory,emailReady:smtpConfigured(settings.smtp),authorService,loginLedger,uidStore,workflow});
+  const community = createCommunityRuntime({
+    payload, directory: settings.directory, siteOrigin: settings.siteOrigin, authorId: settings.authorId, uidStore,
+    readerIdentity: readerService.identity,
+    ownerIdentity: req => authorService.identity(req),
+    ownerName: async () => {
+      const found = await payload.find({ collection: 'site_profile', limit: 1, depth: 0, overrideAccess: true });
+      return String((found.docs[0] as { name?: string } | undefined)?.name || '無相');
+    },
+  });
+  const readerRetention = createReaderRetention({ payload: payload as unknown as Parameters<typeof createReaderRetention>[0]['payload'], directory: settings.directory, uidStore, loginLedger, workflow, mediaRetention,
+    keepReader: id => community.store?.hasContent(id) ?? false });
   return {
     payload,
     store,
     settings,
     contentService: createContentService({...options,revision:publicationRevision.read}),
     authorService,
-    readerService: createReaderService({payload,siteOrigin:settings.siteOrigin,directory:settings.directory,emailReady:smtpConfigured(settings.smtp),authorService,loginLedger,uidStore,workflow}),
+    readerService,
+    communityService: community.service,
     readerAdminService:createReaderAdminService({payload,authorService,siteOrigin:settings.siteOrigin,directory:settings.directory,authorId:settings.authorId,loginLedger,uidStore,workflow,mediaRetention}),
     readerRetention,
     healthCheck:async()=>{await payload.find({collection:'site_profile',limit:1,depth:0});},
     close: async () => {
       publicationRevision.close();
       await readerRetention.close();
+      community.close();
       loginLedger.close();
       uidStore.close();
       await payload.destroy();

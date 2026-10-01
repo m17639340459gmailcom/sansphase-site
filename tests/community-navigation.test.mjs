@@ -1,0 +1,70 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { JSDOM } from 'jsdom';
+
+test('draft navigation confirms once, loads the destination and preserves cancelled history', async (t) => {
+  const dom = new JSDOM('<main></main>', { url: 'http://localhost/#/community/new', runScripts: 'outside-only', pretendToBeVisual: true });
+  const w = dom.window;
+  const globalNames = ['window', 'document', 'location', 'history', 'HTMLElement', 'Element', 'Node', 'HTMLInputElement', 'HTMLTextAreaElement', 'HTMLSelectElement', 'HTMLButtonElement', 'HTMLFormElement', 'HTMLAnchorElement', 'Event', 'CustomEvent', 'BeforeUnloadEvent'];
+  const previousGlobals = Object.fromEntries(globalNames.map((name) => [name, globalThis[name]]));
+  globalThis.window = w;
+  globalThis.document = w.document;
+  globalThis.location = w.location;
+  for (const name of globalNames.slice(3)) globalThis[name] = w[name];
+  const module = await import('../dist/community-ui.mjs');
+  const requests = [];
+  const person = { name: '测试成员', uid: 'u1', role: 'reader', level: 1, owner: false, mod: false, balance: 30, checkedIn: true, streak: 1, nextReward: { total: 10 }, unread: { all: 0 }, inventory: {}, agreed: true };
+  const request = async (url) => {
+    requests.push(url);
+    const data = url.endsWith('/me') ? person : url.endsWith('/summary') ? { total: 0, boards: {}, hot: [] } : { items: [], total: 0, page: 1, pageSize: 20 };
+    return { ok: true, json: async () => data };
+  };
+  const ui = module.createCommunityUI({ request });
+  const main = w.document.querySelector('main');
+  const ctx = { t: zh => zh, esc: s => String(s || ''), icons: {}, members: true };
+  let cleanup;
+  const render = () => { cleanup?.(); main.innerHTML = ui.html(ctx); cleanup = ui.mount(main, ctx); };
+  w.addEventListener('hashchange', render);
+  t.after(() => {
+    cleanup?.();
+    for (const [key, value] of Object.entries(previousGlobals)) {
+      if (value === undefined) delete globalThis[key];
+      else globalThis[key] = value;
+    }
+    w.close();
+  });
+  const settle = () => new Promise(resolve => setTimeout(resolve, 120));
+  render();
+  await settle();
+  const title = main.querySelector('#community-title');
+  title.value = '未发送的标题';
+  title.dispatchEvent(new w.Event('input', { bubbles: true }));
+  let confirmations = 0;
+  w.confirm = () => { confirmations++; return true; };
+  main.querySelector('a[href="#/community/home"]').click();
+  await settle();
+  assert.equal(confirmations, 1, 'the link and history event share one confirmation');
+  assert.ok(requests.some(url => url.endsWith('/summary')), `the accepted destination refreshes its API data: ${requests.join(', ')}`);
+  assert.equal(main.querySelector('[data-community]')?.dataset.community, 'home');
+  w.location.hash = '#/community/new';
+  await settle();
+  assert.equal(main.querySelector('#community-title').value, '未发送的标题');
+  const length = w.history.length;
+  const state = structuredClone(w.history.state);
+  let replacements = 0;
+  const replaceState = w.history.replaceState.bind(w.history);
+  w.history.replaceState = (...args) => { replacements++; return replaceState(...args); };
+  confirmations = 0;
+  w.confirm = () => { confirmations++; return false; };
+  w.history.back();
+  await settle();
+  assert.equal(confirmations, 1, 'back navigation asks once');
+  assert.equal(w.location.hash, '#/community/new');
+  assert.equal(w.history.length, length);
+  assert.deepEqual(w.history.state, state);
+  assert.equal(replacements, 0, 'cancel returns to the original entry without overwriting any entry');
+  w.confirm = () => true;
+  w.history.back();
+  await settle();
+  assert.equal(w.location.hash, '#/community/home', 'the preceding entry survives cancellation');
+});
