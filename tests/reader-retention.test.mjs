@@ -63,3 +63,23 @@ test('a cleanup sweep handles more than one page without skipping accounts after
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('accounts with community posts or replies are kept by the 30-day cleanup', async () => {
+  const directory = await mkdtemp(resolve(tmpdir(), 'sansphase-retention-keep-'));
+  const rows = new Map(['quiet', 'poster'].map(id => [id, { id, _verified: true, createdAt: '2026-08-01T00:00:00.000Z' }]));
+  const retention = createReaderRetention({
+    payload: { findByID: async ({ id }) => rows.get(id) || null, delete: async ({ id }) => rows.delete(id) },
+    directory,
+    uidStore: { get: () => '123456' },
+    loginLedger: { inactiveReaderIds: (_cutoff, _now, limit, offset) => [...rows.keys()].slice(offset, offset + limit), latest: () => null },
+    keepReader: id => id === 'poster',
+  });
+  try {
+    const result = await retention.sweep({ now: '2026-09-01T00:00:00.000Z' });
+    assert.deepEqual(result, { checked: 2, eligible: 1, deleted: 1, kept: 1 });
+    assert.deepEqual([...rows.keys()], ['poster']);
+  } finally {
+    await retention.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

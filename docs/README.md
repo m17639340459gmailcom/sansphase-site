@@ -12,17 +12,20 @@
 | [部署指南](DEPLOYMENT.md) | 环境、进程和 Nginx |
 | [发布流程](RELEASE-PROCESS.md) | 构建、验收、切换和回滚 |
 | [维护与数据保护](MAINTENANCE.md) | 备份、保留和清理 |
+| [社区集成](COMMUNITY-INTEGRATION-20261002.md) | 已合并功能、规则确认与未上线边界 |
 | [静态交付](STATIC-DELIVERY.md) | 版本资源与 CDN |
 | [TypeScript 迁移](TYPESCRIPT-MIGRATION.md) | TS 源码和兼容入口 |
 | [大文件上传](UPLOAD-15GB.md) | 容量与限制 |
 
 ## 最近正式发布
 
-[2026-10-01 黑洞、导航与代码清理](RELEASE-BLACK-HOLE-20261001.md)：已部署；包含验证范围、数据保护和回滚说明。
+[2026-10-02 编辑器、顶栏与点击修复](INTERACTION-RELEASE-20261002.md)：已部署；社区另行集成，本次未部署社区。
+
+上一版本：[2026-10-01 黑洞、导航与代码清理](RELEASE-BLACK-HOLE-20261001.md)。
 
 ## 历史记录怎么读
 
-当前仅本地的修复：[作者编辑器粘贴与滚动](EDITOR-PASTE-20261001.md)、[首页顶栏横线](HEADER-LINE-20261001.md)、[切页后按钮短时无响应](ROUTE-INTERACTION-20261001.md)。尚未部署，不应与上面的正式发布记录混淆。
+本次交互修复的诊断记录：[作者编辑器粘贴与滚动](EDITOR-PASTE-20261001.md)、[首页顶栏横线](HEADER-LINE-20261001.md)、[切页后按钮短时无响应](ROUTE-INTERACTION-20261001.md)。已随 2026-10-02 版本部署，早期记录中的“未部署”描述保留其当时语境。
 
 带日期的 `RELEASE-*` 是相应时间的验收或发布记录；`BLACK-HOLE-*`、`HEADER-VISUAL-*`、`LOCAL-*` 等是开发过程记录，不是另一套操作规范。**某份记录写“本地通过”不代表已上线。** 当前运行版本以网站 `/healthz` 及最近一次正式发布回执为准。
 

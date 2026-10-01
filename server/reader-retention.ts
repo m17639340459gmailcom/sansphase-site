@@ -17,6 +17,9 @@ type RetentionOptions = {
   payload: ReaderPayload; directory: string; uidStore: { get: (id: string) => string | null };
   loginLedger: LoginLedger; workflow?: ReturnType<typeof createReaderWorkflow>;
   mediaRetention?: { sweep: () => Promise<unknown> };
+  // Accounts to keep even when inactive: those with live community posts or
+  // replies, so a quiet author's posts are not removed with the account.
+  keepReader?: (id: string) => boolean;
 };
 
 const thirtyDays = 30 * 24 * 60 * 60 * 1000;
@@ -29,7 +32,7 @@ export const readerCleanupDue = (row: ReaderRow, lastLoginAt: string | null | un
     (!Number.isFinite(vipUntil) || vipUntil <= time);
 };
 
-export function createReaderRetention({ payload, directory, uidStore, loginLedger, workflow, mediaRetention }: RetentionOptions) {
+export function createReaderRetention({ payload, directory, uidStore, loginLedger, workflow, mediaRetention, keepReader }: RetentionOptions) {
   if (!payload || !directory || !uidStore || !loginLedger) throw Error('Reader retention requires the private reader store and login ledger.');
   const audit = readerAudit(directory, 'system');
   let initial: NodeJS.Timeout | null = null, interval: NodeJS.Timeout | null = null;
@@ -53,7 +56,7 @@ export function createReaderRetention({ payload, directory, uidStore, loginLedge
     const at = now instanceof Date ? now : new Date(now);
     if (Number.isNaN(at.getTime())) throw Error('Invalid cleanup time');
     const cutoff = new Date(at.getTime() - thirtyDays).toISOString();
-    const results = { checked: 0, eligible: 0, deleted: 0 };
+    const results = { checked: 0, eligible: 0, deleted: 0, kept: 0 };
     const candidates = [];
     while (candidates.length < limit) {
       const size = Math.min(100, limit - candidates.length);
@@ -65,6 +68,7 @@ export function createReaderRetention({ payload, directory, uidStore, loginLedge
       results.checked++;
       const row = await payload.findByID({ collection: 'readers', id });
       if (!row || !readerCleanupDue(row, loginLedger.latest('reader', id)?.at, at)) continue;
+      if (keepReader?.(id)) { results.kept++; continue; }
       results.eligible++;
       if (dryRun) continue;
       await removeReaderAccount({ payload, directory, uidStore, row, audit, action: 'auto-delete-inactive', workflow });
