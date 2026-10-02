@@ -104,6 +104,7 @@ for (const file of [
   "community-pages.mjs",
   "community-rules.mjs",
   "community-sky.mjs",
+  "community-landing.mjs",
   "community.css",
 ]) {
   if (typedBrowserModules.has(file)) {

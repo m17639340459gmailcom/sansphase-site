@@ -18,6 +18,7 @@ import {ensureRouteStyle} from './route-styles.mjs';
 import {communityView,communityRoute,inCommunityArea,communityHeaderHTML,communityAccountHTML,communityLandingHTML} from './community.mjs';
 import {createCommunityUI} from './community-ui.mjs';
 import {mountCommunitySky} from './community-sky.mjs';
+import {mountCommunityLanding,arriveCommunity} from './community-landing.mjs';
 mountRouteAssets(window);
 import {
   escapeHTML as esc,
@@ -602,6 +603,9 @@ function renderView({silent=false,preserveScroll=false,contentStatus}={}) {
   setContentHTML(main,contentStatus ? contentStatus==='auth' ? readerGate(language==='en') : contentStatus==='vip' ? vipBookGate(language==='en') : contentMessage(contentStatus==='error') : (views[page] || notFound)());
   readerUI?.route(page,id);
   cleanCommunity=!contentStatus && (page==='community'||page==='post') ? communityUI.mount(main,communityContext()) : ()=>{};
+  // The landing page's star gate: tilt with the pointer, and the warp into the community.
+  const communityLanding=main.querySelector('.community-landing');
+  if(communityLanding){const cleanUI=cleanCommunity,cleanLanding=mountCommunityLanding(communityLanding,{backdrop:document.querySelector('#blog-backdrop'),sky:()=>cleanCommunitySky,go:(href)=>{location.hash=href;},prefetch:(href)=>communityUI.prefetch(href)});cleanCommunity=()=>{cleanLanding();cleanUI();};}
   cleanReaderAdmin=page==='admin' && adminReadersModule ? adminReadersModule.mountReaderAdmin(main,{english:language==='en'}) : ()=>{};
   const bookRoot=main.querySelector('.book-reader'),bookGeneration=++bookRenderGeneration;
   cleanBookReading=()=>{};
@@ -976,7 +980,10 @@ window.addEventListener("hashchange", (event) => {
   // starfield stay, and the page's own blocks rise in (community-ui). A
   // snapshot cross-fade would freeze the sky and show both pages at once.
   const withinCommunity = inCommunityArea(communityRoute(event.oldURL ? new URL(event.oldURL).hash : '').view) && inCommunityArea(communityRoute(location.hash).view);
+  // After the landing page's warp the live starfield carries the motion on, so
+  // the community page opens out of the light instead of a frozen snapshot.
   if (withinCommunity) update();
+  else if (entering && document.body.classList.contains('community-warping')) { const rendering = update(); arriveCommunity(document, cleanCommunitySky); return rendering; }
   else routeTransitions.run(from, to, update, entering ? 'enter' : undefined);
 });
 window.addEventListener("pagehide", (e) => {

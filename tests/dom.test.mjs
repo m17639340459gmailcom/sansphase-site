@@ -250,7 +250,7 @@ test("local prototype DOM flows", async (t) => {
       return loadLibrary(new URL("../dist/ui.bundle.mjs", import.meta.url));
     if (specifier === './book-shell.mjs' || specifier === './vip-book-prompt.mjs')
       return loadLibrary(new URL('../dist/' + specifier.slice(2), import.meta.url));
-    if (['./community.mjs', './community-ui.mjs', './community-sky.mjs'].includes(specifier))
+    if (['./community.mjs', './community-ui.mjs', './community-sky.mjs', './community-landing.mjs'].includes(specifier))
       return loadLibrary(new URL('../dist/' + specifier.slice(2), import.meta.url));
     if (specifier === './catalog.mjs')
       return loadLibrary(new URL('../dist/catalog.mjs', import.meta.url));

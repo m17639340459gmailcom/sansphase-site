@@ -1120,6 +1120,11 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     html,
     // What the header needs (bell, account menu, check-in dot); null until it is read.
     me: () => readyData(me),
+    // Starts loading what a community page shows before going there (the landing page's flight),
+    // so the page opens complete instead of in its loading state.
+    prefetch(hash: string) {
+      for (const run of loadsFor(communityRoute(hash))) run().catch(() => {});
+    },
     // Called after each render of a community page; returns the cleanup for the next render.
     mount(main: HTMLElement, ctx: CommunityContext) {
       mounted = { main, ctx };

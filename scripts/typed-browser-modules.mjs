@@ -10,6 +10,7 @@ export const typedBrowserModules = new Set([
   'community-pages.mjs',
   'community-rules.mjs',
   'community-sky.mjs',
+  'community-landing.mjs',
   'content-reader.mjs',
   'content-images.mjs',
   'core.mjs',

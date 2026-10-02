@@ -595,13 +595,20 @@ export function communityBookmarksHTML({ list, ...common }: Common & { list: Com
     + `<div class="community-results community-rv" style="--i:1">${body}</div></section>`;
 }
 
-// 主站导航“社区交流”进来的落地页：一句话介绍，一个按钮进入社区区域。
+// 主站导航“社区交流”进来的落地页：标题逐字亮起，下面是公开版块和“进入社区”。
+// 背后的三维星座网络和进入时的穿越都在 community-landing。
 export function communityLandingHTML(t: Translate, icons: Icons) {
+  const title = t("無相社区", "SANSPHASE Community");
+  // Chinese lights up character by character, English word by word.
+  const words = title.includes(" ");
+  const letters = words ? title.split(" ") : [...title];
+  const boards = communityBoards.filter((board) => !["meta", "vip"].includes(board.id))
+    .map((board) => `<li><a href="${boardHref(board.id)}" style="--board:${board.color}"><i aria-hidden="true"></i>${t(board.zh, board.en)}</a></li>`).join("");
   return `<section class="page community-landing" data-community="landing">`
-    + `<div class="community-orbits" aria-hidden="true"><i></i><i></i><i></i></div>`
     + `<div class="eyebrow">COMMUNITY · ${t("社区交流", "Community")}</div>`
-    + `<h1>${t("無相社区", "SANSPHASE Community")}</h1>`
+    + `<h1>${letters.map((part, i) => `<span style="--i:${i}">${part}</span>`).join(words ? " " : "")}</h1>`
     + `<p>${t("聊 AI 学习、AI 创作，以及好用的软件和资源。提问、晒作品、推荐工具，都在这里。", "Talk about learning AI, making things with it, and useful tools: ask, show your work, share what helps.")}</p>`
+    + `<ul class="community-landing-boards" aria-label="${t("版块", "Boards")}">${boards}</ul>`
     + `<div class="community-landing-actions"><a class="community-enter" href="${communityHomeHref}">${icons.message || ""}<span>${t("进入社区", "Enter the community")}</span></a></div>`
     + `</section>`;
 }

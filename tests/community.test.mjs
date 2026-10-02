@@ -817,9 +817,14 @@ test("moderation: the queue, reports, orders with shipping details, shop items, 
 test("the landing page from the main navigation leads into the community", () => {
   const html = communityLandingHTML(t, { message: "" });
   assert.match(html, /data-community="landing"/);
-  assert.match(html, /<h1>無相社区<\/h1>/);
+  assert.match(html, /<h1><span style="--i:0">無<\/span><span style="--i:1">相<\/span><span style="--i:2">社<\/span><span style="--i:3">区<\/span><\/h1>/, "the title lights up character by character");
+  assert.doesNotMatch(html, /<img|<canvas/, "the constellation network is drawn by the landing script, not the template");
+  assert.deepEqual([...html.matchAll(/<li><a href="(#\/community\/boards\/\w+)"/g)].map((m) => m[1]),
+    ["#/community/boards/qa", "#/community/boards/showcase", "#/community/boards/tools", "#/community/boards/moments"], "public boards only");
   assert.match(html, /<a class="community-enter" href="#\/community\/home">/);
   assert.doesNotMatch(html, /Demo|示例|未读/);
+  const en = communityLandingHTML((zh, english) => english, { message: "" });
+  assert.match(en, /<h1><span style="--i:0">SANSPHASE<\/span> <span style="--i:1">Community<\/span><\/h1>/, "English lights up word by word");
 });
 
 test("rules, reward table and Beijing day", () => {
