@@ -131,10 +131,6 @@
   box-shadow: var(--community-reading-card-shadow, none);
 }
 .community-page[data-community="post"][data-thread-design="feed"] .community-post-side .community-card-h h2 { font-family: var(--font-serif); font-size: 17px; letter-spacing: .08em; color: var(--community-reading-title, var(--text)); }
-.community-page[data-community="post"][data-thread-design="feed"] .community-post-side .community-mini-stats { border: 0; padding-block: 12px; }
-.community-page[data-community="post"][data-thread-design="feed"] .community-post-side .community-prompt { border-radius: 10px; border-color: var(--community-reading-edge-strong, var(--line)); background: var(--community-reading-control, #0b1018); }
-.community-page[data-community="post"][data-thread-design="feed"] .community-related li { padding-block: 12px; }
-.community-page[data-community="post"][data-thread-design="feed"] .community-related a { line-height: 1.7; }
 
 @media (max-width: 1000px) {
   .community-page[data-community="post"][data-thread-design="feed"] { width: min(900px, calc(100% - 40px)); }

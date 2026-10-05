@@ -345,9 +345,8 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-role::before { content: "◇"; font-size: 12px; line-height: 1; }
 .community-lv.is-steward { display: inline-flex; align-items: center; gap: 4px; border-radius: 9px; color: var(--cm-lv3); }
 .community-steward-icon { font-size: 12px; line-height: 1; }
-.community-lv { padding: 0 6px; border: 1px solid currentColor; border-radius: 5px; font-size: 12px; line-height: 17px; letter-spacing: 0.04em; white-space: nowrap; }
+.community-lv { padding: 0 6px; border: 1px solid currentColor; border-radius: 5px; color: var(--lv); font-size: 12px; line-height: 17px; letter-spacing: 0.04em; white-space: nowrap; }
 .is-lv0 { --lv: var(--cm-lv0); } .is-lv1 { --lv: var(--cm-lv1); } .is-lv2 { --lv: var(--cm-lv2); } .is-lv3 { --lv: var(--cm-lv3); } .is-lv4 { --lv: var(--cm-lv4); }
-.community-lv { color: var(--lv); }
 .community-vip { padding: 0 5px; border: 1px solid rgb(201 182 242 / 45%); border-radius: 5px; color: var(--cm-vip); font: 600 10.5px/16px var(--font-mono); letter-spacing: 0.1em; }
 .community-dot { width: 3px; height: 3px; flex-shrink: 0; border-radius: 50%; background: var(--cm-faint); }
 /* 帖子标记 */
@@ -452,8 +451,6 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-sum-row dd { margin: 0; font: 20px var(--font-mono); }
 .community-meter { height: 6px; overflow: hidden; border-radius: 3px; background: rgb(238 233 224 / 8%); }
 .community-meter i { display: block; height: 100%; border-radius: 3px; background: var(--lv, var(--signal)); }
-.community-meter-row { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--muted); }
-.community-prog-row { display: grid; gap: 6px; }
 
 /* ================= 帖子列表 ================= */
 /* 列表上方的一栏：左边排序，右边搜索和发帖 */
@@ -830,7 +827,7 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-ac-top > div { min-width: 0; }
 .community-ac-top .community-uname { font-size: 16px; color: var(--text); }
 .community-ac-top .community-who { flex-wrap: wrap; }
-.community-mini-stats { display: grid; grid-template-columns: repeat(3, 1fr); margin: 0; padding: 10px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.community-mini-stats { display: grid; grid-template-columns: repeat(3, 1fr); margin: 0; padding: 12px 0; border: 0; }
 .community-mini-stats div { display: grid; justify-items: center; gap: 2px; }
 .community-mini-stats dt { font-size: var(--cm-font-meta, 12px); color: var(--dim); }
 .community-mini-stats dd { margin: 0; font: 17px var(--font-mono); }
@@ -848,9 +845,10 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-prompt.is-locked { border-style: dashed; border-color: var(--line-strong); background: rgb(238 233 224 / 4%); }
 .community-prompt.is-locked pre { filter: blur(4px); user-select: none; color: var(--dim); }
 .community-prompt.is-locked .community-prompt-h .ui-icon { color: var(--cm-warn); }
+.community-post-side .community-prompt { border-radius: 10px; border-color: var(--community-reading-edge-strong, var(--line)); background: var(--community-reading-control, #0b1018); }
 .community-related { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
-.community-related li { display: grid; gap: 2px; font-size: 13.5px; line-height: 1.5; }
-.community-related a { color: var(--muted); }
+.community-related li { display: grid; gap: 2px; padding-block: 12px; font-size: 13.5px; line-height: 1.5; }
+.community-related a { color: var(--muted); line-height: 1.7; }
 .community-related a:hover { color: var(--text); }
 .community-related span { font-size: 12.5px; color: var(--dim); }
 /* 看大图 */
@@ -981,7 +979,6 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-ck-early .community-rank { gap: 0; }
 .community-ck-early .community-rank li { min-height: 56px; grid-template-columns: 18px 34px minmax(0, 1fr) auto; gap: 9px; border-bottom: 1px solid rgb(198 217 240 / 8%); }
 .community-ck-early .community-rank li:last-child { border-bottom: 0; }
-.community-ck-early .community-rank .community-avatar { width: 34px; height: 34px; }
 .community-ck-early .community-rank .community-who { display: flex; flex-wrap: wrap; gap: 4px 6px; white-space: normal; }
 .community-ck-early .community-rank-count { color: #bccce0; font-size: 12px; font-weight: 400; }
 .community-ck-badges .community-badge-row.is-large { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 24px 8px; padding: 8px 0 0; }
@@ -1247,7 +1244,6 @@ body.community-open[data-community-theme="light"] .community-level-mark { --leve
 .community-rule-list > li { counter-increment: rule; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px 14px; padding: 24px 0; border-bottom: 1px solid var(--line); }
 .community-rule-list > li::before { content: counter(rule, decimal-leading-zero); grid-row: span 2; padding-top: 5px; font: 13px var(--font-mono); color: var(--muted); }
 .community-rule-list h2 { margin: 0; font-family: var(--font-serif); font-size: 21px; line-height: 1.5; letter-spacing: 0.04em; }
-.community-rule-intro { margin: 0 0 22px; color: var(--muted); font-size: 15px; line-height: 1.85; }
 .community-rule-content { grid-column: 2; min-width: 0; color: var(--muted); font-size: 14px; line-height: 1.9; overflow-wrap: anywhere; }
 .community-rule-content p { margin: 0 0 12px; }
 .community-rule-content p:last-child { margin-bottom: 0; }

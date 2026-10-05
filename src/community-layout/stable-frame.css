@@ -77,10 +77,6 @@ body.community-frame-open #site-footer { display: none; }
 .page.community-page[data-community-frame="stable"] > .community-layout > .community-aside { position: static; min-height: 0; overflow: auto; align-content: start; padding-bottom: 12px; }
 .page.community-page[data-community-frame="stable"] [data-frame-right] > :is([data-frame-overview], [data-frame-hot])[hidden] { display: none; }
 .page.community-page[data-community-frame="stable"] [data-frame-right] > .community-post-side { position: static; display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; min-width: 0; width: 100%; animation: none; }
-.page.community-page[data-community-frame="stable"] [data-frame-right] > .community-post-side .community-mini-stats { border: 0; padding-block: 12px; }
-.page.community-page[data-community-frame="stable"] [data-frame-right] > .community-post-side .community-prompt { border-radius: 10px; border-color: var(--community-reading-edge-strong); background: var(--community-reading-control); }
-.page.community-page[data-community-frame="stable"] [data-frame-right] > .community-post-side .community-related li { padding-block: 12px; }
-.page.community-page[data-community-frame="stable"] [data-frame-right] > .community-post-side .community-related a { line-height: 1.7; }
 .page.community-page[data-community-frame="stable"] > .community-layout > .community-feed-rail { position: static; align-content: start; overflow: auto; }
 /* A visible side navigation must not inherit the site's full-screen mobile menu. */
 .page.community-page[data-community-frame="stable"] .community-feed-rail .nav { inset: auto; z-index: auto; align-self: start; overflow: visible; }
