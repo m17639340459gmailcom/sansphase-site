@@ -13,6 +13,13 @@
 | [发布流程](RELEASE-PROCESS.md) | 构建、验收、切换和回滚 |
 | [维护与数据保护](MAINTENANCE.md) | 备份、保留和清理 |
 | [社区集成](COMMUNITY-INTEGRATION-20261002.md) | 已合并功能、规则确认与未上线边界 |
+| [社区当前界面](COMMUNITY-APPEARANCE.md) | 已采纳的深浅模式、交互和模块位置 |
+| [社区本地版本](COMMUNITY-LOCAL-INTEGRATION.md) | 当前正式源码、预览与旧方案归档 |
+| [社区上线前讨论](COMMUNITY-PRELAUNCH.md) | 身份预览、已验证的防护、已复现缺口与待确认规则 |
+| [社区横幅设置](COMMUNITY-BANNERS.md) | 首页与板块的独立配置、管理权限、封面、轮播和数据迁移 |
+| [星尘获取规则](COMMUNITY-STARDUST-RULES.md) | 已实施的 v4 获取上限、内容收入边界；兑换建议尚未批准 |
+| [社区公约与规则入口](COMMUNITY-CONVENTION.md) | 公约正文、规则位置、申诉与版主自愿公开联系方式 |
+| [社区经验方案](COMMUNITY-EXPERIENCE-RULES.md) | 十级成长、VIP1～VIP8 有效会员登录日与登录经验加速；缺席日不增长，尚未启用结算 |
 | [静态交付](STATIC-DELIVERY.md) | 版本资源与 CDN |
 | [TypeScript 迁移](TYPESCRIPT-MIGRATION.md) | TS 源码和兼容入口 |
 | [大文件上传](UPLOAD-15GB.md) | 容量与限制 |

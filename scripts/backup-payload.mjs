@@ -29,9 +29,18 @@ try {
   files = snapshot.prepare("SELECT filename FROM media").all();
   if (snapshot.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='readers'").get())
     readerAvatars = snapshot.prepare("SELECT avatar FROM readers WHERE avatar IS NOT NULL AND avatar <> ''").all();
-  // Community images, including ones taken out of posts (kept for moderation).
-  if (snapshot.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='community_images'").get())
-    communityImages = snapshot.prepare("SELECT id, topic_id FROM community_images").all();
+  // Content, product artwork and custom banner covers share this image store.
+  // Only genuinely unreferenced uploads can disappear during normal retention.
+  if (snapshot.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='community_images'").get()) {
+    const references = ['i.topic_id IS NOT NULL'];
+    // A pre-upgrade snapshot may still have the original product table without
+    // artwork. Backup must work before migration, not require it to run first.
+    if (snapshot.prepare('PRAGMA table_info(community_shop_items)').all().some(column => column.name === 'image'))
+      references.push('EXISTS (SELECT 1 FROM community_shop_items item WHERE item.image = i.id)');
+    if (snapshot.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='community_banner_entries'").get())
+      references.push('EXISTS (SELECT 1 FROM community_banner_entries banner WHERE banner.cover = i.id)');
+    communityImages = snapshot.prepare(`SELECT i.id, CASE WHEN ${references.join(' OR ')} THEN 1 ELSE 0 END AS referenced FROM community_images i`).all();
+  }
 } finally {
   snapshot.close();
 }
@@ -60,12 +69,12 @@ for (const { avatar } of readerAvatars) {
   await copyFile(resolve(source, 'uploads', filename), resolve(target, 'uploads', filename));
   paths.push(`uploads/${filename}`);
 }
-for (const { id, topic_id } of communityImages) {
+for (const { id, referenced } of communityImages) {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) continue;
   for (const filename of [`community-image-${id}.webp`, `community-thumb-${id}.webp`]) {
-    // An upload not yet attached to a post may be swept at any moment.
+    // An unused upload may be swept at any moment; a persisted reference may not.
     try { await copyFile(resolve(source, 'uploads', filename), resolve(target, 'uploads', filename)); }
-    catch (error) { if (topic_id || error?.code !== 'ENOENT') throw error; continue; }
+    catch (error) { if (referenced || error?.code !== 'ENOENT') throw error; continue; }
     paths.push(`uploads/${filename}`);
   }
 }

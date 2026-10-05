@@ -4,7 +4,9 @@ import type { PromptMode } from '../src/community-rules.ts';
 import type { CommunityPerson } from '../src/community.ts';
 import { fail } from './community-db.ts';
 import type { CommunityAuthor } from './community-db.ts';
+import type { CommunityAuditDetails } from './community-audit.ts';
 import type { CommunityStore, StoredTopic, ShowcaseMeta, ResourceMeta } from './community-store.ts';
+import { imageIdFromLine } from '../src/community-body-images.ts';
 
 // The signed-in member making a request.
 export type CommunityViewer = { kind: 'reader' | 'owner'; id: string; name: string; vip: boolean };
@@ -25,17 +27,22 @@ export type ServiceOptions = {
   findByNames?: (names: string[]) => Promise<Map<string, CommunityAuthor>>;
   // The approved avatar file of a reader, for other members.
   avatarFile?: (uid: string) => Promise<string | null>;
-  // Moderation actions go to the private audit log.
+  // Mirror committed database audit events to the existing private audit log.
   audit?: (action: string, details: Record<string, unknown>) => Promise<void>;
   // Words that may not appear in posts (private configuration).
   words?: readonly string[];
+  // Required title, body text and inline cover. False is only for legacy API compatibility.
+  simplePosting?: boolean;
 };
 export type Body = Record<string, unknown>;
 export type Ctx = {
   req: IncomingMessage; res: ServerResponse; url: URL; path: string; method: string;
   viewer: CommunityViewer; me: CommunityAuthor; live: CommunityStore; options: ServiceOptions;
-  // The viewer's level (4 for stewards; the owner is 4 too), and moderation rights.
-  level: number; owner: boolean; mod: boolean; ownerMember: CommunityAuthor;
+  // Earned trust drives ordinary business rules; appointments separately grant board moderation.
+  level: number; trustLevel: number; owner: boolean; mod: boolean; ownerMember: CommunityAuthor;
+  moderationBoards: string[];
+  canModerateBoard: (board: string) => boolean;
+  actualOwner: boolean; actualMod: boolean; browsingAsReader: boolean;
   canSeeBoard: (board: string) => boolean; hiddenBoard: string;
   send: (body: unknown, status?: number) => void;
   json: () => Promise<Body>;
@@ -44,8 +51,9 @@ export type Ctx = {
   topicDTO: (topic: StoredTopic, map: Map<string, PersonInfo>) => Record<string, unknown>;
   topicsDTO: (topics: StoredTopic[]) => Promise<Record<string, unknown>[]>;
   throttle: (kind: 'topic' | 'reply' | 'image' | 'report' | 'action') => void;
-  audit: (action: string, details?: Record<string, unknown>) => Promise<void>;
-  clean: (value: unknown, limits: readonly [number, number], label: string, multiline: boolean) => string;
+  requireConsent: () => void;
+  auditMutation: <T>(action: string, execute: () => T, details?: CommunityAuditDetails<T>) => Promise<T>;
+  clean: (value: unknown, limits: readonly [number, number], label: string, multiline: boolean, imageIds?: readonly string[]) => string;
   mentions: (body: string) => Promise<CommunityAuthor[]>;
 };
 
@@ -58,16 +66,24 @@ export function communityContactReason(value: string) {
   return null;
 }
 const controls = /[\u0000-\u0008\u000b-\u001f\u007f]/u;
-export function cleanText(value: unknown, [min, max]: readonly [number, number], label: string, multiline: boolean, words: readonly string[] = []) {
+export function cleanText(value: unknown, [min, max]: readonly [number, number], label: string, multiline: boolean, words: readonly string[] = [], imageIds: readonly string[] = []) {
   if (typeof value !== 'string') throw fail(`请填写${label}。`);
   const cleaned = (multiline ? value.replace(/\r\n?/g, '\n') : value).trim();
   const length = [...cleaned].length;
   if (length < min) throw fail(`${label}至少 ${min} 个字。`);
   if (length > max) throw fail(`${label}最多 ${max} 个字。`);
   if (controls.test(cleaned) || (!multiline && /[\n\t]/.test(cleaned))) throw fail(`${label}里有无法显示的字符。`);
-  const contact = communityContactReason(cleaned);
+  // Internal attachment identifiers are not authored contact information. Strip
+  // only exact attached image URLs from recognized blocks, retaining captions.
+  // The store still checks that every attachment belongs to the post's author.
+  const attached = new Set(imageIds);
+  const authored = attached.size ? cleaned.split('\n').map(line => {
+    const id = imageIdFromLine(line);
+    return id && attached.has(id) ? line.replace(`/api/community/images/${id}.webp`, '') : line;
+  }).join('\n') : cleaned;
+  const contact = communityContactReason(authored);
   if (contact) throw fail(contact);
-  const lower = cleaned.normalize('NFKC').toLowerCase();
+  const lower = authored.normalize('NFKC').toLowerCase();
   if (words.some(word => word && lower.includes(word))) throw fail(`${label}里有不允许的内容，请修改后再发。`);
   return cleaned;
 }
@@ -79,9 +95,9 @@ export function tagList(value: unknown) {
   return tags;
 }
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-export function imageList(value: unknown, board: string, level: number) {
+export function imageList(value: unknown, board: string, level: number, simple = false) {
   if (value === undefined) return [];
-  const max = imageLimit(board, level);
+  const max = imageLimit(simple && board === 'tools' ? 'qa' : board, level);
   if (!Array.isArray(value) || value.some(id => !uuid.test(String(id)))) throw fail('图片无效，请重新上传。');
   const images = [...new Set(value.map(String))];
   if (images.length > max) throw fail(max === 0 ? '这个版块的帖子不配图。' : level < 1 && max === communityRules.l0Images ? `初光等级每帖最多 ${max} 张图。` : `这个版块每帖最多 ${max} 张图。`);
@@ -95,9 +111,9 @@ const short = (value: unknown, max: number, label: string, required = false) => 
   return text;
 };
 // 作品帖：工具必填；提示词公开、不公开或星尘解锁（5–50）。没写提示词就是不公开。
-export function showcaseMeta(body: Body): ShowcaseMeta {
-  const usage = String(body.usage || communityUsages[0]);
-  if (!(communityUsages as readonly string[]).includes(usage)) throw fail('请选择作品用途。');
+export function showcaseMeta(body: Body, optional = false): ShowcaseMeta {
+  const usage = String(body.usage || (optional ? '' : communityUsages[0]));
+  if (usage && !(communityUsages as readonly string[]).includes(usage)) throw fail('请选择作品用途。');
   const prompt = typeof body.prompt === 'string' ? body.prompt.replace(/\r\n?/g, '\n').trim() : '';
   if ([...prompt].length > 4000) throw fail('提示词最多 4000 个字。');
   if (controls.test(prompt)) throw fail('提示词里有无法显示的字符。');
@@ -107,16 +123,17 @@ export function showcaseMeta(body: Body): ShowcaseMeta {
   const price = promptMode === 'paid' ? Number(body.promptPrice) : 0;
   if (promptMode === 'paid' && (!Number.isInteger(price) || price < communityRules.unlockMin || price > communityRules.unlockMax))
     throw fail(`解锁价格在 ${communityRules.unlockMin} 到 ${communityRules.unlockMax} 星尘之间。`);
-  return { tools: short(body.tools, 80, '工具', true), model: short(body.model, 80, '模型'), usage, prompt, promptMode, price };
+  return { tools: short(body.tools, 80, '工具', !optional), model: short(body.model, 80, '模型'), usage, prompt, promptMode, price };
 }
 // 资源帖：链接必填（http 或 https），类型、价格从列表里选，平台可选。
-export function resourceMeta(body: Body): ResourceMeta {
+export function resourceMeta(body: Body, optional = false): ResourceMeta | null {
   const url = typeof body.url === 'string' ? body.url.trim() : '';
+  if (optional && !url) return null;
   let parsed: URL | null = null;
   try { parsed = new URL(url); } catch { parsed = null; }
   if (!parsed || !['http:', 'https:'].includes(parsed.protocol) || !parsed.hostname.includes('.') || url.length > 500) throw fail('请填写正确的链接，以 http:// 或 https:// 开头。');
-  const kind = String(body.kind || communityResourceKinds[0]), price = String(body.price || communityResourcePrices[0]);
-  if (!(communityResourceKinds as readonly string[]).includes(kind)) throw fail('请选择资源类型。');
-  if (!(communityResourcePrices as readonly string[]).includes(price)) throw fail('请选择价格。');
+  const kind = String(body.kind || (optional ? '' : communityResourceKinds[0])), price = String(body.price || (optional ? '' : communityResourcePrices[0]));
+  if (kind && !(communityResourceKinds as readonly string[]).includes(kind)) throw fail('请选择资源类型。');
+  if (price && !(communityResourcePrices as readonly string[]).includes(price)) throw fail('请选择价格。');
   return { url: parsed.href, kind, price, platform: short(body.platform, 60, '平台') };
 }

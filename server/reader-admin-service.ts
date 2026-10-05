@@ -5,6 +5,7 @@ import type { Payload, Where } from 'payload';
 import { uuidPattern } from './content-service.ts';
 import { addCalendarMonth, addMembershipDays, membershipState } from './reader-membership.ts';
 import { readerAudit, removeReaderAccount } from './reader-account-removal.ts';
+import type { PurgeCommunity } from './reader-account-removal.ts';
 import { createReaderWorkflow, registrationLifetimeMs } from './reader-workflow.ts';
 import { cleanReaderFiles } from './reader-file-cleanup.ts';
 import { contactDetailReason } from './reader-profile-policy.ts';
@@ -18,13 +19,13 @@ type MediaRetentionView = Pick<ReturnType<typeof createMediaRetention>, 'version
   sweep: (options: { ids: string[]; limit: number }) => Promise<unknown>;
   sweepVersions: (options: { ids: string[]; limit: number }) => Promise<unknown>;
 };
-type AdminOptions = { payload: Payload; authorService: AuthorService; siteOrigin: string; directory: string; authorId: string; loginLedger?: LoginLedger; uidStore: ReturnType<typeof createReaderUidStore>; workflow?: ReturnType<typeof createReaderWorkflow>; mediaRetention?: ReturnType<typeof createMediaRetention> };
+type AdminOptions = { payload: Payload; authorService: AuthorService; siteOrigin: string; directory: string; authorId: string; loginLedger?: LoginLedger; uidStore: ReturnType<typeof createReaderUidStore>; workflow?: ReturnType<typeof createReaderWorkflow>; mediaRetention?: ReturnType<typeof createMediaRetention>; purgeCommunity?: PurgeCommunity };
 type AdminBody = Record<string, unknown>;
 const fail = (message: string, status = 400) => Object.assign(new Error(message), { status });
 const errorStatus = (error: unknown): number | undefined => error && typeof error === 'object' && 'status' in error && typeof error.status === 'number' ? error.status : undefined;
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
 const errorCode = (error: unknown): string | undefined => error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : undefined;
-export function createReaderAdminService({ payload, authorService, siteOrigin, directory, authorId, loginLedger, uidStore, workflow = createReaderWorkflow(directory, payload.config.secret), mediaRetention = createMediaRetention({ payload, directory }) }: AdminOptions) {
+export function createReaderAdminService({ payload, authorService, siteOrigin, directory, authorId, loginLedger, uidStore, workflow = createReaderWorkflow(directory, payload.config.secret), mediaRetention = createMediaRetention({ payload, directory }), purgeCommunity }: AdminOptions) {
   if (!payload || !authorService || !directory || !authorId || !uidStore) throw Error('Reader administration requires the owner service and private storage.');
   // The JavaScript retention service accepts selected ID arrays at runtime.
   const retention = mediaRetention as unknown as MediaRetentionView;
@@ -88,7 +89,7 @@ export function createReaderAdminService({ payload, authorService, siteOrigin, d
             if (expired.has(id)) { if (workflow.removeRegistration(id)) cleaned++; continue; }
             const legacy = await findReader(id).catch(() => null);
             if (legacy && legacy._verified !== true && Date.now() - Date.parse(legacy.createdAt) >= registrationLifetimeMs) {
-              await removeReaderAccount({ payload, directory, uidStore, row: legacy, audit, action: 'manual-delete-unverified', workflow });
+              await removeReaderAccount({ payload, directory, uidStore, row: legacy, audit, action: 'manual-delete-unverified', workflow, purgeCommunity });
               cleaned++;
             }
           }
@@ -187,7 +188,7 @@ export function createReaderAdminService({ payload, authorService, siteOrigin, d
           if (!row || row._verified !== true) throw fail('用户不存在。', 404);
           if (path[2] === 'delete') {
             if (String(input.confirmEmail || '').trim().toLowerCase() !== row.email.toLowerCase()) throw fail('请完整输入该账号的邮箱以确认删除。');
-            const result = await removeReaderAccount({ payload, directory, uidStore, row, audit, action: 'delete', workflow });
+            const result = await removeReaderAccount({ payload, directory, uidStore, row, audit, action: 'delete', workflow, purgeCommunity });
             send(res, result); return;
           }
           if (path[2] === 'uid') {

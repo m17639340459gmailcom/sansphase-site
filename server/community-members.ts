@@ -4,13 +4,20 @@ import {
   communityLevelRules, communityCleanDays, communityNoticeGroups, communityBadges, beijingDay, decorationKinds,
 } from '../src/community-rules.mjs';
 import type { LevelStat, DecorationKind } from '../src/community-rules.ts';
-import { countOf, same, memberKey, parseJson, day, iso } from './community-db.ts';
+import { communityBoards } from '../src/community.mjs';
+import { countOf, same, memberKey, parseJson, day, iso, fail } from './community-db.ts';
 import type { CommunityAuthor } from './community-db.ts';
+import { storedModerationContact, validateModerationContact } from './community-moderation-contact.ts';
+import type { createCommunityConvention } from './community-convention.ts';
 
-type MemberRow = { level: number; level_day: string | null; steward: number; frame: string | null; name_color: string | null; cover: string | null; agreed_at: string | null; created_at: string };
+type MemberRow = { level: number; level_day: string | null; steward: number; steward_boards: string | null; frame: string | null; name_color: string | null; cover: string | null; agreed_at: string | null; created_at: string };
 type NoticeRow = {
   id: string; type: string; actor_kind: CommunityAuthor['kind'] | null; actor_id: string | null; topic_id: string | null; reply_id: string | null;
   text: string; data: string | null; link: string | null; count: number; created_at: string; read_at: string | null;
+};
+type SanctionRow = {
+  id: string; member_kind: CommunityAuthor['kind']; member_id: string; days: number; reason: string;
+  until: string; created_at: string; lifted_at: string | null;
 };
 export type Notice = { type: string; actor?: CommunityAuthor | null; topicId?: string | null; replyId?: string | null; text: string; data?: Record<string, unknown>; link?: string; group?: string };
 export type MemberStats = {
@@ -18,14 +25,20 @@ export type MemberStats = {
   accepted: number; featured: number; topics: number; replies: number; violations30: number; violations180: number;
 };
 const monthStart = (now: number) => iso(Date.parse(`${beijingDay(now).slice(0, 7)}-01T00:00:00+08:00`));
+const moderationBoardIds = communityBoards.map(board => board.id);
+const validModerationBoards = (value: unknown): value is string[] => Array.isArray(value) && value.length > 0
+  && value.every(board => typeof board === 'string' && moderationBoardIds.includes(board)) && new Set(value).size === value.length;
+const orderedModerationBoards = (boards: readonly string[]) => moderationBoardIds.filter(board => boards.includes(board));
 
 // Members: trust levels, visits, stewards, decorations, follows, notifications, badges and sanctions.
-export function createMembers(db: DatabaseSync) {
+export function createMembers(db: DatabaseSync, convention: Pick<ReturnType<typeof createCommunityConvention>, 'state'>) {
   const ensureRow = db.prepare('INSERT OR IGNORE INTO community_members (member_kind, member_id, created_at) VALUES (?, ?, ?)');
-  const memberRow = db.prepare('SELECT level, level_day, steward, frame, name_color, cover, agreed_at, created_at FROM community_members WHERE member_kind = ? AND member_id = ?');
+  const memberRow = db.prepare('SELECT level, level_day, steward, steward_boards, frame, name_color, cover, agreed_at, created_at FROM community_members WHERE member_kind = ? AND member_id = ?');
   const saveLevel = db.prepare('UPDATE community_members SET level = ?, level_day = ? WHERE member_kind = ? AND member_id = ?');
-  const setStewardRow = db.prepare('UPDATE community_members SET steward = ? WHERE member_kind = ? AND member_id = ?');
-  const setAgreed = db.prepare('UPDATE community_members SET agreed_at = COALESCE(agreed_at, ?) WHERE member_kind = ? AND member_id = ?');
+  const setStewardRow = db.prepare('UPDATE community_members SET steward = ?, steward_boards = ? WHERE member_kind = ? AND member_id = ?');
+  const contactRow = db.prepare('SELECT contact_qq, contact_email FROM community_members WHERE member_kind = ? AND member_id = ?');
+  const setContactRow = db.prepare('UPDATE community_members SET contact_qq = ?, contact_email = ? WHERE member_kind = ? AND member_id = ?');
+  const clearContactRow = db.prepare('UPDATE community_members SET contact_qq = NULL, contact_email = NULL WHERE member_kind = ? AND member_id = ?');
   const setDecoration = {
     frame: db.prepare('UPDATE community_members SET frame = ? WHERE member_kind = ? AND member_id = ?'),
     color: db.prepare('UPDATE community_members SET name_color = ? WHERE member_kind = ? AND member_id = ?'),
@@ -78,7 +91,7 @@ export function createMembers(db: DatabaseSync) {
   const oneSanction = db.prepare('SELECT id, member_kind, member_id, lifted_at FROM community_sanctions WHERE id = ?');
   const liftSanction = db.prepare('UPDATE community_sanctions SET lifted_at = ? WHERE id = ? AND lifted_at IS NULL');
   const sanctionList = db.prepare(`SELECT id, member_kind, member_id, days, reason, until, created_at, lifted_at FROM community_sanctions
-    WHERE lifted_at IS NULL AND until > ? ORDER BY until`);
+    ORDER BY (lifted_at IS NULL AND until > ?) DESC, created_at DESC, rowid DESC LIMIT 100`);
   // Contribution this month: likes received + accepted ×5 + 精华 ×10 (the ranking page).
   const monthLikes = db.prepare(`SELECT kind, id, COUNT(*) AS count FROM (
       SELECT t.author_kind AS kind, t.author_id AS id FROM community_reactions x JOIN community_topics t ON x.target_kind = 'topic' AND t.id = x.target_id
@@ -132,6 +145,25 @@ export function createMembers(db: DatabaseSync) {
     if (added) notify(member, { type: 'badge', text: `获得徽章「${communityBadges[badge].name}」`, data: { badge } }, now);
     return added;
   }
+  function trustLevel(member: CommunityAuthor, now = Date.now()) {
+    if (member.kind === 'owner') return 4;
+    const current = row(member);
+    const today = beijingDay(now);
+    if (current.level_day === today) return Math.min(current.level, 3);
+    const next = Math.max(computeLevel(stats(member, now)), Math.min(current.level, 2));
+    saveLevel.run(next, today, member.kind, member.id);
+    if (next > current.level) notify(member, { type: 'level', text: '升到了新的等级', data: { level: next } }, iso(now));
+    return next;
+  }
+  function moderationBoards(member: CommunityAuthor): string[] {
+    if (member.kind === 'owner') return [...moderationBoardIds];
+    const current = row(member);
+    if (!current.steward) return [];
+    if (current.steward_boards === null) return [...moderationBoardIds];
+    const stored = parseJson<unknown>(current.steward_boards, null);
+    // Damaged scope data must never restore an unrestricted appointment.
+    return validModerationBoards(stored) ? orderedModerationBoards(stored) : [];
+  }
 
   return {
     ensure,
@@ -141,14 +173,21 @@ export function createMembers(db: DatabaseSync) {
     // level 3 falls back to 2 when its conditions lapse. Stewards are level 4; the owner is above levels.
     level(member: CommunityAuthor, now = Date.now()) {
       if (member.kind === 'owner') return 4;
-      const current = row(member);
-      if (current.steward) return 4;
-      const today = beijingDay(now);
-      if (current.level_day === today) return current.level;
-      const next = Math.max(computeLevel(stats(member, now)), Math.min(current.level, 2));
-      saveLevel.run(next, today, member.kind, member.id);
-      if (next > current.level) notify(member, { type: 'level', text: `升到了新的等级`, data: { level: next } }, iso(now));
-      return next;
+      return row(member).steward ? 4 : trustLevel(member, now);
+    },
+    trustLevel,
+    moderationBoards,
+    moderationContact(member: CommunityAuthor) {
+      if (!moderationBoards(member).length) return null;
+      const contact = contactRow.get(member.kind, member.id) as { contact_qq: string | null; contact_email: string | null } | undefined;
+      return storedModerationContact(contact?.contact_qq ?? null, contact?.contact_email ?? null);
+    },
+    setModerationContact(member: CommunityAuthor, input: Record<string, unknown>) {
+      if (!moderationBoards(member).length) throw fail('只有作者和现任版主能设置管理联系方式。', 403);
+      const contact = validateModerationContact(input);
+      ensure(member);
+      setContactRow.run(contact.qq || null, contact.email || null, member.kind, member.id);
+      return contact;
     },
     levelProgress(member: CommunityAuthor, level: number, now = Date.now()) {
       if (level >= 3) return null;
@@ -160,11 +199,15 @@ export function createMembers(db: DatabaseSync) {
       };
     },
     steward: (member: CommunityAuthor) => member.kind === 'reader' && Boolean(row(member).steward),
-    setSteward(member: CommunityAuthor, on: boolean, now = new Date().toISOString()) {
+    setSteward(member: CommunityAuthor, on: boolean, boards?: readonly string[], now = new Date().toISOString()) {
+      if (on && boards !== undefined && !validModerationBoards(boards)) throw fail('请至少选择一个有效的管理板块。');
       ensure(member, now);
-      setStewardRow.run(on ? 1 : 0, member.kind, member.id);
+      const wasSteward = Boolean(row(member).steward);
+      const assigned = on && boards !== undefined ? orderedModerationBoards(boards) : null;
+      setStewardRow.run(on ? 1 : 0, assigned ? JSON.stringify(assigned) : null, member.kind, member.id);
+      if (!on) clearContactRow.run(member.kind, member.id);
       saveLevel.run(row(member).level, null, member.kind, member.id);
-      notify(member, { type: 'system', text: on ? '你被任命为协管' : '你的协管职务已撤销', data: { steward: on } }, now);
+      notify(member, { type: 'system', text: on ? wasSteward ? '你的管理板块已更新' : '你被任命为协管' : '你的协管职务已撤销', data: { steward: on, boards: on ? moderationBoards(member) : [], ...(wasSteward && on ? { scopeChanged: true } : {}) } }, now);
     },
     stewards: () => (stewards.all() as Array<{ member_kind: CommunityAuthor['kind']; member_id: string }>).map(item => ({ kind: item.member_kind, id: item.member_id })),
     decorations(member: CommunityAuthor) {
@@ -176,8 +219,7 @@ export function createMembers(db: DatabaseSync) {
       ensure(member);
       setDecoration[kind].run(ref, member.kind, member.id);
     },
-    agreed: (member: CommunityAuthor) => member.kind === 'owner' || Boolean(row(member).agreed_at),
-    agree(member: CommunityAuthor, now = new Date().toISOString()) { ensure(member, now); setAgreed.run(now, member.kind, member.id); },
+    agreed: (member: CommunityAuthor) => convention.state(member).agreed,
     joinedAt: (member: CommunityAuthor) => row(member).created_at,
 
     /* ---------- 关注 ---------- */
@@ -250,8 +292,16 @@ export function createMembers(db: DatabaseSync) {
       return member;
     },
     sanctions(now = Date.now()) {
-      return (sanctionList.all(iso(now)) as Array<{ id: string; member_kind: CommunityAuthor['kind']; member_id: string; days: number; reason: string; until: string; created_at: string }>)
-        .map(item => ({ id: item.id, member: { kind: item.member_kind, id: item.member_id }, days: item.days, reason: item.reason, until: item.until, createdAt: item.created_at }));
+      // History stays durable; the management display limit never changes enforcement or trust statistics.
+      const at = iso(now);
+      return (sanctionList.all(at) as SanctionRow[]).map(item => {
+        const active = !item.lifted_at && item.until > at;
+        const state: 'active' | 'expired' | 'lifted' = item.lifted_at ? 'lifted' : active ? 'active' : 'expired';
+        return {
+          id: item.id, member: { kind: item.member_kind, id: item.member_id }, days: item.days, reason: item.reason,
+          until: item.until, createdAt: item.created_at, liftedAt: item.lifted_at, active, state,
+        };
+      });
     },
 
     /* ---------- 本月贡献 ---------- */

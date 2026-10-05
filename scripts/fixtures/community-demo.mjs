@@ -6,12 +6,14 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import sharp from 'sharp';
 import { migrateCommunity } from '../../server/payload/community-migration.ts';
 import { createCommunityStore } from '../../server/community-store.ts';
 import { createCommunityService } from '../../server/community-service.ts';
+import { communityBoards } from '../../src/community.mjs';
 
 // Sample members: nickname, public UID, VIP, days since joining, signature and level (null: computed).
 const people = {
@@ -28,28 +30,39 @@ const member = (id) => id === 'owner' ? { kind: 'owner', id: 'owner' } : { kind:
 const palettes = [['#1c2a4a', '#d9c49c'], ['#3b1f3a', '#e7a9c6'], ['#12343a', '#8fd0c8'], ['#2a2440', '#c9b6f2']];
 
 // A soft gradient poster, re-encoded like a real upload (full size and thumbnail).
-async function demoImage(directory, uploader, index, store) {
+async function demoImage(directory, uploader, index, store, sourceFile = null) {
   const [from, to] = palettes[index % palettes.length];
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1500"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${from}"/><stop offset="1" stop-color="${to}"/></linearGradient></defs><rect width="1200" height="1500" fill="url(#g)"/><circle cx="${300 + (index % 4) * 220}" cy="520" r="260" fill="#fff6e0" fill-opacity="0.18"/></svg>`;
-  const source = sharp(Buffer.from(svg));
+  const source = sourceFile ? sharp(sourceFile) : sharp(Buffer.from(svg));
   const id = randomUUID();
   mkdirSync(resolve(directory, 'uploads'), { recursive: true });
-  writeFileSync(resolve(directory, 'uploads', `community-image-${id}.webp`), await source.clone().webp({ quality: 82 }).toBuffer());
+  const full = await source.clone().resize({ width: 1600, withoutEnlargement: true }).webp({ quality: 82 }).toBuffer({ resolveWithObject: true });
+  writeFileSync(resolve(directory, 'uploads', `community-image-${id}.webp`), full.data);
   writeFileSync(resolve(directory, 'uploads', `community-thumb-${id}.webp`), await source.clone().resize(480, 480, { fit: 'cover' }).webp({ quality: 76 }).toBuffer());
-  store.addImage({ id, uploader, width: 1200, height: 1500 });
+  store.addImage({ id, uploader, width: full.info.width, height: full.info.height });
   return id;
 }
 
-export async function createCommunityDemo() {
+export async function createCommunityDemo({ simplePosting = true, visualDemo = false } = {}) {
   const directory = mkdtempSync(resolve(tmpdir(), 'sansphase-community-preview-'));
   new DatabaseSync(resolve(directory, 'content.db')).close();
   await migrateCommunity(directory);
   const store = createCommunityStore(directory);
   const now = Date.now();
   const at = (minutesAgo) => new Date(now - minutesAgo * 60000).toISOString();
-  const images = async (author, count, offset) => { const ids = []; for (let i = 0; i < count; i++) ids.push(await demoImage(directory, member(author), offset + i, store)); return ids; };
+  const images = async (author, count, offset) => {
+    const ids = [];
+    for (let i = 0; i < count; i++) {
+      const source = visualDemo ? (offset + i) % 2
+        ? new URL('../../src/vendor/user-space-assets/blog-space.png', import.meta.url)
+        : new URL('../../public/assets/community/atlas-space.webp', import.meta.url) : null;
+      ids.push(await demoImage(directory, member(author), offset + i, store, source ? fileURLToPath(source) : null));
+    }
+    return ids;
+  };
   const reply = (topicId, author, body, minutesAgo, quoteId = null) => store.addReply({ topicId, author: member(author), body, quoteId, now: at(minutesAgo) }).id;
-  for (const id of Object.keys(people)) store.members.agree(member(id), at(60 * 24 * 30));
+  // Sample accounts intentionally have no convention consent. Opening the
+  // preview exercises the same mandatory reading flow as a first visit.
   // Give most members some 星尘 to spend first. The preview reader's opening
   // balance is explicitly initial credit, so the ledger does not pretend it
   // came from a check-in.
@@ -64,8 +77,8 @@ export async function createCommunityDemo() {
   const open = store.createTopic({ board: 'qa', author: member('demo'), title: 'Flux 的 LoRA 训练，显存 12G 够吗？',
     body: '手上是一张 4070 Ti，12G 显存。想训一个自己画风的 LoRA，大概 30 张图。\n\n- 需要开哪些省显存的选项？\n- batch size 设多少合适？', tags: ['本地模型', '新手'], bounty: 20, now: at(40) }).id;
   const linjianOpenReply = reply(open, 'linjian', '12G 可以，打开梯度检查点，batch size 1，分辨率先用 768。', 25);
-  const work = store.createTopic({ board: 'showcase', author: member('mobai'), title: '用 AI 做了一套节气海报',
-    body: '二十四节气做了前六张，底图是生成的，排版和字体是手调的。欢迎提意见。', tags: ['Midjourney', '提示词'],
+  const work = store.createTopic({ board: 'showcase', author: member('mobai'), title: visualDemo ? '星云之间：深空影像与构图练习' : '用 AI 做了一套节气海报',
+    body: visualDemo ? '最近整理的一组宇宙影像练习。尝试用冷暖光线建立空间层次，让星云与深空保持自然的明暗关系。欢迎交流构图和色彩的处理。' : '二十四节气做了前六张，底图是生成的，排版和字体是手调的。欢迎提意见。', tags: ['Midjourney', '提示词'],
     images: await images('mobai', 3, 0), meta: { tools: 'Midjourney · Figma', model: 'Midjourney v7', usage: '个人创作，不可商用', prompt: 'solar terms poster, ink wash texture, gold foil accents, minimal layout --ar 4:5 --style raw', promptMode: 'paid', price: 20 }, now: at(600) }).id;
   const linjianWorkReply = reply(work, 'linjian', '立春那张的配色很好看。', 580);
   const tool = store.createTopic({ board: 'tools', author: member('yuanshan'), title: '推荐一个本地跑的语音转文字工具',
@@ -80,7 +93,7 @@ export async function createCommunityDemo() {
   store.createTopic({ board: 'meta', author: member('owner'), title: '社区开放测试：先读一下社区公约',
     body: '这是本地预览里的示例帖子。发帖、回复、点赞、收藏、签到、兑换都可以试，数据会在预览停止后清除。\n\n觉得处理错了，可以在站务反馈里申诉。', tags: ['新手'], pin: true, now: at(2400) }).id;
   store.createTopic({ board: 'vip', author: member('mobai'), title: '会员茶室：这个月想一起做一个小项目吗', body: '比如每人做一张同主题的海报，月底一起发到作品展廊。', now: at(300) });
-  store.createTopic({ board: 'showcase', author: member('linjian'), title: '水墨风格的猫', body: '', tags: ['Stable Diffusion'], images: await images('linjian', 2, 1),
+  store.createTopic({ board: 'showcase', author: member('linjian'), title: visualDemo ? '银蓝星云的色彩练习' : '水墨风格的猫', body: visualDemo ? '控制亮部的面积，用银蓝色保留星云的层次。素材来自项目已有影像，仅用于这次本地视觉演示。' : '', tags: ['Stable Diffusion'], images: await images('linjian', 2, 1),
     meta: { tools: 'Stable Diffusion · Krita', model: 'SDXL', usage: '可商用', prompt: 'a cat, ink wash painting, negative space', promptMode: 'public', price: 0 }, now: at(900) });
   // Keep the preview levels honest with a real public catalogue and ordinary
   // interactions, rather than direct level writes or numbered filler replies.
@@ -100,7 +113,7 @@ export async function createCommunityDemo() {
     ['moments', '', '把失败的参数也记下来，后来复盘时很有用。', 'yuanshan'],
     ['showcase', '第一次做完整的星空练习', '从构图到后期都留下了过程记录。', 'demo'],
   ];
-  const progressTopics = progressSpecs.map(([board, title, body, author], i) => store.createTopic({ board, author: member(author), title, body, tags: ['预览'], now: at(2300 + i) }).id);
+  const progressTopics = await Promise.all(progressSpecs.map(async ([board, title, body, author], i) => store.createTopic({ board, author: member(author), title, body, tags: ['预览'], images: visualDemo && board === 'showcase' ? await images(author, 1, i) : [], now: at(2300 + i) }).id));
   const publicTopics = [question, open, work, tool, moment, demoWork, ...progressTopics];
   const linjianReplyTopics = new Set([open, tool, demoWork, ...progressTopics.slice(5, 10), progressTopics[10]]);
   for (const topicId of publicTopics) reply(topicId, linjianReplyTopics.has(topicId) ? 'linjian' : 'demo', '我也遇到过类似情况，先记录下来，之后按这个方向试试。', 2100);
@@ -135,10 +148,11 @@ export async function createCommunityDemo() {
   store.thank({ kind: 'reply', id: answer }, member('linjian'), member('yuanshan'), at(115));
   store.economy.unlock(work, member('linjian'), 20, member('mobai'), now - 400 * 60000);
   store.setFeatured(work, true, { actor: member('owner'), now: at(500) });
+  if (visualDemo) store.setFeatured(demoWork, true, { actor: member('owner'), now: at(490) });
   store.members.follow(member('linjian'), member('demo'), true, at(70));
   store.members.follow(member('demo'), member('mobai'), true, at(800));
 
-  // 预览读者 checked in for the last six days (today is day 7, +15), wears the gold frame and has a make-up card.
+  // 预览读者 checked in for the last six days (today earns +1), wears the gold frame and has a make-up card.
   for (let d = 6; d >= 1; d--) store.economy.checkin(member('demo'), { now: now - d * 86400e3 });
   for (const [id, minutes] of [['linjian', 3], ['mobai', 7], ['steward', 12]]) store.economy.checkin(member(id), { vip: people[id].vip, now: now - minutes * 60000 });
   const context = (id) => ({ level: people[id].level ?? 1, owner: false, joinedAt: at(people[id].days * 24 * 60), now });
@@ -154,7 +168,7 @@ export async function createCommunityDemo() {
   store.economy.redeem(member('linjian'), bag, { ...context('linjian'), shipping: { name: '林间', phone: '13900139000', address: '浙江省杭州市西湖区示例路 2 号（本地预览示例）' } });
   store.economy.redeem(member('mobai'), book, context('mobai'));
   store.members.mute(member('spam'), 7, '垃圾广告 / 引流', member('owner'), now - 3600e3);
-  store.members.setSteward(member('steward'), true);
+  store.members.setSteward(member('steward'), true, ['qa', 'tools']);
   // A few notifications for 预览读者 beyond the actual shipped order above.
   store.members.notify(member('demo'), { type: 'system', text: '你兑换的物品已经发货', data: { order: 'shipped', item: '無相帆布袋', company: '顺丰', tracking: 'SF-PREVIEW-10001' } }, at(12));
   store.members.notify(member('demo'), { type: 'mention', actor: member('linjian'), topicId: open, text: '在回复里提到了你', data: { where: 'reply' } }, at(24));
@@ -167,9 +181,20 @@ export async function createCommunityDemo() {
   // Trigger the normal level calculation after the evidence is seeded.
   for (const id of Object.keys(people)) store.members.level(member(id), now);
 
+  // Seed the accepted showcase once. Moderator pinning later changes the feed,
+  // while homepage and board banners remain independently managed selections.
+  const bannerAccess = { actor: member('owner'), browsingAsReader: false, canSeeBoard: () => true };
+  for (const scope of ['home', ...communityBoards.map(board => board.id)]) {
+    const rows = store.listTopics({ ...(scope === 'home' ? {} : { board: scope }), sort: 'active', page: 1, pageSize: 20 }).items.filter(topic => scope !== 'home' || topic.board !== 'vip');
+    const pinned = rows.filter(topic => topic.pinned).slice(0, 5);
+    const chosen = [...pinned, ...rows.filter(topic => !topic.pinned && topic.featured && topic.thumbs.length).slice(0, Math.min(2, 5 - pinned.length))];
+    store.banners.replace(scope, store.banners.get(scope, bannerAccess.canSeeBoard).version,
+      chosen.map(topic => ({ topicId: topic.id, title: '', cover: null })), bannerAccess);
+  }
+
   const byUid = new Map(Object.entries(people).map(([id, info]) => [info.uid, member(id)]));
   const serviceFor = (siteOrigin) => createCommunityService({
-    store, siteOrigin, directory, ownerId: 'owner',
+    store, siteOrigin, directory, ownerId: 'owner', simplePosting,
     identify: async (req) => {
       const as = /(?:^|;\s*)preview_as=([a-z]+)/.exec(String(req.headers.cookie || ''))?.[1] || 'demo';
       if (as === 'owner') return { kind: 'owner', id: 'owner', name: ownerName, vip: true };

@@ -7,6 +7,7 @@ export { createBlogNotice } from "./blog-notice.mjs";
 export { createBlogClock } from "./blog-clock.mjs";
 export { createBlogWeather } from "./blog-weather.mjs";
 export { createBlogPage } from "./blog-page.ts";
+export { mountCommunitySelect } from "./community-select.tsx";
 import { createRoot } from "react-dom/client";
 import { flushSync, createPortal } from "react-dom";
 import * as ToggleGroup from "@radix-ui/react-toggle-group";
@@ -104,16 +105,20 @@ export function mountToaster(container: Element) {
   flushSync(() =>
     root.render(
       <Toaster
-        position="bottom-center"
+        position="top-center"
+        className="site-toaster"
+        style={{ top: "calc(50% - var(--front-toast-height, 0px) / 2)", bottom: "auto" }}
         theme="dark"
-        closeButton
-        duration={4000}
+        closeButton={false}
+        duration={3000}
+        visibleToasts={1}
         toastOptions={{
           style: {
             background: "var(--dialog-fill)",
             backdropFilter: "var(--dialog-blur)",
-            border: "1px solid rgb(224 237 255 / 42%)",
-            color: "#eff4ff",
+            border: "1px solid var(--line-strong)",
+            color: "var(--text)",
+            boxShadow: "var(--dialog-shadow)",
             fontFamily: "inherit",
           },
         }}

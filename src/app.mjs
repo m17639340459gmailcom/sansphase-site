@@ -15,6 +15,11 @@ import {bookShell} from './book-shell.mjs';
 import {vipBookGate,mountVipBookPrompt} from './vip-book-prompt.mjs';
 import {mountRouteAssets} from './route-assets.mjs';
 import {ensureRouteStyle} from './route-styles.mjs';
+import {createStableCommunityFrame, createCommunityAppearance, startCommunityLayout} from './community-layout.mjs';
+import './community-landing.mjs';
+const communityFrame = createStableCommunityFrame(document, window, fetch.bind(window));
+const communityAppearance = createCommunityAppearance(document, window);
+startCommunityLayout(document, window);
 import {communityView,communityRoute,inCommunityArea,communityHeaderHTML,communityAccountHTML,communityLandingHTML} from './community.mjs';
 import {createCommunityUI} from './community-ui.mjs';
 import {mountCommunitySky} from './community-sky.mjs';
@@ -40,6 +45,7 @@ import {
   createBlogPage,
   mountTimezoneSelect,
   mountToaster,
+  mountCommunitySelect,
   toast,
 } from "./ui.bundle.mjs";
 // The server embeds the published snapshot before this module runs: no late
@@ -195,11 +201,14 @@ function header(page) {
   const languageButton = `<button class="language" data-action="language" aria-label="${t("Switch to English", "切换到中文")}">${t("中 / EN", "EN / 中")}</button>`;
   const menuButton = `<button class="icon-button menu-button" data-action="menu" aria-controls="navigation" aria-expanded="false" aria-label="${t("打开菜单", "Open menu")}"><span class="menu-icon-open">${icons.menu}</span><span class="menu-icon-close">${icons.close}</span></button>`;
   const {view} = communityRoute(location.hash);
+  communityAppearance.sync(inCommunityArea(view));
   if (inCommunityArea(view)) {
     // The community is its own area: its own navigation, notifications, and a way back to the main site.
     const me = communityUI.me();
     const account = siteContent ? communityAccountHTML({t, esc, icons, nickname: siteContent.reader?.nickname, author: Boolean(siteContent.author), me, ownerAvatar: siteContent.profile?.avatar || null}) : '';
-    document.querySelector("#site-header").innerHTML = communityHeaderHTML({view, t, icons, unchecked: Boolean(me && !me.owner && !me.checkedIn), actionsHTML: `${languageButton}${account}${menuButton}`});
+    const markup = communityHeaderHTML({view, t, icons, unchecked: Boolean(me && !me.owner && me.role !== 'owner' && !me.management?.browsingAsReader && !me.checkedIn), actionsHTML: `${communityAppearance.buttonHTML(t, icons)}${languageButton}${account}${menuButton}`});
+    if (communityFrame.header(markup)) return;
+    document.querySelector("#site-header").innerHTML = markup;
     document.querySelector("#site-header").classList.add('community-header');
     cleanNavSlider();
     cleanNavSlider = mountNavSlider(document.querySelector("#navigation"));
@@ -384,7 +393,8 @@ let cleanCommunity = () => {};
 let cleanCommunitySky = null;
 function syncCommunitySky(inCommunity) {
   document.body.classList.toggle('community-open', inCommunity);
-  if (inCommunity) cleanCommunitySky ??= mountCommunitySky(document.querySelector('#blog-backdrop'));
+  document.body.classList.toggle('community-management-open', inCommunity && communityRoute(location.hash).view === 'manage');
+  if (inCommunity) cleanCommunitySky ??= mountCommunitySky(document.querySelector('#blog-backdrop'), window, { parallax: () => !document.body.hasAttribute('data-orbit-scene'), starPainter: () => document.body.dataset.orbitScene === 'atlas' ? () => {} : undefined, meteorPainter: () => document.body.dataset.orbitScene === 'atlas' ? () => {} : undefined });
   else { cleanCommunitySky?.(); cleanCommunitySky = null; }
 }
 // The header reads the community's `me` (bell, balance, level); when that changes it is redrawn,
@@ -395,9 +405,15 @@ function refreshCommunityHeader() {
   header(parseRoute(location.hash).page);
 }
 const communityContext = () => ({t, esc, icons, notify: (message) => toast(message), members: Boolean(siteContent?.reader?.vip || siteContent?.author),
-  ownerAvatar: siteContent?.profile?.avatar || null, headerChanged: refreshCommunityHeader});
-// The community account menu (with the way back to the main site). The header
-// is rebuilt on every route, so a route change also closes it.
+  mountSelect: mountCommunitySelect,
+  ownerAvatar: siteContent?.profile?.avatar || null, headerChanged: refreshCommunityHeader,
+  showPostingTips: !communityFrame.enabled(),
+  showActiveMembers: !communityFrame.enabled(),
+  showHomeCompose: !communityFrame.enabled(),
+  simpleCompose: communityFrame.enabled(),
+  painted: communityFrame.enabled() ? () => communityFrame.sync(communityUI.frameHTML(communityContext())) : undefined,
+  beforePaint: communityFrame.enabled() ? communityFrame.preserveReadingPosition : undefined});
+// The header is rebuilt on every route, so a route change also closes the menu.
 function setCommunityAccountMenu(open) {
   const button = document.querySelector('[data-action="community-account"]');
   const menu = document.querySelector('#community-account-menu');
@@ -407,9 +423,12 @@ function setCommunityAccountMenu(open) {
   menu.hidden = !open;
   return wasOpen;
 }
-document.addEventListener('click', (event) => {
+function closeCommunityAccountOutside(event) {
   if (!event.target.closest?.('.community-account')) setCommunityAccountMenu(false);
-});
+}
+// Capture outside presses before controls handle them. Click also covers keyboard activation.
+document.addEventListener('pointerdown', closeCommunityAccountOutside, true);
+document.addEventListener('click', closeCommunityAccountOutside, true);
 let communityStyleReady = false;
 function communityPage() {
   const {view} = communityRoute(location.hash);
@@ -568,6 +587,7 @@ function renderView({preserveScroll=false,contentStatus}={}) {
   else homeRoot.removeAttribute("role");
   cleanStage.setCovered(page !== "home");
   cleanStage.setLanguage(language === "en");
+  if (!communityFrame.enabled() || contentStatus) communityFrame.dispose();
   header(page);
   const views = {
     home,
@@ -597,7 +617,8 @@ function renderView({preserveScroll=false,contentStatus}={}) {
   cleanMobileBlogOrder();
   cleanReaderAdmin();
   cleanCommunity();
-  setContentHTML(main,contentStatus ? contentStatus==='auth' ? readerGate(language==='en') : contentStatus==='vip' ? vipBookGate(language==='en') : contentMessage(contentStatus==='error') : (views[page] || notFound)());
+  const pageMarkup = contentStatus ? contentStatus==='auth' ? readerGate(language==='en') : contentStatus==='vip' ? vipBookGate(language==='en') : contentMessage(contentStatus==='error') : (views[page] || notFound)();
+  if (contentStatus || !communityFrame.render(main, pageMarkup, communityUI.frameHTML(communityContext()))) setContentHTML(main, pageMarkup);
   readerUI?.route(page,id);
   cleanCommunity=!contentStatus && (page==='community'||page==='post') ? communityUI.mount(main,communityContext()) : ()=>{};
   cleanReaderAdmin=page==='admin' && adminReadersModule ? adminReadersModule.mountReaderAdmin(main,{english:language==='en'}) : ()=>{};
@@ -830,6 +851,9 @@ document.addEventListener("click", (e) => {
       if(siteContent?.profile?.music?.tracks?.length && musicModule) musicModule.toggleSiteMusic();
       else toast(t('作者尚未设置可在本站播放的音乐。','No on-site audio has been configured.'));
       break;
+    case "community-theme-toggle":
+      communityAppearance.toggle();
+      break;
     case "theme-toggle":
       blogTheme = blogTheme === "dark" ? "light" : "dark";
       try {
@@ -853,6 +877,12 @@ document.addEventListener("click", (e) => {
       const open = a.getAttribute('aria-expanded') !== 'true';
       setCommunityAccountMenu(open);
       if (open) document.querySelector('#community-account-menu [role="menuitem"]')?.focus();
+      break;
+    }
+    case "community-browse-mode": {
+      setCommunityAccountMenu(false);
+      a.blur();
+      void communityUI.setBrowsing(a.dataset.reader === 'true');
       break;
     }
     case "blog-notice-prev":
@@ -943,6 +973,21 @@ document.addEventListener("click", (event) => {
     location.hash = link.getAttribute("href");
   }, DEPART_MS);
 });
+// Content queue switches retain the reading position; the management sidebar
+// remains page navigation and continues to start at the top.
+let communityManagementSwitch = null;
+function rememberCommunityManagementSwitch(event) {
+  communityManagementSwitch = null;
+  if (event.defaultPrevented || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+  const link = event.target.closest?.('a[data-community-management-switch]');
+  if (!link || (link.target && link.target !== '_self') || link.hasAttribute('download')) return;
+  const href = link.getAttribute('href'), current = communityRoute(location.hash), next = communityRoute(href || '');
+  if (current.view !== 'manage' || next.view !== 'manage' || !['queue', 'reports'].includes(next.tab)
+    || link.dataset.communityManagementSwitch !== next.tab) return;
+  if (href === location.hash) { event.preventDefault(); return; }
+  communityManagementSwitch = { from: location.hash, to: href };
+}
+document.addEventListener('click', rememberCommunityManagementSwitch);
 window.addEventListener("hashchange", (event) => {
   // Stop scheduling new warmup images, but let the one already in flight be
   // reused by the destination page instead of cancelling and downloading again.
@@ -951,18 +996,21 @@ window.addEventListener("hashchange", (event) => {
   const fromRoute = parseRoute(event.oldURL ? new URL(event.oldURL).hash : "");
   const toRoute = parseRoute(location.hash);
   const from = fromRoute.page, to = toRoute.page;
+  const preserveManagementScroll = communityManagementSwitch?.from === (event.oldURL ? new URL(event.oldURL).hash : '')
+    && communityManagementSwitch.to === location.hash;
+  communityManagementSwitch = null;
   const update = () => {
-    const rendering = render();
-    window.scrollTo({ top: 0, behavior: "instant" });
-    (to === "home"
+    const rendering = render(preserveManagementScroll ? { preserveScroll: true } : undefined);
+    // The community frame resets its active desktop/mobile scroll host itself.
+    if (!communityFrame.enabled() && !preserveManagementScroll) window.scrollTo({ top: 0, behavior: "instant" });
+    (communityFrame.center() || (to === "home"
       ? homeRoot.querySelector(".universe-stage")
       : main
-    ).focus({ preventScroll: true });
+    )).focus({ preventScroll: true });
     return rendering;
   };
-  // Within the community the page changes in place: the header and the live
-  // starfield stay, and the page's own blocks rise in (community-ui). A
-  // snapshot cross-fade would freeze the sky and show both pages at once.
+  // Community routes swap synchronously inside the persistent frame. Keep the
+  // header and sky mounted, without fading or replaying an entrance animation.
   const withinCommunity = inCommunityArea(communityRoute(event.oldURL ? new URL(event.oldURL).hash : '').view) && inCommunityArea(communityRoute(location.hash).view);
   if (withinCommunity) update();
   else routeTransitions.run(from, to, update);

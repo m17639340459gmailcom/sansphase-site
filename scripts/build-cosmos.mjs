@@ -16,6 +16,7 @@ import { loaderDial } from "../src/loader-dial.mjs";
 import { validateSceneCdnOrigin } from "../src/scene-delivery.mjs";
 import { composeSiteStyles } from "./compose-site-styles.mjs";
 import { typedBrowserModules } from './typed-browser-modules.mjs';
+import { composeCommunityStyles } from './compose-community-styles.mjs';
 
 const outdir = process.argv[2] || "dist";
 const sceneCdnOrigin = validateSceneCdnOrigin(process.env.SANSPHASE_SCENE_CDN_ORIGIN);
@@ -34,6 +35,9 @@ const result = await build({
     "ui.bundle": "src/library-ui.tsx",
     "author.bundle": "src/author-entry.mjs",
     "music.bundle": "src/music-player.mjs",
+    "community-layout": "src/community-layout.ts",
+    "community-landing": "src/community-landing.ts",
+    "community-compose-editor": "src/community-compose-editor.ts",
   },
   bundle: true,
   format: "esm",
@@ -62,6 +66,7 @@ for (const file of [
   "visitor-controls.css",
   "reader.css",
   "reader-ui.mjs",
+  "reader-policy.mjs",
   "reader-membership.mjs",
   "admin-readers.mjs",
   "admin-route.mjs",
@@ -100,11 +105,29 @@ for (const file of [
   "author.css",
   "community.mjs",
   "community-ui.mjs",
+  "community-write-request.mjs",
+  "community-editor-size.mjs",
   "community-post.mjs",
   "community-pages.mjs",
+  "community-convention.mjs",
+  "community-convention-consent.mjs",
+  "community-management.mjs",
+  "community-banner-controller.mjs",
+  "community-banner-editor.mjs",
+  "community-frame-banners.mjs",
+  "community-stewards.mjs",
+  "community-shop-editor.mjs",
+  "community-equipment-import.mjs",
+  "community-name-effects.mjs",
   "community-rules.mjs",
+  "community-growth.mjs",
+  "community-growth-art.mjs",
+  "community-level-explorer.mjs",
+  "upload-policy.mjs",
   "community-sky.mjs",
-  "community.css",
+  "community-body-images.mjs",
+  "community-badge-icons.mjs",
+  "community-checkin-stars.mjs",
 ]) {
   if (typedBrowserModules.has(file)) {
     const stem = file.slice(0, -'.mjs'.length);
@@ -119,6 +142,7 @@ for (const file of [
   }
 }
 await writeFile(`${outdir}/styles.css`, await composeSiteStyles());
+await writeFile(`${outdir}/community.css`, await composeCommunityStyles());
 await mkdir("outputs/verification", { recursive: true });
 await writeFile(
   "outputs/verification/library-build-meta.json",

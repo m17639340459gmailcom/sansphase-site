@@ -11,13 +11,20 @@ import { createLedger } from './community-ledger.ts';
 import { createMembers } from './community-members.ts';
 import type { Notice } from './community-members.ts';
 import { createEconomy } from './community-economy.ts';
+import { bodyImageContent } from '../src/community-body-images.ts';
+import { createCommunityBanners } from './community-banners.ts';
+import { createCommunityRequests } from './community-requests.ts';
+import { createCommunityRateLimits } from './community-rate-limits.ts';
+import { createCommunityAudit } from './community-audit.ts';
+import { purgeCommunityReaderData } from './community-reader-cleanup.ts';
+import { createCommunityConvention } from './community-convention.ts';
 
 export type { CommunityAuthor, Target } from './community-db.ts';
 export type ShowcaseMeta = { tools: string; model: string; usage: string; prompt: string; promptMode: PromptMode; price: number };
 export type ResourceMeta = { url: string; kind: string; price: string; platform: string };
 type TopicRow = {
   id: string; board: string; author_kind: Kind; author_id: string; title: string; excerpt: string;
-  created_at: string; last_activity_at: string; reply_count: number; pinned: number; featured: number;
+  created_at: string; last_activity_at: string; reply_count: number; pinned: number; featured: number; featured_at: string | null;
   last_kind: Kind | null; last_id: string | null; last_at: string | null;
   edited_at: string | null; accepted_reply_id: string | null; tags: string; likes: number; views: number; thumbs: string | null;
   locked: number; pending: number; pending_reason: string | null; hidden_at: string | null; hidden_reason: string | null;
@@ -46,7 +53,7 @@ export function communityTablesReady(directory: string) {
   finally { db.close(); }
 }
 
-// 随想没有标题：列表和通知里用正文开头代替。
+// 兼容旧版没有标题的随想：列表和通知里用正文开头代替。
 export const displayTitle = (title: string, body: string) => title || ([...body.replace(/\s+/g, ' ').trim()].slice(0, 36).join('') + ([...body].length > 36 ? '…' : ''));
 
 // Community topics, replies and everything around them in content.db.
@@ -61,19 +68,24 @@ export function createCommunityStore(directory: string) {
   const rules = communityRules;
   const tx = createTransaction(db);
   const ledger = createLedger(db);
-  const members = createMembers(db);
+  const convention = createCommunityConvention(db, tx);
+  const members = createMembers(db, convention);
+  const banners = createCommunityBanners(db, tx, members);
   const economy = createEconomy(db, tx, ledger, members);
+  const requests = createCommunityRequests(db, tx);
+  const rateLimits = createCommunityRateLimits(db, tx);
+  const audit = createCommunityAudit(db, tx);
 
   // Each listed topic carries its latest live reply, likes, views, up to four image ids and resource votes.
   const lastReply = (column: string) => `(SELECT r.${column} FROM community_replies r WHERE r.topic_id = t.id AND r.deleted_at IS NULL AND r.hidden_at IS NULL
     ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1)`;
-  const topicColumns = `t.id, t.board, t.author_kind, t.author_id, t.title, substr(t.body, 1, 320) AS excerpt, t.created_at, t.last_activity_at, t.reply_count, t.pinned, t.featured,
+  const topicColumns = `t.id, t.board, t.author_kind, t.author_id, t.title, substr(t.body, 1, 320) AS excerpt, t.created_at, t.last_activity_at, t.reply_count, t.pinned, t.featured, t.featured_at,
     t.edited_at, t.accepted_reply_id, t.tags, t.locked, t.pending, t.pending_reason, t.hidden_at, t.hidden_reason, t.paid_pin_until, t.glow_until,
     t.bounty, t.bounty_state, t.meta, t.resource,
     ${lastReply('author_kind')} AS last_kind, ${lastReply('author_id')} AS last_id, ${lastReply('created_at')} AS last_at,
     (SELECT COUNT(*) FROM community_reactions x WHERE x.target_kind = 'topic' AND x.target_id = t.id) AS likes,
     (SELECT COUNT(*) FROM community_views v WHERE v.topic_id = t.id) AS views,
-    (SELECT group_concat(id) FROM (SELECT i.id FROM community_images i WHERE i.topic_id = t.id AND i.deleted_at IS NULL ORDER BY i.position LIMIT 4)) AS thumbs,
+    (SELECT group_concat(id) FROM (SELECT i.id FROM community_images i WHERE i.topic_id = t.id AND i.reply_id IS NULL AND i.deleted_at IS NULL ORDER BY i.position LIMIT 4)) AS thumbs,
     (SELECT COUNT(*) FROM community_votes v WHERE v.topic_id = t.id AND v.value = 'alive') AS alive,
     (SELECT COUNT(*) FROM community_votes v WHERE v.topic_id = t.id AND v.value = 'dead') AS dead`;
   // Listed topics: published and not hidden, with optional board, tag, author and search filters.
@@ -104,6 +116,9 @@ export function createCommunityStore(directory: string) {
   const repliesCreatedSince = db.prepare('SELECT COUNT(*) AS count FROM community_replies WHERE author_kind = ? AND author_id = ? AND created_at >= ?');
   const newTopicsSince = db.prepare('SELECT COUNT(*) AS count FROM community_topics WHERE created_at >= ? AND deleted_at IS NULL');
   const newRepliesSince = db.prepare('SELECT COUNT(*) AS count FROM community_replies WHERE created_at >= ? AND deleted_at IS NULL');
+  const newBoardTopicsSince = db.prepare('SELECT COUNT(*) AS count FROM community_topics WHERE created_at >= ? AND deleted_at IS NULL AND board = ?');
+  const newBoardRepliesSince = db.prepare(`SELECT COUNT(*) AS count FROM community_replies r JOIN community_topics t ON t.id = r.topic_id
+    WHERE r.created_at >= ? AND r.deleted_at IS NULL AND t.deleted_at IS NULL AND t.board = ?`);
   const boardCounts = db.prepare(`SELECT board, COUNT(*) AS count FROM community_topics WHERE deleted_at IS NULL AND pending = 0 GROUP BY board`);
   const insertTopic = db.prepare(`INSERT INTO community_topics (id, board, author_kind, author_id, title, body, tags, meta, resource, pending, pending_reason, pinned, created_at, last_activity_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
@@ -115,10 +130,10 @@ export function createCommunityStore(directory: string) {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const bumpTopic = db.prepare('UPDATE community_topics SET reply_count = reply_count + 1, last_activity_at = ? WHERE id = ?');
   const dropReplyCount = db.prepare('UPDATE community_topics SET reply_count = MAX(0, reply_count - 1) WHERE id = ?');
-  const removeTopic = db.prepare('UPDATE community_topics SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL');
-  const removeReply = db.prepare('UPDATE community_replies SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL');
+  const removeTopic = db.prepare('UPDATE community_topics SET deleted_at = ?, deleted_reason = ? WHERE id = ? AND deleted_at IS NULL');
+  const removeReply = db.prepare('UPDATE community_replies SET deleted_at = ?, deleted_reason = ? WHERE id = ? AND deleted_at IS NULL');
   const setPinned = db.prepare('UPDATE community_topics SET pinned = ?, paid_pin_until = CASE WHEN ? = 0 THEN NULL ELSE paid_pin_until END WHERE id = ?');
-  const setFeatured = db.prepare('UPDATE community_topics SET featured = ?, featured_at = CASE WHEN ? = 1 THEN ? ELSE featured_at END WHERE id = ?');
+  const setFeatured = db.prepare('UPDATE community_topics SET featured = ?, featured_at = CASE WHEN ? = 1 THEN COALESCE(featured_at, ?) ELSE featured_at END WHERE id = ?');
   const setLocked = db.prepare('UPDATE community_topics SET locked = ? WHERE id = ?');
   const setBoard = db.prepare('UPDATE community_topics SET board = ? WHERE id = ?');
   const setAccepted = db.prepare('UPDATE community_topics SET accepted_reply_id = ?, accepted_at = ? WHERE id = ?');
@@ -127,20 +142,12 @@ export function createCommunityStore(directory: string) {
   const showTopic = db.prepare('UPDATE community_topics SET hidden_at = NULL, hidden_reason = NULL WHERE id = ?');
   const hideReply = db.prepare('UPDATE community_replies SET hidden_at = ? WHERE id = ? AND hidden_at IS NULL');
   const showReply = db.prepare('UPDATE community_replies SET hidden_at = NULL WHERE id = ?');
-  const authored = db.prepare(`SELECT 1 FROM community_topics WHERE author_kind = 'reader' AND author_id = ? AND deleted_at IS NULL
-    UNION ALL SELECT 1 FROM community_replies WHERE author_kind = 'reader' AND author_id = ? AND deleted_at IS NULL LIMIT 1`);
   const replyAuthorsOf = db.prepare(`SELECT DISTINCT author_kind, author_id FROM community_replies WHERE topic_id = ? AND deleted_at IS NULL`);
   // Likes, bookmarks and views.
   const hasReaction = db.prepare('SELECT COUNT(*) AS count FROM community_reactions WHERE target_kind = ? AND target_id = ? AND member_kind = ? AND member_id = ?');
   const addReaction = db.prepare('INSERT OR IGNORE INTO community_reactions (target_kind, target_id, member_kind, member_id, created_at) VALUES (?, ?, ?, ?, ?)');
   const dropReaction = db.prepare('DELETE FROM community_reactions WHERE target_kind = ? AND target_id = ? AND member_kind = ? AND member_id = ?');
   const countReactions = db.prepare('SELECT COUNT(*) AS count FROM community_reactions WHERE target_kind = ? AND target_id = ?');
-  // The same liker's likes on one author's content today (the reward goes once a day per pair).
-  const pairLikesToday = db.prepare(`SELECT COUNT(*) AS count FROM community_reactions x
-    LEFT JOIN community_topics t ON x.target_kind = 'topic' AND t.id = x.target_id
-    LEFT JOIN community_replies r ON x.target_kind = 'reply' AND r.id = x.target_id
-    WHERE x.member_kind = $liker_kind AND x.member_id = $liker_id AND x.created_at >= $since
-    AND ((t.author_kind = $kind AND t.author_id = $id) OR (r.author_kind = $kind AND r.author_id = $id))`);
   const hasBookmark = db.prepare('SELECT COUNT(*) AS count FROM community_bookmarks WHERE topic_id = ? AND member_kind = ? AND member_id = ?');
   const addBookmark = db.prepare('INSERT OR IGNORE INTO community_bookmarks (topic_id, member_kind, member_id, created_at) VALUES (?, ?, ?, ?)');
   const dropBookmark = db.prepare('DELETE FROM community_bookmarks WHERE topic_id = ? AND member_kind = ? AND member_id = ?');
@@ -156,13 +163,14 @@ export function createCommunityStore(directory: string) {
   const dropVote = db.prepare('DELETE FROM community_votes WHERE topic_id = ? AND member_kind = ? AND member_id = ?');
   const voteCounts = db.prepare(`SELECT COALESCE(SUM(value = 'alive'), 0) AS alive, COALESCE(SUM(value = 'dead'), 0) AS dead FROM community_votes WHERE topic_id = ?`);
   // Images.
-  const insertImage = db.prepare(`INSERT INTO community_images (id, uploader_kind, uploader_id, width, height, created_at) VALUES (?, ?, ?, ?, ?, ?)`);
-  const oneImage = db.prepare('SELECT id, uploader_kind, uploader_id, topic_id, width, height, created_at, deleted_at FROM community_images WHERE id = ?');
-  const topicImages = db.prepare('SELECT id, width, height FROM community_images WHERE topic_id = ? AND deleted_at IS NULL ORDER BY position');
-  const attachImage = db.prepare('UPDATE community_images SET topic_id = ?, position = ? WHERE id = ?');
+  const insertImage = db.prepare(`INSERT INTO community_images (id, uploader_kind, uploader_id, width, height, created_at, purpose, frame_ready, banner_scope) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const oneImage = db.prepare('SELECT id, uploader_kind, uploader_id, topic_id, reply_id, width, height, created_at, deleted_at, purpose, frame_ready, banner_scope FROM community_images WHERE id = ?');
+  const topicImages = db.prepare('SELECT id, width, height FROM community_images WHERE topic_id = ? AND reply_id IS NULL AND deleted_at IS NULL ORDER BY position');
+  const replyImages = db.prepare('SELECT id, width, height FROM community_images WHERE topic_id = ? AND reply_id = ? AND deleted_at IS NULL ORDER BY position');
+  const attachImage = db.prepare('UPDATE community_images SET topic_id = ?, reply_id = ?, position = ? WHERE id = ?');
   const removeImage = db.prepare('UPDATE community_images SET deleted_at = ? WHERE id = ?');
-  const staleImages = db.prepare('SELECT id FROM community_images WHERE topic_id IS NULL AND deleted_at IS NULL AND created_at < ?');
-  const dropImage = db.prepare('DELETE FROM community_images WHERE id = ? AND topic_id IS NULL');
+  const staleImages = db.prepare('SELECT id FROM community_images WHERE topic_id IS NULL AND deleted_at IS NULL AND created_at < ? AND NOT EXISTS (SELECT 1 FROM community_shop_items WHERE image = community_images.id) AND NOT EXISTS (SELECT 1 FROM community_banner_entries WHERE cover = community_images.id)');
+  const dropImage = db.prepare('DELETE FROM community_images WHERE id = ? AND topic_id IS NULL AND NOT EXISTS (SELECT 1 FROM community_shop_items WHERE image = community_images.id) AND NOT EXISTS (SELECT 1 FROM community_banner_entries WHERE cover = community_images.id)');
   // Reports.
   const insertReport = db.prepare(`INSERT INTO community_reports (id, target_kind, target_id, reporter_kind, reporter_id, reporter_level, reason, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const openReportBy = db.prepare(`SELECT COUNT(*) AS count FROM community_reports WHERE target_kind = ? AND target_id = ? AND reporter_kind = ? AND reporter_id = ? AND status = 'open'`);
@@ -178,14 +186,14 @@ export function createCommunityStore(directory: string) {
     const meta = parseJson<ShowcaseMeta | null>(row.meta, null);
     const resource = parseJson<ResourceMeta | null>(row.resource, null);
     return {
-      id: row.id, board: row.board, title: displayTitle(row.title, row.excerpt), author: { kind: row.author_kind, id: row.author_id },
+      id: row.id, board: row.board, title: displayTitle(row.title, row.excerpt), hasTitle: Boolean(row.title), author: { kind: row.author_kind, id: row.author_id },
       createdAt: row.created_at, lastActivityAt: row.last_activity_at, replies: row.reply_count,
       likes: Number(row.likes), views: Number(row.views), pinned: Boolean(row.pinned), paidPin, featured: Boolean(row.featured),
       tags: parseJson<string[]>(row.tags, []), thumbs: row.thumbs ? row.thumbs.split(',') : [],
       solved: Boolean(row.accepted_reply_id), edited: Boolean(row.edited_at), locked: Boolean(row.locked),
       glow: Boolean(row.glow_until && Date.parse(row.glow_until) > now), bounty: row.bounty_state === 'open' || row.bounty_state === 'paid' ? row.bounty : 0,
       bountyState: row.bounty_state, pending: Boolean(row.pending), hidden: Boolean(row.hidden_at),
-      excerpt: row.board === 'moments' || !row.title ? row.excerpt : undefined,
+      excerpt: row.excerpt,
       meta: meta && { tools: meta.tools, model: meta.model, usage: meta.usage, promptMode: meta.promptMode, price: meta.price },
       resource: resource && { ...resource, alive: Number(row.alive), dead: Number(row.dead) },
       lastReply: row.last_kind && row.last_id && row.last_at ? { author: { kind: row.last_kind, id: row.last_id }, at: row.last_at } : null,
@@ -200,18 +208,20 @@ export function createCommunityStore(directory: string) {
   const authorOf = (row: { author_kind: Kind; author_id: string }): CommunityAuthor => ({ kind: row.author_kind, id: row.author_id });
   const notify = (member: CommunityAuthor, notice: Notice, now: string) => members.notify(member, notice, now);
 
-  function saveImages(topicId: string, author: CommunityAuthor, images: readonly string[], now: string) {
-    const current = (topicImages.all(topicId) as Array<{ id: string }>).map(image => image.id);
+  function saveImages(topicId: string, author: CommunityAuthor, images: readonly string[], now: string, replyId: string | null = null) {
+    const current = ((replyId ? replyImages.all(topicId, replyId) : topicImages.all(topicId)) as Array<{ id: string }>).map(image => image.id);
     for (const id of images) {
-      const image = oneImage.get(id) as { uploader_kind: Kind; uploader_id: string; topic_id: string | null; deleted_at: string | null } | undefined;
-      if (!image || image.deleted_at || image.uploader_kind !== author.kind || image.uploader_id !== author.id || (image.topic_id && image.topic_id !== topicId))
+      const image = oneImage.get(id) as { uploader_kind: Kind; uploader_id: string; topic_id: string | null; reply_id: string | null; deleted_at: string | null; purpose: string } | undefined;
+      const attachedHere = image?.topic_id === topicId && image.reply_id === replyId;
+      const ownsUpload = image?.uploader_kind === author.kind && image.uploader_id === author.id;
+      if (!image || image.purpose !== 'content' || image.deleted_at || (!ownsUpload && !current.includes(id)) || (image.topic_id && !attachedHere))
         throw fail('图片已失效，请重新上传。');
     }
     // Images taken out of a post are soft-deleted like the post itself would be.
     for (const id of current) if (!images.includes(id)) removeImage.run(now, id);
-    images.forEach((id, position) => attachImage.run(topicId, position, id));
+    images.forEach((id, position) => attachImage.run(topicId, replyId, position, id));
   }
-  // Publishing a topic earns 星尘 (first three a day) and the first-topic badge.
+  // Publishing earns the configured daily topic award and the first-topic badge.
   function published(topicId: string, author: CommunityAuthor, now: string) {
     const earned = ledger.reward(author, rules.topicReward, 'topic', { kind: 'topic', id: topicId }, now, rules.topicDaily);
     members.checkBadges(author, now);
@@ -220,8 +230,9 @@ export function createCommunityStore(directory: string) {
   // A moderated deletion (by the owner or a steward, of someone else's content) costs the author a penalty.
   function deleteTopicIn(id: string, { moderated = false, reason = '', note = '', now }: { moderated?: boolean; reason?: string; note?: string; now: string }) {
     const row = topicRow(id);
-    if (!row || !Number(removeTopic.run(now, id).changes)) return false;
+    if (!row || !Number(removeTopic.run(now, reason || null, id).changes)) return false;
     ledger.revert({ kind: 'topic', id }, now);
+    ledger.revert({ kind: 'topic', id: `featured:${id}` }, now);
     const author = authorOf(row);
     // The asker gets half of an unclaimed bounty back.
     const refund = economy.refundBounty(id, now);
@@ -229,21 +240,25 @@ export function createCommunityStore(directory: string) {
     if (moderated) {
       // Rejecting a post that was never public is not a violation.
       if (!row.pending) ledger.penalise(author, { kind: 'topic', id }, now);
-      notify(author, { type: row.pending ? 'review' : 'penalty', text: row.pending ? `你的帖子没有通过审核：${reason || '其他'}。有异议可以在站务反馈发帖。` : '你的帖子因违规被删除', data: { what: 'topic', title: displayTitle(row.title, row.body), state: row.pending ? 'rejected' : undefined, reason: row.pending ? (reason || '其他') : undefined, note: row.pending ? note : undefined, penalty: row.pending ? 0 : rules.penalty }, link: row.pending ? '#/community/boards/meta' : undefined }, now);
+      notify(author, { type: row.pending ? 'review' : 'penalty', text: row.pending ? `你的帖子没有通过审核：${reason || '其他'}。有异议可以在站务反馈发帖。` : `你的帖子因违规被删除：${reason}`, data: { what: 'topic', title: displayTitle(row.title, row.body), state: row.pending ? 'rejected' : undefined, reason: reason || '其他', note, penalty: row.pending ? 0 : rules.penalty }, link: row.pending ? '#/community/boards/meta' : undefined }, now);
+    } else if (reason) {
+      notify(author, { type: 'system', text: `你的帖子已被删除：${reason}`, data: { what: 'topic', title: displayTitle(row.title, row.body), reason } }, now);
     }
     for (const report of reportsOn.all('topic', id) as Array<{ id: string }>) closeReport.run(moderated ? 'upheld' : 'dismissed', now, report.id);
     return true;
   }
-  function deleteReplyIn(id: string, { moderated = false, now }: { moderated?: boolean; now: string }) {
+  function deleteReplyIn(id: string, { moderated = false, reason = '', now }: { moderated?: boolean; reason?: string; now: string }) {
     const row = replyRow(id);
-    if (!row || !Number(removeReply.run(now, id).changes)) return false;
+    if (!row || !Number(removeReply.run(now, reason || null, id).changes)) return false;
     dropReplyCount.run(row.topic_id);
     ledger.revert({ kind: 'reply', id }, now);
     const topic = topicRow(row.topic_id);
     if (topic?.accepted_reply_id === id) setAccepted.run(null, null, row.topic_id);
     if (moderated) {
       ledger.penalise(authorOf(row), { kind: 'reply', id }, now);
-      notify(authorOf(row), { type: 'penalty', topicId: row.topic_id, text: '你的一条回复因违规被删除', data: { what: 'reply', penalty: rules.penalty } }, now);
+      notify(authorOf(row), { type: 'penalty', topicId: row.topic_id, text: `你的一条回复因违规被删除：${reason}`, data: { what: 'reply', reason, penalty: rules.penalty } }, now);
+    } else if (reason) {
+      notify(authorOf(row), { type: 'system', topicId: row.topic_id, text: `你的一条回复已被删除：${reason}`, data: { what: 'reply', reason } }, now);
     }
     for (const report of reportsOn.all('reply', id) as Array<{ id: string }>) closeReport.run(moderated ? 'upheld' : 'dismissed', now, report.id);
     return true;
@@ -252,7 +267,12 @@ export function createCommunityStore(directory: string) {
   return {
     ledger,
     members,
+    convention,
     economy,
+    banners,
+    requests,
+    rateLimits,
+    audit,
     transaction: tx,
 
     /* ---------- 帖子与回复 ---------- */
@@ -283,7 +303,7 @@ export function createCommunityStore(directory: string) {
     rejectTopic(id: string, reason: string, note = '', now = new Date().toISOString()) {
       return tx(() => {
         const row = topicRow(id);
-        if (!row || !row.pending || !Number(removeTopic.run(now, id).changes)) throw fail('这个帖子不在待审列表里。', 409);
+        if (!row || !row.pending || !Number(removeTopic.run(now, reason, id).changes)) throw fail('这个帖子不在待审列表里。', 409);
         const author = authorOf(row);
         notify(author, {
           type: 'review', topicId: id,
@@ -294,13 +314,13 @@ export function createCommunityStore(directory: string) {
         return { author };
       });
     },
-    editTopic(id: string, { title, body, tags = [], images = [], meta = null, resource = null, editor, now = new Date().toISOString() }:
-      { title: string; body: string; tags?: readonly string[]; images?: readonly string[]; meta?: ShowcaseMeta | null; resource?: ResourceMeta | null; editor: CommunityAuthor; now?: string }) {
+    editTopic(id: string, { title, body, tags = [], images = [], meta = null, resource = null, clearResource = false, editor, now = new Date().toISOString() }:
+      { title: string; body: string; tags?: readonly string[]; images?: readonly string[]; meta?: ShowcaseMeta | null; resource?: ResourceMeta | null; clearResource?: boolean; editor: CommunityAuthor; now?: string }) {
       return tx(() => {
         const row = topicRow(id);
         if (!row) throw fail('帖子不存在，或已被删除。', 404);
         insertRevision.run(randomUUID(), 'topic', id, row.title, row.body, row.tags, editor.kind, editor.id, now);
-        updateTopic.run(title, body, JSON.stringify(tags), meta ? JSON.stringify(meta) : row.meta, resource ? JSON.stringify(resource) : row.resource, now, id);
+        updateTopic.run(title, body, JSON.stringify(tags), meta ? JSON.stringify(meta) : row.meta, resource ? JSON.stringify(resource) : clearResource ? null : row.resource, now, id);
         saveImages(id, authorOf(row), images, now);
         return true;
       });
@@ -314,7 +334,7 @@ export function createCommunityStore(directory: string) {
         updateTags.run(JSON.stringify(tags), now, id);
       });
     },
-    addReply({ topicId, author, body, quoteId = null, now = new Date().toISOString() }: { topicId: string; author: CommunityAuthor; body: string; quoteId?: string | null; now?: string }) {
+    addReply({ topicId, author, body, images = [], quoteId = null, now = new Date().toISOString() }: { topicId: string; author: CommunityAuthor; body: string; images?: readonly string[]; quoteId?: string | null; now?: string }) {
       return tx(() => {
         const topic = topicRow(topicId);
         if (!topic) throw fail('帖子不存在，或已被删除。', 404);
@@ -323,10 +343,11 @@ export function createCommunityStore(directory: string) {
         if (quoteId && (!quoted || quoted.topic_id !== topicId)) throw fail('引用的回复已不存在。');
         const id = randomUUID();
         insertReply.run(id, topicId, author.kind, author.id, body, quoted ? quoteId : null, now);
+        saveImages(topicId, author, images, now, id);
         bumpTopic.run(now, topicId);
         // Only substantive replies on someone else's topic earn 星尘.
         const own = same(authorOf(topic), author);
-        const earned = !own && [...body].length >= rules.replyMinLength
+        const earned = !own && [...bodyImageContent(body).text.trim()].length >= rules.replyMinLength
           ? ledger.reward(author, rules.replyReward, 'reply', { kind: 'reply', id }, now, rules.replyDaily) : 0;
         const told: CommunityAuthor[] = [author];
         const tell = (member: CommunityAuthor, notice: Notice) => { if (told.some(item => same(item, member))) return; told.push(member); notify(member, notice, now); };
@@ -335,12 +356,13 @@ export function createCommunityStore(directory: string) {
         return { id, earned, told };
       });
     },
-    editReply(id: string, { body, editor, now = new Date().toISOString() }: { body: string; editor: CommunityAuthor; now?: string }) {
+    editReply(id: string, { body, images, editor, now = new Date().toISOString() }: { body: string; images?: readonly string[]; editor: CommunityAuthor; now?: string }) {
       return tx(() => {
         const row = replyRow(id);
         if (!row) throw fail('回复不存在，或已被删除。', 404);
         insertRevision.run(randomUUID(), 'reply', id, null, row.body, null, editor.kind, editor.id, now);
         updateReply.run(body, now, id);
+        saveImages(row.topic_id, editor, images ?? bodyImageContent(body).images, now, id);
         return true;
       });
     },
@@ -358,6 +380,7 @@ export function createCommunityStore(directory: string) {
       if (!row) return null;
       const replies = (topicReplies.all(id) as ReplyRow[]).map(reply => ({
         id: reply.id, author: authorOf(reply), body: reply.body, createdAt: reply.created_at,
+        images: replyImages.all(id, reply.id) as Array<{ id: string; width: number; height: number }>,
         edited: Boolean(reply.edited_at), likes: Number(reply.likes), quoteId: reply.quote_id, hidden: Boolean(reply.hidden_at),
       }));
       const vote = voteCounts.get(id) as { alive: number; dead: number };
@@ -375,7 +398,7 @@ export function createCommunityStore(directory: string) {
     },
     memberReplies(member: CommunityAuthor) {
       return (memberReplies.all(member.kind, member.id) as Array<{ id: string; topic_id: string; body: string; created_at: string; title: string; topic_body: string; board: string; likes: number }>)
-        .map(row => ({ id: row.id, topicId: row.topic_id, topicTitle: displayTitle(row.title, row.topic_body), board: row.board, body: row.body, createdAt: row.created_at, likes: Number(row.likes) }));
+        .map(row => ({ id: row.id, topicId: row.topic_id, topicTitle: displayTitle(row.title, row.topic_body), board: row.board, body: row.body, createdAt: row.created_at, likes: Number(row.likes), images: replyImages.all(row.topic_id, row.id) as Array<{ id: string; width: number; height: number }> }));
     },
     // Per-board totals, replies in the last 24 hours, the latest topic, tags, and today's check-ins.
     summary({ limit = 5, now = Date.now(), hiddenBoard = '' }: { limit?: number; now?: number; hiddenBoard?: string } = {}) {
@@ -405,50 +428,47 @@ export function createCommunityStore(directory: string) {
       const since = iso(Date.parse(`${beijingDay(now)}T00:00:00+08:00`));
       return { topics: countOf(topicsCreatedSince, member.kind, member.id, since), replies: countOf(repliesCreatedSince, member.kind, member.id, since) };
     },
-    activity(now = Date.now()) {
+    activity(now = Date.now(), boards?: readonly string[]) {
       const since = iso(now - day);
+      const scope = boards === undefined ? null : [...new Set(boards)];
       return {
-        topics24h: countOf(newTopicsSince, since), replies24h: countOf(newRepliesSince, since),
-        boards: Object.fromEntries((boardCounts.all() as Array<{ board: string; count: number }>).map(row => [row.board, Number(row.count)])),
+        topics24h: scope ? scope.reduce((total, board) => total + countOf(newBoardTopicsSince, since, board), 0) : countOf(newTopicsSince, since),
+        replies24h: scope ? scope.reduce((total, board) => total + countOf(newBoardRepliesSince, since, board), 0) : countOf(newRepliesSince, since),
+        boards: Object.fromEntries((boardCounts.all() as Array<{ board: string; count: number }>).filter(row => !scope || scope.includes(row.board)).map(row => [row.board, Number(row.count)])),
       };
     },
     deleteTopic(id: string, { moderated = false, reason = '', note = '', now = new Date().toISOString() }: { moderated?: boolean; reason?: string; note?: string; now?: string } = {}) {
       return tx(() => deleteTopicIn(id, { moderated, reason, note, now }));
     },
-    deleteReply(id: string, { moderated = false, now = new Date().toISOString() }: { moderated?: boolean; now?: string } = {}) {
-      return tx(() => deleteReplyIn(id, { moderated, now }));
+    deleteReply(id: string, { moderated = false, reason = '', now = new Date().toISOString() }: { moderated?: boolean; reason?: string; now?: string } = {}) {
+      return tx(() => deleteReplyIn(id, { moderated, reason, now }));
     },
-    // Accounts with live community content are not removed by the 30-day cleanup.
-    hasContent(readerId: string) {
-      return Boolean(authored.get(readerId, readerId));
+    // Permanent account cleanup is separate from reversible moderation deletes.
+    purgeReaderData(readerId: string, queueFile: (filename: string, reason: string) => void) {
+      return tx(() => purgeCommunityReaderData(db, readerId, { queueFile, cancelOrder: id => economy.cancel(id) }));
     },
     participants(topicId: string) {
       return (replyAuthorsOf.all(topicId) as Array<{ author_kind: Kind; author_id: string }>).map(authorOf);
     },
 
     /* ---------- 赞、收藏、浏览 ---------- */
-    // Likes give the author 1 星尘 (daily cap 20, once a day per liker) when the liker may give it.
-    like(target: Target, member: CommunityAuthor, on: boolean, { rewarding = false, now = new Date().toISOString() }: { rewarding?: boolean; now?: string } = {}) {
+    // Likes remain visible recognition. The legacy rewarding option cannot issue currency.
+    like(target: Target, member: CommunityAuthor, on: boolean, { now = new Date().toISOString() }: { rewarding?: boolean; now?: string } = {}) {
       return tx(() => {
         const row = target.kind === 'topic' ? topicRow(target.id) : replyRow(target.id);
         if (!row) throw fail(target.kind === 'topic' ? '帖子不存在，或已被删除。' : '回复不存在，或已被删除。', 404);
         const author = authorOf(row);
         if (same(author, member)) throw fail('不能给自己点赞。');
-        let earned = 0;
         if (on) {
           const added = Number(addReaction.run(target.kind, target.id, member.kind, member.id, now).changes) > 0;
           const topicId = target.kind === 'topic' ? target.id : (row as ReplyRow).topic_id;
           if (added) {
-            const since = iso(Date.parse(`${beijingDay(Date.parse(now))}T00:00:00+08:00`));
-            const ref = { kind: 'like', id: `${target.kind}:${target.id}:${member.kind}:${member.id}` };
-            if (rewarding && countOf(pairLikesToday, { liker_kind: member.kind, liker_id: member.id, since, kind: author.kind, id: author.id }) <= 1 && !ledger.rewardedFor(author, 'like', ref))
-              earned = ledger.reward(author, rules.likeReward, 'like', ref, now, rules.likeDaily);
             notify(author, { type: 'like', actor: member, topicId, replyId: target.kind === 'reply' ? target.id : null, text: target.kind === 'topic' ? '赞了你的主题' : '赞了你的回复',
               data: { what: target.kind }, group: `like:${target.kind}:${target.id}:${beijingDay(Date.parse(now))}` }, now);
             members.checkBadges(author, now);
           }
         } else dropReaction.run(target.kind, target.id, member.kind, member.id);
-        return { likes: countOf(countReactions, target.kind, target.id), liked: on, earned };
+        return { likes: countOf(countReactions, target.kind, target.id), liked: on, earned: 0 };
       });
     },
     liked: (target: Target, member: CommunityAuthor) => countOf(hasReaction, target.kind, target.id, member.kind, member.id) > 0,
@@ -487,10 +507,11 @@ export function createCommunityStore(directory: string) {
         const topic = topicRow(reply.topic_id);
         if (!topic) throw fail('帖子不存在，或已被删除。', 404);
         if (topic.accepted_reply_id) throw fail('这个问题已经采纳过回答了。', 409);
+        if (same(authorOf(topic), authorOf(reply))) throw fail('不能采纳自己的回答。');
         setAccepted.run(replyId, now, topic.id);
         const answerer = authorOf(reply);
         const bounty = economy.payBounty(topic.id, answerer, now);
-        const reward = ledger.reward(answerer, rules.acceptReward, 'accepted', { kind: 'reply', id: replyId }, now, Number.MAX_SAFE_INTEGER);
+        const reward = ledger.reward(answerer, rules.acceptReward, 'accepted', { kind: 'reply', id: replyId }, now, rules.acceptDaily);
         notify(answerer, { type: 'accept', actor: authorOf(topic), topicId: topic.id, replyId, text: '采纳了你的回答', data: { amount: bounty + reward } }, now);
         members.checkBadges(answerer, now);
         return bounty + reward;
@@ -512,7 +533,7 @@ export function createCommunityStore(directory: string) {
 
     /* ---------- 管理：置顶、精华、锁帖、移动、审核、隐藏 ---------- */
     setPinned(id: string, on: boolean) { return Number(setPinned.run(on ? 1 : 0, on ? 1 : 0, id).changes) > 0; },
-    // 精华 is the owner's own reward: not limited by the daily cap, and taken back when removed.
+    // Only a topic's first feature can award stars, subject to the author's monthly quota.
     setFeatured(id: string, on: boolean, { actor = null, now = new Date().toISOString() }: { actor?: CommunityAuthor | null; now?: string } = {}) {
       return tx(() => {
         const row = topicRow(id);
@@ -521,8 +542,8 @@ export function createCommunityStore(directory: string) {
         const ref = { kind: 'topic', id: `featured:${id}` };
         const author = authorOf(row);
         if (on) {
-          ledger.credit(author, rules.featureReward, 'featured', ref, now);
-          notify(author, { type: 'feature', actor, topicId: id, text: '把你的主题评为精华', data: { amount: rules.featureReward } }, now);
+          const earned = row.featured_at ? 0 : ledger.feature(author, ref, now);
+          notify(author, { type: 'feature', actor, topicId: id, text: '把你的主题评为精华', data: { amount: earned } }, now);
           members.checkBadges(author, now);
         } else ledger.revert(ref, now);
         return true;
@@ -570,17 +591,16 @@ export function createCommunityStore(directory: string) {
     thanks: (target: Target) => countOf(thanksOn, target.kind, target.id),
 
     /* ---------- 图片 ---------- */
-    addImage({ id, uploader, width, height, now = new Date().toISOString() }: { id: string; uploader: CommunityAuthor; width: number; height: number; now?: string }) {
-      insertImage.run(id, uploader.kind, uploader.id, width, height, now);
+    addImage({ id, uploader, width, height, purpose = 'content', frameReady = false, bannerScope = null, now = new Date().toISOString() }: { id: string; uploader: CommunityAuthor; width: number; height: number; purpose?: 'content' | 'shop' | 'banner'; frameReady?: boolean; bannerScope?: string | null; now?: string }) {
+      insertImage.run(id, uploader.kind, uploader.id, width, height, now, purpose, frameReady ? 1 : 0, bannerScope);
     },
     image(id: string) {
-      return (oneImage.get(id) as { id: string; uploader_kind: Kind; uploader_id: string; topic_id: string | null; width: number; height: number; created_at: string; deleted_at: string | null } | undefined) || null;
+      return (oneImage.get(id) as { id: string; uploader_kind: Kind; uploader_id: string; topic_id: string | null; reply_id: string | null; width: number; height: number; created_at: string; deleted_at: string | null; purpose: 'content' | 'shop' | 'banner'; frame_ready: number; banner_scope: string | null } | undefined) || null;
     },
     // Uploads never attached to a post within a day are removed; returns their ids so the files go too.
     sweepImages(now = Date.now()) {
       const ids = (staleImages.all(iso(now - day)) as Array<{ id: string }>).map(row => row.id);
-      for (const id of ids) dropImage.run(id);
-      return ids;
+      return ids.filter(id => dropImage.run(id).changes === 1);
     },
 
     /* ---------- 举报 ---------- */
@@ -596,11 +616,11 @@ export function createCommunityStore(directory: string) {
       return (openReports.all() as Array<{ id: string; target_kind: 'topic' | 'reply'; target_id: string; reporter_kind: Kind; reporter_id: string; reason: string; note: string; created_at: string }>)
         .map(row => ({ id: row.id, target: { kind: row.target_kind, id: row.target_id }, reporter: { kind: row.reporter_kind, id: row.reporter_id } as CommunityAuthor, reason: row.reason, note: row.note, createdAt: row.created_at }));
     },
-    // Upholding removes the content (with the penalty) and rewards every open reporter;
+    // Upholding removes the content (with the penalty) and notifies every open reporter;
     // dismissing closes this report and shows the content again if nothing else holds it.
-    resolveReport(id: string, uphold: boolean, now = new Date().toISOString()) {
+    resolveReport(id: string, uphold: boolean, now = new Date().toISOString(), decisionReason = '') {
       return tx(() => {
-        const report = oneReport.get(id) as { id: string; target_kind: 'topic' | 'reply'; target_id: string; status: string } | undefined;
+        const report = oneReport.get(id) as { id: string; target_kind: 'topic' | 'reply'; target_id: string; status: string; reason: string } | undefined;
         if (!report || report.status !== 'open') throw fail('这条举报已经处理过了。', 404);
         const target = { kind: report.target_kind, id: report.target_id };
         if (!uphold) {
@@ -609,12 +629,12 @@ export function createCommunityStore(directory: string) {
           return { removed: false };
         }
         const reporters = reportsOn.all(target.kind, target.id) as Array<{ id: string; reporter_kind: Kind; reporter_id: string }>;
-        const removed = target.kind === 'topic' ? deleteTopicIn(target.id, { moderated: true, now }) : deleteReplyIn(target.id, { moderated: true, now });
+        const reason = decisionReason || `举报成立：${report.reason}`;
+        const removed = target.kind === 'topic' ? deleteTopicIn(target.id, { moderated: true, reason, now }) : deleteReplyIn(target.id, { moderated: true, reason, now });
         for (const row of reporters) {
           closeReport.run('upheld', now, row.id);
           const reporter = { kind: row.reporter_kind, id: row.reporter_id };
-          const earned = ledger.reward(reporter, rules.reportReward, 'report', { kind: 'report', id: row.id }, now, rules.reportDaily);
-          notify(reporter, { type: 'system', text: '你的举报成立', data: { report: 'upheld', amount: earned } }, now);
+          notify(reporter, { type: 'system', text: '你的举报成立', data: { report: 'upheld', amount: 0 } }, now);
         }
         return { removed };
       });

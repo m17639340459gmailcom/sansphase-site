@@ -10,6 +10,10 @@ export async function publicationFiles(root=resolve('.')) {
   const result=[...singles,'scripts/migrate-content-order.mjs','scripts/migrate-showcase-cover.mjs','scripts/migrate-reader-accounts.mjs','scripts/migrate-vip-books.mjs','scripts/migrate-community.mjs','scripts/reader-preview.mjs','scripts/check-reader-email.mjs','scripts/static-package.mjs','scripts/catalog-fixture-preview.mjs','scripts/fixtures/catalog-data.mjs','scripts/fixtures/music-demo.mjs','scripts/fixtures/reading-demo.mjs','scripts/fixtures/community-demo.mjs','docs/CATALOG-DEMO.md','docs/READER-ACCESS.md','.gitattributes','.github/workflows/check.yml'];
   result.push('scripts/publication-retention.mjs','scripts/preview.ps1','启动预览.cmd','docs/MAINTENANCE.md','AGENTS.md');
   result.push('CONTRIBUTING.md','docs/README.md','docs/CODE-MAP.md','.github/pull_request_template.md');
+  result.push('scripts/compose-community-styles.mjs', 'docs/COMMUNITY-LOCAL-INTEGRATION.md', 'docs/COMMUNITY-APPEARANCE.md', 'docs/CHECKIN-SKY-PROMPT.md');
+  result.push('scripts/fixtures/community-preview-identity.ts', 'docs/COMMUNITY-PRELAUNCH.md', 'docs/COMMUNITY-BANNERS.md');
+  result.push('docs/COMMUNITY-CONVENTION.md', 'docs/COMMUNITY-EXPERIENCE-RULES.md');
+  result.push('scripts/build-growth-motion.mjs', 'scripts/growth-motion-rig.ts', 'docs/COMMUNITY-STARDUST-RULES.md');
   async function visit(directory) {
     for(const entry of await readdir(directory,{withFileTypes:true})) {
       const path=resolve(directory,entry.name);

@@ -50,8 +50,8 @@ export async function createPayloadRuntime(
       return String((found.docs[0] as { name?: string } | undefined)?.name || '無相');
     },
   });
-  const readerRetention = createReaderRetention({ payload: payload as unknown as Parameters<typeof createReaderRetention>[0]['payload'], directory: settings.directory, uidStore, loginLedger, workflow, mediaRetention,
-    keepReader: id => community.store?.hasContent(id) ?? false });
+  const purgeCommunity = (id: string) => community.purgeReaderData(id, workflow.queueFile);
+  const readerRetention = createReaderRetention({ payload: payload as unknown as Parameters<typeof createReaderRetention>[0]['payload'], directory: settings.directory, uidStore, loginLedger, workflow, mediaRetention, purgeCommunity });
   return {
     payload,
     store,
@@ -60,7 +60,7 @@ export async function createPayloadRuntime(
     authorService,
     readerService,
     communityService: community.service,
-    readerAdminService:createReaderAdminService({payload,authorService,siteOrigin:settings.siteOrigin,directory:settings.directory,authorId:settings.authorId,loginLedger,uidStore,workflow,mediaRetention}),
+    readerAdminService:createReaderAdminService({payload,authorService,siteOrigin:settings.siteOrigin,directory:settings.directory,authorId:settings.authorId,loginLedger,uidStore,workflow,mediaRetention,purgeCommunity}),
     readerRetention,
     healthCheck:async()=>{await payload.find({collection:'site_profile',limit:1,depth:0});},
     close: async () => {

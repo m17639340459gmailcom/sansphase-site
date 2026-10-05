@@ -1,0 +1,83 @@
+/* Community landing sky base and graceful fallback. */
+body.community-open[data-orbit-experiment="astral"] #blog-backdrop {
+  background:
+    radial-gradient(ellipse at 72% 38%, rgb(17 32 56 / 28%), transparent 72%),
+    linear-gradient(155deg, #010307 0%, #03070d 56%, #010305 100%);
+}
+/* Fade the landing navigation into the sky without changing its layout or menu sheet. */
+body.community-open[data-orbit-experiment="astral"] #site-header:not(.community-header):not(:has(.nav.open)) {
+  background: linear-gradient(180deg, rgb(5 7 11 / 86%) 0%, rgb(5 7 11 / 56%) 48%, rgb(5 7 11 / 0%) 100%) no-repeat;
+  border-bottom-color: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+body[data-orbit-experiment="astral"] .community-landing .community-orbits[data-astral-component="constellation"] {
+  position: fixed;
+  inset: 0;
+  width: auto;
+  height: auto;
+  max-width: none;
+  max-height: none;
+  transform: none;
+  overflow: hidden;
+  overflow-clip-margin: 0;
+  pointer-events: none;
+  z-index: -1;
+}
+/* Keep the layout slot so removing the eyebrow does not move the central title. */
+body[data-orbit-experiment="astral"] .community-landing > .eyebrow { visibility: hidden; }
+body[data-orbit-experiment="astral"] .community-landing > h1 {
+  font-family: var(--font-wordmark);
+  font-weight: 400;
+  font-synthesis: none;
+  text-shadow: none;
+}
+body[data-orbit-experiment="astral"] .community-orbits > i { display: none; }
+body[data-orbit-experiment="astral"] .community-orbits canvas { display: block; width: 100%; height: 100%; }
+body[data-orbit-experiment="astral"] .community-landing > :is(h1, p, .eyebrow, .community-landing-actions) { position: relative; z-index: 3; }
+
+/* Reuse the route's entrance gate; keep the fixed sky and button hit area stationary. */
+@media (prefers-reduced-motion: no-preference) {
+  body[data-orbit-experiment="astral"] #main.community-entering .community-landing > h1 {
+    --astral-enter-rise: 18px;
+    animation: astral-content-enter 860ms cubic-bezier(.16, 1, .3, 1) both;
+  }
+  body[data-orbit-experiment="astral"] #main.community-entering .community-landing > p {
+    --astral-enter-rise: 12px;
+    animation: astral-content-enter 760ms cubic-bezier(.16, 1, .3, 1) 110ms both;
+  }
+  body[data-orbit-experiment="astral"] #main.community-entering .community-landing > .community-landing-actions {
+    animation: astral-action-enter 680ms ease-out 220ms both;
+  }
+}
+@keyframes astral-content-enter {
+  from { opacity: 0; transform: translateY(var(--astral-enter-rise)); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes astral-action-enter {
+  from { opacity: .75; }
+  to { opacity: 1; }
+}
+
+.community-sky-error {
+  position: fixed;
+  left: 50%;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  z-index: 40;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
+  padding: 12px 14px;
+  transform: translateX(-50%);
+  border: 1px solid #6d6554;
+  border-radius: 8px;
+  background: rgb(9 14 21 / 96%);
+  color: #e7dcc7;
+  font-size: 13px;
+}
+.community-sky-error button { min-height: 36px; padding: 5px 12px; border: 1px solid #998768; border-radius: 5px; background: transparent; color: #eee6d5; cursor: pointer; }
+.community-sky-error button:focus-visible { outline: none; box-shadow: none; border-color: #e6d5b2; text-decoration: underline; }

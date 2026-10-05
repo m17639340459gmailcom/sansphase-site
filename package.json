@@ -13,7 +13,7 @@
     "preview": "node scripts/dev.mjs",
     "test:publishing": "node --test tests/payload-integration.test.mjs",
     "test:author": "node --test tests/payload-integration.test.mjs",
-    "test": "node --experimental-vm-modules --test tests/*.test.mjs",
+    "test": "node --experimental-vm-modules --test tests/*.test.mjs tests/*.test.ts tests/community-layout/*.test.ts tests/community-atlas/*.test.ts",
     "format": "prettier --write src/*.html src/*.css src/*.mjs scripts/*.mjs tests/*.mjs server.mjs",
     "cms:backup": "node scripts/backup-payload.mjs",
     "cms:restore": "node scripts/restore-payload.mjs",
@@ -57,7 +57,7 @@
     "linkifyjs": "4.3.3",
     "lucide": "1.45.0",
     "motion": "13.2.0",
-    "nodemailer": "9.1.1",
+    "nodemailer": "10.0.9",
     "ogl": "1.0.11",
     "payload": "3.89.0",
     "plyr": "3.8.4",
@@ -73,6 +73,6 @@
     "threejs-galaxy-shader": "1.0.2"
   },
   "engines": {
-    "node": ">=24.0.0 <25"
+    "node": ">=24.21.0 <25"
   }
 }

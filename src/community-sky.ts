@@ -4,11 +4,29 @@
 type Star = { x: number; y: number; z: number; r: number; a: number; tw: number; ph: number; col: string };
 type Shoot = { x: number; y: number; t0: number; dur: number; ang: number };
 
+export interface CommunitySkyPoint {
+  x: number; y: number; radius: number; opacity: number; color: string; seed: number;
+}
+export type CommunityStarPainter = (ctx: CanvasRenderingContext2D, point: CommunitySkyPoint, seconds: number) => void;
+export interface CommunitySkyFrame {
+  width: number; height: number; seconds: number;
+}
+export type CommunityMeteorPainter = (ctx: CanvasRenderingContext2D, frame: CommunitySkyFrame) => void;
+
+export interface CommunitySkyOptions {
+  /** Evaluate per frame so a local preview can switch candidates without remounting. */
+  parallax?: () => boolean;
+  /** Optional point-source renderer. Omission preserves the original sky. */
+  starPainter?: () => CommunityStarPainter | undefined;
+  /** Optional meteor layer. Omission preserves the original timing and drawing. */
+  meteorPainter?: () => CommunityMeteorPainter | undefined;
+}
+
 const TAU = Math.PI * 2;
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 
 // Mounts a canvas into host (the fixed page backdrop); returns the cleanup.
-export function mountCommunitySky(host: HTMLElement, win: Window = window): () => void {
+export function mountCommunitySky(host: HTMLElement, win: Window = window, options: CommunitySkyOptions = {}): () => void {
   const doc = host.ownerDocument;
   const canvas = doc.createElement('canvas');
   canvas.className = 'community-sky';
@@ -20,6 +38,7 @@ export function mountCommunitySky(host: HTMLElement, win: Window = window): () =
   const context = ctx;
 
   const reduced = () => Boolean(win.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+  const parallax = () => options.parallax?.() ?? true;
   const mouse = { x: 0.5, y: 0.5, tx: 0.5, ty: 0.5 };
   let stars: Star[] = [], w = 0, h = 0, dpr = 1;
   let shoot: Shoot | null = null, nextShoot = 2500, frame = 0, running = false;
@@ -41,11 +60,21 @@ export function mountCommunitySky(host: HTMLElement, win: Window = window): () =
   function draw(t: number) {
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
     context.clearRect(0, 0, w, h);
-    mouse.x += (mouse.tx - mouse.x) * 0.05; mouse.y += (mouse.ty - mouse.y) * 0.05;
-    const scroll = win.scrollY;
+    const moving = parallax();
+    if (moving) {
+      mouse.x += (mouse.tx - mouse.x) * 0.05; mouse.y += (mouse.ty - mouse.y) * 0.05;
+    } else {
+      mouse.x = mouse.y = mouse.tx = mouse.ty = 0.5;
+    }
+    const scroll = moving ? win.scrollY : 0;
+    const paintStar = options.starPainter?.();
     for (const s of stars) {
       const x = s.x * w + (mouse.x - 0.5) * -26 * s.z;
       const y = ((s.y * h - scroll * 0.05 * s.z) % h + h) % h + (mouse.y - 0.5) * -18 * s.z;
+      if (paintStar) {
+        paintStar(context, { x, y, radius: s.r, opacity: s.a, color: s.col, seed: s.ph * 173 + s.tw * 37 }, t * 0.001);
+        continue;
+      }
       const alpha = s.a * (t ? 0.55 + 0.45 * Math.sin(t * 0.001 * s.tw + s.ph) : 0.8);
       context.fillStyle = `rgba(${s.col},${alpha})`;
       context.beginPath(); context.arc(x, y, s.r, 0, TAU); context.fill();
@@ -53,6 +82,11 @@ export function mountCommunitySky(host: HTMLElement, win: Window = window): () =
         context.fillStyle = `rgba(${s.col},${alpha * 0.1})`;
         context.beginPath(); context.arc(x, y, s.r * 4.5, 0, TAU); context.fill();
       }
+    }
+    const paintMeteors = options.meteorPainter?.();
+    if (paintMeteors) {
+      paintMeteors(context, { width: w, height: h, seconds: t * 0.001 });
+      return;
     }
     if (!t) return;
     if (!shoot && t > nextShoot) {
@@ -83,7 +117,10 @@ export function mountCommunitySky(host: HTMLElement, win: Window = window): () =
     running = true;
     frame = win.requestAnimationFrame(loop);
   }
-  const onPointer = (event: PointerEvent) => { mouse.tx = event.clientX / w; mouse.ty = event.clientY / h; };
+  const onPointer = (event: PointerEvent) => {
+    if (!parallax()) return;
+    mouse.tx = event.clientX / w; mouse.ty = event.clientY / h;
+  };
   const onVisible = () => { if (!doc.hidden) start(); };
   win.addEventListener('resize', resize);
   win.addEventListener('pointermove', onPointer, { passive: true });

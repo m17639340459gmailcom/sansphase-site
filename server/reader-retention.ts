@@ -1,13 +1,17 @@
-import { readerAudit, removeReaderAccount } from './reader-account-removal.ts';
+import { readerAudit, removeReaderAccount, resumeReaderCleanup } from './reader-account-removal.ts';
+import type { PurgeCommunity } from './reader-account-removal.ts';
+import { readerCleanupDue, readerInactiveCutoff } from './reader-retention-policy.ts';
 import { registrationLifetimeMs } from './reader-workflow.ts';
 import { cleanReaderFiles } from './reader-file-cleanup.ts';
 import type { createReaderWorkflow } from './reader-workflow.ts';
+import type { Payload } from 'payload';
 
 type ReaderRow = { id: string; createdAt: string; _verified?: boolean; vip_until?: string | null };
 type ReaderPayload = {
   find?: (options: object) => Promise<{ docs: ReaderRow[] }>;
   findByID: (options: { collection: string; id: string }) => Promise<ReaderRow | null>;
   delete: (options: { collection: string; id: string }) => Promise<unknown>;
+  config?: Pick<Payload['config'], 'collections'>;
 };
 type LoginLedger = {
   inactiveReaderIds: (cutoff: string, now: string, limit: number, offset: number) => string[];
@@ -17,22 +21,12 @@ type RetentionOptions = {
   payload: ReaderPayload; directory: string; uidStore: { get: (id: string) => string | null };
   loginLedger: LoginLedger; workflow?: ReturnType<typeof createReaderWorkflow>;
   mediaRetention?: { sweep: () => Promise<unknown> };
-  // Accounts to keep even when inactive: those with live community posts or
-  // replies, so a quiet author's posts are not removed with the account.
-  keepReader?: (id: string) => boolean;
+  purgeCommunity?: PurgeCommunity;
 };
 
-const thirtyDays = 30 * 24 * 60 * 60 * 1000;
-export const readerCleanupDue = (row: ReaderRow, lastLoginAt: string | null | undefined, now: number | string | Date = Date.now()) => {
-  const time = typeof now === 'number' ? now : new Date(now).getTime();
-  const anchor = Date.parse(lastLoginAt || row.createdAt);
-  if (row._verified !== true) return Number.isFinite(time) && Number.isFinite(anchor) && time - anchor >= registrationLifetimeMs;
-  const vipUntil = Date.parse(row.vip_until || '');
-  return Number.isFinite(time) && Number.isFinite(anchor) && time - anchor >= thirtyDays &&
-    (!Number.isFinite(vipUntil) || vipUntil <= time);
-};
+export { readerCleanupDue } from './reader-retention-policy.ts';
 
-export function createReaderRetention({ payload, directory, uidStore, loginLedger, workflow, mediaRetention, keepReader }: RetentionOptions) {
+export function createReaderRetention({ payload, directory, uidStore, loginLedger, workflow, mediaRetention, purgeCommunity }: RetentionOptions) {
   if (!payload || !directory || !uidStore || !loginLedger) throw Error('Reader retention requires the private reader store and login ledger.');
   const audit = readerAudit(directory, 'system');
   let initial: NodeJS.Timeout | null = null, interval: NodeJS.Timeout | null = null;
@@ -46,8 +40,9 @@ export function createReaderRetention({ payload, directory, uidStore, loginLedge
       const legacy = await payload.find({ collection: 'readers', depth: 0, limit,
         where: { and: [{ _verified: { equals: false } }, { createdAt: { less_than_equal: new Date(at.getTime() - registrationLifetimeMs).toISOString() } }] } });
       for (const row of legacy.docs) {
-        await removeReaderAccount({ payload, directory, uidStore, row, audit, action: 'auto-delete-unverified', workflow });
-        result.legacy++;
+        const removed = await removeReaderAccount({ payload, directory, uidStore, row, audit, action: 'auto-delete-unverified', workflow, purgeCommunity,
+          cleanupCondition: { now: at.getTime(), unverifiedOnly: true } });
+        if (removed.deleted) result.legacy++;
       }
     }
     return result;
@@ -55,7 +50,7 @@ export function createReaderRetention({ payload, directory, uidStore, loginLedge
   const sweep = async ({ now = new Date(), limit = 1000, dryRun = false }: { now?: Date | string | number; limit?: number; dryRun?: boolean } = {}) => {
     const at = now instanceof Date ? now : new Date(now);
     if (Number.isNaN(at.getTime())) throw Error('Invalid cleanup time');
-    const cutoff = new Date(at.getTime() - thirtyDays).toISOString();
+    const cutoff = readerInactiveCutoff(at);
     const results = { checked: 0, eligible: 0, deleted: 0, kept: 0 };
     const candidates = [];
     while (candidates.length < limit) {
@@ -68,13 +63,16 @@ export function createReaderRetention({ payload, directory, uidStore, loginLedge
       results.checked++;
       const row = await payload.findByID({ collection: 'readers', id });
       if (!row || !readerCleanupDue(row, loginLedger.latest('reader', id)?.at, at)) continue;
-      if (keepReader?.(id)) { results.kept++; continue; }
       results.eligible++;
       if (dryRun) continue;
-      await removeReaderAccount({ payload, directory, uidStore, row, audit, action: 'auto-delete-inactive', workflow });
-      results.deleted++;
+      const removed = await removeReaderAccount({ payload, directory, uidStore, row, audit, action: 'auto-delete-inactive', workflow, purgeCommunity,
+        cleanupCondition: { now: at.getTime() } });
+      if (removed.deleted) results.deleted++;
     }
-    if (workflow && !dryRun) await sweepPending(at, limit);
+    if (workflow && !dryRun) {
+      await sweepPending(at, limit);
+      await resumeReaderCleanup({ payload, directory, workflow, purgeCommunity });
+    }
     return results;
   };
   const run = () => {
@@ -95,6 +93,7 @@ export function createReaderRetention({ payload, directory, uidStore, loginLedge
       try {
         if (workflow) {
           await sweepPending();
+          await resumeReaderCleanup({ payload, directory, workflow, purgeCommunity });
           await cleanReaderFiles({ workflow, payload, directory });
         }
         if (mediaRetention) await mediaRetention.sweep();

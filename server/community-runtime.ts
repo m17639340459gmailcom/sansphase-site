@@ -2,6 +2,7 @@ import type { IncomingMessage } from 'node:http';
 import { readFileSync } from 'node:fs';
 import { appendFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import type { Payload, Where } from 'payload';
 import { communityTablesReady, createCommunityStore } from './community-store.ts';
 import type { CommunityAuthor } from './community-store.ts';
@@ -85,10 +86,20 @@ export function createCommunityRuntime({ payload, directory, siteOrigin, readerI
   };
   // Moderation goes to the same private audit log as reader administration.
   const audit = async (action: string, details: Record<string, unknown>) => {
-    await appendFile(resolve(directory, 'reader-admin-audit.jsonl'), JSON.stringify({ at: new Date().toISOString(), actorId: details.actor, action, ...details }) + '\n', { mode: 0o600 });
+    const at = typeof details.auditCreatedAt === 'string' ? details.auditCreatedAt : new Date().toISOString();
+    await appendFile(resolve(directory, 'reader-admin-audit.jsonl'), JSON.stringify({ at, actorId: details.actor, action, ...details }) + '\n', { mode: 0o600 });
   };
   return {
     store,
+    purgeReaderData(readerId: string, queueFile: (filename: string, reason: string) => void) {
+      if (store) return store.purgeReaderData(readerId, queueFile);
+      const db = new DatabaseSync(resolve(directory, 'content.db'), { readOnly: true });
+      try {
+        if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name GLOB 'community_*' LIMIT 1").get())
+          throw Error('Community migration is required before account data cleanup.');
+        return { topics: 0, replies: 0, images: 0 };
+      } finally { db.close(); }
+    },
     service: createCommunityService({ store, siteOrigin, directory, ownerId: authorId, identify, people, findMember, findByNames, avatarFile, audit, words: readWords(directory) }),
     close() { store?.close(); },
   };

@@ -17,8 +17,12 @@ export function createLedger(db: DatabaseSync) {
   const balanceOf = db.prepare('SELECT COALESCE(SUM(amount), 0) AS total FROM community_ledger WHERE member_kind = ? AND member_id = ?');
   const cappedToday = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM community_ledger WHERE member_kind = ? AND member_id = ? AND day = ? AND capped = 1 AND kind = 'earn'`);
   const gainedOn = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM community_ledger WHERE member_kind = ? AND member_id = ? AND day = ? AND amount > 0`);
+  const growthPoints = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM community_ledger
+    WHERE member_kind = ? AND member_id = ? AND amount > 0 AND kind = 'earn' AND capped = 1 AND reverted_at IS NULL`);
   const reasonsOn = db.prepare(`SELECT COUNT(*) AS count FROM community_ledger WHERE member_kind = ? AND member_id = ? AND day = ? AND reason = ?`);
   const refExists = db.prepare(`SELECT COUNT(*) AS count FROM community_ledger WHERE member_kind = ? AND member_id = ? AND reason = ? AND ref_kind = ? AND ref_id = ?`);
+  const featuredInMonth = db.prepare(`SELECT COUNT(*) AS count FROM community_ledger
+    WHERE member_kind = ? AND member_id = ? AND day LIKE ? AND kind = 'earn' AND reason = 'featured' AND amount > 0`);
   const earnedFor = db.prepare(`SELECT id, member_kind, member_id, amount FROM community_ledger WHERE ref_kind = ? AND ref_id = ? AND kind = 'earn' AND reverted_at IS NULL`);
   const markReverted = db.prepare('UPDATE community_ledger SET reverted_at = ? WHERE id = ?');
   const history = db.prepare(`SELECT id, amount, kind, reason, ref_kind, ref_id, created_at, reverted_at FROM community_ledger
@@ -50,9 +54,10 @@ export function createLedger(db: DatabaseSync) {
       entry(member, -amount, kind, reason, ref, now);
       return amount;
     },
-    // Behaviour rewards (posting, replying, likes, accepted answers, upheld reports) share
-    // the daily cap; each reason also has its own daily count.
+    // Topic, reply and accepted-answer rewards share the daily cap. A historical
+    // reference and its quota remain consumed after reversal or on another day.
     reward(member: CommunityAuthor, amount: number, reason: string, ref: LedgerRef, now: string, perDay: number) {
+      if (amount <= 0 || perDay <= 0 || (ref && countOf(refExists, member.kind, member.id, reason, ref.kind, ref.id))) return 0;
       const today = beijingDay(Date.parse(now));
       if (countOf(reasonsOn, member.kind, member.id, today, reason) >= perDay) return 0;
       const room = rules.dailyCap - totalOf(cappedToday, member.kind, member.id, today);
@@ -62,6 +67,15 @@ export function createLedger(db: DatabaseSync) {
     },
     rewardedFor(member: CommunityAuthor, reason: string, ref: { kind: string; id: string }) {
       return countOf(refExists, member.kind, member.id, reason, ref.kind, ref.id) > 0;
+    },
+    // First-feature awards do not consume the daily quota. Cancelled awards still
+    // consume their original monthly slot and content can never receive a second one.
+    feature(member: CommunityAuthor, ref: { kind: string; id: string }, now: string) {
+      if (countOf(refExists, member.kind, member.id, 'featured', ref.kind, ref.id)) return 0;
+      const month = beijingDay(Date.parse(now)).slice(0, 7);
+      if (countOf(featuredInMonth, member.kind, member.id, `${month}-%`) >= rules.featureMonthly) return 0;
+      entry(member, rules.featureReward, 'earn', 'featured', ref, now);
+      return rules.featureReward;
     },
     // Takes back what a piece of content earned; a balance never goes below zero.
     revert(ref: Target | { kind: string; id: string }, now: string) {
@@ -90,6 +104,8 @@ export function createLedger(db: DatabaseSync) {
       return { gained: Number(row.gained), spent: Number(row.spent) };
     },
     gainedToday: (member: CommunityAuthor, now = Date.now()) => totalOf(gainedOn, member.kind, member.id, beijingDay(now)),
+    // Accumulated valid behaviour awards, independent of balance and spending.
+    growthPoints: (member: CommunityAuthor) => totalOf(growthPoints, member.kind, member.id),
     behaviourToday: (member: CommunityAuthor, now = Date.now()) => totalOf(cappedToday, member.kind, member.id, beijingDay(now)),
     flow(days = 7, now = Date.now()) {
       const from = beijingDay(now - (days - 1) * day);

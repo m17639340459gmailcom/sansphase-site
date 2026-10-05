@@ -1,14 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
-import { communityRules, communityBuiltinItems, checkinReward, beijingDay } from '../src/community-rules.mjs';
-import type { ShopItem } from '../src/community-rules.ts';
-import { fail, countOf, day, iso } from './community-db.ts';
+import { communityRules, communityBuiltinItems, communityNameEffect, checkinReward, checkinMonth, beijingDay } from '../src/community-rules.mjs';
+import type { NameEffect, ShopCategory, ShopItem } from '../src/community-rules.ts';
+import { fail, countOf, day, iso, parseJson } from './community-db.ts';
 import type { CommunityAuthor, Transaction } from './community-db.ts';
 import type { Ledger } from './community-ledger.ts';
 import type { Members } from './community-members.ts';
 
 type Card = 'makeup' | 'pin' | 'highlight';
 type CustomItemRow = {
+  image: string | null;
+  category: string | null; kind: 'frame' | 'color' | null; effect: string | null;
   id: string; cat: 'digital' | 'goods'; name: string; description: string; price: number; stock: number | null; stock_left: number | null;
   limit_per: 'month' | 'year' | 'once' | null; limit_n: number | null; min_level: number; min_days: number; delivery: string; note: string; active: number;
 };
@@ -20,7 +22,9 @@ type OrderRow = {
 export type Shipping = { name: string; phone: string; address: string };
 export type Tracking = { company: string; number: string };
 export type CustomItemInput = {
-  cat: 'digital' | 'goods'; name: string; description: string; price: number; stock: number | null; limitPer: 'month' | 'year' | 'once' | null;
+  image?: string | null;
+  category?: string | null; kind?: 'frame' | 'color'; effect?: NameEffect | null;
+  cat: 'look' | 'digital' | 'goods'; name: string; description: string; price: number; stock: number | null; limitPer: 'month' | 'year' | 'once' | null;
   limitN: number | null; minLevel: number; minDays: number; delivery: string; note: string; active: boolean;
 };
 const previousDay = (key: string) => new Date(Date.parse(`${key}T00:00:00Z`) - day).toISOString().slice(0, 10);
@@ -39,12 +43,21 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
   const insertMakeup = db.prepare('INSERT INTO community_makeups (member_kind, member_id, day, month, cost, created_at) VALUES (?, ?, ?, ?, ?, ?)');
   const makeupsIn = db.prepare('SELECT COUNT(*) AS count FROM community_makeups WHERE member_kind = ? AND member_id = ? AND month = ?');
   // Shop.
+  const categories = db.prepare('SELECT id, name FROM community_shop_categories ORDER BY created_at, rowid');
+  const category = db.prepare('SELECT id, name FROM community_shop_categories WHERE id = ?');
+  const duplicateCategory = db.prepare('SELECT id FROM community_shop_categories WHERE name = ?');
+  const insertCategory = db.prepare('INSERT INTO community_shop_categories (id, name, created_at) VALUES (?, ?, ?)');
   const customItems = db.prepare('SELECT * FROM community_shop_items ORDER BY active DESC, cat, price');
   const customItem = db.prepare('SELECT * FROM community_shop_items WHERE id = ?');
-  const insertItem = db.prepare(`INSERT INTO community_shop_items (id, cat, name, description, price, stock, stock_left, limit_per, limit_n, min_level, min_days, delivery, note, active, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const insertItem = db.prepare(`INSERT INTO community_shop_items (id, cat, name, description, price, stock, stock_left, limit_per, limit_n, min_level, min_days, delivery, note, active, created_at, updated_at, image, category, kind, effect)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const updateItem = db.prepare(`UPDATE community_shop_items SET name = ?, description = ?, price = ?, stock = ?, stock_left = ?, limit_per = ?, limit_n = ?, min_level = ?, min_days = ?,
-    delivery = ?, note = ?, active = ?, updated_at = ? WHERE id = ?`);
+    delivery = ?, note = ?, active = ?, updated_at = ?, image = ?, category = ?, effect = ? WHERE id = ?`);
+  const visibleImage = db.prepare('SELECT 1 FROM community_shop_items WHERE image = ? AND active = 1 LIMIT 1');
+  const redeemedImage = db.prepare(`SELECT 1 FROM community_orders o JOIN community_shop_items i ON i.id = o.item
+    WHERE i.image = ? AND o.member_kind = ? AND o.member_id = ? AND o.status != 'cancelled' LIMIT 1`);
+  const equippedImage = db.prepare('SELECT 1 FROM community_members WHERE frame = ? LIMIT 1');
+  const itemOwned = db.prepare('SELECT 1 FROM community_owned WHERE item = ? LIMIT 1');
   const takeStock = db.prepare('UPDATE community_shop_items SET stock_left = stock_left - 1 WHERE id = ? AND stock_left > 0');
   const returnStock = db.prepare('UPDATE community_shop_items SET stock_left = stock_left + 1 WHERE id = ? AND stock IS NOT NULL');
   const ownedRows = db.prepare('SELECT item FROM community_owned WHERE member_kind = ? AND member_id = ?');
@@ -92,6 +105,22 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
     const today = beijingDay(now);
     return checked(member, today) ? streakEnding(member, today) : streakEnding(member, previousDay(today));
   }
+  function monthAttendance(member: CommunityAuthor, month: string, extraDay?: string) {
+    const days = (daysBetween.all(member.kind, member.id, `${month}-01`, `${month}-31`) as Array<{ day: string }>).map(row => row.day);
+    return checkinMonth(month, extraDay ? [...days, extraDay] : days);
+  }
+  const monthBonus = (member: CommunityAuthor, month: string) => ledger.rewardedFor(member, 'checkin-month', { kind: 'month', id: month }) ? rules.monthBonus : 0;
+  // Called inside the same transaction as the check-in/makeup. The existing
+  // per-member ledger reference makes the full-month award idempotent.
+  function awardMonth(member: CommunityAuthor, month: string, at: string) {
+    if (monthBonus(member, month) || !monthAttendance(member, month).complete) return 0;
+    return ledger.credit(member, rules.monthBonus, 'checkin-month', { kind: 'month', id: month }, at);
+  }
+  function nextCheckinReward(member: CommunityAuthor, now = Date.now()) {
+    const today = beijingDay(now), nextDay = checked(member, today) ? beijingDay(now + day) : today;
+    const month = nextDay.slice(0, 7);
+    return checkinReward(!monthBonus(member, month) && monthAttendance(member, month, nextDay).complete);
+  }
   function streakBadges(member: CommunityAuthor, streak: number, now: string) {
     members.award(member, 'first_checkin', now);
     for (const [need, badge] of [[7, 'streak7'], [30, 'streak30'], [100, 'streak100'], [365, 'streak365']] as const)
@@ -120,7 +149,9 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
 
   /* ---------- 兑换所 ---------- */
   const customToItem = (row: CustomItemRow): ShopItem & { active: boolean; delivery: string } => ({
-    id: row.id, cat: row.cat, kind: row.cat, name: row.name, desc: row.description, price: row.price,
+    image: row.image, category: row.category, effect: row.kind === 'color' ? communityNameEffect(parseJson<unknown>(row.effect, null)) : null,
+    ...(row.kind ? { ref: row.kind === 'frame' ? `image:${row.image}` : `effect:${row.id}` } : {}),
+    id: row.id, cat: row.kind ? 'look' : row.cat, kind: row.kind || row.cat, name: row.name, desc: row.description, price: row.price,
     limit: row.limit_per ? { per: row.limit_per, n: row.limit_n || 1 } : null, minLevel: row.min_level, minDays: row.min_days,
     stock: row.stock, left: row.stock_left, note: row.note, builtin: false, active: Boolean(row.active), delivery: row.delivery,
   });
@@ -164,21 +195,24 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
   return {
     /* ---------- 签到 ---------- */
     currentStreak,
+    monthBonus,
+    nextCheckinReward,
     checked: (member: CommunityAuthor, now = Date.now()) => checked(member, beijingDay(now)),
-    checkin(member: CommunityAuthor, { vip = false, now = Date.now() }: { vip?: boolean; now?: number } = {}) {
+    checkin(member: CommunityAuthor, { now = Date.now() }: { vip?: boolean; now?: number } = {}) {
       return tx(() => {
         if (member.kind === 'owner') throw fail('站长不参与签到。', 403);
         const today = beijingDay(now), at = iso(now);
         if (checked(member, today)) throw fail('今天已经签到过了。', 409);
         const streak = streakEnding(member, previousDay(today)) + 1;
-        const reward = checkinReward(streak, vip);
+        const reward = checkinReward();
         const position = countOf(checkinsOn, today) + 1;
         insertCheckin.run(member.kind, member.id, today, streak, reward.total, at);
         ledger.credit(member, reward.total, 'checkin', null, at);
+        const bonus = awardMonth(member, today.slice(0, 7), at);
         members.visit(member, now);
         streakBadges(member, streak, at);
         if (position <= 10) members.award(member, 'early', at);
-        return { streak, reward: reward.total, bonus: reward.bonus, balance: ledger.balance(member), position };
+        return { streak, reward: reward.total + bonus, bonus, balance: ledger.balance(member), position };
       });
     },
     makeupState,
@@ -198,7 +232,8 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
         insertMakeup.run(member.kind, member.id, key, beijingDay(now).slice(0, 7), cost, at);
         const streak = currentStreak(member, now);
         streakBadges(member, streak, at);
-        return { streak, cost, balance: ledger.balance(member) };
+        const bonus = awardMonth(member, key.slice(0, 7), at);
+        return { streak, cost, bonus, balance: ledger.balance(member) };
       });
     },
     checkinDays: (member: CommunityAuthor, from: string, to: string) => (daysBetween.all(member.kind, member.id, from, to) as Array<{ day: string }>).map(row => row.day),
@@ -242,8 +277,9 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
     // Equip or take off a decoration the member owns.
     equip(member: CommunityAuthor, kind: 'frame' | 'color' | 'cover', ref: string | null) {
       if (ref) {
-        const item = communityBuiltinItems.find(entry => entry.kind === kind && entry.ref === ref);
-        if (!item || !owned(member).has(item.id)) throw fail('还没有这个装扮。', 403);
+        const ownedItems = owned(member);
+        const item = [...communityBuiltinItems, ...allCustom()].find(entry => entry.kind === kind && entry.ref === ref && ownedItems.has(entry.id));
+        if (!item) throw fail('还没有这个装扮。', 403);
       }
       members.equip(member, kind, ref);
       return members.decorations(member);
@@ -276,22 +312,46 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
       });
     },
     customItems: allCustom,
+    categories: () => categories.all() as ShopCategory[],
+    category: (id: string) => category.get(id) as ShopCategory | undefined,
+    saveCategory(name: string, now = Date.now()) {
+      return tx(() => {
+        if (duplicateCategory.get(name)) throw fail('已经有这个类别了。', 409);
+        const id = randomUUID();
+        insertCategory.run(id, name, iso(now));
+        return { id, name };
+      });
+    },
+    nameEffect(ref: string | null): NameEffect | null {
+      if (!ref || !/^effect:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(ref)) return null;
+      const item = findItem(ref.slice(7));
+      return item?.kind === 'color' ? item.effect || null : null;
+    },
+    imageVisible: (id: string, member: CommunityAuthor) => Boolean(visibleImage.get(id) || redeemedImage.get(id, member.kind, member.id) || equippedImage.get(`image:${id}`)),
     saveItem(id: string | null, input: CustomItemInput, now = Date.now()) {
-      const at = iso(now);
-      if (!id) {
-        const newId = randomUUID();
-        insertItem.run(newId, input.cat, input.name, input.description, input.price, input.stock, input.stock, input.limitPer, input.limitN,
-          input.minLevel, input.minDays, input.delivery, input.note, input.active ? 1 : 0, at, at);
-        return newId;
-      }
-      const row = customItem.get(id) as CustomItemRow | undefined;
-      if (!row) throw fail('没有这个物品。', 404);
-      // Changing the stock keeps what has already been redeemed.
-      const sold = row.stock != null && row.stock_left != null ? row.stock - row.stock_left : 0;
-      const left = input.stock == null ? null : Math.max(0, input.stock - sold);
-      updateItem.run(input.name, input.description, input.price, input.stock, left, input.limitPer, input.limitN, input.minLevel, input.minDays,
-        input.delivery, input.note, input.active ? 1 : 0, at, id);
-      return id;
+      return tx(() => {
+        const at = iso(now), kind = input.cat === 'look' ? input.kind : null;
+        if (input.cat === 'look' && kind !== 'frame' && kind !== 'color') throw fail('请选择头像框或昵称特效。');
+        const effect = kind === 'color' && input.effect ? JSON.stringify(input.effect) : null;
+        if (!id) {
+          const newId = randomUUID();
+          insertItem.run(newId, input.cat === 'look' ? 'digital' : input.cat, input.name, input.description, input.price, input.stock, input.stock, input.limitPer, input.limitN,
+            input.minLevel, input.minDays, input.delivery, input.note, input.active ? 1 : 0, at, at, input.image || null, input.category || null, kind || null, effect);
+          return newId;
+        }
+        const row = customItem.get(id) as CustomItemRow | undefined;
+        if (!row) throw fail('没有这个物品。', 404);
+        if (input.cat !== (row.kind ? 'look' : row.cat) || (kind || null) !== row.kind) throw fail('已上架物品的用途不能修改，请另建新物品。');
+        if (row.kind === 'frame' && input.image !== undefined && input.image !== row.image && itemOwned.get(id))
+          throw fail('头像框已经有人兑换，不能更换佩戴图片；请新建头像框。');
+        // Changing the stock keeps what has already been redeemed.
+        const sold = row.stock != null && row.stock_left != null ? row.stock - row.stock_left : 0;
+        const left = input.stock == null ? null : Math.max(0, input.stock - sold);
+        updateItem.run(input.name, input.description, input.price, input.stock, left, input.limitPer, input.limitN, input.minLevel, input.minDays,
+          input.delivery, input.note, input.active ? 1 : 0, at, input.image === undefined ? row.image : input.image,
+          input.category === undefined ? row.category : input.category, input.effect === undefined ? row.effect : effect, id);
+        return id;
+      });
     },
 
     /* ---------- 提示词解锁 ---------- */

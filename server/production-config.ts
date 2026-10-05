@@ -2,8 +2,13 @@ import { readFile, realpath, lstat } from 'node:fs/promises';
 import { resolve, sep, isAbsolute } from 'node:path';
 import { createHash } from 'node:crypto';
 
-export function productionOptions(env:Record<string,string|undefined>) {
+export function productionOptions(env:Record<string,string|undefined>, nodeVersion=process.versions.node) {
   if (env.NODE_ENV !== 'production') throw Error('NODE_ENV must be production');
+  // systemd runs Node directly; package-manager engine checks alone do not
+  // prevent an old binary from starting an already installed release.
+  const version=/^(\d+)\.(\d+)\.(\d+)$/.exec(nodeVersion);
+  if (!version || Number(version[1]) !== 24 || Number(version[2]) < 21)
+    throw Error('Production requires Node.js >=24.21.0 <25; update the Node 24 security patch before starting.');
   let origin;
   try {origin=new URL(env.SITE_ORIGIN || '');} catch {throw Error('SITE_ORIGIN must be an HTTPS origin');}
   if(origin.protocol!=='https:' || origin.username || origin.password || origin.pathname!=='/' || origin.search || origin.hash)

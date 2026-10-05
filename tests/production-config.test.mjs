@@ -6,6 +6,14 @@ import { resolve } from 'node:path';
 import { productionOptions, verifyBuild, verifyPrivateConfig } from '../server/production-config.ts';
 import { createBuildManifest } from '../scripts/build-manifest.mjs';
 
+test('production rejects outdated Node patches before opening private data',()=>{
+  const env={NODE_ENV:'production',SITE_ORIGIN:'https://www.sansphase.com',PAYLOAD_CONFIG_FILE:resolve('private.json')};
+  for(const version of ['24.14.0','24.19.0','24.20.9','23.21.0','25.0.0','24.21.0-rc.1','unknown'])
+    assert.throws(()=>productionOptions(env,version),/Node\.js/);
+  for(const version of ['24.21.0','24.21.1','24.22.0'])
+    assert.equal(productionOptions(env,version).host,'127.0.0.1');
+});
+
 test('production rejects insecure origins, public listeners and relative private paths',()=>{
   const env={NODE_ENV:'production',SITE_ORIGIN:'https://www.sansphase.com',PAYLOAD_CONFIG_FILE:resolve('private.json')};
   assert.equal(productionOptions(env).host,'127.0.0.1');

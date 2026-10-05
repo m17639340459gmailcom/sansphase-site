@@ -1,0 +1,8 @@
+{
+  "format": "sansphase-name-effect",
+  "version": 1,
+  "effect": {
+    "style": "shimmer",
+    "colors": ["#976223", "#236A7B"]
+  }
+}

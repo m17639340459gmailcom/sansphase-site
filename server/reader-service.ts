@@ -6,11 +6,14 @@ import { mkdir, readFile, writeFile, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import sharp from 'sharp';
 import { clientAddress } from './client-ip.ts';
+import { loginIpKey } from './login-ledger.ts';
 import { membershipState } from './reader-membership.ts';
 import { uuidPattern } from './content-service.ts';
 import { withStreamUpload } from './stream-upload.ts';
-import { createReaderWorkflow, registrationLifetimeMs } from './reader-workflow.ts';
+import { readerImageBytes } from '../src/upload-policy.mjs';
+import { createReaderWorkflow } from './reader-workflow.ts';
 import { contactDetailReason } from './reader-profile-policy.ts';
+import { validReaderNickname } from '../src/reader-policy.ts';
 import { cleanReaderFiles } from './reader-file-cleanup.ts';
 import type { createReaderUidStore } from './reader-uids.ts';
 
@@ -36,7 +39,6 @@ const errorMessage = (error: unknown): string => error instanceof Error ? error.
 const cookieName = 'sansphase_reader_session';
 const fail = (message: string, status = 400): ServiceError => Object.assign(new Error(message), { status });
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const nicknamePattern = /^[^\u0000-\u001f\u007f<>]{2,30}$/u;
 const phonePattern = /^1[3-9]\d{9}$/;
 
 export function createReaderService({ payload, siteOrigin, directory, emailReady = false, authorService, loginLedger, uidStore, workflow = createReaderWorkflow(directory, payload.config.secret) }: ReaderServiceOptions) {
@@ -45,7 +47,7 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
   const avatarDir = resolve(directory, 'uploads');
   const avatarPath = (id: string) => resolve(avatarDir, `reader-avatar-${id}.webp`);
   const pendingAvatarPath = (id: string) => resolve(avatarDir, `pending-reader-avatar-${id}.webp`);
-  const avatarLimits = { maxFileBytes: 4 * 1024 ** 2, maxImageBytes: 4 * 1024 ** 2, maxAudioBytes: 0 };
+  const avatarLimits = { maxFileBytes: readerImageBytes, maxImageBytes: readerImageBytes, maxAudioBytes: 0 };
   const avatarFormats: Record<string, string> = { 'image/jpeg': 'jpeg', 'image/png': 'png', 'image/webp': 'webp' };
   let avatarQueue: Promise<unknown> = Promise.resolve();
   let verificationQueue: Promise<unknown> = Promise.resolve();
@@ -62,7 +64,7 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
   const session = (req: IncomingMessage) => req.headers.cookie?.split(';').map(value => value.trim())
     .find(value => value.startsWith(cookieName + '='))?.slice(cookieName.length + 1) || '';
   const cookie = (token: string) => `${cookieName}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${token ? 7 * 86400 : 0}${siteOrigin.startsWith('https:') ? '; Secure' : ''}`;
-  const client = (req: IncomingMessage) => clientAddress(req).ip || 'unknown';
+  const client = (req: IncomingMessage) => loginIpKey(clientAddress(req).ip || '') || 'unknown';
   const throttle = (key: string, limit: number, windowMs: number) => {
     const now = Date.now();
     if (attempts.size > 10000) for (const [name, state] of attempts) if (state.until <= now) attempts.delete(name);
@@ -90,8 +92,8 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
     return value;
   };
   const nickname = (value: unknown) => {
-    const name = String(value || '').trim();
-    if (!nicknamePattern.test(name)) throw fail('昵称需为 2 至 30 个可见字符。');
+    const name = String(value || '').trim().normalize('NFC');
+    if (!validReaderNickname(name)) throw fail('昵称需为 2 至 8 个可见字符。');
     return name;
   };
   const phone = (value: unknown) => {
@@ -134,10 +136,23 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
   };
   // Payload's generic types do not know this site's readers collection fields.
   const localReq = (user: object) => createLocalReq({ user: user as TypedUser }, payload);
-  const sendVerification = async (email: string, token: string) => {
-    const link = `${siteOrigin}/#/verify/${encodeURIComponent(token)}`;
+  const revokeIssuedSession = async (token: string) => {
+    // login().user does not contain _sid. auth() resolves the actual issued
+    // session so logout revokes that session without affecting other devices.
+    const { user } = await payload.auth({ headers: new Headers({ Authorization: `JWT ${token}` }) });
+    if (user?.collection === 'readers') await logoutOperation({ collection: payload.collections.readers, req: await localReq(user) });
+  };
+  const sendVerification = async (email: string, code: string) => {
     await payload.sendEmail({ to: email, subject: '验证你的 SANSPHASE 账号',
-      html: `<p>请在 5 分钟内验证邮箱并启用账号：</p><p><a href="${link}">验证邮箱</a></p><p>如果不是你注册的账号，可以忽略这封邮件。</p>` });
+      text: `你的 SANSPHASE 注册验证码为：${code}。5 分钟内有效，请返回注册页面填写。请勿将验证码提供给他人。如果不是你申请的，请忽略。`,
+      html: `<p>请返回注册页面，填写邮箱验证码：</p><p><strong>${code}</strong></p><p>5 分钟内有效，请勿将验证码提供给他人。如果不是你申请的，请忽略此邮件。</p>` });
+  };
+  const verificationMailLimit = (email: string, ip: string) => {
+    if (!workflow.consumeAuthLimits([
+      { key: `mail-minute:${email}`, limit: 1, windowMs: 60000 },
+      { key: `mail-hour:${email}`, limit: 3, windowMs: 3600000 },
+      { key: `mail-ip:${ip}`, limit: 10, windowMs: 3600000 },
+    ])) throw fail('验证码发送过于频繁，请至少间隔 60 秒，每个邮箱每小时最多 3 次。', 429);
   };
   const expireRegistration = (request: { id: string; expiresAt: string }) => {
     const delay = Math.max(0, Date.parse(request.expiresAt) - Date.now());
@@ -147,7 +162,6 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
     }, delay);
     timer.unref();
   };
-  const legacyExpired = (row: ReaderUser | null) => row && row._verified !== true && Date.now() - Date.parse(row.createdAt) >= registrationLifetimeMs;
   return {
     registrationEnabled: Boolean(emailReady),
     identity: async (req: IncomingMessage) => dto(await authenticated(req)),
@@ -206,27 +220,29 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
           if (!emailReady) throw fail('邮箱验证服务尚未配置，暂时不能注册。', 503);
           throttle(`register:${key}`, 30, 3600000);
           const email = cleanEmail(body.email), name = nickname(body.nickname), number = phone(body.phone), pass = password(body.password);
-          throttle(`register-email:${email}`, 3, 3600000);
+          verificationMailLimit(email, key);
           const existing = await findEmail(email);
-          if (existing && legacyExpired(existing)) await payload.delete({ collection: 'readers', id: existing.id });
-          if ((!existing || legacyExpired(existing)) && !await ownerEmail(email)) {
+          let requestId = randomUUID();
+          if (existing && existing._verified !== true) await payload.delete({ collection: 'readers', id: existing.id });
+          if ((!existing || existing._verified !== true) && !await ownerEmail(email)) {
             const pending = workflow.putRegistration({ email, nickname: name, phone: number, password: pass });
-            try { await sendVerification(email, pending.token); }
+            requestId = pending.id;
+            try { await sendVerification(email, pending.code); }
             catch (error) { workflow.removeRegistration(pending.id); throw error; }
             expireRegistration(pending);
           }
-          send(res, { message: '如果该邮箱可以注册，验证邮件已发送。请查收邮箱。' }); return;
+          send(res, { requestId, message: '如果该邮箱可以注册，验证码已发送，请在 5 分钟内填写。' }); return;
         }
         if (path === 'verify') {
-          throttle(`verify:${key}`, 20, 3600000);
-          const token = String(body.token || '');
-          if (token.length < 20 || token.length > 256) throw fail('验证链接无效或已过期。');
+          if (!workflow.consumeAuthLimits([{ key: `verify:${key}`, limit: 20, windowMs: 3600000 }])) throw fail('验证尝试过于频繁，请稍后再试。', 429);
+          const email = cleanEmail(body.email), code = String(body.code || ''), requestId = String(body.requestId || '');
+          if (!uuidPattern.test(requestId)) throw fail('验证码无效或注册申请已失效，请重新获取。');
           await serializeVerification(async () => {
-            const pending = workflow.registrationByToken(token);
+            const pending = workflow.registrationByCode(email, requestId, code);
             if (pending) {
               if (await findEmail(pending.email) || await ownerEmail(pending.email)) throw fail('该邮箱已注册，请直接登录。', 409);
               const user = await payload.create({ collection: 'readers', data: {
-                email: pending.email, password: pending.password, nickname: pending.nickname,
+                email: pending.email, password: pending.password, nickname: nickname(pending.nickname),
                 phone: pending.phone, disabled: false, _verified: true,
               }, disableVerificationEmail: true });
               try { uidStore.assignRandom(user.id); }
@@ -234,12 +250,7 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
               workflow.removeRegistration(pending.id);
               return;
             }
-            const match = await payload.find({ collection: 'readers', where: { _verificationToken: { equals: token } }, limit: 1, depth: 0 });
-            const legacy = match.docs[0] as ReaderUser | undefined;
-            if (!legacy || legacy._verified === true || legacyExpired(legacy)) throw fail('验证链接无效或已过期，请重新注册。');
-            uidStore.assignRandom(legacy.id);
-            try { await payload.verifyEmail({ collection: 'readers', token }); }
-            catch { throw fail('验证链接无效或已过期。'); }
+            throw fail('验证码无效、已过期或错误次数过多，请重新获取。');
           });
           send(res, { message: '邮箱验证成功，账号已启用。现在可以登录。' }); return;
         }
@@ -247,19 +258,18 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
           if (!emailReady) throw fail('邮箱服务尚未配置。', 503);
           throttle(`resend:${key}`, 30, 3600000);
           const email = cleanEmail(body.email);
-          throttle(`resend-email:${email}`, 3, 3600000);
-          const user = await findEmail(email, true);
+          verificationMailLimit(email, key);
+          const user = await findEmail(email);
           const pending = workflow.registrationByEmail(email);
-          if (!user && pending) {
+          let requestId = randomUUID();
+          if (!user && pending && pending.id === body.requestId) {
             const renewed = workflow.putRegistration(pending);
-            try { await sendVerification(email, renewed.token); }
+            requestId = renewed.id;
+            try { await sendVerification(email, renewed.code); }
             catch (error) { workflow.removeRegistration(renewed.id); throw error; }
             expireRegistration(renewed);
-          } else if (user && user._verified !== true && user._verificationToken && !user.disabled && !legacyExpired(user)) {
-            const link = `${siteOrigin}/#/verify/${encodeURIComponent(user._verificationToken)}`;
-            await payload.sendEmail({ to: email, subject: '验证你的 SANSPHASE 账号', html: `<p>请在原申请的 5 分钟内点击链接验证邮箱：</p><p><a href="${link}">验证邮箱</a></p>` });
           }
-          send(res, { message: '如果该邮箱正在等待验证，验证邮件已重新发送。' }); return;
+          send(res, { requestId, message: '如果该邮箱正在等待验证，验证码已重新发送，之前的验证码已失效。' }); return;
         }
         if (path === 'login') {
           throttle(`login:${key}`, 200, 3600000);
@@ -276,20 +286,21 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
           try { result = await payload.login({ collection: 'readers', data: { email, password: String(body.password || '') } }); }
           catch { throw fail('邮箱或密码不正确，或账号尚未验证。', 401); }
           if (!result.user) throw fail('登录会话暂不可用，请重试。', 503);
+          const issuedToken = result.token;
+          if (!issuedToken) throw fail('登录会话暂不可用，请重试。', 503);
           if (result.user.disabled || result.user._verified !== true) {
-            await logoutOperation({ collection: payload.collections.readers, req: await localReq(result.user) });
+            await revokeIssuedSession(issuedToken);
             throw fail('账号无法登录。', 403);
           }
           if (loginLedger) {
             try { loginLedger.record({ actorType: 'reader', actorId: String(result.user.id), email, address: clientAddress(req), userAgent: req.headers['user-agent'] }); }
             catch (error) {
-              await logoutOperation({ collection: payload.collections.readers, req: await localReq(result.user) });
+              await revokeIssuedSession(issuedToken);
               throw error;
             }
           }
-          if (!result.token) throw fail('登录会话暂不可用，请重试。', 503);
           const identity = dto(result.user as ReaderUser);
-          res.setHeader('Set-Cookie', cookie(result.token));
+          res.setHeader('Set-Cookie', cookie(issuedToken));
           send(res, identity); return;
         }
         if (path === 'logout') {
