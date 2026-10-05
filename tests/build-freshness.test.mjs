@@ -40,6 +40,10 @@ const canonicalFiles = [
   "community-frame-banners.mjs",
   "community-write-request.mjs",
   "community-growth.mjs",
+  "community-pages.mjs",
+  "community-ui.mjs",
+  "community-level-explorer.mjs",
+  "community-growth-art.mjs",
 ];
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 test("the single generated site stays synchronized with source and has all referenced assets", async () => {

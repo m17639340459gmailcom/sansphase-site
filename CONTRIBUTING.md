@@ -33,7 +33,7 @@ node --input-type=module -e "import {createPreviewServer} from './server.mjs'; c
 
 完整业务开发需要站长提供的脱敏测试数据或全新隔离数据。私有配置默认 `.local/payload-env.json`，也可用 `PAYLOAD_CONFIG_FILE` 指定，配置妥当后运行 `pnpm dev`。目前没有一键生成完整站点的初始化向导；不要复制生产密码或伪造已登录状态。
 
-主站及社区样例预览使用 `node scripts/catalog-fixture-preview.mjs`，默认地址 `http://127.0.0.1:4177/#/community/home`。它创建虚构内容和临时社区数据库，正常退出后清除临时数据；本地身份预览仅用于此服务，正式服务不开放。它不接 SMTP 或真实读者注册，不能代替邮箱、账号和生产数据验收。
+主站及社区样例预览使用 `pnpm preview:community`，默认地址 `http://127.0.0.1:4177/#/community/home`。该命令先完成当前源码的类型检查和干净构建，构建失败时不启动预览；不要只拉取源码后直接运行底层预览脚本，旧 `dist` 不会随 Git 拉取自动更新。它创建虚构内容和临时社区数据库，正常退出后清除临时数据；本地身份预览仅用于此服务，正式服务不开放。它不接 SMTP 或真实读者注册，不能代替邮箱、账号和生产数据验收。
 
 成长经验与 VIP1–VIP8 自动晋级暂未启用。界面倍率、草案阈值和真实 VIP 有效期属于不同数据；继续开发时先读 [经验规则内部草案](docs/COMMUNITY-EXPERIENCE-RULES.md)，不要从会员有效布尔值推导用户档位或伪造进度。主站排版与社区样式分别在模块内维护。
 
