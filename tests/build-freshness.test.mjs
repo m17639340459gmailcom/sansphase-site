@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { verifySite } from "../scripts/verify-site.mjs";
 import { rewriteStaticHtml } from "../scripts/static-package.mjs";
 import { composeSiteStyles } from "../scripts/compose-site-styles.mjs";
+import { composeCommunityStyles } from "../scripts/compose-community-styles.mjs";
 import { transform } from 'esbuild';
 import { loaderDial } from '../src/loader-dial.mjs';
 import { typedBrowserModules } from '../scripts/typed-browser-modules.mjs';
@@ -35,6 +36,7 @@ const canonicalFiles = [
   "styles.css",
   "blog-background.css",
   "author.css",
+  "community.css",
   "community-banner-controller.mjs",
   "community-banner-editor.mjs",
   "community-frame-banners.mjs",
@@ -50,9 +52,11 @@ test("the single generated site stays synchronized with source and has all refer
   for (const file of canonicalFiles) {
     let source = file === "styles.css"
       ? await composeSiteStyles()
-      : typedBrowserModules.has(file)
-        ? (await transform(await readFile(`src/${file.slice(0, -'.mjs'.length)}.ts`, 'utf8'), { loader: 'ts', format: 'esm', target: 'es2022' })).code
-        : await readFile(`src/${file}`);
+      : file === "community.css"
+        ? await composeCommunityStyles()
+        : typedBrowserModules.has(file)
+          ? (await transform(await readFile(`src/${file.slice(0, -'.mjs'.length)}.ts`, 'utf8'), { loader: 'ts', format: 'esm', target: 'es2022' })).code
+          : await readFile(`src/${file}`);
     if(file==='index.html') {
       // The only HTML build substitution is the shared loading dial;
       // validate the rest of the template byte for byte as before.

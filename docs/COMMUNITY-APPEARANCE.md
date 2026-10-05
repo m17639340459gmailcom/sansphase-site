@@ -27,7 +27,7 @@
 | `src/community-layout/stable-frame.ts`、`stable-frame.css` | 三栏、导航、阅读位置与滚动条 |
 | `src/community-layout/appearance.ts`、`appearance.css` | 主题切换、主题材质与配色 |
 | `src/community-pages.ts`、`community-post.ts` | 页面和共享物品预览 |
-| `src/community-management.ts`、`community-management.css` | 独立作者/版主管理布局、浏览身份提示和商品图片预览 |
+| `src/community-management.ts`、`community-management.css` | 独立作者/版主管理布局、表单、商品图片预览和操作弹窗 |
 | `src/community-shop-editor.ts`、`community-name-effects.ts` | 作者分类／装扮上架表单、佩戴预览及深浅主题昵称配色 |
 | `src/community-ui.ts`、`community-compose-editor.ts` | 交互、草稿和图片编辑 |
 | `server/community-*`、`server/payload/community-migration.ts` | 权限、内容、图片与迁移 |
@@ -36,9 +36,21 @@
 
 构建按 `scripts/compose-community-styles.mjs` 的明确顺序组合样式，不依赖预览注入或版本参数。每次打开或刷新页面默认深色，旧 `communityTheme` 参数和已存偏好不决定初始主题；`v` 只是旧预览链接标记，不选择另一套代码。手动切换后的主题在本次页面内供社区内容和管理台共用，路由及语言切换保留，不写入长期存储，也不影响主站主题。
 
+## 结构与覆盖维护
+
+正式入口只有一套页面模板。等级内容由 `community-pages.ts` 调用 `community-level-explorer.ts`，成长、社区和 VIP 使用同一个切换组件；固定框架替换路由内容，管理页使用独立管理模板。历史快照和演示页不参与当前构建，不能从旧目录修补正式版本。
+
+样式是基础组件、列表／帖子、固定框架、主题、星空和管理区共 7 个职责模块的组合。主题、响应式、按钮状态与框架布局仍通过 CSS 层叠生效，因此不能宣称“没有任何覆盖”。`runtime.ts` 中的列表作者行和帖子作者行重排仍属于渲染后适配；它们移动现有节点，不复制整张旧页面。修改这些结构时，应连同原模板、适配器和测试一起收拢，不能继续增加第二套重排或覆盖层。
+
+2026-10-06 结构检查移除了 4 条无生产者的样式（`community-meter-row`、`community-prog-row`、早鸟排行中的错误头像类 `community-avatar`、`community-rule-intro`），合并分散的等级标记规则，并将帖子小计、提示词和相关讨论的 4 组视觉属性收回 `community.css`。`feed-thread.css` 与 `stable-frame.css` 保留各自布局，不再各写一份相同内容样式。
+
+本次净减少 12 个规则块、23 个声明。检查后的 7 个模块共有 1,849 个规则块、6,173 个声明，`!important` 为 0；相同选择器与相同条件下没有重复规则块。规则计数包含动画关键帧，声明计数包含变量；这不是历史补丁数量，也不能据此排除不同选择器之间的必要覆盖。新增回归覆盖深浅主题、锁定／公开提示词、侧栏往返移动后的外观、焦点、事件和草稿，视觉结构调整还需实际浏览器验收。
+
+维护时直接修改组件所属规则，删除被替代分支；共享内容样式不能依赖侧栏当前放在哪一列。不要在文件末尾追加覆盖来修复已有样式，不使用 `!important` 抢优先级。预览和发布均从当前源码重新构建，禁止只修改 `dist` 或叠加历史构建文件。
+
 ## 当前预览
 
-`PORT=4214 node scripts/catalog-fixture-preview.mjs` 从正式目录启动，只绑定本机，并使用可丢弃的样例数据库。
+在正式目录执行 `pnpm preview:community`，先构建当前源码再启动样例服务（默认 4177）。服务只绑定本机，并使用可丢弃的样例数据库。指定端口后再启动，例如 PowerShell 下设置 `$env:PORT=4214`，以下链接对应该端口。
 
 - [装扮兑换](http://127.0.0.1:4214/#/community/shop/look)
 - [道具兑换](http://127.0.0.1:4214/#/community/shop/card)，进入后可手动切换明亮
