@@ -79,14 +79,22 @@ test("topics and replies: create, list, read, count and soft delete", async (t) 
   assert.deepEqual(store.related({ id: a.id, board: "qa" }).map((x) => x.id), [c.id]);
   assert.deepEqual(store.postedToday(reader("r2"), Date.parse(at(60))), { topics: 1, replies: 1 });
 
-  assert.equal(store.hasContent("r3"), true, "a reply counts as content");
   assert.equal(store.deleteReply(second.id, { now: at(50) }), true);
   assert.equal(store.topic(a.id).replyCount, 1);
-  assert.equal(store.hasContent("r3"), false, "deleted content no longer protects the account");
   assert.equal(store.deleteTopic(b.id, { now: at(60) }), true);
   assert.equal(store.topic(b.id), null);
   assert.throws(() => store.addReply({ topicId: b.id, author: reader("r1"), body: "晚了", now: at(70) }), /不存在/);
   assert.equal(store.deleteTopic("missing"), false);
+});
+
+test('titled posts expose a bounded body preview without returning their complete body', async (t) => {
+  const store = await open(t);
+  const body = '记录光影与构图。'.repeat(80);
+  const created = post(store, reader('r1'), { board: 'showcase', title: '一组星空练习', body });
+  const listed = store.listTopics(page).items.find(item => item.id === created.id);
+  assert.equal(listed.excerpt, body.slice(0, 320));
+  assert.equal(listed.body, undefined);
+  assert.equal(store.topic(created.id).body, body, 'the complete body remains available in the authorized detail view');
 });
 
 test("moments have no title: lists show the start of the text instead", async (t) => {
@@ -117,7 +125,7 @@ test("星尘: posting and replying earn within their daily counts and the shared
   const store = await open(t);
   const ids = [];
   for (let i = 0; i < 4; i++) ids.push(post(store, reader("r1"), { title: `主题 ${i} 标题`, now: at(i) }));
-  assert.deepEqual(ids.map((x) => x.earned), [5, 5, 5, 0], "only the first three topics a day earn");
+  assert.deepEqual(ids.map((x) => x.earned), [2, 0, 0, 0], "only the first topic a day earns");
   assert.equal(store.addReply({ topicId: ids[0].id, author: reader("r1"), body: "自己帖子里的长回复内容", now: at(5) }).earned, 0, "not on your own topic");
   assert.equal(store.addReply({ topicId: ids[0].id, author: reader("r2"), body: "短", now: at(6) }).earned, 0, "too short to count");
   const good = store.addReply({ topicId: ids[0].id, author: reader("r2"), body: "这是一条足够长的有效回复", now: at(7) });
@@ -125,65 +133,88 @@ test("星尘: posting and replying earn within their daily counts and the shared
   store.deleteReply(good.id, { now: at(8) });
   assert.equal(store.ledger.balance(reader("r2")), 0, "a deleted reply loses its 星尘");
   store.deleteTopic(ids[1].id, { moderated: true, now: at(9) });
-  assert.equal(store.ledger.balance(reader("r1")), 0, "moderation takes back 5 and the penalty (20) stops at zero");
+  assert.equal(store.ledger.balance(reader("r1")), 0, "the moderation penalty stops at zero");
   assert.equal(store.members.inbox(reader("r1")).find((notice) => notice.type === "penalty").data.penalty, 20);
 
   for (let i = 0; i < 12; i++) {
     const q = post(store, reader(`q${i}`), { now: at(10) });
     store.accept(store.addReply({ topicId: q.id, author: reader("helper"), body: "一个足够长的有用回答内容", now: at(11) }).id, at(12));
   }
-  assert.equal(store.ledger.balance(reader("helper")), 60, "replies and accepted answers stop at the daily cap");
-  assert.equal(store.ledger.behaviourToday(reader("helper"), Date.parse(at(13))), 60);
-  assert.equal(store.ledger.gainedToday(reader("helper"), Date.parse(at(13))), 60);
+  assert.equal(store.ledger.balance(reader("helper")), 4, "reply and acceptance each award only once a day");
+  assert.equal(store.ledger.behaviourToday(reader("helper"), Date.parse(at(13))), 4);
+  assert.equal(store.ledger.gainedToday(reader("helper"), Date.parse(at(13))), 4);
 });
 
 test("感谢, 采纳 and 精华 move 星尘 as the design says", async (t) => {
   const store = await open(t);
   const q = post(store, reader("asker"));
   assert.throws(() => store.thank({ kind: "topic", id: q.id }, reader("fan"), reader("asker"), at(1)), /星尘不足/);
-  store.economy.checkin(reader("fan"), { now: Date.parse(at(1)) });
-  store.economy.checkin(reader("fan"), { now: Date.parse(at(1)) + 86400e3 });
+  store.ledger.credit(reader("fan"), 10, 'test', null, at(1));
   assert.equal(store.ledger.balance(reader("fan")), 10);
   assert.deepEqual(store.thank({ kind: "topic", id: q.id }, reader("fan"), reader("asker"), at(2)), { balance: 0, thanks: 1 });
-  assert.equal(store.ledger.balance(reader("asker")), 5 + 8, "the author gets 8 of the 10");
+  assert.equal(store.ledger.balance(reader("asker")), 2 + 8, "the author gets 8 of the 10");
   assert.equal(store.thanked({ kind: "topic", id: q.id }, reader("fan")), true);
   assert.throws(() => store.thank({ kind: "topic", id: q.id }, reader("fan"), reader("asker"), at(3)), /已经感谢过/);
   assert.throws(() => store.thank({ kind: "topic", id: q.id }, reader("asker"), reader("asker"), at(3)), /不能感谢自己/);
 
   const answer = store.addReply({ topicId: q.id, author: reader("helper"), body: "试试降低 IPAdapter 的权重", now: at(4) });
-  assert.equal(store.accept(answer.id, at(5)), 15);
+  assert.equal(store.accept(answer.id, at(5)), 3);
   assert.equal(store.topic(q.id).acceptedReplyId, answer.id);
   assert.equal(store.listTopics(page).items[0].solved, true);
   assert.throws(() => store.accept(answer.id, at(6)), /已经采纳/);
-  assert.equal(store.ledger.balance(reader("helper")), 1 + 15);
+  assert.equal(store.ledger.balance(reader("helper")), 1 + 3);
 
   assert.equal(store.setFeatured(q.id, true, { actor: owner, now: at(7) }), true);
-  assert.equal(store.ledger.balance(reader("asker")), 13 + 50);
+  assert.equal(store.ledger.balance(reader("asker")), 10 + 15);
   assert.equal(store.setFeatured(q.id, true, { now: at(7) }), false, "already featured");
   assert.equal(store.setFeatured(q.id, false, { now: at(8) }), true);
-  assert.equal(store.ledger.balance(reader("asker")), 13, "removing 精华 takes the 50 back");
+  assert.equal(store.ledger.balance(reader("asker")), 10, "removing 精华 takes the 15 back");
   assert.equal(store.setPinned(q.id, true), true);
   assert.equal(store.topic(q.id).pinned, true);
   const history = store.ledger.history(reader("asker"));
   assert.deepEqual(history.map((row) => row.reason), ["revert", "featured", "thank-in", "topic"]);
   assert.equal(history[1].reverted, true);
   assert.deepEqual(store.ledger.history(reader("asker"), { flow: "out" }).map((row) => row.reason), ["revert"]);
-  assert.deepEqual(store.ledger.month(reader("asker"), Date.parse(at(9))), { gained: 63, spent: 50 });
+  assert.deepEqual(store.ledger.month(reader("asker"), Date.parse(at(9))), { gained: 25, spent: 15 });
 });
 
-test("likes pay 1 星尘 only when the liker may give it, once a day per pair, and merge into one notice", async (t) => {
+test("likes never issue 星尘 and merge into one notice", async (t) => {
   const store = await open(t);
   const a = post(store, reader("author"));
   const b = post(store, reader("author"), { title: "另一个问题标题", now: at(1) });
   assert.throws(() => store.like({ kind: "topic", id: a.id }, reader("author"), true), /不能给自己点赞/);
   assert.equal(store.like({ kind: "topic", id: a.id }, reader("newbie"), true, { rewarding: false, now: at(2) }).earned, 0, "a first-light like gives nothing");
-  assert.deepEqual(store.like({ kind: "topic", id: a.id }, reader("fan"), true, { rewarding: true, now: at(3) }), { likes: 2, liked: true, earned: 1 });
+  assert.deepEqual(store.like({ kind: "topic", id: a.id }, reader("fan"), true, { rewarding: true, now: at(3) }), { likes: 2, liked: true, earned: 0 });
   assert.equal(store.like({ kind: "topic", id: b.id }, reader("fan"), true, { rewarding: true, now: at(4) }).earned, 0, "the same pair pays once a day");
   assert.deepEqual(store.like({ kind: "topic", id: a.id }, reader("fan"), false, { now: at(5) }), { likes: 1, liked: false, earned: 0 });
   assert.equal(store.like({ kind: "topic", id: a.id }, reader("fan"), true, { rewarding: true, now: at(6) }).earned, 0, "liking again pays nothing more");
-  assert.equal(store.ledger.balance(reader("author")), 5 + 5 + 1);
+  assert.equal(store.ledger.balance(reader("author")), 2);
   const likes = store.members.inbox(reader("author")).filter((notice) => notice.type === "like");
   assert.deepEqual(likes.map((notice) => [notice.topicId, notice.count]).sort(), [[a.id, 3], [b.id, 1]].sort(), "likes on one topic in a day are one notice");
+});
+
+test('likes never mint currency across accounts, targets or Beijing days', async t => {
+  const store = await open(t);
+  const author = reader('author'), fan = reader('fan');
+  const a = post(store, author), b = post(store, author, { title: '同作者另一个主题' });
+  const question = post(store, reader('asker'));
+  const reply = store.addReply({ topicId: question.id, author, body: '这是作者在另一个问题中的有效回复', now: at(1) });
+  const like = (target, member = fan, now = at(2)) => store.like(target, member, true, { rewarding: true, now });
+  const unlike = target => store.like(target, fan, false, { now: at(3) });
+  const aTarget = { kind: 'topic', id: a.id }, bTarget = { kind: 'topic', id: b.id }, replyTarget = { kind: 'reply', id: reply.id };
+  assert.equal(like(aTarget).earned, 0);
+  unlike(aTarget);
+  assert.equal(like(bTarget).earned, 0, 'cancel then like another topic must not issue another reward');
+  unlike(bTarget);
+  assert.equal(like(replyTarget).earned, 0, 'topic and reply rewards share the same account pair');
+  assert.equal(like(bTarget, reader('different-fan')).earned, 0, 'another liker also gives no stars');
+  const otherAuthor = post(store, reader('different-author'));
+  assert.equal(like({ kind: 'topic', id: otherAuthor.id }).earned, 0, 'another author also gets no like stars');
+  unlike(replyTarget);
+  const tomorrow = '2026-09-30T16:00:00.000Z';
+  assert.equal(like(replyTarget, fan, tomorrow).earned, 0, 'a new day does not enable like awards');
+  store.like(replyTarget, fan, false, { now: tomorrow });
+  assert.equal(like(aTarget, fan, '2026-10-01T16:00:00.000Z').earned, 0, 'a previously rewarded content like can never reward again');
 });
 
 test("likes, bookmarks, views, tags, edits and reports", async (t) => {
@@ -224,7 +255,7 @@ test("likes, bookmarks, views, tags, edits and reports", async (t) => {
   assert.deepEqual(store.resolveReport(second.id, true, at(14)), { removed: true });
   assert.equal(store.topic(b.id), null, "an upheld report removes the content");
   assert.equal(store.openReports().length, 0, "every open report on it closes");
-  assert.equal(store.ledger.balance(reader("r3")), 5, "each reporter gets 5");
+  assert.equal(store.ledger.balance(reader("r3")), 0, "upheld reports do not mint stars");
   assert.ok(store.members.inbox(reader("r3")).some((notice) => notice.data.report === "upheld"));
   assert.throws(() => store.resolveReport(second.id, true, at(15)), /已经处理/);
 });
@@ -274,25 +305,67 @@ test("trust levels: earned from visits, reading, posting, likes and replies; rec
   assert.equal(store.members.level(owner), 4);
 });
 
+test('natural-month attendance pays one daily and five once for 28, 29, 30 and 31 days', async (t) => {
+  const store = await open(t);
+  for (const [month, length] of [['2027-02', 28], ['2028-02', 29], ['2026-04', 30], ['2026-12', 31]]) {
+    const me = reader(month);
+    for (let d = 1; d <= length; d++) {
+      const now = Date.parse(`${month}-${String(d).padStart(2, '0')}T04:00:00Z`);
+      assert.equal(store.economy.nextCheckinReward(me, now).total, d === length ? 6 : 1);
+      const result = store.economy.checkin(me, { now, vip: true });
+      assert.equal(result.reward, d === length ? 6 : 1);
+      assert.equal(result.bonus, d === length ? 5 : 0);
+      assert.throws(() => store.economy.checkin(me, { now }), /已经签到/);
+    }
+    assert.equal(store.ledger.balance(me), length + 5);
+    const bonus = store.ledger.history(me).filter(row => row.reason === 'checkin-month');
+    assert.equal(bonus.length, 1);
+    assert.deepEqual(bonus[0].ref, { kind: 'month', id: month });
+    assert.equal(bonus[0].amount, 5);
+    const nextDay = Date.parse(`${month}-${length}T04:00:00Z`) + 86400e3;
+    assert.equal(store.economy.nextCheckinReward(me, nextDay).total, 1, 'new month resets bonus eligibility');
+    assert.equal(store.economy.checkin(me, { now: nextDay }).reward, 1);
+  }
+});
+
+test('a makeup can complete the previous calendar month and grants its bonus only once', async (t) => {
+  const store = await open(t), me = reader('monthly-makeup');
+  for (let d = 1; d <= 30; d++) {
+    if (d === 28) continue;
+    store.economy.checkin(me, { now: Date.parse(`2026-04-${String(d).padStart(2, '0')}T04:00:00Z`) });
+  }
+  assert.equal(store.ledger.balance(me), 29, 'missing a day means no monthly bonus');
+  const now = Date.parse('2026-05-01T04:00:00Z');
+  assert.equal(store.economy.checkin(me, { now }).reward, 1);
+  const result = store.economy.makeup(me, '2026-04-28', { vip: true, now });
+  assert.equal(result.bonus, 5);
+  assert.equal(result.balance, 35, 'makeup grants the full-month bonus, not missed daily income');
+  assert.throws(() => store.economy.makeup(me, '2026-04-28', { vip: true, now }), /漏掉的日子/);
+  assert.equal(store.ledger.history(me).filter(row => row.reason === 'checkin-month').length, 1);
+  assert.equal(store.economy.monthBonus(me, '2026-04'), 5);
+  assert.equal(store.economy.monthBonus(me, '2026-05'), 0);
+});
+
 test("签到 and 补签: streaks from the actual days, bonuses, early birds, badges and the monthly allowance", async (t) => {
   const store = await open(t);
   const me = reader("r1");
   const start = Date.parse("2026-09-01T16:30:00Z"); // 2026-09-02 00:30 Beijing time
   const first = store.economy.checkin(me, { now: start });
-  assert.deepEqual([first.streak, first.reward, first.bonus, first.position], [1, 5, 0, 1]);
+  assert.deepEqual([first.streak, first.reward, first.bonus, first.position], [1, 1, 0, 1]);
   assert.throws(() => store.economy.checkin(me, { now: start + 3600e3 }), /已经签到/);
   const rewards = [first.reward];
   for (let d = 1; d < 30; d++) rewards.push(store.economy.checkin(me, { now: start + d * 86400e3 }).reward);
-  assert.deepEqual([rewards[6], rewards[13], rewards[27], rewards[29]], [20, 20, 20, 55]);
-  assert.equal(store.ledger.balance(me), 30 * 5 + 4 * 15 + 50, "260 for a full cycle");
+  assert.deepEqual([rewards[6], rewards[13], rewards[27], rewards[29]], [1, 1, 1, 1]);
+  assert.equal(store.ledger.balance(me), 30, "a streak spanning incomplete calendar months earns no monthly bonus");
   assert.deepEqual(store.members.badges(me).sort(), ["early", "first_checkin", "streak30", "streak7"]);
-  assert.equal(store.economy.checkin(reader("v"), { vip: true, now: start }).reward, 7);
+  assert.equal(store.economy.checkin(reader("v"), { vip: true, now: start }).reward, 1);
   assert.equal(store.economy.checkinsToday(start), 2);
   assert.deepEqual(store.economy.earlyBirds(start).map((bird) => bird.member.id), ["r1", "v"]);
   assert.deepEqual(store.economy.checkinDays(me, "2026-09-01", "2026-09-04"), ["2026-09-02", "2026-09-03", "2026-09-04"]);
 
   // Two days missed, then made up: the streak reconnects and no check-in reward is paid.
   const later = start + 32 * 86400e3;
+  store.ledger.credit(me, 100, 'test', null, new Date(later).toISOString());
   store.economy.checkin(me, { now: later });
   assert.equal(store.economy.currentStreak(me, later), 1);
   const state = store.economy.makeupState(me, { now: later });
@@ -412,10 +485,10 @@ test("prompt unlocks, bounties, paid pins and glowing titles", async (t) => {
   assert.equal(store.listTopics({ ...page, author: asker }).total, 0, "a refused bounty posts nothing");
   store.ledger.credit(asker, 100, "test", null, at(0));
   const question = post(store, asker, { bounty: 50, now: at(2) });
-  assert.equal(store.ledger.balance(asker), 100 - 50 + 5, "the bounty is frozen");
+  assert.equal(store.ledger.balance(asker), 100 - 50 + 2, "the bounty is frozen");
   assert.deepEqual([store.topic(question.id).bounty, store.topic(question.id).bountyState], [50, "open"]);
   const answer = store.addReply({ topicId: question.id, author: helper, body: "一个认真的回答写在这里", now: at(3) });
-  assert.equal(store.accept(answer.id, at(4)), 50 + 15, "the bounty and 15 go to the answer");
+  assert.equal(store.accept(answer.id, at(4)), 50 + 3, "the bounty and 3 go to the answer");
   assert.equal(store.topic(question.id).bountyState, "paid");
   const open2 = post(store, asker, { bounty: 20, title: "另一个悬赏问题", now: at(5) });
   assert.equal(store.expireBounties(Date.parse(at(5)) + 6 * 86400e3), 0);
@@ -425,7 +498,7 @@ test("prompt unlocks, bounties, paid pins and glowing titles", async (t) => {
   const third = post(store, asker, { bounty: 20, title: "第三个悬赏问题", now: at(6) });
   const before = store.ledger.balance(asker);
   store.deleteTopic(third.id, { now: at(7) });
-  assert.equal(store.ledger.balance(asker), before - 5 + 10, "deleting it takes the posting reward and gives half the bounty back");
+  assert.equal(store.ledger.balance(asker), before + 10, "the third topic earned nothing; half its bounty is refunded");
 
   // Paid pins are timed against the real clock, as lists are.
   const now = Date.now();
@@ -482,7 +555,7 @@ test("resource votes, follows, sanctions, the review queue, hiding, locking and 
   assert.equal(store.listTopics(page).items.some((x) => x.id === pending.id), false, "pending topics are not listed");
   assert.equal(store.members.inbox(reader("new"))[0].data.state, "pending");
   assert.equal(store.queue().topics[0].id, pending.id);
-  assert.equal(store.approveTopic(pending.id).earned, 5);
+  assert.equal(store.approveTopic(pending.id).earned, 2);
   assert.throws(() => store.approveTopic(pending.id), /不在待审/);
   assert.equal(store.queue().topics.length, 0);
   assert.deepEqual(store.members.badges(reader("new")), ["first_topic"]);
@@ -528,7 +601,7 @@ test("notifications: replies, quotes, accepted answers, thanks and badges; unrea
   const inbox = store.members.inbox(helper);
   assert.deepEqual(inbox.map((notice) => notice.type), ["thank", "badge", "accept", "reply"]);
   assert.deepEqual([inbox[3].data.kind, inbox[3].actor], ["quote", third]);
-  assert.equal(inbox[2].data.amount, 15);
+  assert.equal(inbox[2].data.amount, 3);
   assert.equal(store.members.inbox(asker).filter((notice) => notice.type === "reply").length, 2);
   assert.deepEqual(store.members.unread(helper), { all: 4, reply: 1, thanks: 2, system: 1 });
   store.members.read(helper, inbox[0].id);
@@ -576,6 +649,6 @@ test("the monthly contribution ranking and the owner's 星尘 flow", async (t) =
   assert.equal(store.members.contributions(Date.parse("2026-10-05T04:00:00Z")).length, 0, "a new month starts again");
   const flow = store.ledger.flow(7, now);
   assert.equal(flow.length, 7);
-  assert.deepEqual(flow.at(-1), { day: "2026-09-30", issued: 5 + 5 + 5 + 50, recovered: 0 });
+  assert.deepEqual(flow.at(-1), { day: "2026-09-30", issued: 2 + 2 + 2 + 15, recovered: 0 });
   assert.equal(store.activity(now).topics24h, 3);
 });

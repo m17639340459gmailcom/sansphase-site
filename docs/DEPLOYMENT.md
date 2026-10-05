@@ -1,6 +1,6 @@
 # 腾讯云部署说明
 
-目标环境：Ubuntu 24.04，Node.js 24，Nginx，单进程 Payload + SQLite，域名 https://www.sansphase.com。以下是待执行的部署流程；本地检查不代表已在腾讯云部署或验收。
+目标环境：Ubuntu 24.04，Node.js >=24.21.0 <25，Nginx，单进程 Payload + SQLite，域名 https://www.sansphase.com。以下是待执行的部署流程；本地检查不代表已在腾讯云部署或验收。生产启动会在读取私有配置与打开数据库前拒绝旧 Node 24 补丁及其他主版本；须检查 systemd 实际使用的 `/usr/bin/node --version`，不能只检查交互终端或包管理器版本。
 
 ## 目录与运行身份
 
@@ -21,6 +21,7 @@
 2. 安装官方 Node.js 24 和 package.json 指定的 pnpm，安装 Nginx、Certbot。核对 systemd 文件中 /usr/bin/node 与实际路径一致。
 3. 在新代码目录执行 pnpm install --frozen-lockfile、pnpm build、pnpm test。4 GB 服务器尽量不同时运行其他构建任务；测试与生产使用隔离数据。
 4. 在本地运行 cms:backup，把完整私有备份安全传到服务器。使用 cms:restore 写入新的 /var/lib/sansphase/payload 和新的 /etc/sansphase/payload.json；恢复会拒绝覆盖已有目录和配置。保留原 secret 与 authorId，不重新生成或初始化数据库。运行配置使用生产绝对路径，日常启动 push:false。
+   社区首次上线或本次升级，先校验完整备份及恢复副本，再在确认的私有数据目录执行 `node scripts/migrate-community.mjs <private-payload-directory>`。它会先创建数据库快照，再事务补齐横幅、请求去重与持久限速等表；旧帖子、账号与权益保留。未完成迁移时社区保持关闭，不靠生产自动推表补齐。详细步骤见 [源码与服务器维护](MAINTENANCE.md) 和 [社区上线前验收](COMMUNITY-PRELAUNCH.md)。
 5. 安装 deploy/site.env.example 和 deploy/sansphase.service。systemctl daemon-reload 后启用 sansphase；查看 journalctl -u sansphase，并执行 pnpm healthcheck。读取健康检查中的版本，与 dist/build-info.json 对比。
 6. 证书尚不存在时先安装 nginx-bootstrap.conf，准备 /var/www/letsencrypt，执行 nginx -t。使用 Certbot webroot 方式为 www.sansphase.com 申请证书，再用 nginx.conf 替换临时配置。两个配置不要同时启用。再次 nginx -t，通过后 reload。确认 Certbot 自动续期任务正常。不擅自添加未确认的根域名跳转或 DNS 记录。
 7. 初次签发证书后，将 deploy/certbot-renew-hook.sh 安装至 /etc/letsencrypt/renewal-hooks/deploy/sansphase-nginx，所有者 root、权限 0755；核对其中 Nginx 与 systemctl 绝对路径。此钩子只处理 www.sansphase.com，先 nginx -t，通过后 reload。运行 certbot renew --cert-name www.sansphase.com --dry-run --run-deploy-hooks 验证续期流程与钩子，并确认续期 timer 存在且启用。
@@ -31,7 +32,7 @@
 
 在线播放 MP3 使用 FFmpeg 补齐时长和定位索引，音频包通过 `-c:a copy` 原样复制，不重编码。Ubuntu 使用系统仓库的 `ffmpeg` 包，并在发布机运行 `tests/audio-variants.test.mjs`；该测试不得跳过。音乐上传时准备副本，已有音乐首次播放时补建，结果缓存在私有数据目录的 `audio-cache`。作者下载和 `?download=1` 仍返回上传原文件，播放副本仍需通过原有发布权限检查。缺少 FFmpeg、文件格式异常或文件超过 256 MiB 时回退原文件。缓存不进入数据备份，可按容量需要重建；首屏不会等待整首音乐缓冲，也没有必须达到20%的门槛。
 
-普通附件/安装包上限 15 GiB，图片 25 MiB，音乐 100 MiB；流式上传避免整个安装包进入内存。Nginx 对上传路由关闭请求缓冲，允许 multipart 额外开销，应用仍严格检查文件实际字节数。请求缓冲和超时语义依据 [Nginx 官方说明](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_request_buffering)。
+作者内容的普通附件/安装包上限 15 GiB，图片 25 MiB，音乐 100 MiB；普通读者、VIP 和版主上传图片均不超过 2 MiB，作者身份另有技术上限。流式上传避免整个安装包进入内存。Nginx 对上传路由关闭请求缓冲，允许 multipart 额外开销，应用仍严格检查文件实际字节数。请求缓冲和超时语义依据 [Nginx 官方说明](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_request_buffering)。
 
 15 GiB 单文件上传期间，当前实现需要临时文件和最终文件空间，并保留余量；约需 30.5 GiB 可用空间。40 GB 系统盘还包含系统、程序、数据库及备份，不能承诺容纳多个大软件。上线前要实测空间，必要时增加数据盘或使用单独的对象存储方案。当前不支持断点续传，失败需重传。
 

@@ -2,35 +2,41 @@
 // 帖子详情和发帖在 community-post.ts；签到、星尘、兑换所、排行、成员主页、通知、公约和管理在 community-pages.ts。
 // 这里只拼 HTML、不发请求；读写接口和表单在 community-ui.ts。
 
-import { communityTags, communityLevels, communityBadges } from './community-rules.mjs';
-import type { PromptMode } from './community-rules.ts';
+import { communityTags, communityLevels, communityBadges, communityNameEffect } from './community-rules.mjs';
+import type { PromptMode, NameEffect } from './community-rules.ts';
+import { bodyImageContent, imageIdFromLine } from './community-body-images.mjs';
+import { checkinBadgeIconHTML } from './community-badge-icons.mjs';
+import { nameEffectVariables } from './community-name-effects.mjs';
+import { communityGrowthLevel } from './community-growth.mjs';
+import { communityGrowthArtHTML } from './community-growth-art.mjs';
+import type { CommunityGrowthState } from './community-growth.ts';
 export * from './community-rules.mjs';
 
 export type Translate = (zh: string, en: string) => string;
 export type Escape = (value?: unknown) => string;
 export type Icons = Record<string, string>;
 // What every template needs: translation, escaping, the clock, icons and the owner's site avatar.
-export type Common = { t: Translate; esc: Escape; now?: number; icons?: Icons; ownerAvatar?: string | null; meForSort?: CommunityMe | null };
+export type Common = { t: Translate; esc: Escape; now?: number; icons?: Icons; ownerAvatar?: string | null; meForSort?: CommunityMe | null; showTopicCovers?: boolean };
 
 export type CommunityBoard = {
-  id: string; zh: string; en: string; description: string; descriptionEn: string; color: string;
+  id: string; zh: string; en: string; description: string; descriptionEn: string; color: string; lightColor: string;
   icon: string; kind: string; kindEn: string; tips: readonly string[]; tipsEn: readonly string[];
 };
 
 // 版块与设计稿一致：少开版块，细分交给标签。
 export const communityBoards: readonly CommunityBoard[] = [
-  { id: "qa", zh: "学习问答", en: "Q&A", description: "学 AI 过程中遇到的具体问题。", descriptionEn: "Specific questions about learning AI.", color: "#9fb8e0", icon: "help", kind: "问答帖", kindEn: "Questions",
+  { id: "qa", zh: "学习问答", en: "Q&A", description: "学 AI 过程中遇到的具体问题。", descriptionEn: "Specific questions about learning AI.", color: "#9fb8e0", lightColor: "#41658f", icon: "help", kind: "问答帖", kindEn: "Questions",
     tips: ["标题一句话说清问题", "写清环境、报错和已经试过的办法", "问题解决了，回帖说一声"], tipsEn: ["Say the question in the title", "Include your setup, errors and what you tried", "Say so when it is solved"] },
-  { id: "showcase", zh: "作品展廊", en: "Showcase", description: "用 AI 做的作品，请写清工具和模型。", descriptionEn: "Work made with AI, with tools and models noted.", color: "#e7a9c6", icon: "image", kind: "作品帖", kindEn: "Work",
+  { id: "showcase", zh: "作品展廊", en: "Showcase", description: "用 AI 做的作品，请写清工具和模型。", descriptionEn: "Work made with AI, with tools and models noted.", color: "#e7a9c6", lightColor: "#875073", icon: "image", kind: "作品帖", kindEn: "Work",
     tips: ["写清用了哪些工具和模型", "说说做法和踩过的坑", "只发自己的作品"], tipsEn: ["Name the tools and models", "Share how you made it", "Post only your own work"] },
-  { id: "tools", zh: "工具资源", en: "Tools", description: "软件、网站和教程推荐。", descriptionEn: "Software, sites and tutorials worth using.", color: "#8fd0c8", icon: "box", kind: "资源帖", kindEn: "Resources",
+  { id: "tools", zh: "工具资源", en: "Tools", description: "软件、网站和教程推荐。", descriptionEn: "Software, sites and tutorials worth using.", color: "#8fd0c8", lightColor: "#2c6d65", icon: "box", kind: "资源帖", kindEn: "Resources",
     tips: ["只推荐你自己用过的", "附上官方链接，不发破解版", "写清适合谁、怎么用"], tipsEn: ["Recommend what you have used", "Link the official source, no cracks", "Say who it suits and how to use it"] },
-  { id: "moments", zh: "随想", en: "Moments", description: "随手记录，写短一点就好。", descriptionEn: "Short notes as they come.", color: "#d9c49c", icon: "feather", kind: "短动态", kindEn: "Notes",
+  { id: "moments", zh: "随想", en: "Moments", description: "随手记录，写短一点就好。", descriptionEn: "Short notes as they come.", color: "#d9c49c", lightColor: "#775e31", icon: "feather", kind: "短动态", kindEn: "Notes",
     tips: ["写短一点就好", "随手记，不用太正式", "对事不对人"], tipsEn: ["Keep it short", "No need to be formal", "Discuss ideas, not people"] },
-  { id: "meta", zh: "站务反馈", en: "Meta", description: "公告和对社区的建议。", descriptionEn: "Announcements and feedback about the community.", color: "#788392", icon: "megaphone", kind: "讨论帖", kindEn: "Discussion",
-    tips: ["公告由站长发布", "建议和反馈人人都可以发", "觉得处理错了，可以在这里申诉"], tipsEn: ["Announcements come from the owner", "Anyone can send feedback", "Appeal a moderation decision here"] },
-  { id: "vip", zh: "会员茶室", en: "Members", description: "只有 VIP 能看能发。", descriptionEn: "Visible to VIP members only.", color: "#c9b6f2", icon: "coffee", kind: "讨论帖", kindEn: "Discussion",
-    tips: ["只有 VIP 和站长能看到", "可以聊得更随意一点", "同样不要留联系方式"], tipsEn: ["Only VIP members and the owner see this", "Talk more freely", "Still no contact details"] },
+  { id: "meta", zh: "站务反馈", en: "Meta", description: "公告和对社区的建议。", descriptionEn: "Announcements and feedback about the community.", color: "#788392", lightColor: "#52637b", icon: "megaphone", kind: "讨论帖", kindEn: "Discussion",
+    tips: ["公告由站长发布", "未禁言的成员可以发建议和反馈", "申诉方式请查看社区公约"], tipsEn: ["Announcements come from the owner", "Members who are not muted can send feedback", "See the convention for appeal contacts"] },
+  { id: "vip", zh: "会员茶室", en: "Members", description: "只有 VIP 能看能发。", descriptionEn: "Visible to VIP members only.", color: "#c9b6f2", lightColor: "#6f5191", icon: "coffee", kind: "讨论帖", kindEn: "Discussion",
+    tips: ["VIP、作者和本板块版主按权限进入", "可以聊得更随意一点", "同样不要留联系方式"], tipsEn: ["VIP members, the owner and assigned moderators enter according to their permissions", "Talk more freely", "Still no contact details"] },
 ];
 
 export const communityTabs = [
@@ -55,7 +61,7 @@ export const communityPageTabs = {
   stardust: ["ledger", "levels", "rules"],
   inbox: ["all", "reply", "thanks", "system"],
   shop: ["all", "look", "card", "digital", "goods", "mine"],
-  manage: ["queue", "reports", "orders", "items", "sanctions", "data"],
+  manage: ["queue", "reports", "content", "banners", "orders", "items", "stewards", "sanctions", "data", "contact", "convention"],
 } as const;
 type TabbedView = keyof typeof communityPageTabs;
 const tabbed = (view: CommunityView): view is TabbedView => view in communityPageTabs;
@@ -108,7 +114,7 @@ export function communityRoute(hash: string): CommunityRoute {
   if (view === "edit") return extra ? route({ id: extra }) : unknownRoute;
   if (tabbed(view)) {
     const tabs: readonly string[] = communityPageTabs[view];
-    if (extra && !tabs.includes(extra)) return unknownRoute;
+    if (extra && !tabs.includes(extra) && !(view === 'shop' && /^[0-9a-f-]{36}$/.test(extra))) return unknownRoute;
     return route({ tab: extra || tabs[0] });
   }
   if (!extra) return route({});
@@ -119,8 +125,10 @@ export function communityRoute(hash: string): CommunityRoute {
 export type CommunityRole = "reader" | "owner";
 // A member as the API shows them: display name, role, public UID and avatar, level, VIP and decorations.
 export type CommunityPerson = {
+  nameEffect?: NameEffect | null;
+  growth?: CommunityGrowthState | null;
   name: string; role: CommunityRole; uid: string | null; avatar?: string | null; vip?: boolean; level?: number;
-  steward?: boolean; frame?: string | null; color?: string | null; showUid?: boolean;
+  steward?: boolean; moderationBoards?: string[]; frame?: string | null; color?: string | null; showUid?: boolean;
 };
 export type CommunityShowcaseMeta = { tools: string; model: string; usage: string; promptMode: PromptMode; price: number };
 export type CommunityResource = { url: string; kind: string; price: string; platform: string; alive: number; dead: number };
@@ -148,7 +156,8 @@ export type CommunityTopic = {
   bountyState?: string | null;
   pending?: boolean;
   hidden?: boolean;
-  // The start of the body, for 随想 (no title) in lists.
+  // Distinguish real titles from legacy moment excerpts.
+  hasTitle?: boolean;
   excerpt?: string;
   meta?: CommunityShowcaseMeta | null;
   resource?: CommunityResource | null;
@@ -202,8 +211,14 @@ export const beijingTime = (value: string, withYear = false) =>
 /* ---------- 接口返回的数据和读取状态 ---------- */
 export type CommunityInventory = { makeup: number; pin: number; highlight: number };
 export type CommunityUnread = { all: number; reply: number; thanks: number; system: number };
+export type CommunityModerationContact = { qq: string; email: string };
+export type CommunityModerationContactPerson = CommunityModerationContact & { uid: string; name: string; owner: boolean; boards: string[] };
+export type CommunityModerationContacts = { items: CommunityModerationContactPerson[] };
 export type CommunityMe = CommunityPerson & {
-  owner: boolean; mod: boolean; balance: number; checkedIn: boolean; streak: number;
+  convention?: { version: string; agreed: boolean };
+  management?: { role: 'owner' | 'steward'; browsingAsReader: boolean } | null;
+  moderationContact?: CommunityModerationContact | null;
+  owner: boolean; mod: boolean; trustLevel?: number; balance: number; checkedIn: boolean; streak: number;
   nextReward: { total: number; bonus: number }; gainedToday: number; behaviourToday: number; dailyCap: number;
   unread: CommunityUnread; agreed: boolean; inventory: CommunityInventory; muted: { until: string; reason: string } | null; manageTodo?: number;
 };
@@ -229,15 +244,24 @@ const initial = (name: string) => { const first = [...name][0] || "?"; return /[
 // Decoration names come from the shop catalogue; anything else is ignored.
 const decoration = (value: string | null | undefined) => value && /^[a-z]{2,20}$/.test(value) ? value : "";
 export type AvatarSize = "xs" | "sm" | "md" | "lg" | "xl";
+function currentAppearance(person: CommunityPerson, common: Common): CommunityPerson {
+  const viewer = common.meForSort;
+  return viewer?.uid && person.uid === viewer.uid
+    ? { ...person, avatar: viewer.avatar, frame: viewer.frame, color: viewer.color, nameEffect: viewer.nameEffect, growth: viewer.growth === undefined ? person.growth : viewer.growth }
+    : person;
+}
 export function avatarHTML(person: CommunityPerson | null | undefined, common: Common, size: AvatarSize = "md", link = true) {
   const { esc } = common;
   if (!person) return `<span class="community-av community-av-${size} is-guest" aria-hidden="true"></span>`;
+  person = currentAppearance(person, common);
   const src = person.avatar || (person.role === "owner" ? common.ownerAvatar : null);
+  const customFrame = /^image:([0-9a-f-]{36})$/.exec(person.frame || '')?.[1] || '';
   const frame = decoration(person.frame);
-  const cls = `community-av community-av-${size}${person.role === "owner" ? " is-owner" : ""}${frame ? ` is-frame-${frame}` : ""}`;
-  const inner = src
+  const cls = `community-av community-av-${size}${person.role === "owner" ? " is-owner" : ""}${customFrame ? ' is-frame-image' : frame ? ` is-frame-${frame}` : ""}`;
+  const inner = (src
     ? `<img src="${esc(src)}" alt="" loading="lazy" decoding="async">`
-    : `<span style="--h:${hue(person.name)}">${esc(initial(person.name))}</span>`;
+    : `<span style="--h:${hue(person.name)}">${esc(initial(person.name))}</span>`)
+    + (customFrame ? `<img class="community-frame-image" src="${imageSrc(customFrame)}" alt="" decoding="async">` : '');
   // The name next to it is the link people use; the avatar link is a larger target for pointers only.
   const uid = person.uid;
   return link && uid
@@ -257,11 +281,34 @@ export function levelChipHTML(person: CommunityPerson, { t }: Common) {
   return `<span class="community-lv is-lv${level}" title="L${level}">${levelTitle(level, t)}</span>`;
 }
 export const vipChipHTML = (person: CommunityPerson) => person.vip && person.role !== "owner" ? `<span class="community-vip">VIP</span>` : "";
-export function nameHTML(person: CommunityPerson, { esc }: Common) {
+// 成长与信任、VIP、任命权限分别显示；旧响应缺少成长字段时不推算等级。
+export function growthChipHTML(person: CommunityPerson, common: Common) {
+  person = currentAppearance(person, common);
+  if (person.role === 'owner' || !person.growth) return '';
+  const { t, esc } = common, item = communityGrowthLevel(person.growth.level);
+  const label = `G${item.level} ${t(item.name, item.en)}`;
+  return `<span class="community-growth-chip" title="${esc(t(`成长等级：${label}`, `Growth level: ${label}`))}">${communityGrowthArtHTML(item.level)}<span>${esc(label)}</span></span>`;
+}
+function nameWithGrowthHTML(label: string, person: CommunityPerson, common: Common) {
+  const growth = growthChipHTML(person, common);
+  return growth ? `<span class="community-name">${label}${growth}</span>` : label;
+}
+function nameAttributes(person: CommunityPerson) {
   const color = decoration(person.color);
-  const cls = `community-uname${color ? ` is-color-${color}` : ""}`;
+  const effect = communityNameEffect(person.nameEffect);
+  return `class="community-uname${color ? ` is-color-${color}` : ""}"${effect ? ` data-name-effect="${effect.style}" style="${nameEffectVariables(effect)}"` : ''}`;
+}
+export function nameLabelHTML(person: CommunityPerson, common: Common) {
+  const { esc } = common;
+  person = currentAppearance(person, common);
+  return nameWithGrowthHTML(`<span ${nameAttributes(person)}>${esc(person.name)}</span>`, person, common);
+}
+export function nameHTML(person: CommunityPerson, common: Common) {
+  const { esc } = common;
+  person = currentAppearance(person, common);
   const uid = person.uid;
-  return uid ? `<a class="${cls}" href="${memberHref(uid)}">${esc(person.name)}</a>` : `<span class="${cls}">${esc(person.name)}</span>`;
+  const label = uid ? `<a ${nameAttributes(person)} href="${memberHref(uid)}">${esc(person.name)}</a>` : `<span ${nameAttributes(person)}>${esc(person.name)}</span>`;
+  return nameWithGrowthHTML(label, person, common);
 }
 export const whoHTML = (person: CommunityPerson, common: Common) =>
   `<span class="community-who">${nameHTML(person, common)}${levelChipHTML(person, common)}${vipChipHTML(person)}</span>`;
@@ -271,9 +318,19 @@ export const boardName = (id: string, t: Translate) => {
   return board ? t(board.zh, board.en) : id;
 };
 export const imageSrc = (id: string, thumb = false) => `/api/community/images/${encodeURIComponent(id)}${thumb ? ".thumb" : ""}.webp`;
+export const communityBoardStyle = (id: string) => {
+  const board = communityBoard(id);
+  return `--board:${board?.color || "#aeb3bd"};--board-light:${board?.lightColor || "#52637b"}`;
+};
 export const boardChip = (id: string, t: Translate, esc: Escape) =>
-  `<a class="community-topic-board" style="--board:${communityBoard(id)?.color || "#aeb3bd"}" href="${boardHref(id)}">${esc(boardName(id, t))}</a>`;
-export const tagLink = (tag: string, esc: Escape) => `<a class="community-tag" href="${tagHref(tag)}">${esc(tag)}</a>`;
+  `<a class="community-topic-board" style="${communityBoardStyle(id)}" href="${boardHref(id)}">${esc(boardName(id, t))}</a>`;
+// Presentation only: the permitted tags and their meaning remain in the rules.
+const tagTones: Readonly<Record<string, string>> = {
+  ComfyUI: 'tool', Midjourney: 'tool', 'Stable Diffusion': 'tool', Claude: 'tool', Cursor: 'tool', '本地模型': 'tool',
+  '提示词': 'method', '工作流': 'method', '视频生成': 'creative', '音乐生成': 'creative',
+  '新手': 'guide', '可商用': 'guide', '效率': 'guide',
+};
+export const tagLink = (tag: string, esc: Escape, count = 0) => `<a class="community-tag" data-tag-tone="${tagTones[tag] || 'guide'}" href="${tagHref(tag)}">${esc(tag)}${count > 0 ? `<span class="community-tag-count">${count}</span>` : ''}</a>`;
 export function flagsHTML(topic: Pick<CommunityTopic, "pinned" | "paidPin" | "featured" | "board" | "solved" | "bounty" | "bountyState" | "locked" | "pending" | "hidden" | "resource">, { t, icons = {} }: Common) {
   const flags: string[] = [];
   if (topic.pending) flags.push(`<span class="community-flag is-warn">${icons.clock || ""}${t("审核中", "In review")}</span>`);
@@ -293,7 +350,7 @@ export function badgeHTML(id: string, has: boolean, { t, esc, icons = {} }: Comm
   if (!badge) return "";
   const name = t(badge.name, badge.en), desc = t(badge.desc, badge.descEn);
   return `<span class="community-badge is-${badge.tier} is-${size}${has ? "" : " is-off"}" title="${esc(`${name}：${desc}${has ? "" : t("（未获得）", " (not yet)")}`)}">`
-    + `<span class="community-badge-ic">${icons[badge.icon] || ""}</span>${withName ? `<span class="community-badge-n">${esc(name)}</span>` : `<span class="sr-only">${esc(name)}</span>`}</span>`;
+    + `<span class="community-badge-ic">${checkinBadgeIconHTML(id) || icons[badge.icon] || ""}</span>${withName ? `<span class="community-badge-n">${esc(name)}</span>` : `<span class="sr-only">${esc(name)}</span>`}</span>`;
 }
 export const cardHead = (title: string, icon = "", link = "") => `<div class="community-card-h"><h2>${icon}${title}</h2>${link}</div>`;
 export const moreLink = (href: string, label: string, icons: Icons) => `<a class="community-link-sm" href="${href}">${label}${icons["chevron-right"] || ""}</a>`;
@@ -313,7 +370,7 @@ export function emptyHTML({ icons = {} }: Common, title: string, text = "", acti
 // 读取失败时的说明：没登录、没开放、找不到和其他错误各说各的。
 export function communityStatusHTML(load: CommunityLoad<unknown>, common: Common) {
   const { t, esc } = common;
-  if (load.state === "loading") return `<div class="community-status" role="status"><p>${t("正在读取…", "Loading…")}</p></div>`;
+  if (load.state === "loading") return `<div class="community-status" role="status" aria-busy="true"><p>${t("正在读取…", "Loading…")}</p></div>`;
   if (load.state !== "error") return "";
   if (load.status === 401) return emptyHTML(common, t("登录后参与社区", "Sign in to join"), t("登录后就能看帖和发帖。", "Sign in to read and post."), `<a class="community-button is-gold" href="#/account">${t("登录 / 注册", "Sign in / Register")}</a>`, "auth");
   if (load.status === 503) return emptyHTML(common, t("社区尚未开放", "Not open yet"), t("请稍后再来。", "Please come back later."), "", "not-open");
@@ -347,17 +404,22 @@ function inlineHTML(text: string, esc: Escape, mentions: Readonly<Record<string,
   }
   return html + esc(text.slice(last));
 }
-export function communityBodyHTML(body: string, esc: Escape, mentions: Readonly<Record<string, string>> = {}) {
+export function communityBodyHTML(body: string, esc: Escape, mentions: Readonly<Record<string, string>> = {}, images: readonly string[] = []) {
   const lines = body.replace(/\r\n?/g, "\n").split("\n");
   const blocks: string[] = [];
   const isQuote = (line: string) => /^\s*>\s?/.test(line);
   const isItem = (line: string) => /^\s*[-*]\s+\S/.test(line);
   const isFence = (line: string) => /^\s*```/.test(line);
+  const image = (line: string) => { const id = imageIdFromLine(line); return images.includes(id) ? id : ''; };
   let i = 0;
   while (i < lines.length) {
     const line = lines[i];
     if (!line.trim()) { i++; continue; }
-    if (isFence(line)) {
+    if (image(line)) {
+      const src = imageSrc(image(line));
+      blocks.push(`<figure class="community-body-image"><button type="button" data-action="community-lightbox" data-src="${src}" aria-label="查看图片 / View image"><img src="${src}" alt="" loading="lazy" decoding="async"></button></figure>`);
+      i++;
+    } else if (isFence(line)) {
       const code: string[] = [];
       i++;
       while (i < lines.length && !isFence(lines[i])) code.push(lines[i++]);
@@ -373,14 +435,14 @@ export function communityBodyHTML(body: string, esc: Escape, mentions: Readonly<
       blocks.push(`<ul>${items.map((item) => `<li>${inlineHTML(item, esc, mentions)}</li>`).join("")}</ul>`);
     } else {
       const paragraph: string[] = [];
-      while (i < lines.length && lines[i].trim() && !isFence(lines[i]) && !isQuote(lines[i]) && !isItem(lines[i])) paragraph.push(lines[i++].trim());
+      while (i < lines.length && lines[i].trim() && !isFence(lines[i]) && !isQuote(lines[i]) && !isItem(lines[i]) && !image(lines[i])) paragraph.push(lines[i++].trim());
       blocks.push(`<p>${paragraph.map((part) => inlineHTML(part, esc, mentions)).join("<br>")}</p>`);
     }
   }
   return blocks.join("");
 }
 // Plain text for excerpts: Markdown marks removed.
-export const plainText = (body: string) => body.replace(/```[\s\S]*?```/g, " ").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*`>#-]+/g, " ").replace(/\s+/g, " ").trim();
+export const plainText = (body: string) => bodyImageContent(body).text.replace(/```[\s\S]*?```/g, " ").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*`>#-]+/g, " ").replace(/\s+/g, " ").trim();
 
 /* ---------- 顶栏与账号菜单 ---------- */
 type HeaderOptions = { view: CommunityView; t: Translate; icons: Icons; actionsHTML: string; unchecked?: boolean };
@@ -388,19 +450,26 @@ type HeaderOptions = { view: CommunityView; t: Translate; icons: Icons; actionsH
 // 社区顶栏：左边社区字标，中间社区导航（沿用 #navigation，手机菜单照常工作），右边通知和账号菜单。
 // 回無相主站的入口放在右上角的账号菜单里；发帖在帖子列表上方那一栏。
 export function communityHeaderHTML({ view, t, actionsHTML, unchecked = false }: HeaderOptions) {
+  if (view === 'manage') return `<div class="community-brand-group"><a href="${communityHomeHref}" class="community-brand"><strong>${t('社区', 'Community')}</strong><span>${t('管理工作台', 'MANAGEMENT')}</span></a></div><div class="header-actions">${actionsHTML}</div>`;
   const current = view === "board" ? "boards" : view;
   const nav = communityTabs
     .map(([id, zh, en]) => `<a href="${tabHref(id)}"${current === id ? ' aria-current="page"' : ""}>${t(zh, en)}${id === "checkin" && unchecked ? `<i class="community-nav-dot" aria-hidden="true"></i><span class="sr-only">${t("（今天还没签到）", " (not checked in today)")}</span>` : ""}</a>`)
     .join("");
   return `<div class="community-brand-group"><a href="${communityHomeHref}" class="community-brand" aria-label="${t("社区首页", "Community home")}"><strong>${t("社区", "Community")}</strong><span aria-hidden="true">COMMUNITY</span></a></div>`
-    + `<nav class="nav community-nav" id="navigation" aria-label="${t("社区导航", "Community navigation")}">${nav}</nav>`
+    + `<nav class="nav community-nav" id="navigation" aria-label="${t("社区导航", "Community navigation")}">${nav}<a class="community-nav-guidelines" href="${rulesHref}"${view === 'rules' ? ' aria-current="page"' : ''}>${t('社区公约', 'Guidelines')}</a></nav>`
     + `<div class="header-actions">${actionsHTML}</div>`;
 }
 
 type AccountOptions = { t: Translate; esc: Escape; icons: Icons; nickname?: string | null; author?: boolean; me?: CommunityMe | null; ownerAvatar?: string | null };
 
-// 右上角：通知铃铛和账号菜单。菜单里是我的主页、星尘、兑换所、通知、收藏、社区管理，
-// 账号（或作者台），和“返回無相主站”。社区数据还没读到时只有账号和返回。
+// Only the verified account response supplies management authority. Older
+// responses may omit management; their active mod flag remains compatible.
+export function communityManagementRole(me: CommunityMe | null | undefined) {
+  if (me?.management) return ['owner', 'steward'].includes(me.management.role) ? me.management.role : null;
+  return me?.management === undefined && me?.mod ? me.owner ? 'owner' : 'steward' : null;
+}
+
+// 右上角：通知铃铛和个人入口。兑换和返回主站沿用左侧导航入口。
 export function communityAccountHTML({ t, esc, icons, nickname, author, me = null, ownerAvatar = null }: AccountOptions) {
   const common: Common = { t, esc, icons, ownerAvatar };
   const signedIn = Boolean(author || nickname || me);
@@ -408,63 +477,67 @@ export function communityAccountHTML({ t, esc, icons, nickname, author, me = nul
   const unread = me?.unread.all || 0;
   const bell = me ? `<a class="community-bell" href="${inboxHref()}" aria-label="${unread ? t(`通知，${unread} 条未读`, `Notifications, ${unread} unread`) : t("通知", "Notifications")}">${icons.bell || ""}${unread ? `<b>${unread > 99 ? "99+" : unread}</b>` : ""}</a>` : "";
   const item = (href: string, icon: string, text: string, extra = "") => `<a role="menuitem" href="${href}">${icons[icon] || ""}<span>${text}</span>${extra}</a>`;
-  const head = me ? `<div class="community-menu-head">${avatarHTML(me, common, "sm", false)}<div><b>${esc(me.name)}</b><span>${me.owner ? t("站长", "Owner") : levelTitle(me.steward ? 4 : me.level ?? 0, t)}${me.uid ? ` · UID ${esc(me.uid)}` : ""}</span></div></div>` : "";
+  const managementRole = communityManagementRole(me);
+  const browsingAsReader = Boolean(me?.management?.browsingAsReader);
+  const head = me ? `<div class="community-menu-head">${avatarHTML(me, common, "sm", false)}<div><b>${nameLabelHTML(me, common)}</b><span>${me.owner || me.management?.role === 'owner' ? t("站长", "Owner") : levelTitle(me.steward ? 4 : me.level ?? 0, t)}${me.uid ? ` · UID ${esc(me.uid)}` : ""}</span></div></div>` : "";
   const personal = me
     ? (me.uid ? item(memberHref(me.uid), "user", t("我的主页", "My page")) : "")
       + item(stardustHref(), "star", t("我的星尘", "My stardust"), `<span class="community-menu-num">${me.balance}</span>`)
-      + item(shopHref(), "box", t("星尘兑换所", "Exchange"))
       + item(inboxHref(), "bell", t("通知", "Notifications"), unread ? `<span class="community-menu-badge">${unread > 99 ? "99+" : unread}</span>` : "")
       + item("#/community/bookmarks", "bookmark", t("我的收藏", "Bookmarks"))
-      + (me.mod ? item(manageHref(), "shield", t("社区管理", "Moderation"), me.manageTodo ? `<span class="community-menu-badge">${me.manageTodo > 99 ? "99+" : me.manageTodo}</span>` : "") : "")
-    : signedIn ? item("#/community/bookmarks", "bookmark", t("我的收藏", "Bookmarks")) + (author ? item(manageHref(), "shield", t("社区管理", "Moderation")) : "") : "";
+      + (managementRole && !browsingAsReader ? item(manageHref(), "shield", t("管理台", "Management"), me.manageTodo ? `<span class="community-menu-badge">${me.manageTodo > 99 ? "99+" : me.manageTodo}</span>` : "") : "")
+      + (managementRole ? `<button type="button" role="menuitem" data-action="community-browse-mode" data-reader="${!browsingAsReader}">${icons.eye || ''}<span>${browsingAsReader ? managementRole === 'owner' ? t('返回作者身份', 'Restore owner perspective') : t('返回版主身份', 'Restore moderator perspective') : t('以读者身份浏览', 'Browse as a reader')}</span></button>` : '')
+    : signedIn ? item("#/community/bookmarks", "bookmark", t("我的收藏", "Bookmarks")) : "";
   const account = author
     ? `<button type="button" role="menuitem" data-author-login>${icons.user || ""}<span>${t("打开作者台", "Open author studio")}</span></button>`
     : `<a role="menuitem" href="#/account" data-reader-return>${icons.user || ""}<span>${signedIn ? t("我的账号", "My account") : t("登录 / 注册", "Sign in / Register")}</span></a>`;
   const button = me
-    ? `${avatarHTML(me, common, "xs", false)}<span>${esc(me.name)}</span>`
+    ? `${avatarHTML(me, common, "xs", false)}${nameLabelHTML(me, common)}`
     : `<span>${label}</span>`;
   return `${bell}<div class="community-account"><button type="button" class="account-button${me ? " has-avatar" : ""}" data-action="community-account" aria-haspopup="menu" aria-expanded="false" aria-controls="community-account-menu">${button}${icons["chevron-down"] || ""}</button>`
-    + `<div class="community-account-menu" id="community-account-menu" role="menu" hidden>${head}${personal}${account}<a role="menuitem" class="community-menu-out" href="#/home">${icons.left || ""}<span>${t("返回無相主站", "Back to 無相")}</span></a></div></div>`;
+    + `<div class="community-account-menu" id="community-account-menu" role="menu" hidden>${head}${personal}${account}</div></div>`;
 }
 
 /* ---------- 帖子列表 ---------- */
 export function communityTopicsHTML(items: readonly CommunityTopic[], common: Common, { showBoard = true, showAuthor = true } = {}) {
   const { t, esc, now = Date.now(), icons = {} } = common;
   return `<div class="community-topics">${items.map((topic, i) => {
-    const board = communityBoard(topic.board);
     const when = topic.lastReply
-      ? `<time datetime="${esc(topic.lastReply.at)}">${t(`${esc(topic.lastReply.author.name)} ${relativeTime(topic.lastReply.at, now, t)}回复`, `${esc(topic.lastReply.author.name)} replied ${relativeTime(topic.lastReply.at, now, t)}`)}</time>`
+      ? `<time datetime="${esc(topic.lastReply.at)}">${t(`${nameLabelHTML(topic.lastReply.author, common)} ${relativeTime(topic.lastReply.at, now, t)}回复`, `${nameLabelHTML(topic.lastReply.author, common)} replied ${relativeTime(topic.lastReply.at, now, t)}`)}</time>`
       : `<time datetime="${esc(topic.createdAt)}">${relativeTime(topic.createdAt, now, t)}</time>`;
-    const thumbs = topic.thumbs?.length && (topic.board === "showcase" || topic.board === "moments")
-      ? `<a class="community-topic-thumbs" href="${postHref(topic.id)}" tabindex="-1" aria-hidden="true">${topic.thumbs.slice(0, 4).map((id) => `<img src="${imageSrc(id, true)}" alt="" loading="lazy" decoding="async" width="84" height="60">`).join("")}</a>`
+    const thumbs = topic.thumbs?.length && (common.showTopicCovers || topic.board === "showcase" || topic.board === "moments")
+      ? `<a class="community-topic-thumbs" href="${postHref(topic.id)}" tabindex="-1" aria-hidden="true">${topic.thumbs.slice(0, common.showTopicCovers ? 1 : 4).map((id) => `<img src="${imageSrc(id, true)}" alt="" loading="lazy" decoding="async" width="84" height="60">`).join("")}</a>`
       : "";
     const tags = (topic.tags || []).slice(0, 2).map((tag) => tagLink(tag, esc)).join("");
     const flags = flagsHTML(topic, common);
     const moment = topic.board === "moments";
-    const heading = moment
+    const heading = moment && !topic.hasTitle
       ? `${flags ? `<div class="community-topic-flags">${flags}</div>` : ""}<a class="community-topic-moment" href="${postHref(topic.id)}">${esc(topic.excerpt || topic.title)}</a>`
       : `<h3>${flags}<a href="${postHref(topic.id)}">${esc(topic.title)}</a></h3>`;
+    const preview = plainText(topic.excerpt || '');
+    const excerpt = preview && (!moment || topic.hasTitle)
+      ? `<p class="community-topic-excerpt">${esc(preview)}</p>` : "";
     const classes = `community-topic${topic.pinned ? " is-pinned" : ""}${topic.glow ? " is-glow" : ""}${topic.pending || topic.hidden ? " is-muted" : ""}`;
-    return `<article class="${classes}" style="--board:${board?.color || "#aeb3bd"};--i:${i}">`
+    return `<article class="${classes}" data-created-at="${esc(topic.createdAt)}" style="${communityBoardStyle(topic.board)};--i:${i}">`
       + avatarHTML(topic.author, common)
-      + `<div class="community-topic-main">${heading}${thumbs}`
+      + `<div class="community-topic-main">${heading}${excerpt}${thumbs}`
       + `<p class="community-topic-meta">${showBoard ? boardChip(topic.board, t, esc) : ""}${tags}${showBoard || tags ? dot : ""}${showAuthor ? `${whoHTML(topic.author, common)}${dot}` : ""}${when}</p></div>`
-      + `<a class="community-topic-replies" href="${postHref(topic.id)}" tabindex="-1" aria-label="${t(`${topic.replies} 条回复，${topic.likes || 0} 个赞`, `${topic.replies} replies, ${topic.likes || 0} likes`)}">${icons.reply || ""}<span>${topic.replies}</span><small>${t(`${topic.likes || 0} 赞`, `${topic.likes || 0} likes`)}</small></a></article>`;
+      + `<a class="community-topic-replies" href="${postHref(topic.id)}" tabindex="-1" aria-label="${t(`${topic.replies} 条回复，${topic.likes || 0} 个赞`, `${topic.replies} replies, ${topic.likes || 0} likes`)}"><small>${icons.like || ""}${t(`${topic.likes || 0} 赞`, `${topic.likes || 0} likes`)}</small><span>${icons.reply || ""}${topic.replies}</span></a></article>`;
   }).join("")}</div>`;
 }
 
 export const communitySearchLimit = 40;
 
-type ListingOptions = Common & { list: CommunityLoad<CommunityListing>; sort: CommunitySort; query: string; board: string; empty: string; meForSort?: CommunityMe | null };
+type ListingOptions = Common & { list: CommunityLoad<CommunityListing>; sort: CommunitySort; query: string; board: string; empty: string; meForSort?: CommunityMe | null; showCompose?: boolean };
 
 // 帖子列表上方的一栏（首页、版块页和标签页共用）：左边排序，右边搜索和发帖。
 // 版块页里的“发帖”默认发到这个版块。“加载更多”在还有下一页时出现。
-function listingHTML({ list, sort, query, board, empty, ...common }: ListingOptions) {
+function listingHTML({ list, sort, query, board, empty, showCompose = true, ...common }: ListingOptions) {
   const { t, esc, icons = {} } = common;
   const sortHTML = communitySorts.filter(([id]) => id !== "following" || Boolean(common.meForSort)).map(([id, zh, en]) =>
     `<button type="button" data-action="community-sort" data-sort="${id}" aria-pressed="${sort === id}">${t(zh, en)}</button>`).join("");
   const search = `<form class="community-search" role="search" data-community-form="search"><label class="sr-only" for="community-search">${t("搜索帖子", "Search posts")}</label>${icons.search || ""}<input id="community-search" name="q" type="search" autocomplete="off" maxlength="${communitySearchLimit}" value="${esc(query)}" placeholder="${t("搜索帖子", "Search posts")}"></form>`;
-  const compose = `<a class="community-post" href="${composeHref(board)}">${icons.plus || ""}<span>${t("发帖", "New post")}</span></a>`;
+  const compose = showCompose ? `<a class="community-post" href="${composeHref(board)}">${icons.plus || ""}<span>${t("发帖", "New post")}</span></a>` : "";
   let body = communityStatusHTML(list, common);
   if (list.state === "ready") {
     const { items, total: count } = list.data;
@@ -485,11 +558,12 @@ function listingHTML({ list, sort, query, board, empty, ...common }: ListingOpti
 }
 
 /* ---------- 首页 ---------- */
-type HomeOptions = Common & { summary: CommunityLoad<CommunitySummary>; list: CommunityLoad<CommunityListing>; sort: CommunitySort; query?: string; members: boolean; me?: CommunityLoad<CommunityMe> | null };
+type HomeOptions = Common & { summary: CommunityLoad<CommunitySummary>; list: CommunityLoad<CommunityListing>; sort: CommunitySort; query?: string; members: boolean; me?: CommunityLoad<CommunityMe> | null; showCompose?: boolean; activityBoard?: string };
 
 // 横幅里的签到胶囊：没签到时直接签，签过了去签到页。
 function checkinPill(me: CommunityMe | null, { t, icons = {} }: Common) {
-  if (!me || me.owner) return "";
+  if (!me || me.owner || me.role === 'owner') return "";
+  if (me.management?.browsingAsReader) return '';
   if (!me.checkedIn) return `<div class="community-ck-pill is-todo"><span class="community-ck-dot" aria-hidden="true"></span><span>${t(`今天还没签到 · 签到后连签 ${me.streak + 1} 天 <b>+${me.nextReward.total}</b>`, `Not checked in today · check in for a ${me.streak + 1}-day streak <b>+${me.nextReward.total}</b>`)}</span><button type="button" class="community-button is-gold is-small" data-action="community-checkin">${icons.star || ""}${t("签到", "Check in")}</button></div>`;
   return `<a class="community-ck-pill is-done" href="#/community/checkin">${icons.check || ""}<span>${t(`已连续签到 <b>${me.streak}</b> 天 · 明天 +${me.nextReward.total}`, `<b>${me.streak}</b>-day streak · +${me.nextReward.total} tomorrow`)}</span>${icons["chevron-right"] || ""}</a>`;
 }
@@ -501,25 +575,29 @@ function boardsMiniHTML(summary: CommunitySummary | null, members: boolean, comm
   return communityBoards.map((item) => {
     const locked = item.id === "vip" && !members;
     const count = summary?.boards[item.id]?.topics || 0;
-    return `<a class="community-board-link" href="${boardHref(item.id)}" style="--board:${item.color};--w:${locked ? 0 : Math.round(count / max * 100)}%"><i aria-hidden="true"></i><span>${t(item.zh, item.en)}</span>`
+    return `<a class="community-board-link" href="${boardHref(item.id)}" style="${communityBoardStyle(item.id)};--w:${locked ? 0 : Math.round(count / max * 100)}%"><i aria-hidden="true"></i><span>${t(item.zh, item.en)}</span>`
       + (locked ? `<span class="community-board-lock" aria-label="${t("仅 VIP", "VIP only")}">${icons.lock || ""}</span>` : `<span class="community-board-count">${summary ? count : ""}</span>`) + `</a>`;
   }).join("");
 }
 
-export function communityHomeHTML({ summary, list, sort, query = "", members, me = null, ...common }: HomeOptions) {
+export function communityHomeHTML({ summary, list, sort, query = "", members, me = null, showCompose = true, activityBoard = '', ...common }: HomeOptions) {
   const { t, esc, icons = {} } = common;
   const ready = readyData(summary);
-  const hot = ready?.hot || [];
-  const hotHTML = hot.length
-    ? `<ol class="community-hot">${hot.map((topic, i) => `<li><span class="community-hot-rank${i < 3 ? " is-top" : ""}">${String(i + 1).padStart(2, "0")}</span><a href="${postHref(topic.id)}">${esc(topic.title)}</a></li>`).join("")}</ol>`
+  const locked = activityBoard === 'vip' && !members;
+  const hot = locked ? [] : (ready?.hot || []).filter(topic => !activityBoard || topic.board === activityBoard);
+  const hotHTML = locked ? `<p class="community-muted">${t('会员茶室仅 VIP 可见。', 'This board is for VIP members.')}</p>` : hot.length || activityBoard
+    ? `<ol class="community-hot"${activityBoard ? ` data-board="${esc(activityBoard)}"` : ''}>${hot.map((topic, i) => `<li><span class="community-hot-rank${i < 3 ? " is-top" : ""}">${String(i + 1).padStart(2, "0")}</span><a href="${postHref(topic.id)}">${esc(topic.title)}</a></li>`).join("")}</ol>`
     : `<p class="community-muted">${summary.state === "loading" ? t("正在读取…", "Loading…") : t("还没有帖子。有了讨论以后，这里会列出最热的五个。", "No posts yet. The five most active will appear here.")}</p>`;
-  const stats = statsHTML([[t("主题", "Topics"), ready ? ready.total : "—"], [t("24 小时回复", "Replies · 24 h"), ready ? ready.repliesToday : "—"], [t("今日签到", "Check-ins today"), ready ? ready.checkinsToday : "—"]]);
+  const boardStats = ready?.boards[activityBoard];
+  const stats = activityBoard
+    ? statsHTML([[t('本板主题', 'Board topics'), ready && !locked ? boardStats?.topics || 0 : '—'], [t('24 小时回复', 'Replies · 24 h'), ready && !locked ? boardStats?.repliesToday || 0 : '—']])
+    : statsHTML([[t("主题", "Topics"), ready ? ready.total : "—"], [t("24 小时回复", "Replies · 24 h"), ready ? ready.repliesToday : "—"], [t("今日签到", "Check-ins today"), ready ? ready.checkinsToday : "—"]]);
   return `<section class="page community-page" data-community="home">`
     + bannerHTML({ eyebrow: "COMMUNITY", title: t("社区", "Community"), text: t("聊 AI 学习、AI 创作，以及好用的软件和资源。", "Talk about learning AI, making things with it, and useful tools."), esc, side: stats + checkinPill(readyData(me), common) })
     + `<div class="community-layout"><aside class="community-aside">`
     + `<section class="community-card community-rv community-spot" style="--i:2">${cardHead(t("热门讨论", "Trending"), icons.trending)}${hotHTML}</section>`
     + `<section class="community-card community-rv community-spot" style="--i:3">${cardHead(t("版块", "Boards"), icons.grid, moreLink("#/community/boards", t("全部版块", "All boards"), icons))}<div class="community-boards">${boardsMiniHTML(ready, members, common)}</div></section>`
-    + `</aside><div class="community-main">${listingHTML({ list, sort, query, board: "", empty: t("点上方的“发帖”，来发第一帖吧。", "Use “New post” to start the first discussion."), meForSort: readyData(me), ...common })}</div></div></section>`;
+    + `</aside><div class="community-main">${listingHTML({ list, sort, query, board: "", showCompose, empty: showCompose ? t("点上方的“发帖”，来发第一帖吧。", "Use “New post” to start the first discussion.") : t("选择一个板块，开始第一场讨论。", "Choose a board to start the first discussion."), meForSort: readyData(me), ...common })}</div></div></section>`;
 }
 
 /* ---------- 版块目录 ---------- */
@@ -531,14 +609,14 @@ export function communityBoardsHTML({ summary, members, ...common }: Common & { 
     const locked = item.id === "vip" && !members;
     const stats = ready?.boards[item.id];
     const latest = !locked && stats?.latest;
-    return `<a class="community-board-card community-rv community-spot${locked ? " is-locked" : ""}" href="${boardHref(item.id)}" style="--board:${item.color};--i:${i + 2}">`
+    return `<a class="community-board-card community-rv community-spot${locked ? " is-locked" : ""}" href="${boardHref(item.id)}" style="${communityBoardStyle(item.id)};--i:${i + 2}">`
       + `<div class="community-bc-top"><span class="community-bc-icon">${icons[item.icon] || ""}</span><div class="community-bc-name"><h2>${t(item.zh, item.en)}</h2><span>${esc(item.en.toUpperCase())}</span></div>${locked ? `<span class="community-bc-lock">${icons.lock || ""}VIP</span>` : ""}</div>`
       + `<p>${esc(t(item.description, item.descriptionEn))}</p>`
       + `<dl class="community-bc-stats"><div><dt>${t("类型", "Type")}</dt><dd>${t(item.kind, item.kindEn)}</dd></div><div><dt>${t("主题", "Topics")}</dt><dd>${ready ? visibleCount(stats?.topics, locked) : "—"}</dd></div><div><dt>${t("24 小时回复", "Replies · 24 h")}</dt><dd>${ready ? visibleCount(stats?.repliesToday, locked) : "—"}</dd></div></dl>`
       + `<div class="community-bc-latest">${latest ? `<span>${t("最新", "Latest")}</span><b>${esc(latest.title)}</b><time datetime="${esc(latest.lastActivityAt)}">${relativeTime(latest.lastActivityAt, now, t)}</time>` : `<span>${locked ? t("开通 VIP 后可见", "Visible to VIP members") : ready ? t("还没有帖子", "No posts yet") : ""}</span>`}</div>`
       + `</a>`;
   }).join("");
-  const tags = communityTags.map((tag) => `<a class="community-tag" href="${tagHref(tag)}">${esc(tag)}${ready?.tags?.[tag] ? `<span class="community-tag-count">${ready.tags[tag]}</span>` : ""}</a>`).join("");
+  const tags = communityTags.map((tag) => tagLink(tag, esc, ready?.tags?.[tag] || 0)).join("");
   const stats = statsHTML([[t("版块", "Boards"), communityBoards.length], [t("主题", "Topics"), ready ? ready.total : "—"], [t("标签", "Tags"), communityTags.length]]);
   return `<section class="page community-page" data-community="boards">`
     + bannerHTML({ eyebrow: "BOARDS", title: t("版块", "Boards"), text: t("版块少一点，内容才不会散。更细的分类用标签。", "A few boards, so conversations stay together; tags do the rest."), esc, side: stats })
@@ -548,9 +626,9 @@ export function communityBoardsHTML({ summary, members, ...common }: Common & { 
 }
 
 /* ---------- 单个版块 ---------- */
-type BoardOptions = Common & { board: string; summary: CommunityLoad<CommunitySummary>; list: CommunityLoad<CommunityListing>; sort: CommunitySort; query?: string; members: boolean; me?: CommunityMe | null };
+type BoardOptions = Common & { board: string; summary: CommunityLoad<CommunitySummary>; list: CommunityLoad<CommunityListing>; sort: CommunitySort; query?: string; members: boolean; me?: CommunityMe | null; showPostingTips?: boolean; showActiveMembers?: boolean };
 
-export function communityBoardHTML({ board, summary, list, sort, query = "", members, me = null, ...common }: BoardOptions) {
+export function communityBoardHTML({ board, summary, list, sort, query = "", members, me = null, showPostingTips = true, showActiveMembers = true, ...common }: BoardOptions) {
   const { t, esc, icons = {} } = common;
   const item = communityBoard(board)!;
   const locked = board === "vip" && !members;
@@ -559,20 +637,20 @@ export function communityBoardHTML({ board, summary, list, sort, query = "", mem
   const hero = `<header class="community-board-hero community-rv" style="--i:0"><div class="community-bh-glow" aria-hidden="true"></div>`
     + `<nav class="community-crumb" aria-label="${t("位置", "Location")}"><a href="#/community/boards">${t("版块", "Boards")}</a>${icons["chevron-right"] || "›"}<span>${t(item.zh, item.en)}</span></nav>`
     + `<div class="community-bh-row"><span class="community-bc-icon is-large">${icons[item.icon] || ""}</span>`
-    + `<div class="community-bh-text"><div class="eyebrow">${esc(item.en.toUpperCase())} · ${t(item.kind, item.kindEn)}</div><h1>${t(item.zh, item.en)}</h1><p>${esc(t(item.description, item.descriptionEn))}</p></div>`
+    + `<div class="community-bh-text"><div class="eyebrow">${esc(item.en.toUpperCase())} · ${t(item.kind, item.kindEn)}</div><h1>${t(item.zh, item.en)}</h1><p>${esc(t(item.description, item.descriptionEn))}</p><a class="community-link-sm community-board-rules" href="${rulesHref}">${t('板块规则与版主联系', 'Board rules and moderator contacts')}</a></div>`
     + `<dl class="community-stats"><div><dt>${t("主题", "Topics")}</dt><dd>${known ? visibleCount(stats?.topics, locked) : "—"}</dd></div><div><dt>${t("24 小时回复", "Replies · 24 h")}</dt><dd>${known ? visibleCount(stats?.repliesToday, locked) : "—"}</dd></div></dl></div></header>`;
   if (locked) {
-    return `<section class="page community-page" data-community="board" data-board="${esc(board)}" style="--board:${item.color}">${hero}`
+    return `<section class="page community-page" data-community="board" data-board="${esc(board)}" style="${communityBoardStyle(item.id)}">${hero}`
       + emptyHTML(common, t("会员茶室只对 VIP 开放", "This board is for VIP members"), t("VIP 可以在这里聊得更随意一点。", "VIP members can talk more freely here."), `<a class="community-button" href="#/community/boards">${t("看看其他版块", "Other boards")}</a>`, "members")
       + `</section>`;
   }
-  const posters = readyData(list)?.posters || [];
+  const posters = showActiveMembers ? readyData(list)?.posters || [] : [];
   const tips = t(item.tips.join("\n"), item.tipsEn.join("\n")).split("\n");
-  const aside = `<section class="community-card community-rv community-spot" style="--i:2">${cardHead(t("发帖须知", "Before posting"), icons.book)}<ul class="community-ticks">${tips.map((tip) => `<li>${icons.check || ""}${esc(tip)}</li>`).join("")}</ul></section>`
+  const aside = (showPostingTips ? `<section class="community-card community-rv community-spot" style="--i:2">${cardHead(t("发帖须知", "Before posting"), icons.book)}<ul class="community-ticks">${tips.map((tip) => `<li>${icons.check || ""}${esc(tip)}</li>`).join("")}</ul></section>` : "")
     + (posters.length ? `<section class="community-card community-rv community-spot" style="--i:3">${cardHead(t("本版活跃", "Most active"), icons.users)}<ol class="community-rank">${posters.map((poster, i) => `<li><span class="community-hot-rank${i < 3 ? " is-top" : ""}">${i + 1}</span>${avatarHTML(poster.author, common, "sm")}${whoHTML(poster.author, common)}<span class="community-rank-count">${t(`${poster.topics} 帖`, `${poster.topics} posts`)}</span></li>`).join("")}</ol></section>` : "");
-  return `<section class="page community-page" data-community="board" data-board="${esc(board)}" style="--board:${item.color}">${hero}`
-    + `<div class="community-layout"><aside class="community-aside">${aside}</aside><div class="community-main">`
-    + listingHTML({ list, sort, query, board, empty: t("这个版块还没有帖子，来发第一个吧。", "Be the first to post in this board."), meForSort: me, ...common })
+  return `<section class="page community-page" data-community="board" data-board="${esc(board)}" style="${communityBoardStyle(item.id)}">${hero}`
+    + `<div class="community-layout">${aside ? `<aside class="community-aside">${aside}</aside>` : ""}<div class="community-main">`
+    + listingHTML({ list, sort, query, board, showCompose: board !== 'vip' || !me || Boolean(me.vip || me.owner), empty: t("这个版块还没有帖子，来发第一个吧。", "Be the first to post in this board."), meForSort: me, ...common })
     + `</div></div></section>`;
 }
 

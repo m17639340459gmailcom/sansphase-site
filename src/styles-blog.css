@@ -3,7 +3,10 @@
 .blog-page {
   position: relative;
   isolation: isolate;
-  max-width: 1480px;
+  max-width: 1540px;
+  width: 100%;
+  padding-top: var(--page-top);
+  padding-bottom: var(--page-bottom);
   padding-left: clamp(28px, 3.5vw, 52px);
   padding-right: clamp(28px, 3.5vw, 52px);
 }
@@ -12,7 +15,8 @@
   align-items: end;
   justify-content: space-between;
   gap: 40px;
-  padding-bottom: 36px;
+  padding-bottom: clamp(24px, 2.5vw, 32px);
+  border-bottom: 1px solid var(--line);
 }
 .blog-masthead h1 {
   font-size: clamp(46px, 5.6vw, 80px);
@@ -55,7 +59,6 @@
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr) 250px;
   gap: 32px;
-  margin-top: 40px;
 }
 .blog-left {
   display: flex;
@@ -530,20 +533,10 @@ body.content-open #site-footer {
   border-top-color: var(--line);
   background: rgb(5 7 11 / 82%);
 }
-.blog-page {
-  max-width: 1540px;
-  width: 100%;
-  padding-top: clamp(54px, 7vw, 94px);
-  padding-bottom: clamp(32px, 4vw, 56px);
-}
 /* The background belongs to the viewport, not the animated page container. */
 @keyframes blog-galaxy-drift {
   from { transform: scale(1.02) translate3d(-.8%, .3%, 0); background-position: 46% 52%; }
   to { transform: scale(1.06) translate3d(.9%, -.4%, 0); background-position: 54% 64%; }
-}
-.blog-masthead {
-  padding-bottom: clamp(28px, 3vw, 40px);
-  border-bottom: 1px solid var(--line);
 }
 .blog-masthead .eyebrow,
 .blog-masthead .page-meta {
@@ -565,7 +558,7 @@ body.content-open #site-footer {
   grid-template-areas: "author main widgets";
   align-items: start;
   gap: clamp(24px, 2.6vw, 44px);
-  margin-top: clamp(28px, 3vw, 40px);
+  margin-top: clamp(24px, 2.5vw, 32px);
 }
 .blog-layout > *,
 .blog-main,
@@ -856,7 +849,7 @@ body.theme-light .calendar-day.is-today { color: #071725; background: #a9dcff; b
   body.content-open #site-header { padding-inline: 16px 12px; }
   body.content-open .header-actions { gap: 2px; min-width: 0; }
   body.content-open .account-button { max-width: min(32vw, 150px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .blog-page { padding: 30px 18px 32px; }
+  .blog-page { padding: 24px 18px 32px; }
   .blog-masthead { gap: 16px; padding-bottom: 24px; }
   .blog-masthead h1 { margin-top: 12px; font-size: clamp(40px, 12vw, 46px); line-height: 1.1; letter-spacing: 0.06em; }
   .blog-masthead p { margin-top: 12px; font-size: 15px; line-height: 1.8; }

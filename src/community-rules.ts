@@ -1,14 +1,15 @@
 // 社区规则（设计稿 docs/COMMUNITY-DESIGN.md 第 3–9 节）：数值、等级、徽章和兑换所目录。
 // 服务端结算和页面说明共用这一份；改数值只改这里。
+import { uploadLimits, readerImageBytes } from './upload-policy.mjs';
 
 export const communityRules = {
   // 签到与补签（第 5 节）
-  checkinBase: 5, vipBonus: 2, weekBonus: 15, cycleBonus: 50, cycle: 30,
+  checkinBase: 1, monthBonus: 5,
   makeupCost: 30, makeupPerMonth: 2, makeupWindow: 7,
-  // 获取（第 6 节）：行为类每人每天合计最多 60
-  dailyCap: 60,
-  topicReward: 5, topicDaily: 3, replyReward: 1, replyDaily: 10, replyMinLength: 10, likeReward: 1, likeDaily: 20,
-  acceptReward: 15, featureReward: 50, reportReward: 5, reportDaily: 5, penalty: 20,
+  // 已确认的获取规则：docs/COMMUNITY-STARDUST-RULES.md；三项贡献奖励合计每日最多 6。
+  dailyCap: 6,
+  topicReward: 2, topicDaily: 1, replyReward: 1, replyDaily: 1, replyMinLength: 10, likeReward: 0, likeDaily: 0,
+  acceptReward: 3, acceptDaily: 1, featureReward: 15, featureMonthly: 2, reportReward: 0, reportDaily: 0, penalty: 20,
   // 消耗
   thankCost: 10, thankToAuthor: 8, unlockShare: 0.8, unlockMin: 5, unlockMax: 50, pinCost: 200, pinHours: 24, glowDays: 3,
   bountyOptions: [20, 50, 100], bountyDays: 7,
@@ -17,8 +18,11 @@ export const communityRules = {
   // 编辑期限：初光、巡天 24 小时，观测起 30 天
   editWindowHours: 24, editWindowDaysL2: 30,
   // 内容
-  showcaseImageMax: 9, imageMax: 4, imageBytes: 2_000_000, tagMax: 3, momentMax: 300,
+  showcaseImageMax: 9, imageMax: 4, imageBytes: readerImageBytes, tagMax: 3, momentMax: 300,
 } as const;
+
+// The owner keeps the main site's existing technical image ceiling.
+export const communityImageBytes = (owner = false) => owner ? uploadLimits.maxImageBytes : communityRules.imageBytes;
 
 // 标签由站长维护，发帖时只能选。
 export const communityTags = ["新手", "提示词", "工作流", "ComfyUI", "Midjourney", "Stable Diffusion", "Claude", "Cursor", "视频生成", "音乐生成", "本地模型", "可商用", "效率"] as const;
@@ -31,13 +35,18 @@ export type PromptMode = "public" | "hidden" | "paid";
 
 // 北京时间的日期（YYYY-MM-DD），签到、每日上限和等级重算都按它换日。
 export const beijingDay = (ms: number) => new Date(ms + 8 * 3600 * 1000).toISOString().slice(0, 10);
-// 连签第 n 天的奖励：每天 5（VIP 再加 2）；每轮第 7、14、21、28 天加 15，第 30 天加 50。
-export function checkinReward(streak: number, vip = false) {
-  const r = communityRules;
-  const cycleDay = ((Math.max(1, streak) - 1) % r.cycle) + 1;
-  const bonus = cycleDay === r.cycle ? r.cycleBonus : cycleDay % 7 === 0 ? r.weekBonus : 0;
-  const base = r.checkinBase + (vip ? r.vipBonus : 0);
-  return { cycleDay, base, bonus, total: base + bonus };
+// 每人每天 1 星尘；自然月满勤另得 5，是否已发放由服务端流水判断。
+export function checkinReward(completesMonth = false) {
+  const base = communityRules.checkinBase, bonus = completesMonth ? communityRules.monthBonus : 0;
+  return { base, bonus, total: base + bonus };
+}
+export function checkinMonth(month: string, days: readonly string[]) {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new RangeError('Invalid check-in month');
+  const [year, number] = month.split('-').map(Number);
+  const totalDays = new Date(Date.UTC(year, number, 0)).getUTCDate();
+  const dates = Array.from({ length: totalDays }, (_, i) => `${month}-${String(i + 1).padStart(2, '0')}`);
+  const valid = new Set(dates), signed = [...new Set(days)].filter(key => valid.has(key));
+  return { month, totalDays, dates, signed, complete: signed.length === totalDays };
 }
 // 每帖图片上限：作品展廊 9 张，工具资源不配图，其他 4 张；初光每帖 1 张。
 export function imageLimit(board: string, level = 1) {
@@ -76,7 +85,7 @@ export const communityLevelRules: Record<1 | 2 | 3, Array<{ key: LevelStat; labe
 export const communityCleanDays = { 2: 30, 3: 180 } as const;
 export const communityLevelPerks: Record<number, Array<[string, string]>> = {
   0: [["每天最多 2 个主题、10 条回复", "Up to 2 topics and 10 replies a day"], ["每帖最多 1 张图、2 个外链", "1 image and 2 links per post"], ["前 2 个带链接或图片的帖子先审后发", "The first 2 posts with links or images are reviewed first"], ["不能悬赏、不能感谢、不能举报；点赞不给对方星尘", "No bounties, thanks or reports; likes give no stardust"]],
-  1: [["去掉图片和链接限制", "No image or link limits"], ["点赞能给对方星尘", "Likes give stardust"], ["可以举报、悬赏、感谢", "Can report, offer bounties and thank"]],
+  1: [["去掉图片和链接限制", "No image or link limits"], ["点赞表达认可，不发星尘", "Likes show appreciation without stardust"], ["可以举报、悬赏、感谢", "Can report, offer bounties and thank"]],
   2: [["编辑期限延长到 30 天", "Edit for 30 days"], ["每日发帖、回复上限 ×1.5", "1.5× daily posting limits"], ["举报开始计入自动隐藏", "Reports count towards auto-hiding"]],
   3: [["举报即隐藏初光、巡天用户的内容", "A report hides content by first-light and survey members"], ["可以给帖子改标签", "Can change tags on posts"], ["条件不满足会掉回观测", "Falls back to observer when the conditions lapse"]],
   4: [["置顶、移动、锁帖、审核", "Pin, move, lock and review"], ["操作全部进审计日志", "Every action is audited"]],
@@ -100,9 +109,23 @@ export const communityBadges: Record<string, { name: string; en: string; tier: "
 };
 export const communityCheckinBadges = ["first_checkin", "streak7", "streak30", "streak100", "streak365", "early"] as const;
 
-/* ---------- 兑换所（装扮和道具卡的效果写在代码里；数字资源和实物由站长上架） ---------- */
+/* ---------- 兑换所（道具卡保留内置规则；作者可上架资源、实物和安全的装扮） ---------- */
 export type ShopLimit = { per: "month" | "year" | "once"; n: number } | null;
+export type ShopCategory = { id: string; name: string };
+export type NameEffect = { style: "solid" | "gradient" | "shimmer"; colors: string[] };
+// The same allowlist protects persisted effects and their eventual CSS variables.
+export function communityNameEffect(value: unknown): NameEffect | null {
+  if (!value || typeof value !== "object") return null;
+  const input = value as Record<string, unknown>, style = input.style;
+  if (style !== "solid" && style !== "gradient" && style !== "shimmer") return null;
+  if (!Array.isArray(input.colors) || input.colors.length !== (style === "solid" ? 1 : 2)
+    || !input.colors.every(color => typeof color === "string" && /^#[0-9a-f]{6}$/i.test(color))) return null;
+  return { style, colors: input.colors.map(color => String(color).toUpperCase()) };
+}
 export type ShopItem = {
+  image?: string | null;
+  category?: string | null;
+  effect?: NameEffect | null;
   id: string; cat: "look" | "card" | "digital" | "goods"; kind: "frame" | "color" | "cover" | "card" | "digital" | "goods";
   ref?: string; name: string; desc: string; price: number; limit?: ShopLimit; minLevel?: number; minDays?: number;
   stock?: number | null; left?: number | null; note?: string; builtin: boolean;

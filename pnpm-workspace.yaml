@@ -5,3 +5,7 @@ overrides:
   use-sync-external-store@1.2.0: 1.7.0
   # Old drizzle tooling transitively requests an esbuild version with GHSA-67mh-4wv8-2f99.
   '@esbuild-kit/core-utils>esbuild': 0.25.4
+  # Payload 3.89 still requests vulnerable SMTP/HTTP/URI dependencies; pin the reviewed security fixes.
+  '@payloadcms/email-nodemailer>nodemailer': 10.0.9
+  'payload>undici': 7.29.1
+  'ajv>fast-uri': 3.1.8

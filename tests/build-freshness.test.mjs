@@ -35,6 +35,11 @@ const canonicalFiles = [
   "styles.css",
   "blog-background.css",
   "author.css",
+  "community-banner-controller.mjs",
+  "community-banner-editor.mjs",
+  "community-frame-banners.mjs",
+  "community-write-request.mjs",
+  "community-growth.mjs",
 ];
 const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 test("the single generated site stays synchronized with source and has all referenced assets", async () => {
@@ -69,6 +74,8 @@ test('a typed browser module is emitted as runnable JavaScript', async () => {
   assert.ok(!output.includes('export * from'));
   const { publicRoute, publicKind } = await import('../dist/access-policy.mjs');
   assert.equal(publicRoute('note'), true);
+  assert.equal(publicRoute('community', 'rules'), false);
+  assert.equal(publicRoute('community', 'manage'), false);
   assert.equal(publicRoute('resource-center'), false);
   assert.equal(publicKind('notes'), true);
   assert.equal(publicKind('books'), false);

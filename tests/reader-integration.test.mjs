@@ -45,7 +45,14 @@ test('reader registers, verifies email, signs in and never receives author permi
   await new Promise(resolve => server.listen(port, '127.0.0.1', resolve));
   t.after(async () => { await new Promise(resolve => server.close(resolve)); loginLedger.close(); uidStore.close(); await payload.destroy(); await payload.db.client.close(); await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
   const base = siteOrigin;
-  const post = async (path, body, cookie = '', realIp = '') => fetch(base + '/api/reader/' + path, { method: 'POST', headers: { Origin: base, 'X-Reader-Request': '1', 'Content-Type': 'application/json', cookie, ...(realIp ? { 'X-Real-IP': realIp } : {}) }, body: JSON.stringify(body) });
+  const challenges = new Map();
+  const post = async (path, body, cookie = '', realIp = '') => {
+    const email = String(body.email || '').trim().toLowerCase();
+    if (['verify','resend'].includes(path) && email && !Object.hasOwn(body, 'requestId')) body = { ...body, requestId: challenges.get(email) };
+    const response = await fetch(base + '/api/reader/' + path, { method: 'POST', headers: { Origin: base, 'X-Reader-Request': '1', 'Content-Type': 'application/json', cookie, ...(realIp ? { 'X-Real-IP': realIp } : {}) }, body: JSON.stringify(body) });
+    if (['register','resend'].includes(path) && response.ok) challenges.set(email, (await response.clone().json()).requestId);
+    return response;
+  };
   const approveReview = async kind => {
     const queue = await (await fetch(base + '/api/manage/review', { headers: { cookie: 'owner=yes' } })).json();
     const row = queue.profiles.find(item => item.kind === kind);
@@ -63,6 +70,7 @@ test('reader registers, verifies email, signs in and never receives author permi
     assert.match((await invalid.json()).error, /请输入正确的手机号/);
   }
   assert.equal((await post('register', { ...account, password: '1234567' })).status, 400, 'seven-character passwords are rejected');
+  assert.equal((await post('register', { ...account, nickname: '一二三四五六七八九' })).status, 400, 'nine-character nicknames are rejected on the server');
   const ownerAccount = { ...account, email: 'owner@example.test' };
   assert.equal((await post('register', ownerAccount)).status, 200);
   assert.equal(sent.length, 0);
@@ -76,17 +84,25 @@ test('reader registers, verifies email, signs in and never receives author permi
   assert.equal((await fetch(base + '/api/manage/readers?status=pending', { headers: { cookie: 'owner=yes' } })).status, 400);
   const waiting = await (await fetch(base + '/api/manage/readers', { headers: { cookie: 'owner=yes' } })).json();
   assert.equal(waiting.total, 0, 'unverified registrations are absent from account management');
+  assert.equal((await post('resend', {email:account.email})).status, 429, 'immediate resends share the registration send cooldown');
+  const mailDb = new DatabaseSync(resolve(directory, 'reader-workflow.db'));
+  try { mailDb.exec('UPDATE reader_auth_attempts SET happened_at=happened_at-61000'); } finally { mailDb.close(); }
+  const firstCode = /<strong>(\d{6})<\/strong>/.exec(sent.at(-1).html)?.[1];
   assert.equal((await post('resend', {email:account.email})).status, 200);
   assert.equal(sent.length, 2);
   let response = await post('login', account);
   assert.equal(response.status, 401);
-  const token = /#\/verify\/([^"<]+)/.exec(sent.at(-1).html)?.[1];
-  assert.ok(token);
+  const code = /<strong>(\d{6})<\/strong>/.exec(sent.at(-1).html)?.[1];
+  assert.ok(code);
+  assert.doesNotMatch(sent.at(-1).html, /#\/verify\//);
+  assert.equal((await post('verify', { email: account.email, code, requestId: randomUUID() })).status, 400, 'a code is tied to the browser registration request');
+  assert.equal((await post('verify', { token: 'old-verification-link-value' })).status, 400, 'links cannot bypass the code flow');
+  assert.equal((await post('verify', { email: account.email, code: firstCode })).status, 400, 'resending invalidates the earlier code');
   const verificationAttempts = await Promise.all([
-    post('verify', { token: decodeURIComponent(token) }),
-    post('verify', { token: decodeURIComponent(token) }),
+    post('verify', { email: account.email, code }),
+    post('verify', { email: account.email, code }),
   ]);
-  assert.deepEqual(verificationAttempts.map(result => result.status).sort(), [200, 400], 'one verification link activates an account only once');
+  assert.deepEqual(verificationAttempts.map(result => result.status).sort(), [200, 400], 'one verification code activates an account only once');
   const verified = verificationAttempts.find(result => result.status === 200);
   assert.equal(verified.status, 200);
   assert.match((await verified.json()).message, /验证成功/);
@@ -109,6 +125,7 @@ test('reader registers, verifies email, signs in and never receives author permi
     'reader sessions cannot view the owner management API');
   assert.equal((await fetch(base + '/api/manage/review', { headers: { cookie } })).status, 403);
   assert.equal((await post('profile', { nickname: '新昵称', phone: 'bad' }, cookie)).status, 400);
+  assert.equal((await post('profile', { nickname: '一二三四五六七八九', phone: '13900139000' }, cookie)).status, 400);
   assert.equal((await post('profile', { nickname: '新昵称', phone: '66666666' }, cookie)).status, 400);
   assert.equal((await post('profile', { nickname: '新昵称', phone: '13900139000', signature: 'x'.repeat(101) }, cookie)).status, 400);
   assert.equal((await post('profile', { nickname: '新昵称', phone: '13900139000', signature: '加微信 13800138000' }, cookie)).status, 400);
@@ -124,7 +141,8 @@ test('reader registers, verifies email, signs in and never receives author permi
   const image = await sharp({ create: { width: 600, height: 400, channels: 3, background: '#795da8' } }).png().toBuffer();
   assert.equal((await avatarUpload(image, 'image/png', { Origin: 'http://untrusted.example' })).status, 403);
   assert.equal((await avatarUpload(Buffer.from('not an image'), 'image/png')).status, 400);
-  const uploaded = await avatarUpload(image);
+  assert.equal((await avatarUpload(Buffer.concat([image, Buffer.alloc(2 * 1024 ** 2 + 1 - image.length)]))).status, 413);
+  const uploaded = await avatarUpload(Buffer.concat([image, Buffer.alloc(2 * 1024 ** 2 - image.length)]));
   assert.equal(uploaded.status, 200);
   assert.equal((await uploaded.json()).reviewPending, true);
   await approveReview('avatar');
@@ -215,16 +233,26 @@ test('reader registers, verifies email, signs in and never receives author permi
   assert.equal((await adminPost('enable')).status, 200);
   assert.equal((await post('logout', {}, cookie)).status, 200);
   assert.equal((await fetch(base + '/api/content?view=detail&kind=works&id=secret', { headers: { cookie } })).status, 401);
-  for (const email of ['reader@qq.com', 'reader@gmail.com', 'reader@163.com', 'reader@126.com', 'reader@yeah.net']) {
+  const providerAccounts = ['reader@qq.com', 'reader@gmail.com', 'reader@163.com', 'reader@126.com', 'reader@yeah.net'];
+  for (const [index, email] of providerAccounts.entries()) {
     const before = sent.length;
     assert.equal((await post('register', { ...account, email })).status, 200, email);
     assert.equal(sent.length, before + 1, email);
     assert.equal(sent.at(-1).to, email);
-    const linkToken = /#\/verify\/([^"<]+)/.exec(sent.at(-1).html)?.[1];
-    assert.ok(linkToken, email);
-    assert.equal((await post('verify', { token: decodeURIComponent(linkToken) })).status, 200, email);
-    assert.equal((await post('login', { email, password: account.password })).status, 200, email);
+    const code = /<strong>(\d{6})<\/strong>/.exec(sent.at(-1).html)?.[1];
+    assert.ok(code, email);
+    assert.equal((await post('verify', { email, code })).status, 200, email);
+    assert.equal((await post('login', { email, password: account.password }, '', `198.51.100.${30 + index}`)).status, 200, email);
   }
+  const sharedIp = '198.51.100.90';
+  for (const email of providerAccounts.slice(0, 3)) assert.equal((await post('login', { email, password: account.password }, '', sharedIp)).status, 200);
+  const fourth = await post('login', { email: providerAccounts[3], password: account.password }, '', sharedIp);
+  assert.equal(fourth.status, 403);
+  assert.equal(fourth.headers.get('set-cookie'), null, 'blocked logins never receive an authentication cookie');
+  const blocked = (await payload.find({ collection: 'readers', where: { email: { equals: providerAccounts[3] } }, limit: 1 })).docs[0];
+  const blockedDb = new DatabaseSync(resolve(directory, 'content.db'), { readOnly: true });
+  try { assert.equal(blockedDb.prepare('SELECT COUNT(*) AS n FROM readers_sessions WHERE _parent_id=?').get(blocked.id)?.n, 1, 'the rejected login session is revoked without removing the earlier allowed session'); }
+  finally { blockedDb.close(); }
   const numbered = await (await fetch(base + '/api/manage/readers', { headers: { cookie: 'owner=yes' } })).json();
   const issued = numbered.users.map(user => user.uid);
   assert.equal(issued.length, 6);
@@ -253,8 +281,8 @@ test('reader registers, verifies email, signs in and never receives author permi
   assert.equal(uidAudit.events[0].to, '123456789');
   const nextEmail = 'later@example.test';
   assert.equal((await post('register', { ...account, email: nextEmail })).status, 200);
-  const nextToken = /#\/verify\/([^"<]+)/.exec(sent.at(-1).html)?.[1];
-  assert.equal((await post('verify', { token: decodeURIComponent(nextToken) })).status, 200);
+  const nextCode = /<strong>(\d{6})<\/strong>/.exec(sent.at(-1).html)?.[1];
+  assert.equal((await post('verify', { email: nextEmail, code: nextCode })).status, 200);
   const nextLogin = await post('login', { email: nextEmail, password: account.password });
   const nextIdentity = await nextLogin.json();
   const nextUid = nextIdentity.uid;
@@ -336,17 +364,21 @@ test('reader registers, verifies email, signs in and never receives author permi
   });
   assert.equal((await grantNextVip()).status, 200);
   assert.equal((await grantNextVip()).status, 200);
+  await payload.update({ collection: 'readers', id: nextIdentity.id, data: { vip_until: new Date(Date.now() + 210 * 86400000).toISOString() } });
   const retention = createReaderRetention({ payload, directory, loginLedger, uidStore });
-  const afterThirtyOneDays = new Date(Date.now() + 31 * 86400000);
-  const dryRun = await retention.sweep({ now: afterThirtyOneDays, dryRun: true });
+  const afterSixMonths = new Date(Date.now() + 190 * 86400000);
+  const dryRun = await retention.sweep({ now: afterSixMonths, dryRun: true });
   assert.equal(dryRun.eligible, 5, 'five inactive readers are due; active VIP is exempt');
   assert.equal(dryRun.deleted, 0);
-  const sweep = await retention.sweep({ now: afterThirtyOneDays });
+  const sweep = await retention.sweep({ now: afterSixMonths });
   assert.equal(sweep.deleted, 5);
+  const sessionDb = new DatabaseSync(resolve(directory, 'content.db'), { readOnly: true });
+  try { assert.equal(sessionDb.prepare('SELECT COUNT(*) AS n FROM readers_sessions WHERE _parent_id=?').get(signedIn.id)?.n, 0, 'deleted account sessions are removed'); }
+  finally { sessionDb.close(); }
   const survivors = await (await fetch(base + '/api/manage/readers', { headers: { cookie: 'owner=yes' } })).json();
   assert.equal(survivors.summary.total, 1);
   assert.equal(survivors.users[0].id, nextIdentity.id);
-  assert.equal((await retention.sweep({ now: new Date(Date.now() + 70 * 86400000) })).deleted, 1,
+  assert.equal((await retention.sweep({ now: new Date(Date.now() + 230 * 86400000) })).deleted, 1,
     'an inactive VIP can be cleaned after the membership expires');
   assert.equal((await (await fetch(base + '/api/manage/readers', { headers: { cookie: 'owner=yes' } })).json()).summary.total, 0);
 

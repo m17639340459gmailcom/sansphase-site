@@ -1,0 +1,154 @@
+.vip-orders-dialog {
+  width: min(640px, calc(100vw - 32px));
+}
+.vip-orders-dialog[open] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.vip-orders-dialog .vip-orders {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0 24px;
+}
+.vip-order-scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  max-height: min(480px, calc(100dvh - 220px));
+  scrollbar-gutter: stable;
+}
+.vip-orders ol {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.vip-orders li + li {
+  border-top: 1px solid var(--manage-edge);
+}
+.vip-orders summary {
+  cursor: pointer;
+  padding: 18px 0;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.vip-orders li summary {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.vip-orders li summary > span:first-child {
+  flex: 1;
+}
+.vip-orders li summary strong {
+  display: block;
+  font-weight: 600;
+}
+.vip-orders li summary small {
+  display: block;
+  margin-top: 7px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.vip-detail-hint {
+  color: var(--signal);
+  font-size: 11px;
+}
+.vip-detail-hint::after {
+  content: " ＋";
+}
+.vip-orders details[open] .vip-detail-hint::after {
+  content: " −";
+}
+.vip-orders dl {
+  margin: 0 0 16px;
+  display: grid;
+  gap: 9px;
+  font-size: 12px;
+}
+.vip-orders dl > div {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 10px;
+}
+.vip-orders dt {
+  color: var(--manage-muted);
+}
+.vip-orders dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.vip-orders details > button {
+  margin-bottom: 16px;
+}
+.vip-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 16px 0;
+  border-top: 1px solid var(--manage-edge);
+  flex: none;
+}
+.vip-pagination > span {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+.vip-pagination .vip-secondary:disabled {
+  cursor: default;
+}
+.vip-admin-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.vip-admin-message {
+  color: var(--manage-muted);
+  min-height: 20px;
+  font-size: 12px;
+  margin-block: 16px;
+}
+.vip-admin-table {
+  table-layout: fixed;
+  min-width: 820px;
+}
+.vip-admin-table th:nth-child(1) {
+  width: 17%;
+}
+.vip-admin-table th:nth-child(2) {
+  width: 31%;
+}
+.vip-admin-table th:nth-child(3) {
+  width: 11%;
+}
+.vip-admin-table th:nth-child(4) {
+  width: 14%;
+}
+.vip-admin-table th:nth-child(5) {
+  width: 17%;
+}
+.vip-admin-number {
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.vip-admin-table td {
+  overflow-wrap: anywhere;
+}
+.vip-admin-detail {
+  padding: 24px;
+}
+.vip-admin-detail > p {
+  margin: 12px 0 24px;
+}
+.vip-orders summary:focus-visible {
+  outline: none;
+  border-color: var(--signal);
+}
+.vip-orders summary:hover {
+  color: var(--signal);
+}

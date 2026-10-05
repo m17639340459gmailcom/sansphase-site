@@ -4,6 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
+import { webcrypto } from "node:crypto";
 import vm from "node:vm";
 import { JSDOM, VirtualConsole } from "jsdom";
 import * as visitorLocation from '../src/visitor-location.mjs';
@@ -41,6 +42,9 @@ test("local prototype DOM flows", async (t) => {
   published.textContent=JSON.stringify({notes:data.notes,resources:data.resources.map(item=>({...item,downloadUrl:'./assets/'+item.file})),works:[],software:[],announcements:[1,2,3].map(i=>({title:"测试公告 "+i,summary:"公告内容"})),profile:null,author:null});
   d.head.append(published);
   w.structuredClone = structuredClone;
+  // jsdom provides randomUUID but not SubtleCrypto. Use the real browser
+  // primitive from Node so protected writes hash their payload asynchronously.
+  Object.defineProperty(w.crypto, 'subtle', { value: webcrypto.subtle });
   // An in-memory community API with the server's response shapes. Two topics
   // per page, so "load more" is exercised.
   const community = { topics: [], replies: [], next: 1, requests: [], checkedIn: false, balance: 30, frame: null, redeemed: [],
@@ -90,7 +94,7 @@ test("local prototype DOM flows", async (t) => {
       if (!topic) return respond(404, { error: "帖子不存在，或已被删除。" });
       const mine = topic.author === "林间";
       return respond(200, {
-        topic: { ...dto(topic), body: topic.body, canDelete: true, canEdit: mine, mine, canReply: true, bookmarks: topic.bookmarks || 0 },
+        topic: { ...dto(topic), images: (topic.images || []).map(id => ({ id, width: 100, height: 100 })), body: topic.body, canDelete: true, canEdit: mine, mine, canReply: true, bookmarks: topic.bookmarks || 0 },
         replies: replies(topic.id).map((reply) => ({
           ...reply, author: person(reply.author), mine: reply.author === "林间", byTopicAuthor: reply.author === topic.author, canDelete: true, canEdit: reply.author === "林间",
           quote: reply.quote ? { id: reply.quote, author: "远山", excerpt: community.replies.find((item) => item.id === reply.quote)?.body || "" } : null,
@@ -101,10 +105,10 @@ test("local prototype DOM flows", async (t) => {
       });
     }
     if (method === "POST" && path === "topics") {
-      if (body.board !== "moments" && [...String(body.title || "")].length < 4) return respond(400, { error: "标题至少 4 个字。" });
+      if ([...String(body.title || "")].length < 1) return respond(400, { error: "标题至少 4 个字。" });
       const id = `t${community.next++}`, now = at();
       const moment = body.board === "moments";
-      community.topics.push({ id, board: body.board, title: moment ? body.body.trim().slice(0, 36) : body.title.trim(), body: body.body.trim(), author: "林间",
+      community.topics.push({ id, board: body.board, title: body.title.trim(), hasTitle: true, images: body.images || [], body: body.body.trim(), author: "林间",
         createdAt: now, lastActivityAt: now, likes: 0, ...(moment ? { excerpt: body.body.trim() } : {}) });
       community.lastTopic = body;
       return respond(201, { id, earned: 5, pending: false });
@@ -126,7 +130,7 @@ test("local prototype DOM flows", async (t) => {
     // 签到、赞、收藏：只记本页需要的状态。
     if (method === "GET" && path === "me")
       return respond(200, { ...person("林间"), owner: false, mod: false, checkedIn: community.checkedIn, streak: community.checkedIn ? 7 : 6,
-        balance: community.balance, gainedToday: 0, behaviourToday: 0, dailyCap: 60, nextReward: { total: community.checkedIn ? 5 : 20, bonus: community.checkedIn ? 0 : 15 },
+        balance: community.balance, gainedToday: 0, behaviourToday: 0, dailyCap: 60, nextReward: { total: 1, bonus: 0 },
         unread: unread(), agreed: true, inventory: { makeup: 0, pin: 0, highlight: 0 }, muted: null });
     if (method === "GET" && path === "checkin")
       return respond(200, { checkedIn: community.checkedIn, streak: community.checkedIn ? 7 : 6, balance: community.balance, gainedToday: 0, behaviourToday: 0, vip: false,
@@ -135,8 +139,8 @@ test("local prototype DOM flows", async (t) => {
     if (method === "POST" && path === "checkin") {
       if (community.checkedIn) return respond(409, { error: "今天已经签到过了。" });
       community.checkedIn = true;
-      community.balance += 20;
-      return respond(200, { streak: 7, reward: 20, bonus: 15, balance: community.balance, position: 1 });
+      community.balance += 1;
+      return respond(200, { streak: 7, reward: 1, bonus: 0, balance: community.balance, position: 1 });
     }
     if (method === "POST" && (match = /^topics\/([^/]+)\/(like|bookmark)$/.exec(path))) {
       const topic = live.find((item) => item.id === match[1]);
@@ -234,6 +238,11 @@ test("local prototype DOM flows", async (t) => {
     const module = new vm.SourceTextModule(readFileSync(url, "utf8"), {
       context,
       identifier: url.href,
+      importModuleDynamically: async specifier => {
+        const dependency = await loadLibrary(new URL(specifier, url));
+        if (dependency.status === 'linked') await dependency.evaluate();
+        return dependency;
+      },
     });
     const entry = { module, linked: null };
     libraryModules.set(url.href, entry);
@@ -250,7 +259,7 @@ test("local prototype DOM flows", async (t) => {
       return loadLibrary(new URL("../dist/ui.bundle.mjs", import.meta.url));
     if (specifier === './book-shell.mjs' || specifier === './vip-book-prompt.mjs')
       return loadLibrary(new URL('../dist/' + specifier.slice(2), import.meta.url));
-    if (['./community.mjs', './community-ui.mjs', './community-sky.mjs'].includes(specifier))
+    if (['./community.mjs', './community-ui.mjs', './community-sky.mjs', './community-layout.mjs', './community-landing.mjs'].includes(specifier))
       return loadLibrary(new URL('../dist/' + specifier.slice(2), import.meta.url));
     if (specifier === './catalog.mjs')
       return loadLibrary(new URL('../dist/catalog.mjs', import.meta.url));
@@ -833,7 +842,7 @@ test("local prototype DOM flows", async (t) => {
       assert.equal(d.querySelectorAll('#blog-backdrop .community-sky').length, 1, 'one sky across community pages');
       assert.ok(q('#site-header').classList.contains('community-header'));
       assert.deepEqual(Array.from(d.querySelectorAll('#navigation a'), a=>a.getAttribute('href')),
-        ['#/community/home','#/community/boards','#/community/checkin','#/community/shop','#/community/rank']);
+        ['#/community/home','#/community/checkin','#/community/shop','#/community/rank']);
       assert.equal(q('#navigation [aria-current="page"]').getAttribute('href'),'#/community/home');
       assert.equal(d.querySelector('.community-back,.community-brand-group a[href="#/home"]'),null,'no back link in the corner');
       assert.equal(q('.community-brand').getAttribute('href'),'#/community/home');
@@ -842,7 +851,7 @@ test("local prototype DOM flows", async (t) => {
       assert.equal(q('.community-bell').getAttribute('href'),'#/community/inbox');
       assert.ok(q('#navigation a[href="#/community/checkin"] .community-nav-dot'),'check-in shows a dot until today is done');
       assert.deepEqual(Array.from(d.querySelectorAll('#community-account-menu [role="menuitem"]'),item=>item.getAttribute('href')),
-        ['#/community/u/u1','#/community/stardust','#/community/shop','#/community/inbox','#/community/bookmarks','#/account','#/home']);
+        ['#/community/u/u1','#/community/stardust','#/community/inbox','#/community/bookmarks','#/account']);
       assert.match(q('#community-account-menu a[href="#/community/stardust"]').textContent,/我的星尘\s*30/);
       const account=q('[data-action="community-account"]');
       assert.equal(q('#community-account-menu').hidden,true);
@@ -856,10 +865,44 @@ test("local prototype DOM flows", async (t) => {
       click('[data-action="community-account"]');
       click('main');
       assert.equal(q('#community-account-menu').hidden,true,'a click elsewhere closes it');
-      assert.equal(q('#community-account-menu a[href="#/home"]').textContent.trim(),'返回無相主站');
+      assert.equal(d.querySelector('#community-account-menu a[href="#/home"], #community-account-menu a[href="#/community/shop"]'),null);
+      const outside = d.createElement('button');
+      outside.textContent = 'Outside control';
+      let activations = 0;
+      outside.addEventListener('click', event => { event.stopPropagation(); activations++; });
+      q('main').append(outside);
+      click('[data-action="community-account"]');
+      outside.dispatchEvent(new w.Event('pointerdown', { bubbles: true }));
+      assert.equal(q('#community-account-menu').hidden, true, 'an outside press closes before the clicked control handles it');
+      outside.focus();
+      outside.click();
+      assert.equal(activations, 1, 'outside controls still work');
+      assert.equal(d.activeElement, outside, 'closing does not steal outside focus');
+      click('[data-action="community-account"]');
+      outside.click();
+      assert.equal(q('#community-account-menu').hidden, true, 'keyboard clicks also close even when their handler stops propagation');
+      assert.equal(activations, 2);
+      outside.remove();
       assert.equal(d.querySelector('#site-header .community-post'),null,'no 发帖 in the header');
-      assert.equal(q('.community-sort-actions .community-post').getAttribute('href'),'#/community/new');
+      assert.equal(d.querySelector('.community-sort-actions .community-post'),null,'the home does not offer a board-less post action');
       assert.ok(q('.community-sort-actions #community-search'));
+    });
+    await t.test('operation notices are centered, do not steal focus and disappear without a close button', async () => {
+      const library = await loadLibrary(new URL('../dist/ui.bundle.mjs', import.meta.url));
+      library.namespace.toast.dismiss();
+      const focused = d.activeElement;
+      const message = '发布成功（自动关闭测试）';
+      library.namespace.toast(message);
+      const notice = () => [...d.querySelectorAll('[data-sonner-toast]')].find(node => node.textContent.includes(message));
+      await until(notice, 'the operation notice appears');
+      const toaster = notice().closest('[data-sonner-toaster]');
+      assert.equal(toaster.dataset.xPosition, 'center');
+      assert.equal(toaster.dataset.yPosition, 'top');
+      assert.equal(toaster.style.top, 'calc(50% - var(--front-toast-height, 0px) / 2)');
+      assert.equal(notice().querySelector('[data-close-button]'), null);
+      assert.equal(d.activeElement, focused, 'a notice does not move keyboard focus');
+      await new Promise(resolve => setTimeout(resolve, 3500));
+      assert.equal(notice(), undefined, 'the notice dismisses itself in about three seconds');
     });
     await t.test('community home reads the API, sorts on the server and starts empty', async()=>{
       await until(()=>d.querySelector('.community-topics, .community-empty'),'the home finishes loading');
@@ -877,30 +920,32 @@ test("local prototype DOM flows", async (t) => {
       click('[data-action="community-sort"][data-sort="active"]');
     });
     await t.test('posting: validation, publish, then the post page with replies and deletion', async()=>{
-      await clickRoute('.community-post');
+      await navigate('community/boards/qa');
+      await clickRoute('.community-feed-rail-compose');
+      assert.equal(q('input[name="board"]').value,'qa');
+      assert.equal(d.querySelector('.community-board-pick'),null);
+      input('#community-title','');
       submit('form[data-community-form="topic"]');
-      assert.match(q('.community-form-status').textContent,/先选版块/);
-      click('input[name="board"][value="qa"]');
-      assert.equal(d.activeElement,q('#community-board-qa'),'focus stays on the chosen board');
-      assert.ok(q('input[name="bounty"][value="20"]'),'a question can offer a bounty');
-      input('#community-title','短');
-      assert.equal(q('[data-count-for="title"]').textContent,'1 / 60');
-      submit('form[data-community-form="topic"]');
-      assert.match(q('.community-form-status').textContent,/标题至少 4 个字/);
+      assert.match(q('.community-form-status').textContent,/标题至少 1 个字/);
       assert.equal(q('#community-title').getAttribute('aria-invalid'),'true');
       assert.equal(d.activeElement,q('#community-title'));
       input('#community-title','ComfyUI 人脸一起用就崩');
-      input('#community-body','第一段：单独用没问题。\n\n第二段：一起用就崩。');
+      input('#community-body','第一段：单独用没问题。\n\n第二段：一起用就崩。\n\n![封面](/api/community/images/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.webp)');
       const published=new Promise(resolve=>w.addEventListener('hashchange',resolve,{once:true}));
       submit('form[data-community-form="topic"]');
       assert.equal(q('form[data-community-form="topic"] button[type="submit"]').disabled,true,'no double submit');
-      assert.deepEqual([community.lastTopic.board,community.lastTopic.bounty,community.lastTopic.tags],['qa',0,[]]);
+      await until(()=>community.lastTopic,'the hashed publishing request reaches the API');
+      assert.deepEqual([community.lastTopic.board,community.lastTopic.bounty,community.lastTopic.tags],['qa',undefined,[]]);
+      assert.deepEqual(community.lastTopic.images,['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa']);
       await published;
       await tick();
       assert.match(w.location.hash,/^#\/post\/t\d+$/);
       await until(()=>d.querySelector('.community-thread'),'the new post loads');
+      await until(()=>[...d.querySelectorAll('[data-sonner-toast]')].some(node => node.textContent.includes('发布成功')), 'publishing confirms success even without a stardust award');
       assert.equal(q('.community-thread h1').textContent,'ComfyUI 人脸一起用就崩');
-      assert.deepEqual(Array.from(d.querySelectorAll('.community-thread .community-text p'),p=>p.textContent),['第一段：单独用没问题。','第二段：一起用就崩。']);
+      const paragraphs = [...d.querySelectorAll('.community-thread > .community-text p')];
+      assert.deepEqual(paragraphs.filter(p=>!p.querySelector('img')).map(p=>p.textContent),['第一段：单独用没问题。','第二段：一起用就崩。']);
+      assert.equal(q('.community-thread > .community-text img').getAttribute('src'), '/api/community/images/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.webp', 'the inline image renders alongside the two text paragraphs');
       assert.equal(q('.community-crumb a:last-child').getAttribute('href'),'#/community/boards/qa');
       assert.match(q('.community-author-card').textContent,/林间/);
       assert.equal(d.querySelector('#navigation [aria-current="page"]'),null);
@@ -921,7 +966,7 @@ test("local prototype DOM flows", async (t) => {
     });
     await t.test('community drafts survive a route change and protect unsent work', async()=>{
       w.localStorage.clear();
-      await navigate('community/new');
+      await navigate('community/new/qa');
       input('#community-title','草稿标题');
       input('#community-body','草稿正文，稍后再发。');
       const previous = w.location.hash;
@@ -933,7 +978,7 @@ test("local prototype DOM flows", async (t) => {
       assert.ok(confirmations > 0);
       w.confirm = () => true;
       await navigate('community/home');
-      await navigate('community/new');
+      await navigate('community/new/qa');
       assert.equal(q('#community-title').value,'草稿标题');
       assert.equal(q('#community-body').value,'草稿正文，稍后再发。');
       input('#community-title','');
@@ -949,14 +994,14 @@ test("local prototype DOM flows", async (t) => {
       await navigate('community/boards');
       await until(()=>/主题4/.test(d.querySelector('.community-board-card[href="#/community/boards/qa"] .community-bc-stats')?.textContent||''),'board counts load');
       assert.equal(d.querySelectorAll('.community-board-card').length,6);
-      assert.equal(q('#navigation [aria-current="page"]').getAttribute('href'),'#/community/boards');
+      assert.equal(d.querySelector('#navigation [aria-current="page"]'),null);
       await clickRoute('.community-board-card[href="#/community/boards/qa"]');
       assert.equal(q('[data-community="board"]').dataset.board,'qa');
-      assert.equal(q('#navigation [aria-current="page"]').getAttribute('href'),'#/community/boards','a board page is under 版块');
+      assert.equal(q('[data-frame-boards] [aria-current="page"]').getAttribute('href'),'#/community/boards/qa');
       assert.equal(q('.community-post').getAttribute('href'),'#/community/new/qa','posting from a board goes to that board');
       await until(()=>d.querySelectorAll('.community-topic').length===2,'the first page shows');
       await until(()=>/主题4/.test(q('.community-board-hero .community-stats').textContent),'the board hero shows its numbers');
-      assert.match(q('.community-aside').textContent,/发帖须知[\s\S]*本版活跃[\s\S]*林间/);
+      assert.doesNotMatch(q('[data-frame-right]').textContent,/发帖须知|本版活跃/);
       assert.match(q('[data-action="community-more"]').textContent,/还有 2 个/);
       click('[data-action="community-more"]');
       await until(()=>d.querySelectorAll('.community-topic').length===4,'the next page is appended');
@@ -973,7 +1018,7 @@ test("local prototype DOM flows", async (t) => {
       assert.equal(q('#community-search').value,'');
       assert.equal(d.activeElement,q('#community-search'));
       await navigate('community/new/qa');
-      assert.equal(q('input[name="board"]:checked').value,'qa');
+      assert.equal(q('input[name="board"]').value,'qa');
       assert.equal(q('.community-form-actions a').getAttribute('href'),'#/community/boards/qa');
       const first=community.topics[0].id;
       await navigate('post/'+first);
@@ -1006,17 +1051,18 @@ test("local prototype DOM flows", async (t) => {
     await t.test('check-in from the home page, then the check-in page; likes on a post', async()=>{
       await navigate('community/home');
       await until(()=>d.querySelector('.community-ck-pill.is-todo'),'the check-in pill loads');
-      assert.match(q('.community-ck-pill').textContent,/签到后连签 7 天 \+20/);
+      assert.match(q('.community-ck-pill').textContent,/签到后连签 7 天 \+1/);
       click('[data-action="community-checkin"]');
       await until(()=>d.querySelector('.community-ck-pill.is-done'),'checking in updates the pill');
-      assert.match(q('.community-ck-pill').textContent,/已连续签到 7 天 · 明天 \+5/);
+      assert.match(q('.community-ck-pill').textContent,/已连续签到 7 天 · 明天 \+1/);
       assert.ok(community.requests.includes('POST checkin'));
       await clickRoute('.community-ck-pill.is-done');
       assert.equal(w.location.hash,'#/community/checkin');
       assert.equal(q('#navigation [aria-current="page"]').getAttribute('href'),'#/community/checkin');
       await until(()=>d.querySelector('.community-constellation'),'the check-in page loads');
       assert.equal(d.querySelectorAll('.community-cs').length,30);
-      assert.match(q('.community-banner').textContent,/今日已签到 · 明天 \+5/);
+      assert.match(q('[data-community="checkin"] > .community-page-head').textContent,/每日签到 \+1 星尘，自然月满勤额外 \+5/);
+      assert.equal(d.querySelector('[data-community="checkin"] [data-action="community-checkin"]'),null);
       click('[data-action="community-month"]');
       await until(()=>community.requests.includes('GET checkin?month=2026-08'),'the calendar pages back a month');
       const topic=community.topics.find((item)=>!item.deleted);
@@ -1032,7 +1078,7 @@ test("local prototype DOM flows", async (t) => {
       await navigate('community/shop');
       assert.equal(q('#navigation [aria-current="page"]').getAttribute('href'),'#/community/shop');
       await until(()=>d.querySelectorAll('.community-sitem').length===2,'the items load');
-      assert.match(q('.community-banner').textContent,/我的星尘\s*50/);
+      assert.match(q('.community-banner').textContent,/我的星尘\s*31/);
       click('[data-action="community-redeem"][data-id="bag"]');
       const form=q('form[data-community-form="redeem"]');
       assert.equal(d.activeElement,q('#community-ship-name'),'the shipping form takes focus');
@@ -1049,11 +1095,11 @@ test("local prototype DOM flows", async (t) => {
       await until(()=>!d.querySelector('form[data-community-form="redeem"]'),'the panel closes after redeeming');
       assert.deepEqual(community.redeemed[0],{item:'bag',shipping:{name:'林间',phone:'138 0013 8000',address:'浙江省杭州市西湖区某路 1 号'}});
       assert.ok(!form.isConnected);
-      await until(()=>/我的星尘\s*30/.test(q('.community-banner').textContent),'the balance updates');
+      await until(()=>/我的星尘\s*11/.test(q('.community-banner').textContent),'the balance updates');
       await navigate('community/shop/look');
       await until(()=>d.querySelectorAll('.community-sitem').length===1,'a category shows its items only');
       assert.equal(q('.community-shop-cats [aria-current="page"]').getAttribute('href'),'#/community/shop/look');
-      assert.match(q('[data-action="community-redeem"], .community-sitem button').textContent,/还差 50 星尘/,'a short balance says how much is missing');
+      assert.match(q('[data-action="community-redeem"], .community-sitem button').textContent,/还差 69 星尘/,'a short balance says how much is missing');
     });
     await t.test('the ranking lists contributions, streaks and early birds', async()=>{
       await navigate('community/rank');
@@ -1081,25 +1127,21 @@ test("local prototype DOM flows", async (t) => {
       click('[data-action="community-read-all"]');
       await until(()=>!d.querySelector('.community-bell b'),'nothing is unread');
     });
-    await t.test('posting by board: a moment has no title, a resource needs its link', async()=>{
+    await t.test('posting by board: required title and cover, with a fixed destination', async()=>{
       await navigate('community/new/moments');
-      assert.equal(d.querySelector('#community-title'),null,'moments have no title');
+      assert.ok(q('#community-title').required,'moments require a title too');
       assert.equal(q('#community-body').maxLength,300);
+      input('#community-title','工作流终于跑通了');
       input('#community-body','今天终于把工作流跑通了');
-      await until(()=>/今天终于把工作流跑通了/.test(q('[data-compose-preview]').textContent),'the list preview follows the text');
-      click('input[name="board"][value="tools"]');
-      assert.ok(q('#community-url'),'a resource asks for its link');
-      assert.equal(q('#community-body').value,'今天终于把工作流跑通了','what was typed stays when switching boards');
-      input('#community-title','一个好用的抠图网站');
       submit('form[data-community-form="topic"]');
-      assert.match(q('.community-form-status').textContent,/请填写正确的链接/);
-      assert.equal(d.activeElement,q('#community-url'));
-      click('input[name="board"][value="moments"]');
+      assert.match(q('.community-form-status').textContent,/封面/);
+      assert.equal(q('input[name="board"]').value,'moments');
+      input('#community-body','今天终于把工作流跑通了\n\n![封面](/api/community/images/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.webp)');
       const published=new Promise(resolve=>w.addEventListener('hashchange',resolve,{once:true}));
       submit('form[data-community-form="topic"]');
       await published;
       await tick();
-      assert.deepEqual([community.lastTopic.board,community.lastTopic.title],['moments','']);
+      assert.deepEqual([community.lastTopic.board,community.lastTopic.title],['moments','工作流终于跑通了']);
       await until(()=>d.querySelector('.community-thread .community-text.is-moment'),'a moment reads as text');
       // The author's menu opens (a repaint must not close it at once), Escape and outside clicks close it.
       click('[data-action="community-post-menu"]');
@@ -1121,7 +1163,8 @@ test("local prototype DOM flows", async (t) => {
       await until(()=>d.querySelector('[data-action="community-quote"]'),'the reply loads');
       click('[data-action="community-quote"]');
       assert.match(q('.community-quoting').textContent,/回复 远山：试试把权重降到 0\.5/);
-      assert.equal(d.activeElement,q('#community-reply'));
+      const replyEditor=q('#community-reply').closest('[data-inline-editor]');
+      assert.equal(d.activeElement,replyEditor.querySelector('.community-rich-body') || q('#community-reply'), 'quoting focuses the visible reply editor');
       input('#community-reply','谢谢，我去试试');
       submit('form[data-community-form="reply"]');
       await until(()=>community.replies.some((reply)=>reply.body==='谢谢，我去试试'),'the reply is sent');
@@ -1132,9 +1175,10 @@ test("local prototype DOM flows", async (t) => {
       click(`[data-action="community-delete-reply"][data-id="${theirs.id}"]`);
       assert.ok(q('form[data-community-form="delete"]'),"someone else's reply opens the moderation panel");
       click('form[data-community-form="delete"] input[name="mute"][value="7"]');
+      input('form[data-community-form="delete"] [name="reason"]','违规回复，已核实');
       submit('form[data-community-form="delete"]');
       await until(()=>!d.querySelector('form[data-community-form="delete"]'),'the panel closes');
-      assert.deepEqual(community.lastDelete,{violation:true,mute:7});
+      assert.deepEqual(community.lastDelete,{reason:'违规回复，已核实',violation:true,mute:7});
     });
     await t.test('unknown community pages and the way out', async()=>{
       for(const route of ['community/nope','community/boards/nope','community/home/extra']) {

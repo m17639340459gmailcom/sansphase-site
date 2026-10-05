@@ -2,6 +2,7 @@ import { DatabaseSync, backup } from 'node:sqlite';
 import { mkdir, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { communityBoards } from '../../src/community.ts';
 
 // Community posts are durable reader content, so they live in content.db and
 // are covered by the existing content.db backups (reader_uids and
@@ -9,6 +10,57 @@ import { randomUUID } from 'node:crypto';
 // this explicit, backed-up migration adds the community tables.
 const member = (prefix = 'member') => `${prefix}_kind TEXT NOT NULL CHECK(${prefix}_kind IN ('reader','owner')), ${prefix}_id TEXT NOT NULL`;
 const tables: Record<string, string> = {
+  community_conventions: `CREATE TABLE community_conventions (
+  version TEXT PRIMARY KEY,
+  body TEXT NOT NULL,
+  actor_kind TEXT NOT NULL CHECK(actor_kind='owner'),
+  actor_id TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);`,
+  community_audit_events: `CREATE TABLE community_audit_events (
+  id TEXT PRIMARY KEY,
+  actor_kind TEXT NOT NULL CHECK(actor_kind IN ('reader','owner')),
+  actor_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  details TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  mirrored_at TEXT
+);
+CREATE INDEX community_audit_pending_idx ON community_audit_events(mirrored_at,created_at);`,
+  community_rate_events: `CREATE TABLE community_rate_events (
+  id INTEGER PRIMARY KEY,
+  ${member()},
+  action TEXT NOT NULL CHECK(action IN ('topic','reply','image','report','action')),
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX community_rate_member_idx ON community_rate_events(member_kind,member_id,action,created_at);
+CREATE INDEX community_rate_time_idx ON community_rate_events(created_at);`,
+  // Completed request intents are kept independently of orders/content so that
+  // cancellation, deletion and server restarts cannot turn retries into new writes.
+  community_requests: `CREATE TABLE community_requests (
+  ${member()},
+  operation TEXT NOT NULL,
+  request_key TEXT NOT NULL,
+  fingerprint TEXT NOT NULL,
+  result TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(member_kind, member_id, operation, request_key)
+);`,
+  community_banners: `CREATE TABLE community_banners (
+  scope TEXT PRIMARY KEY,
+  version INTEGER NOT NULL DEFAULT 0 CHECK(version >= 0)
+);`,
+  community_banner_entries: `CREATE TABLE community_banner_entries (
+  scope TEXT NOT NULL,
+  position INTEGER NOT NULL CHECK(position >= 0 AND position < 5),
+  topic_id TEXT NOT NULL,
+  topic_board TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  cover TEXT,
+  PRIMARY KEY(scope, position),
+  UNIQUE(scope, topic_id)
+);
+CREATE INDEX community_banner_cover_idx ON community_banner_entries(cover);`,
   community_topics: `CREATE TABLE community_topics (
   id TEXT PRIMARY KEY,
   board TEXT NOT NULL,
@@ -74,6 +126,7 @@ CREATE INDEX community_bookmarks_member_idx ON community_bookmarks(member_kind, 
   id TEXT PRIMARY KEY,
   ${member('uploader')},
   topic_id TEXT,
+  reply_id TEXT,
   position INTEGER NOT NULL DEFAULT 0,
   width INTEGER NOT NULL,
   height INTEGER NOT NULL,
@@ -192,7 +245,13 @@ CREATE INDEX community_notifications_group_idx ON community_notifications(group_
   lifted_at TEXT
 );
 CREATE INDEX community_sanctions_member_idx ON community_sanctions(member_kind, member_id, until);`,
-  // 兑换所：站长上架的数字资源和实物（装扮和道具卡的效果写在代码里，不在这张表）。
+  // Author-defined grouping is separate from a product's functional type.
+  community_shop_categories: `CREATE TABLE community_shop_categories (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL
+);`,
+  // 兑换所：兼容初版 cat 约束，后加 kind 区分可佩戴装扮。
   community_shop_items: `CREATE TABLE community_shop_items (
   id TEXT PRIMARY KEY,
   cat TEXT NOT NULL CHECK(cat IN ('digital','goods')),
@@ -287,6 +346,25 @@ const columns: Array<[string, string, string]> = [
   ['community_replies', 'edited_at', 'TEXT'],
   ['community_replies', 'quote_id', 'TEXT'],
   ['community_replies', 'hidden_at', 'TEXT'],
+  // Reply attachments retain their parent topic for access checks and cleanup.
+  ['community_images', 'reply_id', 'TEXT'],
+  ['community_images', 'purpose', "TEXT NOT NULL DEFAULT 'content' CHECK (purpose IN ('content', 'shop', 'banner'))"],
+  ['community_images', 'banner_scope', 'TEXT'],
+  ['community_images', 'frame_ready', 'INTEGER NOT NULL DEFAULT 0'],
+  ['community_shop_items', 'image', 'TEXT'],
+  ['community_shop_items', 'category', 'TEXT REFERENCES community_shop_categories(id)'],
+  ['community_shop_items', 'kind', "TEXT CHECK (kind IN ('frame', 'color'))"],
+  ['community_shop_items', 'effect', 'TEXT'],
+  ['community_topics', 'deleted_reason', 'TEXT'],
+  ['community_replies', 'deleted_reason', 'TEXT'],
+  // NULL preserves an existing all-board appointment; new appointments store an explicit board array.
+  ['community_members', 'steward_boards', 'TEXT'],
+  // Voluntary public moderation contacts are separate from private reader credentials.
+  ['community_members', 'contact_qq', 'TEXT'],
+  ['community_members', 'contact_email', 'TEXT'],
+  ['community_members', 'agreed_version', 'TEXT'],
+  ['community_members', 'convention_read_version', 'TEXT'],
+  ['community_members', 'convention_read_at', 'INTEGER'],
 ];
 export const communityTables = Object.keys(tables);
 export const communitySchema = Object.values(tables).join('\n');
@@ -296,13 +374,63 @@ const missingParts = (db: DatabaseSync) => {
   const tablesMissing = communityTables.filter(name => !has(name));
   const columnsMissing = columns.filter(([table, column]) => has(table)
     && !(db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).some(row => row.name === column));
-  return { tablesMissing, columnsMissing };
+  const imageSQL = (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='community_images'").get() as { sql: string } | undefined)?.sql || '';
+  const imagesPurposeUpgrade = /CHECK\s*\(\s*purpose\s+IN\s*\(\s*'content'\s*,\s*'shop'\s*\)\s*\)/i.test(imageSQL);
+  const bannerSQL = (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='community_banner_entries'").get() as { sql: string } | undefined)?.sql || '';
+  const bannerCapacityUpgrade = /\bposition\s*<\s*4\b/i.test(bannerSQL);
+  return { tablesMissing, columnsMissing, imagesPurposeUpgrade, bannerCapacityUpgrade };
 };
 // True when content.db has every community table and column.
 export const communitySchemaReady = (db: DatabaseSync) => {
-  const { tablesMissing, columnsMissing } = missingParts(db);
-  return !tablesMissing.length && !columnsMissing.length;
+  const { tablesMissing, columnsMissing, imagesPurposeUpgrade, bannerCapacityUpgrade } = missingParts(db);
+  return !tablesMissing.length && !columnsMissing.length && !imagesPurposeUpgrade && !bannerCapacityUpgrade;
 };
+
+// SQLite cannot widen a column CHECK in place. Recreate only this table from its
+// existing definition, retaining all columns, rows, indexes and triggers.
+function extendImagePurpose(db: DatabaseSync) {
+  const source = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='community_images'").get() as { sql: string };
+  const objects = db.prepare("SELECT sql FROM sqlite_master WHERE tbl_name='community_images' AND type IN ('index','trigger') AND sql IS NOT NULL").all() as Array<{ sql: string }>;
+  const sql = source.sql.replace(/CREATE TABLE\s+["`\[]?community_images["`\]]?/i, 'CREATE TABLE community_images_banner_upgrade')
+    .replace(/CHECK\s*\(\s*purpose\s+IN\s*\(\s*'content'\s*,\s*'shop'\s*\)\s*\)/i, "CHECK(purpose IN ('content','shop','banner'))");
+  if (sql === source.sql || !sql.includes('community_images_banner_upgrade')) throw Error('Image schema cannot be upgraded safely.');
+  const names = (db.prepare('PRAGMA table_info(community_images)').all() as Array<{ name: string }>).map(column => `"${column.name.replaceAll('"', '""')}"`).join(',');
+  db.exec(sql);
+  db.exec(`INSERT INTO community_images_banner_upgrade(${names}) SELECT ${names} FROM community_images; DROP TABLE community_images; ALTER TABLE community_images_banner_upgrade RENAME TO community_images;`);
+  for (const object of objects) db.exec(object.sql);
+}
+
+// Existing local configurations use positions 0–3. Widen only their constraint;
+// preserve the ordered selections, original indexes and audit-related triggers.
+function extendBannerCapacity(db: DatabaseSync) {
+  const source = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='community_banner_entries'").get() as { sql: string };
+  const objects = db.prepare("SELECT sql FROM sqlite_master WHERE tbl_name='community_banner_entries' AND type IN ('index','trigger') AND sql IS NOT NULL").all() as Array<{ sql: string }>;
+  const sql = source.sql.replace(/CREATE TABLE\s+["`\[]?community_banner_entries["`\]]?/i, 'CREATE TABLE community_banner_entries_capacity_upgrade')
+    .replace(/\bposition\s*<\s*4\b/i, 'position < 5');
+  if (sql === source.sql || !sql.includes('community_banner_entries_capacity_upgrade')) throw Error('Banner schema cannot be upgraded safely.');
+  const names = (db.prepare('PRAGMA table_info(community_banner_entries)').all() as Array<{ name: string }>).map(column => `"${column.name.replaceAll('"', '""')}"`).join(',');
+  db.exec(sql);
+  db.exec(`INSERT INTO community_banner_entries_capacity_upgrade(${names}) SELECT ${names} FROM community_banner_entries; DROP TABLE community_banner_entries; ALTER TABLE community_banner_entries_capacity_upgrade RENAME TO community_banner_entries;`);
+  for (const object of objects) db.exec(object.sql);
+}
+
+// One migration snapshot preserves the former automatic highlights. Subsequent
+// pins/features do not update these selections, including deliberately empty ones.
+function snapshotHighlights(db: DatabaseSync) {
+  const topics = db.prepare(`SELECT t.id,t.board,t.pinned,t.featured,t.last_activity_at,
+    EXISTS(SELECT 1 FROM community_images i WHERE i.topic_id=t.id AND i.reply_id IS NULL AND i.deleted_at IS NULL AND i.purpose='content') AS has_image
+    FROM community_topics t WHERE t.deleted_at IS NULL AND t.pending=0 AND t.hidden_at IS NULL
+    ORDER BY t.pinned DESC,t.last_activity_at DESC`).all() as Array<{ id: string; board: string; pinned: number; featured: number; has_image: number }>;
+  const config = db.prepare('INSERT INTO community_banners(scope,version) VALUES(?,?)');
+  const insert = db.prepare("INSERT INTO community_banner_entries(scope,position,topic_id,topic_board,title,cover) VALUES(?,?,?,?,'',NULL)");
+  for (const scope of ['home', ...communityBoards.map(board => board.id)]) {
+    const scoped = topics.filter(topic => scope === 'home' ? topic.board !== 'vip' : topic.board === scope).slice(0, 20);
+    const pinned = scoped.filter(topic => topic.pinned).slice(0, 4);
+    const chosen = [...pinned, ...scoped.filter(topic => !topic.pinned && topic.featured && topic.has_image).slice(0, Math.min(2, 4 - pinned.length))];
+    config.run(scope, chosen.length ? 1 : 0);
+    chosen.forEach((topic, position) => insert.run(scope, position, topic.id, topic.board));
+  }
+}
 
 // Adds whatever is missing, after a snapshot in schema-backups/. A database
 // with the first community tables is upgraded in place; nothing is dropped.
@@ -311,19 +439,29 @@ export async function migrateCommunity(directory: string) {
   await stat(database);
   const db = new DatabaseSync(database);
   try {
-    const { tablesMissing, columnsMissing } = missingParts(db);
-    if (!tablesMissing.length && !columnsMissing.length) return { changed: false };
+    const { tablesMissing, columnsMissing, imagesPurposeUpgrade, bannerCapacityUpgrade } = missingParts(db);
+    if (!tablesMissing.length && !columnsMissing.length && !imagesPurposeUpgrade && !bannerCapacityUpgrade) return { changed: false };
     const root = resolve(directory, 'schema-backups');
     await mkdir(root, { recursive: true });
     const snapshot = resolve(root, `before-community-${Date.now()}-${randomUUID()}.db`);
     await backup(db, snapshot);
+    // A table rebuild must not execute ON DELETE actions on referencing rows.
+    // Keep references intact, then check them inside the transaction before committing.
+    const foreignKeys = Number((db.prepare('PRAGMA foreign_keys').get() as { foreign_keys: number }).foreign_keys);
+    const rebuildTables = imagesPurposeUpgrade || bannerCapacityUpgrade;
+    if (rebuildTables) db.exec('PRAGMA foreign_keys=OFF');
     db.exec('BEGIN IMMEDIATE');
     try {
       for (const name of tablesMissing) db.exec(tables[name]);
       // Tables created just now also need the later columns.
       for (const [table, column, type] of missingParts(db).columnsMissing) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+      if (imagesPurposeUpgrade) extendImagePurpose(db);
+      if (bannerCapacityUpgrade) extendBannerCapacity(db);
+      if (tablesMissing.includes('community_banners')) snapshotHighlights(db);
+      if (rebuildTables && db.prepare('PRAGMA foreign_key_check').all().length) throw Error('Community table migration has invalid foreign-key references.');
       db.exec('COMMIT');
     } catch (error) { db.exec('ROLLBACK'); throw error; }
+    finally { if (rebuildTables && foreignKeys) db.exec('PRAGMA foreign_keys=ON'); }
     return { changed: true, backup: snapshot };
   } finally { db.close(); }
 }

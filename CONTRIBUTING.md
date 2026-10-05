@@ -8,11 +8,11 @@
 
 ## 工作分支与构建
 
-Node.js 24、pnpm 11.19.0：
+Node.js 24.21.0 或同主版本更高补丁、pnpm 11.19.0：
 
 ```sh
 git fetch origin
-git switch -c feature/你的功能 origin/codex/release-preparation
+git switch -c codex/你的功能 origin/codex/release-preparation
 pnpm install --frozen-lockfile
 pnpm build
 pnpm test
@@ -32,6 +32,10 @@ node --input-type=module -e "import {createPreviewServer} from './server.mjs'; c
 打开 `http://127.0.0.1:4176/#/home`。这个方式没有真实内容和登录服务，列表为空是预期，不能用它验收账号与发布。
 
 完整业务开发需要站长提供的脱敏测试数据或全新隔离数据。私有配置默认 `.local/payload-env.json`，也可用 `PAYLOAD_CONFIG_FILE` 指定，配置妥当后运行 `pnpm dev`。目前没有一键生成完整站点的初始化向导；不要复制生产密码或伪造已登录状态。
+
+主站及社区样例预览使用 `node scripts/catalog-fixture-preview.mjs`，默认地址 `http://127.0.0.1:4177/#/community/home`。它创建虚构内容和临时社区数据库，正常退出后清除临时数据；本地身份预览仅用于此服务，正式服务不开放。它不接 SMTP 或真实读者注册，不能代替邮箱、账号和生产数据验收。
+
+成长经验与 VIP1–VIP8 自动晋级暂未启用。界面倍率、草案阈值和真实 VIP 有效期属于不同数据；继续开发时先读 [经验规则内部草案](docs/COMMUNITY-EXPERIENCE-RULES.md)，不要从会员有效布尔值推导用户档位或伪造进度。主站排版与社区样式分别在模块内维护。
 
 集成测试自行创建临时数据库，不需要共享真实用户数据。实际邮件投递、真实支付等外部能力须独立验证。
 

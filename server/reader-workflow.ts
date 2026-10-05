@@ -1,16 +1,16 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { resolve } from 'node:path';
 
 type RegistrationInput = { email: string; nickname: string; phone: string; password: string };
-type RegistrationRow = { id: string; email: string; nickname: string; phone: string; password_cipher: string; created_at: string; expires_at: string };
+type RegistrationRow = { id: string; email: string; nickname: string; phone: string; password_cipher: string; token_hash: string; failed_attempts: number; created_at: string; expires_at: string };
 type ExpiredRegistrationRow = { id: string; email: string; createdAt: string; expiresAt: string };
 type ProfileKind = 'avatar' | 'signature';
 type ProfileRow = { id: string; reader_id: string; kind: ProfileKind; proposed_value: string; created_at: string };
 type CleanupFileRow = { id: string; filename: string; reason: string; created_at: string; last_error: string | null };
+type CleanupAccountRow = { reader_id: string; avatar: string | null; action: string; created_at: string; last_error: string | null };
 
 export const registrationLifetimeMs = 5 * 60 * 1000;
-const tokenDigest = (token: string) => createHash('sha256').update(token).digest('hex');
 const nowIso = () => new Date().toISOString();
 const avatarIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -27,7 +27,7 @@ export function createReaderWorkflow(directory: string, secret: string) {
     try { db.exec('PRAGMA busy_timeout = 5000'); return operation(db); }
     finally { db.close(); }
   };
-  withDb(db => db.exec(`
+  withDb(db => { db.exec(`
     CREATE TABLE IF NOT EXISTS reader_registration_requests (
       id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, nickname TEXT NOT NULL,
       phone TEXT NOT NULL, password_cipher TEXT NOT NULL,
@@ -44,7 +44,20 @@ export function createReaderWorkflow(directory: string, secret: string) {
       id TEXT PRIMARY KEY, filename TEXT NOT NULL UNIQUE, reason TEXT NOT NULL,
       created_at TEXT NOT NULL, last_error TEXT
     );
-  `));
+    CREATE TABLE IF NOT EXISTS reader_account_cleanup (
+      reader_id TEXT PRIMARY KEY, avatar TEXT, action TEXT NOT NULL, created_at TEXT NOT NULL, last_error TEXT
+    );
+    CREATE TABLE IF NOT EXISTS reader_auth_attempts (
+      id INTEGER PRIMARY KEY, attempt_key TEXT NOT NULL, happened_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS reader_auth_attempts_key_time_idx ON reader_auth_attempts(attempt_key,happened_at);
+  `);
+    if (!db.prepare('PRAGMA table_info(reader_registration_requests)').all().some(row => row.name === 'failed_attempts'))
+      db.exec('ALTER TABLE reader_registration_requests ADD COLUMN failed_attempts INTEGER NOT NULL DEFAULT 0');
+  });
+  // Keep the existing column for a compatible workflow upgrade. It now stores
+  // an email/request-scoped HMAC, never a six-digit code or an old link token.
+  const codeDigest = (email: string, id: string, code: string) => createHmac('sha256', key).update(`email-code-v1\0${email}\0${id}\0${code}`).digest('hex');
   const encrypt = (value: string) => {
     const iv = randomBytes(12);
     const cipher = createCipheriv('aes-256-gcm', key, iv);
@@ -61,29 +74,58 @@ export function createReaderWorkflow(directory: string, secret: string) {
     password: decrypt(row.password_cipher), createdAt: row.created_at, expiresAt: row.expires_at }) : null;
   return {
     putRegistration({ email, nickname, phone, password }: RegistrationInput, now = Date.now()) {
-      const token = randomBytes(32).toString('base64url');
-      const value = { id: randomUUID(), email, nickname, phone, cipher: encrypt(password), digest: tokenDigest(token),
+      let code = randomInt(1000000).toString().padStart(6, '0');
+      const value = { id: randomUUID(), email, nickname, phone, cipher: encrypt(password),
         createdAt: new Date(now).toISOString(), expiresAt: new Date(now + registrationLifetimeMs).toISOString() };
       withDb(db => {
         db.exec('BEGIN IMMEDIATE');
         try {
+          const previous = db.prepare('SELECT id,token_hash FROM reader_registration_requests WHERE email=?').get(email) as Pick<RegistrationRow, 'id' | 'token_hash'> | undefined;
+          while (previous && previous.token_hash === codeDigest(email, previous.id, code)) code = randomInt(1000000).toString().padStart(6, '0');
           db.prepare('DELETE FROM reader_registration_requests WHERE email=?').run(email);
           db.prepare(`INSERT INTO reader_registration_requests
             (id,email,nickname,phone,password_cipher,token_hash,created_at,expires_at)
-            VALUES (?,?,?,?,?,?,?,?)`).run(value.id, email, nickname, phone, value.cipher, value.digest, value.createdAt, value.expiresAt);
+            VALUES (?,?,?,?,?,?,?,?)`).run(value.id, email, nickname, phone, value.cipher, codeDigest(email, value.id, code), value.createdAt, value.expiresAt);
           db.exec('COMMIT');
         } catch (error) { db.exec('ROLLBACK'); throw error; }
       });
-      return { id: value.id, token, expiresAt: value.expiresAt };
+      return { id: value.id, code, expiresAt: value.expiresAt };
     },
-    registrationByToken(token: string, now = Date.now()) {
-      if (typeof token !== 'string' || token.length < 20 || token.length > 256) return null;
-      return withDb(db => registration(db.prepare('SELECT * FROM reader_registration_requests WHERE token_hash=? AND expires_at>?')
-        .get(tokenDigest(token), new Date(now).toISOString()) as RegistrationRow | undefined));
+    registrationByCode(email: string, requestId: string, code: string, now = Date.now()) {
+      return withDb(db => {
+        db.exec('BEGIN IMMEDIATE');
+        try {
+          const row = db.prepare('SELECT * FROM reader_registration_requests WHERE email=? AND id=? AND expires_at>? AND failed_attempts<5')
+            .get(email, requestId, new Date(now).toISOString()) as RegistrationRow | undefined;
+          if (!row) { db.exec('COMMIT'); return null; }
+          const supplied = Buffer.from(codeDigest(email, row.id, code), 'hex'), stored = Buffer.from(row.token_hash, 'hex');
+          if (!/^\d{6}$/.test(code) || stored.length !== supplied.length || !timingSafeEqual(stored, supplied)) {
+            db.prepare('UPDATE reader_registration_requests SET failed_attempts=failed_attempts+1 WHERE id=?').run(row.id);
+            db.exec('COMMIT'); return null;
+          }
+          const pending = registration(row);
+          db.exec('COMMIT'); return pending;
+        } catch (error) { db.exec('ROLLBACK'); throw error; }
+      });
     },
     registrationByEmail(email: string, now = Date.now()) {
       return withDb(db => registration(db.prepare('SELECT * FROM reader_registration_requests WHERE email=? AND expires_at>?')
         .get(email, new Date(now).toISOString()) as RegistrationRow | undefined));
+    },
+    consumeAuthLimits(limits: ReadonlyArray<{ key: string; limit: number; windowMs: number }>, now = Date.now()) {
+      return withDb(db => {
+        db.exec('BEGIN IMMEDIATE');
+        try {
+          db.prepare('DELETE FROM reader_auth_attempts WHERE happened_at<=?').run(now - 86400000);
+          const keys = limits.map(rule => ({ ...rule, digest: createHmac('sha256', key).update(`auth-rate-v1\0${rule.key}`).digest('hex') }));
+          for (const rule of keys) {
+            const count = Number(db.prepare('SELECT COUNT(*) AS n FROM reader_auth_attempts WHERE attempt_key=? AND happened_at>?').get(rule.digest, now - rule.windowMs)?.n);
+            if (count >= rule.limit) { db.exec('COMMIT'); return false; }
+          }
+          for (const rule of keys) db.prepare('INSERT INTO reader_auth_attempts(attempt_key,happened_at) VALUES (?,?)').run(rule.digest, now);
+          db.exec('COMMIT'); return true;
+        } catch (error) { db.exec('ROLLBACK'); throw error; }
+      });
     },
     removeRegistration(id: string) { return withDb(db => db.prepare('DELETE FROM reader_registration_requests WHERE id=?').run(id).changes === 1); },
     expiredRegistrations(now = Date.now(), limit = 100): ExpiredRegistrationRow[] {
@@ -112,17 +154,33 @@ export function createReaderWorkflow(directory: string, secret: string) {
     profiles(limit = 100) { return withDb(db => db.prepare('SELECT * FROM reader_profile_requests ORDER BY created_at LIMIT ?').all(Math.min(1000, Math.max(1, limit))) as ProfileRow[]); },
     removeProfile(id: string) { return withDb(db => db.prepare('DELETE FROM reader_profile_requests WHERE id=?').run(id).changes === 1); },
     removeProfilesFor(readerId: string) { return withDb(db => {
-      const rows = db.prepare('SELECT * FROM reader_profile_requests WHERE reader_id=?').all(readerId) as ProfileRow[];
-      db.prepare('DELETE FROM reader_profile_requests WHERE reader_id=?').run(readerId);
-      return rows;
+      db.exec('BEGIN IMMEDIATE');
+      try {
+        const rows = db.prepare('SELECT * FROM reader_profile_requests WHERE reader_id=?').all(readerId) as ProfileRow[];
+        for (const row of rows) if (row.kind === 'avatar' && avatarIdPattern.test(row.proposed_value)) {
+          db.prepare(`INSERT INTO reader_file_cleanup (id,filename,reason,created_at) VALUES (?,?,?,?)
+            ON CONFLICT(filename) DO NOTHING`).run(randomUUID(), `pending-reader-avatar-${row.proposed_value}.webp`, 'reader-deleted', nowIso());
+        }
+        db.prepare('DELETE FROM reader_profile_requests WHERE reader_id=?').run(readerId);
+        db.exec('COMMIT'); return rows;
+      } catch (error) { db.exec('ROLLBACK'); throw error; }
     }); },
     queueFile(filename: string, reason: string) {
-      if (!/^(?:reader-avatar|pending-reader-avatar)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.webp$/.test(filename)) throw Error('Invalid reader cleanup filename');
+      if (!/^(?:reader-avatar|pending-reader-avatar|community-image|community-thumb)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.webp$/.test(filename)) throw Error('Invalid reader cleanup filename');
       withDb(db => db.prepare(`INSERT INTO reader_file_cleanup (id,filename,reason,created_at) VALUES (?,?,?,?)
         ON CONFLICT(filename) DO NOTHING`).run(randomUUID(), filename, reason, nowIso()));
     },
     cleanupFiles(limit = 100) { return withDb(db => db.prepare('SELECT * FROM reader_file_cleanup ORDER BY created_at LIMIT ?').all(Math.min(1000, Math.max(1, limit))) as CleanupFileRow[]); },
     fileCleaned(id: string) { withDb(db => db.prepare('DELETE FROM reader_file_cleanup WHERE id=?').run(id)); },
     fileFailed(id: string, error: unknown) { withDb(db => db.prepare('UPDATE reader_file_cleanup SET last_error=? WHERE id=?').run(String(error).slice(0, 300), id)); },
+    queueAccount(readerId: string, avatar: string | null, action: string) {
+      withDb(db => db.prepare(`INSERT INTO reader_account_cleanup (reader_id,avatar,action,created_at) VALUES (?,?,?,?)
+        ON CONFLICT(reader_id) DO NOTHING`).run(readerId, avatar, action, nowIso()));
+    },
+    cleanupAccounts(limit = 100) {
+      return withDb(db => db.prepare('SELECT * FROM reader_account_cleanup ORDER BY created_at LIMIT ?').all(Math.min(1000, Math.max(1, limit))) as CleanupAccountRow[]);
+    },
+    accountCleaned(readerId: string) { withDb(db => db.prepare('DELETE FROM reader_account_cleanup WHERE reader_id=?').run(readerId)); },
+    accountFailed(readerId: string, error: unknown) { withDb(db => db.prepare('UPDATE reader_account_cleanup SET last_error=? WHERE reader_id=?').run(String(error).slice(0, 300), readerId)); },
   };
 }

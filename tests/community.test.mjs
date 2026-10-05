@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from 'node:fs';
+import { JSDOM } from 'jsdom';
 import {
   communityBoards, communityTabs, communityView, communityRoute, inCommunityArea, sortTopics, hotTopics,
   communityHeaderHTML, communityAccountHTML, communityHomeHTML, communityBoardsHTML, communityBoardHTML, communityTagHTML,
   communityBookmarksHTML, communityTopicsHTML, communityBodyHTML, communityLandingHTML, plainText,
-  memberHref, inboxHref, shopHref, manageHref, stardustHref, communityRules, communityTags, checkinReward, beijingDay,
+  memberHref, inboxHref, shopHref, manageHref, stardustHref, communityRules, communityTags, checkinReward, checkinMonth, beijingDay,
 } from "../src/community.mjs";
 import { communityPostHTML, communityComposeHTML, editingFrom } from "../src/community-post.mjs";
 import {
@@ -19,6 +20,11 @@ const icons = { menu: "", close: "", left: "", plus: "" };
 const ui = { star: "<i-star></i-star>", reply: "<i-reply></i-reply>", lock: "<i-lock></i-lock>", pin: "<i-pin></i-pin>", award: "<i-award></i-award>", search: "", plus: "", trash: "<i-trash></i-trash>", copy: "", send: "", help: "<i-help></i-help>", bell: "<i-bell></i-bell>" };
 const now = Date.parse("2026-09-30T12:00:00Z");
 const common = { t, esc, now, icons: ui };
+const textAt = (markup, selector) => {
+  const dom = new JSDOM(markup);
+  try { return dom.window.document.querySelector(selector)?.textContent; }
+  finally { dom.window.close(); }
+};
 const person = (name, overrides = {}) => ({ name, role: "reader", uid: name === "林间" ? "u1" : "u2", avatar: null, vip: false, level: 1, steward: false, frame: null, color: null, ...overrides });
 const owner = { name: "無相", role: "owner", uid: "owner", avatar: null, vip: true, level: 4, steward: false, frame: null, color: null };
 const topic = (id, overrides = {}) => ({
@@ -26,8 +32,8 @@ const topic = (id, overrides = {}) => ({
   createdAt: "2026-09-29T08:00:00Z", lastActivityAt: "2026-09-29T08:00:00Z", replies: 0, likes: 0, ...overrides,
 });
 const me = (overrides = {}) => ({
-  ...person("林间"), owner: false, mod: false, balance: 30, checkedIn: false, streak: 6, nextReward: { total: 20, bonus: 15 },
-  gainedToday: 0, behaviourToday: 0, dailyCap: 60, unread: { all: 0, reply: 0, thanks: 0, system: 0 }, agreed: true,
+  ...person("林间"), owner: false, mod: false, balance: 30, checkedIn: false, streak: 6, nextReward: { total: 1, bonus: 0 },
+  gainedToday: 0, behaviourToday: 0, dailyCap: 6, unread: { all: 0, reply: 0, thanks: 0, system: 0 }, agreed: true,
   inventory: { makeup: 0, pin: 0, highlight: 0 }, muted: null, ...overrides,
 });
 const ready = (data) => ({ state: "ready", data });
@@ -35,6 +41,25 @@ const listing = (items, total = items.length, extra = {}) => ready({ items, tota
 const stats = (topics, repliesToday = 0, latest = null) => ({ topics, repliesToday, latest });
 const summary = (overrides = {}) => ready({ total: 0, repliesToday: 0, checkinsToday: 0, boards: {}, tags: {}, hot: [], ...overrides });
 const count = (html, pattern) => [...html.matchAll(pattern)].length;
+
+test('management is a dedicated workspace with role navigation, product artwork and required deletion reasons', () => {
+  for (const owner of [true, false]) {
+    const html = communityManageHTML({ manage: ready(manage({ owner, content: [topic('t1')] })), tab: 'content', deleting: { kind: 'topic', id: 't1' }, ...common });
+    const doc = new JSDOM(html).window.document;
+    assert.ok(doc.querySelector('.community-management-page > .community-management-nav'));
+    assert.match(doc.querySelector('h1').textContent, owner ? /作者/ : /版主/);
+    assert.ok(doc.querySelector('[data-community-form="delete"] [name="reason"][required]'));
+    assert.ok(doc.querySelector('[data-action="community-queue-delete"]'));
+    assert.equal(Boolean(doc.querySelector('a[href="#/community/manage/items"]')), owner);
+    assert.ok(doc.querySelector('[data-action="community-browse-mode"]'));
+  }
+  const html = communityManageHTML({ manage: ready(manage()), tab: 'items', itemEditing: { id: null }, ...common });
+  assert.match(html, /data-community-item-upload/);
+  assert.match(html, /image\/gif/);
+  const menu = communityAccountHTML({ ...common, me: me({ management: { role: 'owner', browsingAsReader: true } }) });
+  assert.match(menu, /data-action="community-browse-mode" data-reader="false"/);
+  assert.doesNotMatch(menu, /href="#\/community\/manage"/);
+});
 
 test('recommended topics follow pinned topics in time sorts and cannot be recommended twice', () => {
   const items = [topic('fresh', { createdAt: '2026-09-30T10:00:00Z', lastActivityAt: '2026-09-30T10:00:00Z' }), topic('recommended', { paidPin: true }), topic('pinned', { pinned: true })];
@@ -60,14 +85,6 @@ test('mobile inventory places the small card and its name in separate grid cells
   assert.match(css, /\.community-inv \.community-sart \.community-holo\s*\{[^}]*width:\s*\d+px;[^}]*height:\s*\d+px;[^}]*transform:\s*none/);
 });
 
-test('constellation labels remain outside the scaled SVG with readable CSS pixels', () => {
-  const data = { checkedIn: false, streak: 6, balance: 0, vip: false, month: '2026-09', days: [], checkinsToday: 0, earlyBirds: [], makeup: { left: 0, days: [], cards: 0 }, badges: [] };
-  const html = communityCheckinHTML({ checkin: ready(data), ...common });
-  assert.equal(count(html, /class="community-cs-day/g), 5);
-  const css = readFileSync(new URL('../src/community.css', import.meta.url), 'utf8');
-  assert.match(css, /\.community-cs-day\s*\{[^}]*font:\s*24px/);
-});
-
 test('recommendation flag has its own neutral style', () => {
   const css = readFileSync(new URL('../src/community.css', import.meta.url), 'utf8');
   assert.match(css, /\.community-flag\.is-recommend\s*\{[^}]*border[^}]*background[^}]*color/);
@@ -79,6 +96,20 @@ test('owner stardust and own profile offer no check-in reminder', () => {
   assert.doesNotMatch(dust, /今天还没签到|去签到|href="#\/community\/checkin"/);
   const profile = communityMemberHTML({ member: ready(memberPage({ person: owner, self: true, quick: { balance: 0, checkedIn: false, unread: 0, orders: 0 } })), me: ownerMe, ...common });
   assert.doesNotMatch(profile, /还没签到|href="#\/community\/checkin"/);
+});
+
+test('check-in reminders distinguish real readers from read-only management previews', () => {
+  const render = identity => new JSDOM(communityHomeHTML({ ...common, summary: ready({ total: 0, boards: {}, hot: [] }), list: ready({ items: [], total: 0, page: 1, pageSize: 20 }), sort: 'active', members: false, me: ready(identity) }));
+  const reader = render(me());
+  assert.ok(reader.window.document.querySelector('[data-action="community-checkin"]'), 'ordinary readers retain their check-in action');
+  reader.window.close();
+  const authorPreview = render(me({ ...owner, owner: false, mod: false, management: { role: 'owner', browsingAsReader: true } }));
+  assert.equal(authorPreview.window.document.querySelector('.community-ck-pill'), null, 'an owner perspective switch must not fabricate check-in eligibility');
+  authorPreview.window.close();
+  const moderatorPreview = render(me({ management: { role: 'steward', browsingAsReader: true } }));
+  assert.equal(moderatorPreview.window.document.querySelector('[data-action="community-checkin"]'), null);
+  assert.equal(moderatorPreview.window.document.querySelector('.community-ck-pill'), null, 'the moderator preview adds no perspective reminder');
+  moderatorPreview.window.close();
 });
 
 test("community routes: the landing page, pages, boards, posts, members and the tabs of tabbed pages", () => {
@@ -142,7 +173,7 @@ test("the community header keeps one navigation, marks the current tab and a che
   const html = communityHeaderHTML({ view: "shop", t, icons, actionsHTML: "<button data-action=\"menu\"></button>" });
   const nav = html.slice(html.indexOf('id="navigation"'), html.indexOf("</nav>"));
   assert.deepEqual([...nav.matchAll(/href="([^"]+)"/g)].map((m) => m[1]),
-    ["#/community/home", "#/community/boards", "#/community/checkin", "#/community/shop", "#/community/rank"]);
+    ["#/community/home", "#/community/boards", "#/community/checkin", "#/community/shop", "#/community/rank", "#/community/rules"]);
   assert.match(html, /<a href="#\/community\/shop" aria-current="page">/);
   assert.doesNotMatch(html, /href="#\/home"|community-back/, "no back link in the corner");
   assert.match(html, /<a href="#\/community\/home" class="community-brand"/);
@@ -156,13 +187,13 @@ test("the community header keeps one navigation, marks the current tab and a che
     /href="#\/community\/checkin">签到<i class="community-nav-dot" aria-hidden="true"><\/i><span class="sr-only">（今天还没签到）<\/span><\/a>/);
 });
 
-test("the account menu: notifications, the member's own pages, moderation for moderators, and the way back", () => {
+test("the account menu keeps personal pages and moderation without duplicate site or shop links", () => {
   const menu = (options) => communityAccountHTML({ t, esc, icons: { "chevron-down": "", left: "", bell: "<i-bell></i-bell>" }, ...options });
   const guest = menu({});
   assert.match(guest, /<span>登录 \/ 注册<\/span>/);
   assert.match(guest, /href="#\/account" data-reader-return><span>登录 \/ 注册<\/span>/);
   assert.doesNotMatch(guest, /community-bell|我的收藏/, "a guest has no notifications or bookmarks");
-  assert.match(guest, /<a role="menuitem" class="community-menu-out" href="#\/home"><span>返回無相主站<\/span><\/a>/);
+  assert.doesNotMatch(guest, /href="#\/home"|href="#\/community\/shop"/);
   const reader = menu({ nickname: "<林间>" });
   assert.match(reader, /data-action="community-account" aria-haspopup="menu" aria-expanded="false"/);
   assert.match(reader, /&lt;林间&gt;/);
@@ -174,17 +205,18 @@ test("the account menu: notifications, the member's own pages, moderation for mo
   const author = menu({ author: true });
   assert.match(author, /<span>作者台<\/span>/);
   assert.match(author, /<button type="button" role="menuitem" data-author-login><span>打开作者台<\/span><\/button>/);
-  assert.match(author, /href="#\/community\/manage"><span>社区管理<\/span>/);
+  assert.doesNotMatch(author, /href="#\/community\/manage"/, 'wait for the verified community account before exposing management');
   // Once the community knows the member: the bell, a head with level and UID, and their pages.
   const signedIn = menu({ nickname: "林间", me: me({ balance: 42, unread: { all: 3, reply: 3, thanks: 0, system: 0 } }) });
   assert.match(signedIn, /^<a class="community-bell" href="#\/community\/inbox" aria-label="通知，3 条未读"><i-bell><\/i-bell><b>3<\/b><\/a>/);
-  assert.match(signedIn, /class="account-button has-avatar"[^>]*><span class="community-av community-av-xs" aria-hidden="true"><span style="--h:\d+">林<\/span><\/span><span>林间<\/span>/);
-  assert.match(signedIn, /<div class="community-menu-head">[\s\S]*<b>林间<\/b><span>巡天 · UID u1<\/span>/);
+  assert.equal(textAt(signedIn, '.account-button.has-avatar > .community-uname'), '林间');
+  assert.equal(textAt(signedIn, '.community-menu-head b'), '林间');
+  assert.equal(textAt(signedIn, '.community-menu-head div > span'), '巡天 · UID u1');
   assert.deepEqual([...signedIn.matchAll(/role="menuitem" (?:class="[^"]+" )?href="([^"]+)"/g)].map((m) => m[1]),
-    ["#/community/u/u1", "#/community/stardust", "#/community/shop", "#/community/inbox", "#/community/bookmarks", "#/account", "#/home"]);
+    ["#/community/u/u1", "#/community/stardust", "#/community/inbox", "#/community/bookmarks", "#/account"]);
   assert.match(signedIn, /<span>我的星尘<\/span><span class="community-menu-num">42<\/span>/);
   assert.match(signedIn, /<span>通知<\/span><span class="community-menu-badge">3<\/span>/);
-  assert.match(menu({ nickname: "协管", me: me({ mod: true, steward: true, manageTodo: 4 }) }), /协管 · UID[\s\S]*href="#\/community\/manage"><span>社区管理<\/span><span class="community-menu-badge">4<\/span>/);
+  assert.match(menu({ nickname: "协管", me: me({ mod: true, steward: true, manageTodo: 4 }) }), /协管 · UID[\s\S]*href="#\/community\/manage"><span>管理台<\/span><span class="community-menu-badge">4<\/span>/);
   assert.match(menu({ nickname: "林间", me: me({ unread: { all: 120, reply: 0, thanks: 0, system: 120 } }) }), /<b>99\+<\/b>/);
   assert.doesNotMatch(menu({ nickname: "林间", me: me() }), /<b>\d/, "no count when all is read");
 });
@@ -198,8 +230,8 @@ test("community home shows honest empty and loading states", () => {
   assert.match(html, /href="#\/community\/boards\/vip"[^>]*>[\s\S]*?community-board-lock/, "non-members see the members board locked");
   assert.doesNotMatch(communityHomeHTML({ summary: summary(), list: listing([]), sort: "active", members: true, ...common }), /community-board-lock/);
   assert.match(html, /data-action="community-sort" data-sort="active" aria-pressed="true"/);
-  const todo = communityHomeHTML({ summary: summary(), list: listing([]), sort: "active", members: false, me: ready(me({ checkedIn: false, streak: 6, nextReward: { total: 20, bonus: 15 } })), ...common });
-  assert.match(todo, /今天还没签到 · 签到后连签 7 天 <b>\+20<\/b>/);
+  const todo = communityHomeHTML({ summary: summary(), list: listing([]), sort: "active", members: false, me: ready(me({ checkedIn: false, streak: 6, nextReward: { total: 1, bonus: 0 } })), ...common });
+  assert.match(todo, /今天还没签到 · 签到后连签 7 天 <b>\+1<\/b>/);
   const bar = html.slice(html.indexOf('class="community-sort'), html.indexOf('class="community-results"'));
   assert.match(bar, /class="community-sort-actions"><form class="community-search" role="search" data-community-form="search">[\s\S]*name="q"[^>]*maxlength="40" value=""/, "search sits right of the sort tabs");
   assert.match(bar, /<a class="community-post" href="#\/community\/new">/, "and so does 发帖");
@@ -228,9 +260,9 @@ test("topic rows follow the demo: avatars, level and VIP marks, decorations, fla
   assert.match(rows, /class="community-topic-board"[^>]*href="#\/community\/boards\/qa">学习问答<\/a>/);
   assert.match(rows, /<span class="community-who"><a class="community-uname" href="#\/community\/u\/owner">無相<\/a><span class="community-role">站长<\/span><\/span>/);
   assert.match(rows, /<span class="community-uname">&lt;b&gt;x&lt;\/b&gt;<\/span><span class="community-lv is-lv1" title="L1">巡天<\/span>/);
-  assert.match(rows, /<time datetime="2026-09-30T11:30:00Z">远山 30 分钟前回复<\/time>/, "the latest replier");
+  assert.equal(textAt(rows, 'time[datetime="2026-09-30T11:30:00Z"]'), '远山 30 分钟前回复', 'the latest replier');
   assert.match(rows, /<time datetime="2026-09-29T08:00:00Z">1 天前<\/time>/, "otherwise when it was posted");
-  assert.match(rows, /class="community-topic-replies" href="#\/post\/a" tabindex="-1" aria-label="3 条回复，0 个赞"><i-reply><\/i-reply><span>3<\/span>/);
+  assert.match(rows, /class="community-topic-replies" href="#\/post\/a" tabindex="-1" aria-label="3 条回复，0 个赞"><small>0 赞<\/small><span><i-reply><\/i-reply>3<\/span>/);
   assert.match(html, /<dd>25<\/dd><\/div><div><dt>24 小时回复<\/dt><dd>4<\/dd>/);
   assert.match(html, /--w:100%"><i aria-hidden="true"><\/i><span>学习问答<\/span><span class="community-board-count">24</, "the busiest board has the full bar");
   assert.match(html, /data-action="community-more"[^>]*>加载更多 · 还有 23 个/);
@@ -258,6 +290,33 @@ test("topic rows follow the demo: avatars, level and VIP marks, decorations, fla
   assert.match(rows2, /class="community-topic-thumbs"[^>]*><img src="\/api\/community\/images\/i1\.thumb\.webp"[^>]*><img src="\/api\/community\/images\/i2\.thumb\.webp"/);
   assert.equal(count(rows2, /class="community-tag"/g), 2, "two tags at most in a row");
   assert.match(rows2, /<small>4 赞<\/small>/);
+});
+
+test('discussion previews use escaped API excerpts and do not duplicate untitled moments', () => {
+  const dom = new JSDOM(communityTopicsHTML([
+    topic('work', { board: 'showcase', excerpt: '记录光影、构图和 <script> 的尝试。' }),
+    topic('moment', { board: 'moments', hasTitle: false, title: '随想', excerpt: '今晚的星空很安静。' }),
+    topic('titled-moment', { board: 'moments', hasTitle: true, excerpt: '一次小练习。' }),
+    topic('empty'),
+  ], common));
+  try {
+    const rows = dom.window.document.querySelectorAll('.community-topic');
+    assert.equal(rows[0].querySelector('.community-topic-excerpt')?.textContent, '记录光影、构图和 <script 的尝试。');
+    assert.equal(rows[0].querySelector('script'), null);
+    assert.equal(rows[1].querySelector('.community-topic-excerpt'), null, 'the moment already uses its excerpt as the heading');
+    assert.equal(rows[2].querySelector('.community-topic-excerpt')?.textContent, '一次小练习。');
+    assert.equal(rows[3].querySelector('.community-topic-excerpt'), null, 'do not invent a preview when the API supplies none');
+  } finally { dom.window.close(); }
+});
+
+test("topic rows expose escaped creation metadata without changing their latest-reply time", () => {
+  const latest = { author: person("远山"), at: "2026-09-30T11:00:00Z" };
+  const html = communityTopicsHTML([topic("dates", { createdAt: "2026-09-28T08:00:00Z", lastReply: latest })], common);
+  assert.match(html, /<article[^>]*data-created-at="2026-09-28T08:00:00Z"/);
+  assert.equal(textAt(html, 'time[datetime="2026-09-30T11:00:00Z"]'), '远山 1 小时前回复');
+  const escaped = communityTopicsHTML([topic("escaped", { createdAt: 'bad" data-unsafe="value', lastReply: latest })], common);
+  assert.match(escaped, /data-created-at="bad&quot; data-unsafe=&quot;value"/);
+  assert.doesNotMatch(escaped, / data-unsafe="value"/);
 });
 
 test("post text: paragraphs, bold, code, links, quotes, lists and @mentions, always escaped", () => {
@@ -318,8 +377,8 @@ test("board cards and a board page follow the demo", () => {
   assert.match(tagPage, /data-community="tag" data-tag="ComfyUI"[\s\S]*<h1>#ComfyUI<\/h1>[\s\S]*community-sort/);
   assert.match(communityBookmarksHTML({ list: listing([]), t, esc, icons: ui }), /<h1>我的收藏<\/h1>[\s\S]*还没有收藏/);
   const pill = (overrides) => communityHomeHTML({ summary: summary({ checkinsToday: 3 }), list: listing([]), sort: "active", members: false, ...common, me: ready(me(overrides)) });
-  assert.match(pill({}), /<dt>今日签到<\/dt><dd>3<\/dd>[\s\S]*community-ck-pill is-todo[\s\S]*签到后连签 7 天 <b>\+20<\/b>[\s\S]*data-action="community-checkin"/);
-  assert.match(pill({ checkedIn: true, streak: 7, nextReward: { total: 5, bonus: 0 } }), /<a class="community-ck-pill is-done" href="#\/community\/checkin">[\s\S]*已连续签到 <b>7<\/b> 天 · 明天 \+5/);
+  assert.match(pill({}), /<dt>今日签到<\/dt><dd>3<\/dd>[\s\S]*community-ck-pill is-todo[\s\S]*签到后连签 7 天 <b>\+1<\/b>[\s\S]*data-action="community-checkin"/);
+  assert.match(pill({ checkedIn: true, streak: 7, nextReward: { total: 1, bonus: 0 } }), /<a class="community-ck-pill is-done" href="#\/community\/checkin">[\s\S]*已连续签到 <b>7<\/b> 天 · 明天 \+1/);
 });
 
 test("the compose form changes with the board and mirrors the server's rules", () => {
@@ -351,14 +410,16 @@ test("the compose form changes with the board and mirrors the server's rules", (
   assert.match(show, /name="body"[^>]*minlength="0" maxlength="10000" placeholder/, "the text of a work is optional");
   assert.equal(count(show, /name="promptMode"/g), 3);
   assert.match(show, /name="promptMode" value="public" checked/);
-  assert.match(show, /data-price-row hidden><label class="sr-only" for="community-prompt-price">解锁价格<\/label><input type="range" id="community-prompt-price" name="promptPrice" min="5" max="50" step="5" value="10">/);
+  assert.match(show, /data-price-row hidden>[\s\S]*<input type="number" id="community-prompt-price" name="promptPrice" min="5" max="50" step="1" value="10"[^>]*disabled/);
   const tools = compose({ board: "tools" });
   assert.match(tools, /id="community-url" name="url" type="url"[^>]*required/);
   assert.match(tools, /<select id="community-kind" name="kind" class="community-select"><option selected>软件<\/option>/);
   assert.doesNotMatch(tools, /data-community-upload|添加图片/, "resources have no images");
   assert.match(compose({ board: "meta", me: me({ owner: true }) }), /name="announce"/);
   assert.match(compose({ board: "meta", me: me() }), /公告只有站长能发/);
-  assert.match(compose({ board: "qa", me: me({ agreed: false }) }), /name="agree" id="community-agree"[\s\S]*href="#\/community\/rules"/);
+  const unsigned = compose({ board: "qa", me: me({ agreed: false }) });
+  assert.match(unsigned, /href="#\/community\/rules"/);
+  assert.doesNotMatch(unsigned, /name="agree"/, 'agreement requires the timed convention dialog');
   const uploads = [{ id: "i1", name: "a.png", state: "ready" }, { name: "b.png", state: "uploading" }, { name: "c.png", state: "error", message: "图片无法读取" }];
   const images = compose({ board: "moments", uploads });
   assert.match(images, /最多 4 张/, "随想 allows four");
@@ -409,8 +470,8 @@ test("a post follows the demo: crumb, author line, text, bounty, actions, replie
   assert.match(html, /class="community-flag is-solved">[\s\S]*已解决/);
   assert.match(html, /class="community-post-by"><a class="community-av community-av-sm" href="#\/community\/u\/u2"[\s\S]*12 次浏览/);
   assert.match(html, /<p>第一段&lt;script&gt;<br>同段换行<\/p><p>第二段<\/p>/);
-  assert.match(html, /community-bounty is-solved[\s\S]*悬赏 50 星尘，已采纳 林间 的回答，星尘已发放。/);
-  assert.match(html, /class="community-post-tags"><a class="community-tag" href="#\/community\/tag\/%E6%96%B0%E6%89%8B">新手<\/a>/);
+  assert.equal(textAt(html, '.community-bounty.is-solved > span'), '悬赏 50 星尘，已采纳 林间 的回答，星尘已发放。');
+  assert.match(html, /class="community-post-tags"><a class="community-tag" data-tag-tone="guide" href="#\/community\/tag\/%E6%96%B0%E6%89%8B">新手<\/a>/);
   const bar = html.slice(html.indexOf('class="community-actbar"'), html.indexOf('class="community-discussion"'));
   assert.match(bar, /data-action="community-like" data-kind="topic" data-id="t1" aria-pressed="true"[^>]*>[\s\S]*?<span>3<\/span>/, "likes start the bar");
   assert.match(bar, /data-action="community-bookmark" data-id="t1" aria-pressed="false">[\s\S]*?<small>2<\/small>/);
@@ -435,8 +496,8 @@ test("a post follows the demo: crumb, author line, text, bounty, actions, replie
   assert.doesNotMatch(theirs, /community-delete-reply/);
   assert.match(html, /<blockquote class="community-quote"><b>無相：<\/b>回复一 @远山<\/blockquote>/);
   assert.match(html, /3 条回复/);
-  assert.match(html, /class="community-rf-head">[\s\S]*以 <b>林间<\/b> 的身份回复/);
-  assert.match(html, /data-community-form="reply" data-topic="t1"[\s\S]*<textarea id="community-reply" name="body" rows="4" minlength="2" maxlength="2000" required/);
+  assert.equal(textAt(html, '.community-rf-head > span:last-child'), '以 林间 的身份回复');
+  assert.match(html, /data-community-form="reply" data-topic="t1"[\s\S]*<textarea id="community-reply" name="body" rows="1" minlength="2" maxlength="2000" required/);
   assert.match(html, /data-action="community-md" data-md="bold" data-for="community-reply"[\s\S]*data-action="community-md-preview" data-for="community-reply" aria-pressed="false">预览/);
   assert.match(html, /<p class="community-muted">&lt;喜欢画画&gt;<\/p>/);
   assert.match(html, /<dt>主题<\/dt><dd>4<\/dd><\/div><div><dt>获赞<\/dt><dd>7<\/dd><\/div><div><dt>被采纳<\/dt><dd>2<\/dd>/, "the author card");
@@ -447,7 +508,8 @@ test("a post follows the demo: crumb, author line, text, bounty, actions, replie
   const open = communityPostHTML({ thread: thread(), me: me(), reporting: { kind: "reply", id: "r1" }, editingReply: "r2", quoting: "r1", ...common });
   assert.match(open.slice(open.indexOf('id="reply-r1"')), /data-community-form="report" data-kind="reply" data-id="r1"[\s\S]*value="垃圾广告 \/ 引流"/, "the report form opens under its reply");
   assert.match(open, /data-community-form="reply-edit" data-id="r2"[\s\S]*<textarea id="community-reply-edit"[^>]*>回复二<\/textarea>/);
-  assert.match(open, /class="community-quoting">[\s\S]*回复 <b>無相<\/b>：回复一 @远山…<\/span><button type="button" class="community-icon-button" data-action="community-unquote"/);
+  assert.equal(textAt(open, '.community-quoting > span'), '回复 無相：回复一 @远山…');
+  assert.match(open, /data-action="community-unquote"/);
 });
 
 test("post states: review, hidden content, locked and muted, prompts, resources and bounties", () => {
@@ -463,9 +525,9 @@ test("post states: review, hidden content, locked and muted, prompts, resources 
   assert.match(restorable, /community-reply is-hidden[\s\S]*community-flag is-danger">已隐藏[\s\S]*data-action="community-restore" data-kind="reply" data-id="h1"/);
   assert.match(restorable, /data-action="community-delete-reply" data-id="h1" data-panel="true"/, "a moderator removing someone else's reply gets the panel");
   // Bounties.
-  assert.match(post({ topic: { solved: false, bountyState: "open", bounty: 20 }, replies: [] }), /class="community-bounty"><i-star><\/i-star><span>悬赏 <b>20<\/b> 星尘：采纳后悬赏发给被采纳的回答者，系统另奖励 TA 15 星尘；7 天没人采纳会退回一半。/);
+  assert.match(post({ topic: { solved: false, bountyState: "open", bounty: 20 }, replies: [] }), /class="community-bounty"><i-star><\/i-star><span>悬赏 <b>20<\/b> 星尘：采纳后悬赏发给回答者；符合条件另得 3 星尘，每天最多 1 次。7 天没人采纳退回一半。/);
   assert.match(post({ topic: { solved: false, bountyState: "refunded", bounty: 20 }, replies: [] }), /悬赏 20 星尘 7 天没人采纳，已退回一半。/);
-  assert.match(post({ topic: { solved: false, bounty: 0, bountyState: null }, replies: [] }), /community-bounty is-plain[\s\S]*被采纳的人得 15 星尘/);
+  assert.match(post({ topic: { solved: false, bounty: 0, bountyState: null }, replies: [] }), /community-bounty is-plain[\s\S]*符合条件得 3 星尘，每天最多 1 次/);
   // Resources: the link, the facts and the votes.
   const tool = post({ topic: { board: "tools", solved: false, resource: { url: "https://example.com/app?x=1&y=2", kind: "网站", price: "免费", platform: "", alive: 1, dead: 3, myVote: "dead" } } });
   assert.match(tool, /<a class="community-res-link" href="https:\/\/example\.com\/app\?x=1&amp;y=2" target="_blank" rel="noopener noreferrer nofollow ugc">[\s\S]*<b>example\.com<\/b>/);
@@ -504,7 +566,7 @@ test("the post menu: the author's edit, paid pin and glow; moderation for owners
   assert.match(mod, /aria-expanded="true" aria-controls="community-post-menu"[\s\S]*id="community-post-menu" role="menu">/);
   for (const action of ["pin", "feature", "lock", "move", "restore", "retag"]) assert.match(mod, new RegExp(`data-action="community-${action}"`), action);
   assert.match(mod, /data-action="community-pin" data-id="t1" aria-pressed="true"><i-pin><\/i-pin><span>取消置顶<\/span>/);
-  assert.match(mod, /data-action="community-feature" data-id="t1" aria-pressed="false"><i-award><\/i-award><span>评为精华（\+50 星尘）<\/span>/);
+  assert.match(mod, /data-action="community-feature" data-id="t1" aria-pressed="false"><i-award><\/i-award><span>评为精华<\/span>/);
   assert.match(mod, /data-action="community-lock" data-id="t1" aria-pressed="false"><i-lock><\/i-lock><span>锁定，禁止回复<\/span>/);
   assert.match(mod, /data-action="community-delete-topic" data-id="t1" data-panel="true"/, "removing someone else's post opens the panel");
   assert.doesNotMatch(mod, /community-approve/, "only pending posts are approved");
@@ -518,6 +580,22 @@ test("the post menu: the author's edit, paid pin and glow; moderation for owners
   assert.match(panels, /data-community-form="retag" data-id="t1"[\s\S]*value="新手" checked/);
 });
 
+test('scoped moderators can move only between their assigned boards and keep their earned trust input limits', () => {
+  const moderator = me({ owner: false, mod: true, steward: true, level: 4, trustLevel: 0, moderationBoards: ['qa', 'tools'] });
+  const data = thread({ topic: { board: 'qa', canModerate: true } });
+  const dom = new JSDOM(communityPostHTML({ ...common, thread: data, me: moderator, moving: true }));
+  assert.deepEqual([...dom.window.document.querySelectorAll('[data-community-form="move"] option')].map(option => option.value), ['tools']);
+  assert.match(dom.window.document.querySelector('.community-rf-bar').textContent, /初光：每天最多/);
+  assert.equal(dom.window.document.querySelector('.community-reply-form [data-inline-editor]').dataset.imageMax, '1');
+  assert.equal(dom.window.document.querySelector('.community-actbar [data-action="community-report"]')?.disabled, false);
+  dom.window.close();
+  const oneBoard = communityPostHTML({ ...common, thread: data, me: { ...moderator, moderationBoards: ['qa'] }, moving: true });
+  assert.doesNotMatch(oneBoard, /data-action="community-move"|data-community-form="move"/);
+  const compose = communityComposeHTML({ ...common, me: moderator, board: 'qa' });
+  assert.match(compose, /每帖最多 1 张图、2 个链接/);
+  assert.match(compose, /name="bounty" value="20" disabled/);
+});
+
 test("the check-in page: constellation, calendar with make-up days, early birds and badges", () => {
   const data = {
     checkedIn: false, streak: 6, balance: 42, gainedToday: 0, behaviourToday: 0, vip: false, month: "2026-09",
@@ -526,15 +604,16 @@ test("the check-in page: constellation, calendar with make-up days, early birds 
     makeup: { used: 0, allowed: 2, left: 2, free: false, cards: 0, cost: 30, days: ["2026-09-28"] }, badges: ["first_checkin"],
   };
   const html = communityCheckinHTML({ checkin: ready(data), ...common });
-  assert.match(html, /data-action="community-checkin"[^>]*>[\s\S]*签到 · \+20 星尘/, "day 7 brings the weekly bonus");
-  assert.match(html, /已连签 6 天。点亮今天这颗星，\+20 星尘（含连签奖励 15）。/);
+  assert.doesNotMatch(html, /data-action="community-checkin"/, "the right rail owns the check-in action");
+  assert.match(html, /每日签到 \+1 星尘，自然月满勤额外 \+5。补签计入满勤/);
   assert.equal(count(html, /class="community-cs[ "]/g), 30);
-  assert.equal(count(html, /class="community-cs is-on/g), 6);
-  assert.match(html, /class="community-cs is-now is-bonus"/);
+  assert.equal(count(html, /class="community-cs is-on/g), 2, 'only actual September records light stars');
+  assert.match(html, /class="community-cs is-now is-bonus is-big"/);
   const labelSample = communityCheckinHTML({ checkin: ready({ ...data, streak: 9 }), ...common });
-  assert.equal(count(labelSample, /class="community-cs-day"/g), 6, "only milestone days plus today are labelled");
-  assert.doesNotMatch(labelSample, /第 2 天|第 3 天|第 4 天|第 5 天|第 6 天|第 8 天|第 9 天/);
-  assert.match(html, /aria-label="30 天签到星座，已点亮 6 颗"/);
+  assert.equal(count(labelSample, /class="community-star-current"/g), 1, "today status stays outside the star positions");
+  assert.doesNotMatch(labelSample, /class="community-cs-day"/, "day labels no longer collide inside the chart");
+  assert.match(labelSample, /class="community-star-milestones"/);
+  assert.match(html, /aria-label="30 天签到星座，已点亮 2 颗"/);
   assert.match(html, /<h2>2026 年 9 月<\/h2>/);
   assert.match(html, /class="community-cal-day is-ok">24</);
   assert.match(html, /<button type="button" class="community-cal-day is-makeup" data-action="community-makeup" data-day="2026-09-28" aria-label="补签 2026-09-28">28<\/button>/);
@@ -551,12 +630,12 @@ test("the check-in page: constellation, calendar with make-up days, early birds 
   assert.match(noLeft, /这个月的补签次数用完了/);
   assert.match(communityCheckinHTML({ checkin: ready({ ...data, makeup: { ...data.makeup, cards: 2 } }), ...common }), /先用补签卡（剩 2 张）/);
   const done = communityCheckinHTML({ checkin: ready({ ...data, checkedIn: true, streak: 7 }), ...common });
-  assert.match(done, /今日已签到 · 明天 \+5/);
-  assert.match(done, /已连续签到 7 天。再签 7 天，第 14 颗星额外 \+15。/);
+  assert.doesNotMatch(done, /data-action="community-checkin"|今日已签到 · 明天/);
+  assert.match(done, /每日签到 \+1 星尘，自然月满勤额外 \+5/);
 });
 
 const stardust = (overrides = {}) => ({
-  balance: 42, gainedToday: 5, behaviourToday: 5, dailyCap: 60, checkedIn: false, month: { gained: 60, spent: 18 }, flow: "all",
+  balance: 42, gainedToday: 5, behaviourToday: 5, dailyCap: 6, checkedIn: false, month: { gained: 60, spent: 18 }, flow: "all",
   ledger: [
     { id: "l1", amount: 5, kind: "earn", reason: "topic", createdAt: "2026-09-30T02:00:00Z", reverted: false, topic: { id: "t1", title: "<一个主题>" } },
     { id: "l2", amount: -10, kind: "out", reason: "thank-out", createdAt: "2026-09-30T03:00:00Z", reverted: true, topic: null },
@@ -575,7 +654,7 @@ const stardust = (overrides = {}) => ({
 test("the 星尘 center: the ledger, levels and the rules", () => {
   const ledger = communityStardustHTML({ stardust: ready(stardust()), tab: "ledger", ...common });
   assert.match(ledger, /data-community="stardust" data-tab="ledger"/);
-  assert.match(ledger, /<p>今天获得 <b>5<\/b> 星尘，行为星尘 <b>5 \/ 60<\/b>。今天还没签到。<\/p>/);
+  assert.match(ledger, /<p>今天获得 <b>5<\/b> 星尘，行为星尘 <b>5 \/ 6<\/b>。今天还没签到。<\/p>/);
   assert.match(ledger, /<dt>余额<\/dt><dd>42<\/dd>[\s\S]*href="#\/community\/checkin"/);
   assert.match(ledger, /<a href="#\/community\/stardust" aria-current="page">明细<\/a><a href="#\/community\/stardust\/levels">等级<\/a><a href="#\/community\/stardust\/rules">规则<\/a><a class="community-tab-go" href="#\/community\/shop">/);
   assert.match(ledger, /<dt>本月收入<\/dt><dd class="is-plus">\+60<\/dd><\/div><div><dt>本月支出<\/dt><dd class="is-minus">−18<\/dd>/);
@@ -585,19 +664,20 @@ test("the 星尘 center: the ledger, levels and the rules", () => {
   assert.match(ledger, /补签 · 2026-09-28[\s\S]*is-right is-mono is-minus">−30/);
   assert.match(ledger, /兑换 · &lt;金环头像框&gt;[\s\S]*−80/);
   const levels = communityStardustHTML({ stardust: ready(stardust()), tab: "levels", ...common });
-  assert.match(levels, /<svg class="community-lv-rings" viewBox="-170 -170 340 340" role="img" aria-label="等级：巡天，升到下一级完成 70%">/);
-  assert.match(levels, /class="community-lr-prog is-lv2" r="90" pathLength="100" style="--p:70"/);
-  assert.match(levels, /<h2 class="community-lv-big is-lv1">巡天<\/h2>/);
-  assert.match(levels, /升到「观测」还需要：[\s\S]*累计访问天数<\/span><span class="is-mono">9 \/ 15<\/span>[\s\S]*width:60%/);
-  assert.match(levels, /width:100%/, "a met condition is full");
-  assert.equal(count(levels, /class="community-rung /g), 4);
-  assert.match(levels, /community-rung community-spot is-lv1 is-current">[\s\S]*你在这里/);
-  assert.match(levels, /收到的赞 ≥ 50[\s\S]*精华 ≥ 1 次，或被采纳 ≥ 3 次[\s\S]*180 天内没有处罚/);
-  assert.match(levels, /VIP 是另一条线/);
-  assert.match(communityStardustHTML({ stardust: ready(stardust({ progress: { ...stardust().progress, clean: false } })), tab: "levels", ...common }), /还需要最近 30 天没有违规/);
-  assert.match(communityStardustHTML({ stardust: ready(stardust({ owner: true, level: 4, progress: null })), tab: "levels", ...common }), /站长拥有全部管理权限/);
+  assert.match(levels, /data-level-explorer data-mode="growth"/);
+  assert.equal(count(levels, /data-action="community-level-step"/g), 2);
+  assert.equal(count(levels, /data-level-detail/g), 1);
+  assert.doesNotMatch(levels, /community-ladder|community-rung|community-lv-rings/);
+  const trust = (entry = stardust(), level = 2) => communityStardustHTML({ stardust: ready(entry), tab: "levels", levelSelection: { mode: "trust", growth: null, trust: level }, ...common });
+  assert.doesNotMatch(trust(), /累计访问天数|升级条件|9 \/ 15/);
+  assert.match(trust(), /权限与限制/);
+  assert.match(trust(), /版主由作者任命[\s\S]*VIP 不改变信任等级或管理权/);
+  assert.equal(count(trust(), /role="tab" /g), 0);
+  assert.doesNotMatch(trust(stardust(), 3), /收到的赞|精华 ≥|被采纳 ≥|180 天内没有处罚/);
+  assert.doesNotMatch(trust(stardust({ progress: { ...stardust().progress, clean: false } })), /30 天内没有违规|未满足/);
+  assert.match(trust(stardust({ owner: true, level: 4, progress: null })), /拥有全部管理权限/);
   const rules = communityStardustHTML({ stardust: ready(stardust({ checkedIn: true })), tab: "rules", ...common });
-  assert.match(rules, /怎么挣[\s\S]*\+5（VIP \+7）[\s\S]*每人每天最多 60/);
+  assert.match(rules, /怎么挣[\s\S]*签到[\s\S]*\+1[\s\S]*自然月满勤额外 \+5，补签计入满勤[\s\S]*每人每天最多 6/);
   assert.match(rules, /怎么花[\s\S]*作者得 8，销毁 2/);
   assert.doesNotMatch(rules, /今天还没签到/);
 });
@@ -618,7 +698,7 @@ test("the exchange: categories, what each item looks like, what you can do with 
   assert.match(html, /<a href="#\/community\/shop" aria-current="page">全部<\/a><a href="#\/community\/shop\/look">装扮<span class="community-seg-n">2<\/span><\/a><a href="#\/community\/shop\/card">道具卡<span class="community-seg-n">1<\/span>/);
   assert.deepEqual([...html.matchAll(/<div class="community-sec-h[^>]*><h2>([^<]+)<\/h2>/g)].map((m) => m[1]), ["装扮", "道具卡", "数字资源", "实物周边"]);
   const card = (id) => html.slice(html.indexOf(`data-id="${id}"`) - 2000, html.indexOf(`data-id="${id}"`) + 200);
-  assert.match(html, /<span class="community-av community-av-xl community-shop-avatar is-frame-gold" aria-hidden="true"><span>人<\/span><\/span>/, "a frame preview uses a neutral avatar");
+  assert.match(html, /<span class="community-av community-av-xl community-shop-avatar is-frame-gold" aria-hidden="true"><span>無<\/span><\/span>/, "a frame preview uses the accepted 無 glyph");
   assert.match(html, /data-action="community-equip" data-kind="frame" data-ref="">[\s\S]*?使用中/, "the frame you wear");
   assert.match(html, /<button type="button" class="community-button is-small" disabled>还差 50 星尘<\/button>/);
   assert.match(card("card-makeup"), /<span>每月限 2 次<\/span>[\s\S]*data-action="community-redeem" data-id="card-makeup"/);
@@ -631,10 +711,15 @@ test("the exchange: categories, what each item looks like, what you can do with 
   assert.match(goods, /<a href="#\/community\/shop\/goods" aria-current="page">/);
   const redeem = communityShopHTML({ shop: ready(shop), tab: "all", redeeming: "bag", ...common });
   assert.match(redeem, /data-community-form="redeem" data-id="bag"[\s\S]*兑换「帆布袋」[\s\S]*花 20 星尘，兑换后剩 80。/);
+  assert.match(redeem, /作者取消待发货订单时退还星尘/);
+  assert.doesNotMatch(redeem, /兑换后不能退回|cannot be refunded/);
   assert.match(redeem, /id="community-ship-name" name="name"[\s\S]*id="community-ship-phone" name="phone" type="tel"[\s\S]*id="community-ship-address" name="address"[\s\S]*收货信息只给站长看，发货或取消后就会删除/);
   const card2 = communityShopHTML({ shop: ready(shop), tab: "all", redeeming: "card-makeup", ...common });
   assert.match(card2, /data-community-form="redeem" data-id="card-makeup"/);
+  assert.doesNotMatch(card2, /兑换后不能退回|cannot be refunded/);
   assert.doesNotMatch(card2, /name="address"/, "only goods need an address");
+  const framePanel = communityShopHTML({ shop: ready(shop), tab: "look", redeeming: "frame-orbit", ...common });
+  assert.match(framePanel, /data-community-form="redeem"[\s\S]*is-frame-orbit" aria-hidden="true"><span>無<\/span>/, "confirmation uses the same frame preview");
   const delivery = communityShopHTML({ shop: ready(shop), tab: "all", delivery: { id: "pack", name: "<手册>", delivery: "链接：https://x.example 提取码 <ab>" }, ...common });
   assert.match(delivery, /community-delivery[\s\S]*&lt;手册&gt;[\s\S]*<pre class="community-delivery-text" data-delivery>链接：https:\/\/x\.example 提取码 &lt;ab&gt;<\/pre>[\s\S]*data-action="community-copy-delivery"/);
   assert.match(communityShopHTML({ shop: ready({ ...shop, items: [] }), tab: "digital", ...common }), /这里还没有东西/);
@@ -645,6 +730,7 @@ test("the exchange: categories, what each item looks like, what you can do with 
   assert.match(mine, /补签卡<\/b><span class="community-inv-n">× 1<\/span><\/div><a class="community-button is-small is-line-gold" href="#\/community\/checkin">去签到日历用/);
   assert.match(mine, /community-inv community-spot is-empty">[\s\S]*推荐卡[\s\S]*× 0[\s\S]*href="#\/community\/shop\/card">去兑换/);
   assert.match(mine, /data-action="community-equip" data-kind="frame" data-ref=""/);
+  assert.match(mine, /community-shop-avatar is-frame-gold" aria-hidden="true"><span>無<\/span>/, "owned frames share the accepted preview glyph");
   assert.doesNotMatch(mine, /community-price/, "owned looks do not repeat a price");
   assert.match(mine, /&lt;手册&gt;[\s\S]*data-action="community-delivery" data-id="pack"/);
   assert.match(mine, /帆布袋[\s\S]*−20<\/span><span class="community-o-st is-wait">待发货[\s\S]*补签卡[\s\S]*is-ok">已到账/);
@@ -655,7 +741,7 @@ test("the ranking: this month's contributions, streaks and early birds", () => {
     contributions: [{ person: person("远山"), score: 12, likes: 7, accepted: 1, featured: 0 }, { person: person("林间"), score: 6, likes: 6, accepted: 0, featured: 0 }],
     streaks: [{ person: person("林间"), streak: 7 }], early: [],
   }), me: me(), ...common });
-  assert.match(html, /<div class="community-banner-lead">[\s\S]*本月第一<\/span><b>远山<\/b>/);
+  assert.equal(textAt(html, '.community-banner-lead b'), '远山');
   assert.match(html, /本月贡献[\s\S]*style="--w:100%;--i:0"[\s\S]*远山[\s\S]*<span class="community-rank-count">12<\/span>[\s\S]*<li class="is-me" style="--w:50%;--i:1">/);
   assert.match(html, /连签榜[\s\S]*7 天/);
   assert.match(html, /今日早鸟[\s\S]*还没有人/);
@@ -668,15 +754,30 @@ const memberPage = (overrides = {}) => ({
   topics: [topic("x", { author: person("远山") })], replies: [], bookmarks: [], counts: { topics: 3, replies: 5, bookmarks: 0 }, quick: null, ...overrides,
 });
 
+test('the profile background covers identity and biography while statistics stay outside it', () => {
+  const html = communityMemberHTML({ member: ready(memberPage()), me: me(), ...common });
+  const dom = new JSDOM(html);
+  try {
+    const intro = dom.window.document.querySelector('.community-m-intro');
+    assert.ok(intro, 'the cover and identity have one shared area');
+    assert.ok(intro.querySelector('.community-m-cover[aria-hidden="true"]'));
+    assert.ok(intro.querySelector('.community-m-id .community-av'));
+    assert.equal(intro.querySelector('.community-m-name p').textContent, '<喜欢>');
+    assert.ok(intro.nextElementSibling.matches('.community-m-stats'), 'stats remain a separate row below the cover');
+  } finally { dom.window.close(); }
+});
+
 test("member pages: the hero, follows, moderation, quick links for yourself, and the tabs", () => {
   const html = communityMemberHTML({ member: ready(memberPage()), me: me({ mod: true }), ...common });
   assert.match(html, /data-community="member" data-tab="topics"/);
   assert.match(html, /<div class="community-m-cover is-cover-aurora" aria-hidden="true">/);
-  assert.match(html, /<h1 class="is-color-gold">远山<\/h1><div class="community-m-tags"><span class="community-lv is-lv2" title="L2">观测<\/span><span class="community-vip">VIP<\/span><span class="community-muted is-mono">UID u2<\/span>/);
+  assert.equal(textAt(html, 'h1 .community-uname.is-color-gold'), '远山');
+  assert.match(html, /<div class="community-m-tags"><span class="community-lv is-lv2" title="L2">观测<\/span><span class="community-vip">VIP<\/span><span class="community-muted is-mono">UID u2<\/span>/);
   assert.match(html, /<p>&lt;喜欢&gt;<\/p><p class="community-muted">加入 10 天 · 连签 4 天<\/p>/);
   assert.match(html, /data-action="community-follow" data-uid="u2" aria-pressed="false">关注/);
   assert.match(html, /data-action="community-mute" data-uid="u2"/);
-  assert.match(html, /data-action="community-steward" data-uid="u2" data-on="true">[\s\S]*任命为协管/);
+  assert.match(html, /href="#\/community\/manage\/stewards">[\s\S]*选择版主负责板块/);
+  assert.doesNotMatch(html, /data-action="community-steward"[^>]*data-on="true"/);
   assert.match(html, /<dt>收到的赞<\/dt><dd>12<\/dd>[\s\S]*<dt>关注者<\/dt><dd>2<\/dd>/);
   assert.match(html, /<a href="#\/community\/u\/u2" aria-current="page">主题 3<\/a><a href="#\/community\/u\/u2\/replies">回复 5<\/a><a href="#\/community\/u\/u2\/badges">徽章 1<\/a><\/nav>/, "no bookmarks tab on someone else's page");
   assert.match(html, /class="community-topics"/);
@@ -724,6 +825,7 @@ test("notifications read naturally in both languages and lead to what they are a
   assert.equal(text(notice("system", { order: "shipped", item: "<帆布袋>" })), "你兑换的「&lt;帆布袋&gt;」已发货");
   assert.equal(text(notice("system", { refund: 10 })), "悬赏退回一半：+10 星尘");
   assert.equal(text(notice("system", { steward: true })), "你被任命为协管");
+  assert.equal(text(notice('system', { steward: true, scopeChanged: true, boards: ['qa', 'tools'] })), '你的负责板块已调整：学习问答、工具资源');
   assert.equal(text(notice("system", { report: "new", hidden: true })), "提交了一条举报，内容已自动隐藏");
   assert.equal(text(notice("mystery")), "&lt;原文&gt;", "anything else shows its stored text");
   assert.equal(noticeHref(notice("reply"), null), "#/post/t1");
@@ -736,22 +838,23 @@ test("notifications read naturally in both languages and lead to what they are a
   const html = communityInboxHTML({ inbox: ready({ tab: "all", unread: { all: 2, reply: 1, thanks: 0, system: 1 }, items: [notice("reply", { kind: "topic" }), notice("follow", {}, { topicId: null, read: true, topicTitle: null })] }), tab: "all", me: me(), ...common });
   assert.match(html, /data-community="inbox" data-tab="all"[\s\S]*<h1>通知<\/h1>[\s\S]*data-action="community-read-all"/);
   assert.match(html, /<a href="#\/community\/inbox" aria-current="page">全部<b class="community-tab-n">2<\/b><\/a><a href="#\/community\/inbox\/reply">回复和 @<b class="community-tab-n">1<\/b><\/a><a href="#\/community\/inbox\/thanks">采纳和感谢<\/a>/);
-  assert.match(html, /<button type="button" class="community-note is-unread" data-action="community-notice" data-id="n-reply" data-href="#\/post\/t1">[\s\S]*<b>远山<\/b> 回复了你的主题[\s\S]*<span class="community-note-ref">&lt;主题&gt;<\/span>[\s\S]*community-udot/);
+  assert.match(html, /<button type="button" class="community-note is-unread" data-action="community-notice" data-id="n-reply" data-href="#\/post\/t1">[\s\S]*<span class="community-note-ref">&lt;主题&gt;<\/span>[\s\S]*community-udot/);
+  assert.equal(textAt(html, '[data-id="n-reply"] .community-note-t'), '远山 回复了你的主题');
   assert.match(html, /class="community-note" data-action="community-notice" data-id="n-follow" data-href="#\/community\/u\/u2">/);
   const quiet = communityInboxHTML({ inbox: ready({ tab: "system", unread: { all: 0, reply: 0, thanks: 0, system: 0 }, items: [] }), tab: "system", ...common });
   assert.doesNotMatch(quiet, /community-read-all/);
   assert.match(quiet, /<a href="#\/community\/inbox\/system" aria-current="page">系统<\/a>[\s\S]*这里很安静/);
 });
 
-test("the guidelines: four rules, what happens after a violation, and agreeing once", () => {
+test("the guidelines cover six policy sections without a shortcut around timed agreement", () => {
   const html = communityRulesHTML({ me: me({ agreed: false }), ...common });
   assert.match(html, /data-community="rules"[\s\S]*<h1>社区公约<\/h1>/);
-  assert.equal(count(html, /<li><h2>/g), 4);
-  assert.match(html, /作品标注工具和模型[\s\S]*不用 AI 灌水[\s\S]*不发盗版和引流[\s\S]*对事不对人/);
-  assert.match(html, /收回这条内容带来的星尘，再扣 20[\s\S]*在站务反馈里申诉/);
-  assert.match(html, /data-action="community-agree"/);
-  assert.match(communityRulesHTML({ me: me(), ...common }), /你已经同意了社区公约/);
-  assert.doesNotMatch(communityRulesHTML({ ...common }), /community-agree|已经同意/, "a guest just reads");
+  assert.equal(count(html, /class="community-rule-section"/g), 6);
+  assert.match(html, /交流与内容[\s\S]*板块与发布[\s\S]*星尘与成长[\s\S]*兑换与装扮[\s\S]*账号与数据[\s\S]*管理、处理与申诉/);
+  assert.match(html, /违规删除[\s\S]*另扣 20[\s\S]*自行删除[\s\S]*联系作者或负责该板块的版主/);
+  assert.doesNotMatch(html, /data-action="community-agree"/);
+  assert.match(communityRulesHTML({ me: me(), ...common }), /你已同意当前版本公约/);
+  assert.match(html, /重新阅读至少 10 秒并同意新版本/);
 });
 
 const manage = (overrides = {}) => ({
@@ -770,22 +873,28 @@ const manage = (overrides = {}) => ({
     { id: "o2", member: person("远山"), item: "bag", itemName: "帆布袋", price: 20, status: "shipped", createdAt: "2026-09-29T04:00:00Z", resolvedAt: "2026-09-29T08:00:00Z", shipping: null },
   ],
   items: [{ id: "bag", cat: "goods", kind: "goods", name: "帆布袋", desc: "一个帆布袋", price: 20, builtin: false, stock: 10, left: 3, limit: { per: "year", n: 1 }, minLevel: 1, minDays: 30, note: "包邮", active: true, delivery: "" }],
-  sanctions: [{ id: "s1", member: person("远山"), days: 7, reason: "人身攻击", until: "2026-10-07T04:00:00Z", createdAt: "2026-09-30T04:00:00Z" }],
+  sanctions: [{ id: "s1", member: person("远山"), days: 7, reason: "人身攻击", until: "2026-10-07T04:00:00Z", createdAt: "2026-09-30T04:00:00Z", active: true, state: 'active', liftedAt: null }],
   data: null, ...overrides,
 });
 
 test("moderation: the queue, reports, orders with shipping details, shop items, sanctions and data", () => {
   const queue = communityManageHTML({ manage: ready(manage()), tab: "queue", ...common });
-  assert.match(queue, /<dt>待审<\/dt><dd class="is-warn">3<\/dd><\/div><div><dt>待处理举报<\/dt><dd class="is-warn">1<\/dd><\/div><div><dt>24 小时新主题<\/dt><dd>4<\/dd>/);
-  assert.deepEqual([...queue.matchAll(/<a href="(#\/community\/manage[^"]*)"/g)].map((m) => m[1]),
-    ["#/community/manage", "#/community/manage/reports", "#/community/manage/orders", "#/community/manage/items", "#/community/manage/sanctions", "#/community/manage/data"]);
+  const queueDom = new JSDOM(queue);
+  try {
+    assert.deepEqual([...queueDom.window.document.querySelectorAll('.community-kpis > div')].map(card => [card.querySelector('dt').textContent, card.querySelector('dd').textContent]),
+      [['待审', '3'], ['待处理举报', '1'], ['24 小时新主题', '4'], ['24 小时回复', '9']]);
+    assert.equal(queueDom.window.document.querySelectorAll('.community-kpis dd.is-warn').length, 2);
+    assert.deepEqual([...queueDom.window.document.querySelectorAll('.community-management-nav nav a')].map(link => link.getAttribute('href')),
+      ["#/community/manage", "#/community/manage/content", "#/community/manage/banners", "#/community/manage/orders", "#/community/manage/items", "#/community/manage/stewards", "#/community/manage/sanctions", "#/community/manage/data", "#/community/manage/contact", "#/community/manage/convention"]);
+  } finally { queueDom.window.close(); }
   assert.match(queue, /待审 · 初光等级，帖子带外链[\s\S]*&lt;待审&gt;[\s\S]*链接 https:\/\/a\.example[\s\S]*data-action="community-approve" data-id="p1"[\s\S]*data-action="community-reject" data-kind="topic" data-id="p1"/);
   assert.match(queue, /已自动隐藏 · 举报：其他[\s\S]*data-action="community-restore" data-kind="topic" data-id="h1"[\s\S]*data-kind="topic" data-id="h1" data-violation="true"/);
   assert.match(queue, /回复已自动隐藏[\s\S]*data-action="community-restore" data-kind="reply" data-id="hr1"[\s\S]*data-kind="reply" data-id="hr1" data-violation="true"/);
   const steward = communityManageHTML({ manage: ready(manage({ owner: false })), tab: "queue", ...common });
-  assert.doesNotMatch(steward, /manage\/orders|manage\/items/, "the shop is the owner's");
+  assert.doesNotMatch(steward, /manage\/orders|manage\/items|manage\/stewards|manage\/convention/, "shop, appointments and convention editing are the owner's");
   const reports = communityManageHTML({ manage: ready(manage()), tab: "reports", ...common });
-  assert.match(reports, /垃圾广告 \/ 引流 · 已自动隐藏[\s\S]*href="#\/post\/t1">回复：加我领取资料<\/a>[\s\S]*作者 远山 · 举报人 林间（观测）/);
+  assert.match(reports, /垃圾广告 \/ 引流 · 已自动隐藏[\s\S]*href="#\/post\/t1">回复：加我领取资料<\/a>/);
+  assert.match(textAt(reports, '.community-queue-main .community-muted'), /作者 远山 · 举报人 林间（观测）/);
   assert.match(reports, /“&lt;广告&gt;”[\s\S]*data-action="community-uphold" data-id="p1"[\s\S]*data-action="community-dismiss" data-id="p1"/);
   const orders = communityManageHTML({ manage: ready(manage()), tab: "orders", ...common });
   assert.match(orders, /<b>林间<\/b> <span class="is-mono">13800138000<\/span><br>&lt;某路 1 号&gt;/);
@@ -796,7 +905,7 @@ test("moderation: the queue, reports, orders with shipping details, shop items, 
   const items = communityManageHTML({ manage: ready(manage()), tab: "items", ...common });
   assert.match(items, /data-action="community-item-edit" data-id=""[\s\S]*上架新物品[\s\S]*帆布袋[\s\S]*3 \/ 10[\s\S]*上架中[\s\S]*data-action="community-item-edit" data-id="bag"/);
   const creating = communityManageHTML({ manage: ready(manage()), tab: "items", itemEditing: { id: null }, ...common });
-  assert.match(creating, /data-community-form="item" data-id=""[\s\S]*上架新物品[\s\S]*name="cat" value="goods" checked[\s\S]*name="cat" value="digital"/);
+  assert.match(creating, /data-community-form="item" data-id=""[\s\S]*上架新物品[\s\S]*name="kind" value="goods" checked[\s\S]*name="kind" value="digital"/);
   const editing = communityManageHTML({ manage: ready(manage()), tab: "items", itemEditing: { id: "bag" }, ...common });
   assert.match(editing, /data-community-form="item" data-id="bag"[\s\S]*编辑「帆布袋」[\s\S]*<input type="hidden" name="cat" value="goods">/);
   assert.match(editing, /id="community-item-name" name="name" type="text" maxlength="30" required value="帆布袋"/);
@@ -825,10 +934,10 @@ test("the landing page from the main navigation leads into the community", () =>
 test("rules, reward table and Beijing day", () => {
   assert.equal(beijingDay(Date.parse("2026-09-30T15:59:00Z")), "2026-09-30");
   assert.equal(beijingDay(Date.parse("2026-09-30T16:00:00Z")), "2026-10-01", "midnight in Beijing");
-  assert.deepEqual([1, 7, 14, 29, 30, 31, 37].map((day) => checkinReward(day).total), [5, 20, 20, 5, 55, 5, 20]);
-  assert.equal(checkinReward(7, true).total, 22, "VIP adds 2");
-  assert.equal(checkinReward(30).cycleDay, 30);
-  assert.equal(checkinReward(31).cycleDay, 1);
+  assert.deepEqual(checkinReward(), { base: 1, bonus: 0, total: 1 });
+  assert.deepEqual(checkinReward(true), { base: 1, bonus: 5, total: 6 });
+  assert.deepEqual(['2027-02', '2028-02', '2026-04', '2026-10'].map(month => checkinMonth(month, []).totalDays), [28, 29, 30, 31]);
+  assert.deepEqual(checkinMonth('2026-04', ['2026-04-01', '2026-04-01', '2026-04-31', '2026-05-01']).signed, ['2026-04-01']);
   assert.equal(communityRules.thankCost - communityRules.thankToAuthor, 2, "thanking destroys 2");
   assert.equal(communityTags.length, 13);
 });

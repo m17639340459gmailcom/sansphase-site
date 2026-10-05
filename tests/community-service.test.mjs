@@ -10,10 +10,13 @@ import { createCommunityStore } from "../server/community-store.ts";
 import { createCommunityService, communityContactReason } from "../server/community-service.ts";
 import { createPreviewServer } from "../server.mjs";
 import { beijingDay } from "../src/community-rules.mjs";
+import { communityBoards } from '../src/community.mjs';
+import { acceptCommunityConvention } from './fixtures/community-convention-consent.ts';
 
 // Signed-in members, by cookie `reader=<id>` or `owner=yes`. uid is the public id
 // used by member pages; r1 has an approved avatar.
 const avatarId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const allModerationBoards = communityBoards.map(board => board.id);
 const members = {
   r1: { name: "林间", uid: "u1", vip: false, avatar: avatarId, bio: "喜欢画画" },
   r2: { name: "远山", uid: "u2", vip: false },
@@ -34,7 +37,7 @@ test.before(async () => {
 test.after(() => cleanup(template));
 
 // r1, r2, v1 and s1 have agreed to the guidelines and reached 巡天 (L1); r3 is brand new.
-async function setup(t, { store: withStore = true } = {}) {
+async function setup(t, { store: withStore = true, simplePosting = false, useDefault = false } = {}) {
   const reservation = createServer();
   await new Promise((done) => reservation.listen(0, "127.0.0.1", done));
   const port = reservation.address().port;
@@ -54,13 +57,15 @@ async function setup(t, { store: withStore = true } = {}) {
   };
   for (const id of ["r1", "r2", "v1", "s1"]) setLevel(id, 1);
   const store = withStore ? createCommunityStore(directory) : null;
+  if (store) acceptCommunityConvention(store, [{ kind: 'owner', id: 'owner' }, ...Object.keys(members).map(id => ({ kind: 'reader', id }))]);
   const audits = [];
   const communityService = createCommunityService({
-    store, siteOrigin, directory, ownerId: "owner",
+    store, siteOrigin, directory, ownerId: "owner", ...(useDefault ? {} : { simplePosting }),
     identify: async (req) => {
-      const [kind, id] = String(req.headers.cookie || "").split("=");
-      if (kind === "owner" && id === "yes") return { kind: "owner", id: "owner", name: "無相", vip: true };
-      return kind === "reader" && members[id] ? { kind: "reader", id, name: members[id].name, vip: members[id].vip } : null;
+      const cookies = new Map(String(req.headers.cookie || '').split(';').map(part => part.trim().split('=')));
+      if (cookies.get('owner') === 'yes') return { kind: "owner", id: "owner", name: "無相", vip: true };
+      const id = cookies.get('reader');
+      return members[id] ? { kind: "reader", id, name: members[id].name, vip: members[id].vip } : null;
     },
     people: async (authors) => new Map(authors.flatMap((author) => {
       const info = author.kind === "owner" ? { name: "無相", uid: "owner", vip: true } : members[author.id];
@@ -90,11 +95,534 @@ async function setup(t, { store: withStore = true } = {}) {
     return fetch(`${siteOrigin}/api/community/images`, { method: "POST", headers: { Origin: siteOrigin, "X-Reader-Request": "1", cookie }, body: form });
   };
   const credit = (id, amount) => store.ledger.credit(id === "owner" ? { kind: "owner", id } : { kind: "reader", id }, amount, "test", null, new Date().toISOString());
-  return { get, post, upload, siteOrigin, store, audits, setLevel, credit };
+  return { get, post, upload, siteOrigin, store, audits, setLevel, credit, directory };
 }
 const json = async (response) => (await response).json();
 const png = async () => (await import("sharp")).default({ create: { width: 1200, height: 800, channels: 3, background: "#d9c49c" } }).png().toBuffer();
 const topicBody = { board: "qa", title: "ComfyUI 人脸崩了", body: "IPAdapter 和 ControlNet 一起用就崩。" };
+const imageMarker = id => `![图片](/api/community/images/${id}.webp)`;
+
+test('level catalogue receives the real reader membership state without fabricating VIP growth', async t => {
+  const { get, post } = await setup(t);
+  const vip = await json(get('stardust', 'reader=v1'));
+  assert.equal(vip.vip, true);
+  assert.equal((await json(get('stardust', 'reader=r1'))).vip, false);
+  assert.equal((await json(get('stardust', 'owner=yes'))).vip, false, 'owner access is not membership growth');
+  await post('members/u4/steward', { on: true, boards: ['qa'] }, 'owner=yes');
+  const preview = await json(get('stardust', 'reader=v1; community_browse=reader'));
+  assert.equal(preview.browsingAsReader, true);
+  assert.equal(preview.vip, true, 'a read-only perspective does not expire actual membership');
+  for (const entry of [vip, preview]) {
+    assert.equal(Object.hasOwn(entry, 'vipLevel'), false);
+    assert.equal(Object.hasOwn(entry, 'vipProgress'), false);
+    assert.equal(entry.growth.configured, false);
+  }
+});
+
+test('bulk review checks the whole selection before changes and reuses approval and rejection accounting', async t => {
+  const { post, store, audits } = await setup(t);
+  const author = { kind: 'reader', id: 'r1' };
+  const pending = () => store.createTopic({ ...topicBody, author, pending: '需要审核' }).id;
+  const ids = [pending(), pending()];
+  assert.equal((await post('manage/review', { action: 'approve', ids })).status, 403);
+  assert.equal((await post('manage/review', { action: 'approve', ids: [ids[0], 'missing'] }, 'owner=yes')).status, 409);
+  assert.equal(store.topic(ids[0]).pending, true, 'a stale selection must not partially approve');
+  assert.equal((await post('manage/review', { action: 'approve', ids: [ids[0], ids[0]] }, 'owner=yes')).status, 400);
+  store.members.setSteward({ kind: 'reader', id: 's1' }, true);
+  const approved = await post('manage/review', { action: 'approve', ids }, 'reader=s1');
+  assert.equal(approved.status, 200);
+  assert.equal((await approved.json()).count, 2);
+  assert.equal(store.topic(ids[0]).pending, false);
+  const balance = store.ledger.balance(author);
+  assert.equal((await post('manage/review', { action: 'approve', ids }, 'reader=s1')).status, 409);
+  assert.equal(store.ledger.balance(author), balance, 'retry cannot issue review rewards twice');
+  const rejected = [pending(), pending()];
+  assert.equal((await post('manage/review', { action: 'reject', ids: rejected }, 'owner=yes')).status, 400);
+  assert.equal((await post('manage/review', { action: 'reject', ids: rejected, reason: '重复内容', note: '内容已发布过' }, 'owner=yes')).status, 200);
+  assert.equal(store.topic(rejected[0]), null);
+  assert.equal(store.ledger.balance(author), balance, 'rejecting unpublished content never penalises');
+  assert.ok(audits.some(audit => audit.action === 'community-bulk-reject-topics' && audit.reason === '重复内容'));
+});
+
+test('community images allow 2 MB for readers and VIP, and reuse the author image ceiling', async t => {
+  const { upload } = await setup(t);
+  const source = await png();
+  const padded = size => Buffer.concat([source, Buffer.alloc(size - source.length)]);
+  for (const cookie of ['reader=r1', 'reader=v1']) {
+    assert.equal((await upload(padded(2 * 1024 ** 2), 'image/png', cookie)).status, 201);
+    assert.equal((await upload(padded(2 * 1024 ** 2 + 1), 'image/png', cookie)).status, 413);
+  }
+  assert.equal((await upload(padded(6 * 1024 ** 2), 'image/png', 'owner=yes')).status, 201);
+  assert.equal((await upload(padded(25 * 1024 ** 2 + 1), 'image/png', 'owner=yes')).status, 413);
+  assert.equal((await upload(Buffer.from('video'), 'video/mp4', 'owner=yes')).status, 415);
+});
+
+test('moderation deletion requires a reason, stores it and tells the author', async t => {
+  const { post, get, store, audits, directory } = await setup(t);
+  const topic = await (await post('topics', { board: 'qa', title: '删除理由回归测试', body: '足够长的正文内容用于删除测试' })).json();
+  await post('members/u5/steward', { on: true, boards: allModerationBoards }, 'owner=yes');
+  assert.equal((await post(`topics/${topic.id}/delete`, {}, 'reader=s1')).status, 400);
+  assert.ok(store.topic(topic.id));
+  assert.equal((await post(`topics/${topic.id}/delete`, { reason: '重复发布同一内容', violation: false }, 'reader=s1')).status, 200);
+  assert.equal(store.topic(topic.id), null);
+  assert.match(JSON.stringify((await (await get('inbox?tab=system')).json()).items), /重复发布同一内容/);
+  assert.equal(audits.at(-1).reason, '重复发布同一内容');
+  const db = new DatabaseSync(resolve(directory, 'content.db'));
+  try { assert.equal(db.prepare('SELECT deleted_reason FROM community_topics WHERE id = ?').get(topic.id).deleted_reason, '重复发布同一内容'); }
+  finally { db.close(); }
+});
+
+test('owner and steward reader perspective retains identity and rejects writes until restored', async t => {
+  const { post, get, upload } = await setup(t);
+  await post('members/u5/steward', { on: true, boards: allModerationBoards }, 'owner=yes');
+  for (const identity of ['owner=yes', 'reader=s1']) {
+    const before = await (await get('me', identity)).json();
+    const switchResponse = await post('browse-mode', { reader: true }, identity);
+    assert.equal(switchResponse.status, 200);
+    assert.match(switchResponse.headers.get('set-cookie'), /community_browse=reader/);
+    const cookie = `${identity}; community_browse=reader`;
+    const during = await (await get('me', cookie)).json();
+    assert.equal(during.name, before.name);
+    assert.equal(during.owner, false);
+    assert.equal(during.mod, false);
+    assert.equal(during.management.browsingAsReader, true);
+    assert.equal((await get('manage', cookie)).status, 403);
+    assert.equal((await post('shop/redeem', { item: 'card-makeup' }, cookie)).status, 403);
+    assert.equal((await post('browse-mode', { reader: false }, cookie)).status, 200);
+    assert.equal((await get('manage', identity)).status, 200);
+  }
+  assert.equal((await post('browse-mode', { reader: true })).status, 403);
+  assert.equal((await get('manage', 'reader=r1; community_browse=reader')).status, 403);
+  const cover = await json(upload(await png(), 'image/png', 'owner=yes'));
+  const created = await post('topics', { board: 'showcase', title: '作者视角提示词测试', body: '这是足够长的作品说明正文内容。', images: [cover.id], tools: 'ComfyUI', prompt: 'private prompt', promptMode: 'paid', promptPrice: 20 }, 'owner=yes');
+  assert.equal(created.status, 201, await created.clone().text());
+  const work = await created.json();
+  const preview = await (await get(`topics/${work.id}`, 'owner=yes; community_browse=reader')).json();
+  assert.equal(preview.topic.meta.prompt, null, 'reader perspective masks the owner-only prompt');
+  assert.equal(preview.topic.mine, false);
+  assert.equal(preview.topic.canReply, false);
+});
+
+test('check-in reads distinguish manager preview from a reader and preserve real author eligibility', async t => {
+  const { post, get, store } = await setup(t);
+  await post('members/u5/steward', { on: true, boards: allModerationBoards }, 'owner=yes');
+  for (const [identity, owner] of [['owner=yes', true], ['reader=s1', false]]) {
+    const normal = await json(get('checkin?month=2026-09', identity));
+    assert.equal(normal.owner, owner);
+    assert.equal(normal.browsingAsReader, false);
+    const cookie = `${identity}; community_browse=reader`;
+    const preview = await json(get('checkin?month=2026-08', cookie));
+    assert.equal(preview.owner, owner, 'the author remains ineligible for check-in while previewing');
+    assert.equal(preview.browsingAsReader, true);
+    assert.equal(preview.month, '2026-08', 'month browsing remains read-only');
+    const stardust = await json(get('stardust', cookie));
+    assert.equal(stardust.owner, owner, 'stardust retains the real author eligibility in reader perspective');
+    assert.equal(stardust.browsingAsReader, true, 'stardust identifies a read-only moderator perspective');
+    assert.deepEqual([(await json(get('stardust', identity))).owner, (await json(get('stardust', identity))).browsingAsReader], [owner, false]);
+    assert.equal((await post('checkin', {}, cookie)).status, 403);
+    assert.equal((await post('checkin/makeup', { day: '2026-09-29' }, cookie)).status, 403);
+  }
+  assert.equal((await post('checkin', {}, 'owner=yes')).status, 403);
+  assert.equal(store.ledger.balance({ kind: 'owner', id: 'owner' }), 0);
+  const normal = await json(get('checkin', 'reader=r2; community_browse=reader'));
+  assert.deepEqual([normal.owner, normal.browsingAsReader], [false, false], 'a forged preview cookie gives a reader no management status');
+  const readerStardust = await json(get('stardust', 'reader=r2; community_browse=reader'));
+  assert.deepEqual([readerStardust.owner, readerStardust.browsingAsReader], [false, false]);
+  assert.equal((await post('checkin', {}, 'reader=r2')).status, 200);
+  assert.equal((await post('checkin', {}, 'reader=r2')).status, 409);
+  assert.equal(store.ledger.balance({ kind: 'reader', id: 'r2' }), 1);
+  assert.equal(store.ledger.history({ kind: 'reader', id: 'r2' }).filter(entry => entry.reason === 'checkin').length, 1);
+  assert.equal((await post('checkin', {}, 'reader=s1')).status, 200, 'a real moderator may check in outside preview');
+});
+
+test('redemption request keys replay the original result without duplicate debit, inventory or notification', async t => {
+  const { post, store, credit } = await setup(t);
+  const headers = { 'X-Idempotency-Key': 'redeem-intent-000001' };
+  credit('r1', 500); credit('r2', 500);
+  const input = { item: 'card-highlight' };
+  const first = await post('shop/redeem', input, 'reader=r1', headers);
+  assert.equal(first.status, 201);
+  const result = await first.json();
+  const balance = store.ledger.balance({ kind: 'reader', id: 'r1' });
+  const repeated = await post('shop/redeem', input, 'reader=r1', headers);
+  assert.equal(repeated.status, 201);
+  assert.deepEqual(await repeated.json(), result);
+  assert.equal(store.ledger.balance({ kind: 'reader', id: 'r1' }), balance);
+  assert.equal(store.economy.inventory({ kind: 'reader', id: 'r1' }).highlight, 1);
+  assert.equal(store.economy.orders({ kind: 'reader', id: 'r1' }).length, 1);
+  assert.equal((await post('shop/redeem', { item: 'card-pin' }, 'reader=r1', headers)).status, 409, 'a key cannot be reused with changed payload');
+  assert.equal((await post('shop/redeem', input, 'reader=r1', { 'X-Idempotency-Key': 'redeem-intent-000002' })).status, 201);
+  assert.equal(store.economy.inventory({ kind: 'reader', id: 'r1' }).highlight, 2, 'a new intent remains a legal repeat purchase');
+  assert.equal((await post('shop/redeem', input, 'reader=r2', headers)).status, 201, 'request keys are isolated by real actor');
+  for (const key of ['short', 'contains invalid spaces 1234', 'x'.repeat(129)])
+    assert.equal((await post('shop/redeem', input, 'reader=r1', { 'X-Idempotency-Key': key })).status, 400);
+  const item = store.economy.saveItem(null, { cat: 'goods', name: '去重实物', description: '', price: 10, stock: 2, limitPer: null, limitN: null, minLevel: 0, minDays: 0, delivery: '', note: '', active: true });
+  const goods = { item, shipping: { name: '虚构测试', phone: '13800138000', address: '本地虚构测试地址' } };
+  const goodsHeaders = { 'X-Idempotency-Key': 'goods-intent-000001' };
+  const order = await json(post('shop/redeem', goods, 'reader=r1', goodsHeaders));
+  assert.deepEqual(await json(post('shop/redeem', goods, 'reader=r1', goodsHeaders)), order);
+  assert.equal(store.economy.item(item).left, 1);
+  assert.equal(store.members.inbox({ kind: 'owner', id: 'owner' }).filter(notice => notice.data?.order === 'new').length, 1);
+});
+
+test('topic and reply request keys replay once, including their rewards and mentions', async t => {
+  const { post, store } = await setup(t);
+  const headers = { 'X-Idempotency-Key': 'topic-intent-000001' };
+  const input = { ...topicBody, body: '这是测试发布请求去重的正文并且提及 @远山' };
+  const created = await post('topics', input, 'reader=r1', headers);
+  assert.equal(created.status, 201);
+  const topic = await created.json();
+  const reordered = { body: input.body, title: input.title, board: input.board };
+  assert.deepEqual(await json(post('topics', reordered, 'reader=r1', headers)), topic, 'object field order does not change the fingerprint');
+  assert.equal(store.postedToday({ kind: 'reader', id: 'r1' }).topics, 1);
+  assert.equal(store.ledger.balance({ kind: 'reader', id: 'r1' }), 2);
+  assert.equal(store.members.inbox({ kind: 'reader', id: 'r2' }).filter(notice => notice.type === 'mention').length, 1);
+  assert.equal((await post('topics', { ...input, title: '修改内容的同一请求' }, 'reader=r1', headers)).status, 409);
+  assert.equal((await post('topics', input, 'reader=r1', { 'X-Idempotency-Key': 'topic-intent-000002' })).status, 201);
+  const replyHeaders = { 'X-Idempotency-Key': 'reply-intent-000001' }, path = `topics/${topic.id}/replies`;
+  const replyInput = { body: '这是用于回复请求去重的有效内容并且提及 @林间' };
+  const reply = await json(post(path, replyInput, 'reader=r2', replyHeaders));
+  assert.deepEqual(await json(post(path, replyInput, 'reader=r2', replyHeaders)), reply);
+  assert.equal(store.postedToday({ kind: 'reader', id: 'r2' }).replies, 1);
+  assert.equal(store.ledger.balance({ kind: 'reader', id: 'r2' }), 1);
+  assert.equal(store.members.inbox({ kind: 'reader', id: 'r1' }).filter(notice => notice.type === 'reply' || notice.type === 'mention').length, 1);
+  assert.equal((await post(path, { body: '同一个请求修改了回复内容' }, 'reader=r2', replyHeaders)).status, 409);
+  assert.equal((await post(path, replyInput, 'reader=r2', { 'X-Idempotency-Key': 'reply-intent-000002' })).status, 201);
+});
+
+test('thank request keys replay once and never grant permissions after a role or board change', async t => {
+  const { post, store, credit } = await setup(t);
+  const topic = await json(post('topics', topicBody));
+  const reply = await json(post(`topics/${topic.id}/replies`, { body: '这是有效回复，用于感谢的去重测试' }));
+  credit('r2', 100);
+  for (const path of [`topics/${topic.id}/thank`, `replies/${reply.id}/thank`]) {
+    const headers = { 'X-Idempotency-Key': 'thank-intent-000001' };
+    const first = await post(path, {}, 'reader=r2', headers);
+    assert.equal(first.status, 200);
+    const result = await first.json();
+    assert.deepEqual(await json(post(path, {}, 'reader=r2', headers)), result);
+    assert.equal((await post(path, { on: true }, 'reader=r2', headers)).status, 409);
+  }
+  assert.equal(store.ledger.balance({ kind: 'reader', id: 'r2' }), 80);
+  assert.equal(store.members.inbox({ kind: 'reader', id: 'r1' }).filter(notice => notice.type === 'thank').length, 2);
+  store.move(topic.id, 'vip');
+  assert.equal((await post(`topics/${topic.id}/thank`, {}, 'reader=r2', { 'X-Idempotency-Key': 'thank-intent-000001' })).status, 404, 'cached results never bypass current board visibility');
+  credit('owner', 100);
+  const ownerHeaders = { 'X-Idempotency-Key': 'owner-redeem-000001' };
+  assert.equal((await post('shop/redeem', { item: 'card-highlight' }, 'owner=yes', ownerHeaders)).status, 201);
+  assert.equal((await post('shop/redeem', { item: 'card-highlight' }, 'owner=yes; community_browse=reader', ownerHeaders)).status, 403, 'a cached result cannot bypass read-only preview');
+});
+
+test('economic actions share durable action throttling while completed request replay consumes no quota', async t => {
+  const { post, store, credit } = await setup(t);
+  const actor = { kind: 'reader', id: 'r2' }, headers = { 'X-Idempotency-Key': 'quota-redeem-000001' };
+  credit('r2', 300);
+  const first = await json(post('shop/redeem', { item: 'card-highlight' }, 'reader=r2', headers));
+  const now = Date.now();
+  for (let i = 0; i < 119; i++) store.rateLimits.consume(actor, 'action', 1, now);
+  assert.deepEqual(await json(post('shop/redeem', { item: 'card-highlight' }, 'reader=r2', headers)), first, 'completed replay is not another action');
+  assert.equal((await post('shop/redeem', { item: 'card-highlight' }, 'reader=r2', { 'X-Idempotency-Key': 'quota-redeem-000002' })).status, 429);
+  assert.equal((await post('checkin', {}, 'reader=r2')).status, 429);
+  const topic = store.createTopic({ ...topicBody, author: { kind: 'reader', id: 'r1' } });
+  assert.equal((await post(`topics/${topic.id}/thank`, {}, 'reader=r2', { 'X-Idempotency-Key': 'quota-thank-000001' })).status, 429);
+  const paid = store.createTopic({ board: 'showcase', title: '限速付费提示词', body: '', author: { kind: 'reader', id: 'r1' }, meta: { tools: 'test', model: '', usage: '', prompt: 'private prompt', promptMode: 'paid', price: 10 } });
+  assert.equal((await post(`topics/${paid.id}/unlock`, {}, 'reader=r2')).status, 429);
+  assert.equal(store.economy.inventory(actor).highlight, 1);
+  assert.equal(store.economy.checked(actor), false);
+});
+
+test('private image and approved avatar responses require current permission rather than reuse a previous identity cache', async t => {
+  const { post, get, upload } = await setup(t);
+  const image = await json(upload(await png()));
+  assert.equal((await get(`images/${image.id}.webp`)).headers.get('cache-control'), 'private, no-store');
+  const topic = await json(post('topics', { ...topicBody, images: [image.id] }));
+  assert.ok(topic.id);
+  for (const suffix of ['.webp', '.thumb.webp']) {
+    const response = await get(`images/${image.id}${suffix}`, 'reader=r2');
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('cache-control'), 'private, no-store');
+  }
+  assert.equal((await get('avatar/u1.webp', 'reader=r2')).headers.get('cache-control'), 'private, no-store');
+  const vipImage = await json(upload(await png(), 'image/png', 'reader=v1'));
+  await post('topics', { ...topicBody, board: 'vip', images: [vipImage.id] }, 'reader=v1');
+  assert.equal((await get(`images/${vipImage.id}.webp`, 'reader=v1')).headers.get('cache-control'), 'private, no-store');
+  assert.equal((await get(`images/${vipImage.id}.webp`, 'reader=r2')).status, 404);
+  assert.equal((await get(`images/${vipImage.id}.webp`, '')).status, 401);
+});
+
+test('growth DTOs remain independent from earned trust and appointed moderation while upgrade thresholds await configuration', async t => {
+  const { get, post, store, credit } = await setup(t);
+  const actor = { kind: 'reader', id: 'r1' };
+  credit('r1', 100);
+  await post('checkin', {}, 'reader=r1');
+  const topic = await json(post('topics', topicBody));
+  const me = await json(get('me'));
+  assert.deepEqual(me.growth, { level: 1, points: 2, configured: false });
+  assert.equal(me.trustLevel, 1);
+  const board = await json(get('stardust'));
+  assert.deepEqual(board.growth, me.growth);
+  assert.equal(board.level, 1, 'the existing trust field retains its permission meaning');
+  const person = (await json(get(`topics/${topic.id}`))).topic.author;
+  assert.deepEqual(person.growth, me.growth);
+  store.members.setSteward(actor, true, ['qa']);
+  const moderator = await json(get('me'));
+  assert.deepEqual(moderator.growth, me.growth);
+  assert.equal(moderator.trustLevel, 1);
+  assert.equal(moderator.mod, true);
+  assert.deepEqual((await json(get('me', 'owner=yes'))).growth, null, 'the real author does not display reader growth');
+  assert.deepEqual((await json(get('stardust', 'owner=yes; community_browse=reader'))).growth, null);
+  store.deleteTopic(topic.id);
+  assert.deepEqual((await json(get('me'))).growth, { level: 1, points: 0, configured: false }, 'reverted rewards no longer contribute');
+});
+
+test('shop images are owner uploads, visible for active items and protected from orphan cleanup', async t => {
+  const { post, get, siteOrigin: origin, store, directory, credit } = await setup(t);
+  const sharp = (await import('sharp')).default;
+  const source = await sharp({ create: { width: 32, height: 32, channels: 4, background: '#b69b6b' } }).png().toBuffer();
+  const upload = async cookie => {
+    const form = new FormData(); form.append('file', new Blob([source], { type: 'image/png' }), 'product.png');
+    return fetch(`${origin}/api/community/manage/item-image`, { method: 'POST', headers: { cookie, origin, 'x-reader-request': '1' }, body: form });
+  };
+  assert.equal((await upload('reader=r1')).status, 403);
+  const image = await (await upload('owner=yes')).json();
+  assert.ok(image.id);
+  const item = await (await post('manage/items', { cat: 'goods', name: '商品图片测试', description: '用于检验商品图片的说明', price: 10, stock: 1, image: image.id }, 'owner=yes')).json();
+  assert.equal((await get(`images/${image.id}.webp`)).status, 200);
+  assert.equal((await (await get('shop')).json()).items.find(row => row.id === item.id).image, image.id);
+  assert.ok(!store.sweepImages(Date.now() + 2 * 86400e3).includes(image.id));
+  assert.equal((await post('manage/items', { cat: 'goods', name: '无效图片测试', description: '说明正文足够', price: 10, stock: 1, image: 'https://evil.example/a.gif' }, 'owner=yes')).status, 400);
+  assert.equal((await post('topics', { board: 'qa', title: '商品图不能作帖子图', body: '这是足够长的帖子正文内容', images: [image.id] }, 'owner=yes')).status, 400);
+  assert.ok(directory);
+  credit('r2', 10);
+  assert.equal((await post('shop/redeem', { item: item.id, shipping: { name: '测试收件人', phone: '13800138000', address: '测试地址一号街道' } }, 'reader=r2')).status, 201);
+  await post(`manage/items/${item.id}`, { cat: 'goods', name: '商品图片测试', description: '用于检验商品图片的说明', price: 10, stock: 1, active: false }, 'owner=yes');
+  assert.equal((await get(`images/${image.id}.webp`)).status, 404);
+  assert.equal((await get(`images/${image.id}.webp`, 'reader=r2')).status, 200, 'members who redeemed an item can still see its artwork after it leaves the shop');
+  assert.equal((await get(`images/${image.id}.webp`, 'owner=yes')).status, 200);
+  const managed = await (await get('manage?tab=items', 'owner=yes')).json();
+  assert.equal(managed.items.find(row => row.id === item.id).image, image.id, 'older clients updating text preserve product artwork');
+  assert.ok(!store.sweepImages(Date.now() + 2 * 86400e3).includes(image.id), 'off-sale product artwork remains persistent');
+});
+
+test('product GIF and animated WebP keep frames and timing, with a static thumbnail', async t => {
+  const { siteOrigin: origin, get, store } = await setup(t);
+  const sharp = (await import('sharp')).default;
+  const pixels = await sharp({ create: { width: 32, height: 64, channels: 4, background: '#b69b6b' } }).raw().toBuffer();
+  pixels.fill(255, 32 * 32 * 4);
+  for (const [format, type] of [['gif', 'image/gif'], ['webp', 'image/webp']]) {
+    const source = await sharp(pixels, { raw: { width: 32, height: 64, channels: 4, pageHeight: 32 } })[format]({ delay: [100, 200], loop: 0 }).toBuffer();
+    const form = new FormData(); form.append('file', new Blob([source], { type }), `product.${format}`);
+    const response = await fetch(`${origin}/api/community/manage/item-image`, { method: 'POST', headers: { cookie: 'owner=yes', origin, 'x-reader-request': '1' }, body: form });
+    assert.equal(response.status, 201);
+    const image = await response.json();
+    const full = await (await get(`images/${image.id}.webp`, 'owner=yes')).arrayBuffer();
+    const meta = await sharp(Buffer.from(full), { animated: true }).metadata();
+    assert.equal(meta.pages, 2); assert.deepEqual(meta.delay, [100, 200]);
+    assert.deepEqual([store.image(image.id).width, store.image(image.id).height], [32, 32]);
+    const thumb = await (await get(`images/${image.id}.thumb.webp`, 'owner=yes')).arrayBuffer();
+    assert.equal((await sharp(Buffer.from(thumb)).metadata()).pages ?? 1, 1);
+  }
+});
+
+test('reply images persist independently of the topic cover and respect ownership, edits and visibility', async t => {
+  const { post, get, upload } = await setup(t, { simplePosting: true });
+  const cover = await json(upload(await png()));
+  const topic = await json(post('topics', { board: 'qa', title: '回复图片', body: '说明\n\n' + imageMarker(cover.id), images: [cover.id] }));
+  const picture = await json(upload(await png(), 'image/png', 'reader=r2'));
+  const body = '截图说明\n\n' + imageMarker(picture.id);
+  assert.equal((await post(`topics/${topic.id}/replies`, { body }, 'reader=r1')).status, 400);
+  assert.equal((await post(`topics/${topic.id}/replies`, { body: imageMarker(picture.id) }, 'reader=r2')).status, 400);
+  const sent = await post(`topics/${topic.id}/replies`, { body }, 'reader=r2');
+  assert.equal(sent.status, 201, await sent.clone().text());
+  const reply = await sent.json();
+  const thread = await json(get(`topics/${topic.id}`));
+  assert.deepEqual(thread.topic.images.map(image => image.id), [cover.id]);
+  assert.deepEqual(thread.replies[0].images.map(image => image.id), [picture.id]);
+  assert.equal(thread.replies[0].body, body);
+  assert.equal((await get(`images/${picture.id}.webp`)).status, 200);
+  assert.equal((await post(`topics/${topic.id}/replies`, { body }, 'reader=r2')).status, 400);
+  assert.equal((await post(`topics/${topic.id}/edit`, { title: '封面保持', body: '说明\n\n' + imageMarker(cover.id), images: [cover.id] })).status, 200);
+  assert.equal((await get(`images/${picture.id}.webp`)).status, 200);
+  assert.equal((await post(`replies/${reply.id}/edit`, { body: '编辑说明\n\n' + imageMarker(picture.id) }, 'reader=r2')).status, 200);
+  assert.equal((await post(`replies/${reply.id}/edit`, { body: '移除图片' }, 'reader=r2')).status, 200);
+  assert.equal((await get(`images/${picture.id}.webp`)).status, 404);
+  const second = await json(upload(await png(), 'image/png', 'reader=r2'));
+  const again = await json(post(`topics/${topic.id}/replies`, { body: '另一张图\n\n' + imageMarker(second.id) }, 'reader=r2'));
+  assert.equal((await post(`replies/${again.id}/delete`, {}, 'reader=r2')).status, 200);
+  assert.equal((await get(`images/${second.id}.webp`)).status, 404);
+});
+
+for (const board of ['qa', 'showcase', 'tools', 'moments', 'meta', 'vip']) {
+  test(`simple local posting: ${board} requires title, body and a cover, but no metadata, and can be edited`, async t => {
+    const { post, get, upload } = await setup(t, { useDefault: true });
+    const cover = await json(upload(await png(), 'image/png', 'owner=yes'));
+    const body = `文字\n\n${imageMarker(cover.id)}`;
+    const emptyTitle = await post('topics', { board, title: '', body: '文字', agree: true }, 'owner=yes');
+    assert.equal(emptyTitle.status, 400); assert.match((await emptyTitle.json()).error, /标题/);
+    const missingCover = await post('topics', { board, title: '标题', body: '文字', agree: true }, 'owner=yes');
+    assert.equal(missingCover.status, 400); assert.match((await missingCover.json()).error, /封面/);
+    const created = await post('topics', { board, title: '标题', body, images: [cover.id], agree: true }, 'owner=yes');
+    assert.equal(created.status, 201, await created.clone().text());
+    const { id } = await created.json();
+    const thread = await json(get(`topics/${id}`, 'owner=yes'));
+    assert.equal(thread.topic.board, board);
+    assert.equal(thread.topic.body, body);
+    assert.equal(thread.topic.title, '标题');
+    assert.equal(thread.topic.rawTitle, '标题');
+    const list = await json(get(`topics?board=${board}`, 'owner=yes'));
+    assert.equal(list.items.find(topic => topic.id === id).hasTitle, true);
+    assert.equal(list.items.find(topic => topic.id === id).thumbs[0], cover.id);
+    assert.equal(thread.topic.bounty, 0);
+    assert.equal(thread.topic.resource, null);
+    if (board === 'showcase') {
+      assert.equal(thread.topic.meta.tools, '');
+      assert.equal(thread.topic.meta.usage, '');
+      assert.equal(thread.topic.meta.price, 0);
+    }
+    const edited = await post(`topics/${id}/edit`, { title: '修改标题', body: `修改\n\n${imageMarker(cover.id)}`, images: [cover.id] }, 'owner=yes');
+    assert.equal(edited.status, 200, await edited.clone().text());
+    assert.equal((await json(get(`topics/${id}`, 'owner=yes'))).topic.title, '修改标题');
+  });
+}
+
+test('registered inline image IDs never trigger contact filtering, while visible text and captions still do', async t => {
+  const { post, get, store } = await setup(t, { useDefault: true });
+  const imageId = 'aaaaaaaa-aaaa-4aaa-8aaa-138001380001';
+  store.addImage({ id: imageId, uploader: { kind: 'reader', id: 'r1' }, width: 100, height: 100 });
+  const payload = { board: 'qa', title: '图片编号测试', body: '说明文字\n\n' + imageMarker(imageId), images: [imageId] };
+  const created = await post('topics', payload);
+  assert.equal(created.status, 201, await created.clone().text());
+  const { id } = await created.json();
+  assert.equal((await json(get(`topics/${id}`))).topic.images[0].id, imageId);
+  assert.equal((await post(`topics/${id}/edit`, { ...payload, body: '更新说明\n\n' + imageMarker(imageId) })).status, 200);
+  for (const body of [payload.body + '\n13800138000', payload.body.replace('![图片]', '![13800138000]')]) {
+    const rejected = await post(`topics/${id}/edit`, { ...payload, body });
+    assert.equal(rejected.status, 400);
+    assert.match((await rejected.json()).error, /手机号/);
+  }
+});
+
+test('simple posting requires body text even with a title or cover; tools accepts real inline images', async t => {
+  const { post, upload, get } = await setup(t, { simplePosting: true });
+  const uploaded = await json(upload(await png()));
+  for (const board of ['qa', 'showcase', 'tools', 'moments', 'meta']) {
+    const rejected = await post('topics', { board, title: '只有标题', body: ' \n ', images: [uploaded.id] });
+    assert.equal(rejected.status, 400, board);
+    assert.match((await rejected.json()).error, /正文|内容/);
+  }
+  const accepted = await post('topics', { board: 'tools', title: '截图', body: '实际使用截图\n\n' + imageMarker(uploaded.id), images: [uploaded.id] });
+  assert.equal(accepted.status, 201, await accepted.clone().text());
+  const { id } = await accepted.json();
+  const thread = await json(get(`topics/${id}`));
+  assert.equal(thread.topic.images[0].id, uploaded.id);
+  const edited = await post(`topics/${id}/edit`, { title: '截图', body: '', images: [uploaded.id] });
+  assert.equal(edited.status, 400);
+  assert.equal((await upload(Buffer.from('video'), 'video/mp4')).status, 415);
+  assert.equal((await upload(Buffer.from('video'), 'image/png')).status, 400);
+});
+
+test('simple posting validates optional links, forbids resource prices and bounties, and keeps board permissions', async t => {
+  const { post, upload } = await setup(t, { simplePosting: true });
+  const cover = await json(upload(await png()));
+  const fields = { title: '标题', body: '正文\n\n' + imageMarker(cover.id), images: [cover.id] };
+  const invalidLink = await post('topics', { ...fields, board: 'tools', url: 'broken' });
+  assert.equal(invalidLink.status, 400); assert.match((await invalidLink.json()).error, /链接/);
+  assert.equal((await post('topics', { board: 'vip', body: '文字' })).status, 403);
+  const bounty = await post('topics', { ...fields, board: 'qa', bounty: 5 });
+  assert.equal(bounty.status, 400); assert.match((await bounty.json()).error, /价格|悬赏/);
+  const price = await post('topics', { ...fields, board: 'tools', url: 'https://example.com/', price: '付费' });
+  assert.equal(price.status, 400); assert.match((await price.json()).error, /价格|悬赏/);
+  const wrongBoard = await post('topics', { ...fields, board: 'qa', prompt: 'test', promptMode: 'paid', promptPrice: 17 });
+  assert.equal(wrongBoard.status, 400);
+});
+
+test('simple work posting accepts every integer from 5 to 50 and unlocks at the author-defined amount', async t => {
+  const { post, get, upload, credit } = await setup(t, { simplePosting: true });
+  const cover = await json(upload(await png()));
+  const fields = { board: 'showcase', title: '自定义解锁数量', body: '作品说明\n\n' + imageMarker(cover.id), images: [cover.id],
+    prompt: 'silver nebula over a quiet star field', promptMode: 'paid' };
+  for (const promptPrice of [4, 51, 17.5, '', 'invalid']) {
+    const rejected = await post('topics', { ...fields, promptPrice });
+    assert.equal(rejected.status, 400, String(promptPrice));
+    assert.match((await rejected.json()).error, /解锁价格/);
+  }
+  const works = [];
+  for (const promptPrice of [5, 17, 50]) {
+    const nextCover = await json(upload(await png()));
+    const content = { ...fields, body: '作品说明\n\n' + imageMarker(nextCover.id), images: [nextCover.id] };
+    const created = await post('topics', { ...content, promptPrice });
+    assert.equal(created.status, 201, await created.clone().text());
+    const { id } = await created.json(); works.push({ id, content });
+    const locked = await json(get(`topics/${id}`, 'reader=r2'));
+    assert.equal(locked.topic.meta.price, promptPrice);
+    assert.equal(locked.topic.meta.prompt, null);
+    assert.equal(JSON.stringify(locked).includes(fields.prompt), false);
+  }
+  const { id, content } = works[1];
+  credit('r2', 30);
+  const unlocked = await json(post(`topics/${id}/unlock`, {}, 'reader=r2'));
+  assert.deepEqual(unlocked, { share: 13, balance: 13 });
+  assert.equal((await json(get(`topics/${id}`, 'reader=r2'))).topic.meta.prompt, fields.prompt);
+  const edited = await post(`topics/${id}/edit`, { ...content, promptPrice: 32 });
+  assert.equal(edited.status, 200, await edited.clone().text());
+  assert.equal((await json(get(`topics/${id}`))).topic.meta.price, 32);
+  assert.equal((await json(get(`topics/${id}`, 'reader=r2'))).topic.meta.unlocked, true, 'an existing unlock remains valid');
+  const otherEdit = await post(`topics/${id}/edit`, { ...content, promptPrice: 8 }, 'reader=r2');
+  assert.equal(otherEdit.status, 403);
+  assert.equal((await json(get(`topics/${id}`))).topic.meta.price, 32);
+});
+
+test('simple edits can remove optional resource links and preserve existing paid prompts', async t => {
+  const { post, get, store, upload } = await setup(t, { simplePosting: true });
+  const cover = await json(upload(await png()));
+  const resource = await json(post('topics', { board: 'tools', title: '标题', body: '工具说明\n\n' + imageMarker(cover.id), images: [cover.id], url: 'https://example.com/' }));
+  assert.equal((await json(get(`topics/${resource.id}`))).topic.resource.url, 'https://example.com/');
+  assert.equal((await post(`topics/${resource.id}/edit`, { title: '标题', body: '撤回资源链接\n\n' + imageMarker(cover.id), images: [cover.id], url: '' })).status, 200);
+  assert.equal((await json(get(`topics/${resource.id}`))).topic.resource, null);
+  const old = store.createTopic({ board: 'showcase', author: { kind: 'reader', id: 'r1' }, title: '旧作品', body: '旧作品的说明',
+    meta: { tools: '旧工具', model: '', usage: '', prompt: '原先的付费提示词', promptMode: 'paid', price: 10 } });
+  const second = await json(upload(await png()));
+  const edited = await post(`topics/${old.id}/edit`, { title: '标题', body: '更新后的说明\n\n' + imageMarker(second.id), images: [second.id], tools: '旧工具' });
+  assert.equal(edited.status, 200, await edited.clone().text());
+  const thread = await json(get(`topics/${old.id}`));
+  assert.equal(thread.topic.meta.promptMode, 'paid');
+  assert.equal(thread.topic.meta.price, 10);
+  assert.equal(thread.topic.meta.prompt, '原先的付费提示词');
+});
+
+test('no role can omit a cover and body image order determines the cover on create and edit', async t => {
+  const { post, get, upload } = await setup(t, { simplePosting: true });
+  for (const cookie of ['owner=yes', 'reader=r1', 'reader=v1', 'reader=s1']) {
+    const result = await post('topics', { board: 'qa', title: '封面要求', body: '有正文但没有封面', agree: true }, cookie);
+    assert.equal(result.status, 400); assert.match((await result.json()).error, /封面/);
+  }
+  const first = await json(upload(await png())), second = await json(upload(await png()));
+  const payload = { board: 'qa', title: '封面顺序', body: `文字\n\n${imageMarker(second.id)}\n\n${imageMarker(first.id)}`, images: [first.id, second.id] };
+  const created = await json(post('topics', payload));
+  assert.ok(created.id);
+  assert.equal((await json(get(`topics/${created.id}`))).topic.images[0].id, second.id);
+  const edited = await post(`topics/${created.id}/edit`, { ...payload, body: `文字\n\n${imageMarker(first.id)}\n\n${imageMarker(second.id)}` });
+  assert.equal(edited.status, 200);
+  assert.equal((await json(get(`topics/${created.id}`))).topic.images[0].id, first.id);
+  const missing = await post(`topics/${created.id}/edit`, { ...payload, body: '只留下文字', images: [] });
+  assert.equal(missing.status, 400);
+});
+
+test('inline body pictures require real text, attached IDs and ownership; image markers do not use up the moment text limit', async t => {
+  const { post, get, upload } = await setup(t, { simplePosting: true });
+  const { id } = await json(upload(await png()));
+  const marker = `![图片](/api/community/images/${id}.webp)`;
+  const empty = await post('topics', { board: 'moments', title: '标题', body: marker, images: [id] });
+  assert.equal(empty.status, 400); assert.match((await empty.json()).error, /正文/);
+  const unbound = await post('topics', { board: 'moments', title: '标题', body: '说明\n\n' + marker, images: [] });
+  assert.equal(unbound.status, 400); assert.match((await unbound.json()).error, /图片/);
+  assert.equal((await post('topics', { board: 'moments', title: '标题', body: '说明\n\n' + marker, images: [id] }, 'reader=r2')).status, 400);
+  const created = await post('topics', { board: 'moments', title: '标题', body: '文'.repeat(298) + '\n\n' + marker, images: [id] });
+  assert.equal(created.status, 201, await created.clone().text());
+  const result = await created.json();
+  const topic = (await json(get(`topics/${result.id}`))).topic;
+  assert.equal(topic.title, '标题'); assert.equal(topic.images[0].id, id); assert.ok(topic.body.includes(marker));
+});
 
 test("the community requires sign-in and a same-site request for every write", async (t) => {
   const { get, post, siteOrigin } = await setup(t);
@@ -111,7 +639,7 @@ test("readers post, list, read and reply; the owner can remove anything, readers
   const created = await post("topics", { board: "qa", title: "  ComfyUI 人脸崩了  ", body: "第一段：单独用没问题\r\n第二段：一起用就崩" });
   assert.equal(created.status, 201);
   const { id, earned, pending } = await created.json();
-  assert.deepEqual([earned, pending], [5, false]);
+  assert.deepEqual([earned, pending], [2, false]);
   assert.equal((await post("topics", { board: "tools", title: "推荐一个工具", body: "这是一个很好用的工具。", url: "https://example.com/tool" }, "reader=r2")).status, 201);
   assert.equal((await post(`topics/${id}/replies`, { body: "试试降低强度" }, "reader=r2")).status, 201);
 
@@ -119,7 +647,7 @@ test("readers post, list, read and reply; the owner can remove anything, readers
   assert.equal(list.total, 2);
   assert.equal(list.items[0].id, id, "the replied topic is most recently active");
   assert.equal(list.items[0].title, "ComfyUI 人脸崩了", "titles are trimmed");
-  assert.deepEqual(list.items[0].author, { name: "林间", role: "reader", uid: "u1", showUid: true, avatar: `/api/community/avatar/u1.webp?v=${avatarId.slice(0, 8)}`, vip: false, level: 1, steward: false, frame: null, color: null });
+  assert.deepEqual(list.items[0].author, { name: "林间", role: "reader", uid: "u1", showUid: true, avatar: `/api/community/avatar/u1.webp?v=${avatarId.slice(0, 8)}`, vip: false, level: 1, growth: { level: 1, points: 2, configured: false }, steward: false, frame: null, color: null });
   assert.equal(list.items[0].replies, 1);
   assert.equal(list.items[0].lastReply.author.name, "远山", "a listed topic names its latest replier");
   assert.equal(list.items[1].lastReply, null);
@@ -153,7 +681,7 @@ test("readers post, list, read and reply; the owner can remove anything, readers
   assert.equal((await post(`topics/${id}/delete`, {}, "reader=r2")).status, 403);
   assert.equal((await post(`replies/${replyId}/delete`, {}, "reader=r2")).status, 200);
   assert.equal((await json(get(`topics/${id}`))).replies.length, 0);
-  assert.equal((await post(`topics/${id}/delete`, {}, "owner=yes")).status, 200);
+  assert.equal((await post(`topics/${id}/delete`, { reason: "违规内容处理" }, "owner=yes")).status, 200);
   assert.equal((await get(`topics/${id}`)).status, 404);
   assert.equal((await get("topics/not-a-topic")).status, 404);
   assert.deepEqual(audits.map((entry) => [entry.action, entry.moderated]), [["community-delete-topic", true]], "only moderation is audited");
@@ -255,8 +783,8 @@ test("the runtime maps site identities to community members and looks up their p
 test("likes, bookmarks, views, thanks, check-ins and the viewer's own state", async (t) => {
   const { get, post, setLevel } = await setup(t);
   const { id, earned } = await json(post("topics", { ...topicBody, tags: ["ComfyUI", "新手"] }));
-  assert.equal(earned, 5, "posting earns 星尘");
-  assert.deepEqual(await json(post(`topics/${id}/like`, { on: true }, "reader=r2")), { likes: 1, liked: true, earned: 1 }, "a 巡天 like pays the author");
+  assert.equal(earned, 2, "posting earns 星尘");
+  assert.deepEqual(await json(post(`topics/${id}/like`, { on: true }, "reader=r2")), { likes: 1, liked: true, earned: 0 }, "a 巡天 like gives no stars");
   assert.deepEqual(await json(post(`topics/${id}/bookmark`, { on: true }, "reader=r2")), { bookmarks: 1, bookmarked: true });
   const seen = await json(get(`topics/${id}`, "reader=r2"));
   assert.deepEqual([seen.topic.likes, seen.topic.liked, seen.topic.bookmarked, seen.topic.mine, seen.topic.canEdit], [1, true, true, false, false]);
@@ -271,7 +799,7 @@ test("likes, bookmarks, views, thanks, check-ins and the viewer's own state", as
   assert.equal((await post("checkin", {}, "reader=r2")).status, 200);
   assert.equal((await post("checkin", {}, "reader=r2")).status, 409, "once a day");
   const me = await json(get("me", "reader=r2"));
-  assert.deepEqual([me.name, me.checkedIn, me.streak, me.balance, me.nextReward.total, me.agreed], ["远山", true, 1, 5, 5, true]);
+  assert.deepEqual([me.name, me.checkedIn, me.streak, me.balance, me.nextReward.total, me.agreed], ["远山", true, 1, 1, 1, true]);
   const summary = await json(get("summary"));
   assert.deepEqual([summary.checkinsToday, summary.tags.ComfyUI], [1, 1]);
   assert.equal((await post(`topics/${id}/thank`, {})).status, 400, "not your own post");
@@ -283,7 +811,7 @@ test("likes, bookmarks, views, thanks, check-ins and the viewer's own state", as
   setLevel("r2", 1);
   await post("checkin", {}, "reader=v1");
   await post("checkin", {}, "reader=v1");
-  assert.equal((await json(get("me", "reader=v1"))).balance, 7, "VIPs get 2 more a day");
+  assert.equal((await json(get("me", "reader=v1"))).balance, 1, "VIP daily check-in reward is also one");
   assert.equal((await post("topics", { ...topicBody, tags: ["不存在的标签"] })).status, 400);
   assert.equal((await post("topics", { ...topicBody, tags: ["新手", "提示词", "工作流", "Claude"] })).status, 400, "at most three tags");
 });
@@ -304,7 +832,7 @@ test("editing, accepting answers and moderation tools are limited to the right p
   assert.equal((await post(`replies/${answer.id}/edit`, { body: "把权重降到 0.5 左右试试" }, "reader=r2")).status, 200);
   assert.equal((await post(`replies/${answer.id}/accept`, {}, "reader=r2")).status, 403, "only the asker accepts");
   assert.equal((await post(`replies/${mine.id}/accept`, {})).status, 400, "not your own reply");
-  assert.deepEqual(await json(post(`replies/${answer.id}/accept`, {})), { earned: 15 });
+  assert.deepEqual(await json(post(`replies/${answer.id}/accept`, {})), { earned: 3 });
   assert.equal((await post(`replies/${answer.id}/accept`, {})).status, 409);
   const solved = await json(get(`topics/${id}`));
   assert.deepEqual(solved.replies.map((reply) => [reply.id, reply.accepted]), [[answer.id, true], [mine.id, false]], "the accepted answer comes first");
@@ -318,7 +846,7 @@ test("editing, accepting answers and moderation tools are limited to the right p
   assert.equal((await post(`topics/${id}/feature`, { on: true }, "owner=yes")).status, 200);
   const flagged = (await json(get("topics"))).items[0];
   assert.deepEqual([flagged.pinned, flagged.featured, flagged.solved], [true, true, true]);
-  assert.equal((await json(get("me"))).balance, 5 + 50, "精华 pays the author 50");
+  assert.equal((await json(get("me"))).balance, 2 + 15, "a first 精华 pays the author 15");
   assert.equal((await json(get(`topics/${id}`, "owner=yes"))).topic.canModerate, true);
   assert.equal((await json(get(`topics/${id}`))).topic.canModerate, false);
 
@@ -348,10 +876,11 @@ test("reports go to the owner; strong reports hide content at once", async (t) =
   const [open] = queue.reports;
   assert.deepEqual([open.reporter.name, open.target.kind, open.target.author.name, open.target.topicId, open.target.excerpt], ["林间", "reply", "远山", id, "广告广告广告广告"]);
   assert.equal((await post(`manage/reports/${open.id}`, { uphold: true })).status, 403);
-  assert.deepEqual(await json(post(`manage/reports/${open.id}`, { uphold: true }, "owner=yes")), { removed: true });
+  assert.equal((await post(`manage/reports/${open.id}`, { uphold: true }, 'owner=yes')).status, 400);
+  assert.deepEqual(await json(post(`manage/reports/${open.id}`, { uphold: true, reason: '核实为违规内容' }, "owner=yes")), { removed: true });
   assert.equal((await json(get(`topics/${id}`))).replies.length, 0);
   assert.equal((await json(get("manage?tab=reports", "owner=yes"))).reports.length, 0);
-  assert.equal((await json(get("me"))).balance, 5 + 5, "the reporter is rewarded");
+  assert.equal((await json(get("me"))).balance, 2, "reports do not mint stars");
 
   // A 守夜 (L3) report hides a 巡天 member's post at once; the author still sees it.
   setLevel("r2", 3);
@@ -370,6 +899,59 @@ test("reports go to the owner; strong reports hide content at once", async (t) =
   assert.deepEqual(await json(report({ kind: "topic", id: third.id, reason: "其他" }, "reader=v1")), { hidden: false });
   assert.deepEqual(await json(report({ kind: "topic", id: third.id, reason: "其他" }, "reader=s1")), { hidden: true });
   assert.ok((await json(get("inbox", "owner=yes"))).items.some((notice) => notice.data.report === "new" && notice.data.hidden));
+});
+
+for (const kind of ['topic', 'reply']) test(`a failed ${kind} report notification rolls back the report and hiding while the attempt stays counted`, async t => {
+  const { post, store, setLevel, directory } = await setup(t);
+  const owner = { kind: 'owner', id: 'owner' };
+  const topic = await json(post('topics', topicBody));
+  const target = kind === 'topic' ? topic : await json(post(`topics/${topic.id}/replies`, { body: '有效回复用于举报通知失败回滚测试' }));
+  setLevel('r2', 3);
+  const db = new DatabaseSync(resolve(directory, 'content.db'));
+  try {
+    db.exec("CREATE TRIGGER reject_report_notification BEFORE INSERT ON community_notifications WHEN NEW.text = '收到一条举报' BEGIN SELECT RAISE(ABORT, 'synthetic report notification failure'); END");
+    const input = { kind, id: target.id, reason: '垃圾广告 / 引流' };
+    assert.equal((await post('reports', input, 'reader=r2')).status, 500);
+    assert.equal(store.openReports().length, 0, 'an incomplete report is not retained');
+    assert.equal((kind === 'topic' ? store.topic(target.id) : store.reply(target.id)).hidden, false, 'failed notification cannot leave content hidden');
+    assert.equal(store.members.inbox(owner).filter(notice => notice.data?.report === 'new').length, 0);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM community_rate_events WHERE member_kind='reader' AND member_id='r2' AND action='report'").get().n, 1, 'a failed business operation still consumes a validated report attempt');
+    db.exec('DROP TRIGGER reject_report_notification');
+    const response = await post('reports', input, 'reader=r2');
+    assert.equal(response.status, 201, 'a rolled-back report remains retryable');
+    assert.deepEqual(await response.json(), { hidden: true });
+    assert.equal(store.openReports().length, 1);
+    assert.equal((kind === 'topic' ? store.topic(target.id) : store.reply(target.id)).hidden, true);
+    assert.equal(store.members.inbox(owner).filter(notice => notice.data?.report === 'new').length, 1);
+  } finally { db.close(); }
+});
+
+test('a failed prompt unlock notification rolls back buyer debit, author share and entitlement while the attempt stays counted', async t => {
+  const { post, get, store, credit, directory } = await setup(t);
+  const author = { kind: 'reader', id: 'r1' }, buyer = { kind: 'reader', id: 'r2' };
+  const topic = store.createTopic({ author, board: 'showcase', title: '通知失败解锁测试', body: '用于隔离验证解锁事务的作品说明', meta: { tools: '', model: '', usage: '', prompt: 'paid private prompt', promptMode: 'paid', price: 10 } });
+  credit('r2', 100);
+  const authorBalance = store.ledger.balance(author);
+  const db = new DatabaseSync(resolve(directory, 'content.db'));
+  try {
+    db.exec("CREATE TRIGGER reject_unlock_notification BEFORE INSERT ON community_notifications WHEN NEW.type = 'unlock' BEGIN SELECT RAISE(ABORT, 'synthetic unlock notification failure'); END");
+    const path = `topics/${topic.id}/unlock`;
+    assert.equal((await post(path, {}, 'reader=r2')).status, 500);
+    assert.equal(store.ledger.balance(buyer), 100);
+    assert.equal(store.ledger.balance(author), authorBalance);
+    assert.equal(store.economy.unlocked(topic.id, buyer), false);
+    assert.equal(store.economy.unlockCount(topic.id), 0);
+    assert.equal(store.members.inbox(author).filter(notice => notice.type === 'unlock').length, 0);
+    assert.equal((await json(get(`topics/${topic.id}`, 'reader=r2'))).topic.meta.prompt, null);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM community_rate_events WHERE member_kind='reader' AND member_id='r2' AND action='action'").get().n, 1);
+    db.exec('DROP TRIGGER reject_unlock_notification');
+    assert.deepEqual(await json(post(path, {}, 'reader=r2')), { share: 8, balance: 90 });
+    assert.equal(store.ledger.balance(author), authorBalance + 8);
+    assert.equal(store.economy.unlocked(topic.id, buyer), true);
+    assert.equal(store.members.inbox(author).filter(notice => notice.type === 'unlock').length, 1);
+    assert.equal((await post(path, {}, 'reader=r2')).status, 409, 'a completed unlock cannot debit again');
+    assert.equal(store.ledger.balance(buyer), 90);
+  } finally { db.close(); }
 });
 
 test("images: upload, re-encode, attach to a post and serve only to those who may see it", async (t) => {
@@ -400,12 +982,17 @@ test("images: upload, re-encode, attach to a post and serve only to those who ma
 });
 
 test("the guidelines come first, and 初光 members have limits and a review queue", async (t) => {
-  const { get, post } = await setup(t);
+  const { get, post, store, directory } = await setup(t);
+  const agreement = new DatabaseSync(resolve(directory, 'content.db'));
+  agreement.prepare("UPDATE community_members SET agreed_version=NULL,convention_read_version=NULL,convention_read_at=NULL WHERE member_id='r3'").run();
+  agreement.close();
   const first = await post("topics", topicBody, "reader=r3");
   assert.equal(first.status, 428, "the first post asks for the guidelines");
   assert.equal((await json(get("me", "reader=r3"))).agreed, false);
+  assert.equal((await post("topics", { ...topicBody, agree: true }, "reader=r3")).status, 428, 'the old checkbox cannot bypass versioned consent');
+  acceptCommunityConvention(store, [{ kind: 'reader', id: 'r3' }]);
   const plain = await json(post("topics", { ...topicBody, agree: true }, "reader=r3"));
-  assert.deepEqual([plain.pending, plain.earned], [false, 5]);
+  assert.deepEqual([plain.pending, plain.earned], [false, 2]);
   assert.equal((await json(get("me", "reader=r3"))).agreed, true);
   assert.equal((await post("topics", { ...topicBody, bounty: 20 }, "reader=r3")).status, 403, "初光 cannot offer bounties");
   const links = "看这几个链接 https://a.example https://b.example https://c.example";
@@ -456,7 +1043,7 @@ test("@mentions, notifications and follows", async (t) => {
   const replies = await json(get("members/u2?tab=replies"));
   assert.deepEqual(replies.replies.map((reply) => reply.topicTitle), ["ComfyUI 人脸崩了"]);
   const self = await json(get("members/u1?tab=bookmarks"));
-  assert.deepEqual([self.self, self.quick.balance, self.bookmarks], [true, 5, []]);
+  assert.deepEqual([self.self, self.quick.balance, self.bookmarks], [true, 2, []]);
   assert.deepEqual([(await json(get("members/owner"))).person.name, (await json(get("members/owner"))).joinedAt], ["無相", null]);
 });
 
@@ -501,7 +1088,7 @@ test("review rejection requires a fixed reason and records the appeal notice and
 test("a steward can reject a pending topic and the audit names the steward", async (t) => {
   const { get, post, audits } = await setup(t);
   const pending = await json(post("topics", { board: "qa", title: "协管待审主题", body: "请看 https://example.com/steward", agree: true }, "reader=r3"));
-  await post("members/u5/steward", { on: true }, "owner=yes");
+  await post("members/u5/steward", { on: true, boards: allModerationBoards }, "owner=yes");
   const rejected = await post(`manage/topics/${pending.id}/reject`, { reason: "与版块无关", note: "请换到工具资源版块" }, "reader=s1");
   assert.equal(rejected.status, 200);
   const notice = (await json(get("inbox?tab=system", "reader=r3"))).items[0];
@@ -543,8 +1130,8 @@ test("shipping company and tracking number survive resolution while recipient PI
 test("public post people keep a linkable UID while display follows viewer permissions", async (t) => {
   const { get, post } = await setup(t);
   const { id } = await json(post("topics", topicBody, "reader=r1"));
-  await post("members/u5/steward", { on: true }, "owner=yes");
-  assert.deepEqual((await json(get(`topics/${id}`, "reader=r2"))).topic.author, { name: "林间", role: "reader", uid: "u1", showUid: false, avatar: "/api/community/avatar/u1.webp?v=aaaaaaaa", vip: false, level: 1, steward: false, frame: null, color: null });
+  await post("members/u5/steward", { on: true, boards: allModerationBoards }, "owner=yes");
+  assert.deepEqual((await json(get(`topics/${id}`, "reader=r2"))).topic.author, { name: "林间", role: "reader", uid: "u1", showUid: false, avatar: "/api/community/avatar/u1.webp?v=aaaaaaaa", vip: false, level: 1, growth: { level: 1, points: 2, configured: false }, steward: false, frame: null, color: null });
   assert.equal((await json(get(`topics/${id}`, "reader=r1"))).topic.author.showUid, true);
   assert.equal((await json(get(`topics/${id}`, "reader=s1"))).topic.author.showUid, true);
   assert.equal((await json(get("me", "reader=r1"))).uid, "u1");
@@ -593,7 +1180,7 @@ test("the shop: prices and states, decorations, goods with shipping details for 
 test("stewards, mutes, moderated deletions, tag edits and the audit log", async (t) => {
   const { get, post, audits } = await setup(t);
   assert.equal((await post("members/u5/steward", { on: true })).status, 403, "only the owner appoints");
-  assert.deepEqual(await json(post("members/u5/steward", { on: true }, "owner=yes")), { steward: true });
+  assert.deepEqual(await json(post("members/u5/steward", { on: true, boards: allModerationBoards }, "owner=yes")), { steward: true });
   assert.deepEqual([(await json(get("me", "reader=s1"))).mod, (await json(get("me", "reader=s1"))).level], [true, 4]);
   assert.equal((await get("manage", "reader=s1")).status, 200);
   assert.equal((await get("manage?tab=items", "reader=s1")).status, 403, "the shop is the owner's");
@@ -606,9 +1193,9 @@ test("stewards, mutes, moderated deletions, tag edits and the audit log", async 
   assert.equal((await post(`topics/${id}/retag`, { tags: ["效率"] })).status, 403, "巡天 cannot retag");
   assert.equal((await post(`topics/${id}/retag`, { tags: ["效率"] }, "reader=s1")).status, 200);
   assert.deepEqual((await json(get(`topics/${id}`))).topic.tags, ["效率"]);
-  assert.equal((await post(`replies/${reply.id}/delete`, {}, "reader=s1")).status, 200);
+  assert.equal((await post(`replies/${reply.id}/delete`, { reason: "违规回复处理" }, "reader=s1")).status, 200);
   assert.equal((await json(get("inbox?tab=system", "reader=r2"))).items[0].type, "penalty");
-  assert.equal((await post(`topics/${id}/delete`, { mute: 7 }, "reader=s1")).status, 200);
+  assert.equal((await post(`topics/${id}/delete`, { mute: 7, reason: "违规内容处理" }, "reader=s1")).status, 200);
   const muted = await post("topics", topicBody);
   assert.equal(muted.status, 403);
   assert.match((await muted.json()).error, /禁言/);
@@ -631,7 +1218,7 @@ test("stewards, mutes, moderated deletions, tag edits and the audit log", async 
   assert.equal(audits[4].mute, 7);
   const other = await json(post("topics", topicBody, "reader=v1"));
   const noisy = await json(post(`topics/${other.id}/replies`, { body: "刷屏刷屏刷屏" }, "reader=r3"));
-  assert.equal((await post(`replies/${noisy.id}/delete`, { mute: 30 }, "reader=s1")).status, 200);
+  assert.equal((await post(`replies/${noisy.id}/delete`, { mute: 30, reason: "违规回复处理" }, "reader=s1")).status, 200);
   assert.equal((await json(get("me", "reader=r3"))).muted.reason, "发布违规内容", "deleting a reply can mute its author too");
   assert.deepEqual([audits.at(-1).action, audits.at(-1).mute], ["community-delete-reply", 30]);
 });
@@ -688,11 +1275,11 @@ test("make-up check-ins, the 星尘 center, rankings and avatars", async (t) => 
   assert.deepEqual([board.makeup.days.length, board.makeup.left, board.makeup.cost], [7, 2, 30]);
   assert.equal((await post("checkin/makeup", { day: board.makeup.days[0] })).status, 402);
   credit("r1", 100);
-  assert.deepEqual(await json(post("checkin/makeup", { day: board.makeup.days[0] })), { streak: 2, cost: "stardust", balance: 75 });
+  assert.deepEqual(await json(post("checkin/makeup", { day: board.makeup.days[0] })), { streak: 2, cost: "stardust", bonus: 0, balance: 71 });
   assert.equal((await post("checkin/makeup", { day: "2020-01-01" })).status, 400);
 
   const stardust = await json(get("stardust"));
-  assert.deepEqual([stardust.balance, stardust.level, stardust.progress.next], [75, 1, 2]);
+  assert.deepEqual([stardust.balance, stardust.level, stardust.progress.next], [71, 1, 2]);
   assert.deepEqual(stardust.ledger.map((row) => row.reason), ["makeup", "test", "checkin"]);
   assert.equal(stardust.ledger[0].detail, board.makeup.days[0], "a make-up names its day");
   assert.deepEqual((await json(get("stardust?flow=out"))).ledger.map((row) => row.amount), [-30]);

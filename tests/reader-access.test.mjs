@@ -33,36 +33,54 @@ test('password reset success stays visible after asynchronous account rendering'
   } finally {releaseRender();Object.assign(globalThis,originals);dom.window.close();}
 });
 
-test('successful email verification returns the previous registration form to sign-in mode', async () => {
+test('registration requires a code entered on the page and returns to sign-in after verification', async () => {
   const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://127.0.0.1:4203/#/account' });
-  const originals = Object.fromEntries(['window', 'document', 'location', 'fetch'].map(key => [key, globalThis[key]]));
+  const originals = Object.fromEntries(['window', 'document', 'location', 'history', 'FormData', 'fetch'].map(key => [key, globalThis[key]]));
+  const calls = [];
   Object.assign(globalThis, { window: dom.window, document: dom.window.document, location: dom.window.location,
-    fetch: async () => ({ ok: true, json: async () => ({ message: 'verified' }) }) });
+    history: dom.window.history, FormData: dom.window.FormData,
+    fetch: async (url, options) => { calls.push({ url, body: JSON.parse(options.body) }); return { ok: true, json: async () => ({ requestId: '11111111-1111-4111-8111-111111111111', message: '验证码已发送' }) }; } });
   try {
     const render = () => { document.body.innerHTML = readerPage('account', '', null, false, true); };
     render();
     const ui = mountReaderUI({ render, onIdentity: () => {} });
     document.querySelector('[data-reader-mode="register"]').click();
-    assert(document.querySelector('[data-reader-form="register"]'));
-    document.body.innerHTML = readerPage('verify', 'valid-test-token', null, false, true);
-    ui.route('verify', 'valid-test-token');
+    for (const [name, value] of Object.entries({ nickname: '测试读者', email: 'reader@example.test', phone: '13800138000', password: 'test-password' })) document.querySelector(`[name="${name}"]`).value = value;
+    document.querySelector('form').dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }));
     await new Promise(resolve => setTimeout(resolve, 0));
-    assert.equal(document.querySelector('[data-reader-verified]').hidden, false);
-    render();
+    assert(document.querySelector('[data-reader-form="verify"]'));
+    assert.equal(document.querySelector('[name="email"]').value, 'reader@example.test');
+    assert.equal(document.querySelector('[name="password"]'), null);
+    assert.equal(document.querySelector('[data-reader-resend-code]').disabled, true);
+    document.querySelector('[name="code"]').value = '123456';
+    document.querySelector('form').dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(calls[1].url, '/api/reader/verify');
+    assert.deepEqual(calls[1].body, { email: 'reader@example.test', code: '123456', requestId: '11111111-1111-4111-8111-111111111111' });
     assert(document.querySelector('[data-reader-form="login"]'), 'Sign in now must open the login form');
+    assert.match(document.querySelector('[data-reader-message]').textContent, /验证成功/);
   } finally { Object.assign(globalThis, originals); dom.window.close(); }
 });
 
-test('a hidden verification retry stays hidden despite primary-button layout styles', async () => {
-  const css = await readFile(new URL('../src/reader.css', import.meta.url), 'utf8');
-  const dom = new JSDOM(`<!doctype html><head><style>${css}</style></head><body>${readerPage('verify', 'test-token', null, false, true)}</body>`);
-  try { assert.equal(dom.window.getComputedStyle(dom.window.document.querySelector('[data-reader-verify]')).display, 'none'); }
-  finally { dom.window.close(); }
+test('legacy verification links show a code form without automatically activating an account', async () => {
+  const dom = new JSDOM(`<!doctype html><body>${readerPage('verify', 'test-token', null, false, true)}</body>`);
+  const previous = Object.fromEntries(['document', 'fetch'].map(key => [key, globalThis[key]]));
+  let requests = 0;
+  Object.assign(globalThis, { document: dom.window.document, fetch: async () => { requests++; } });
+  try {
+    mountReaderUI({ render: () => {}, onIdentity: () => {} }).route('verify', 'test-token');
+    assert.equal(requests, 0);
+    assert.equal(dom.window.document.querySelector('[name="code"]').autocomplete, 'one-time-code');
+    assert.equal(dom.window.document.querySelector('[data-reader-verify]'), null);
+  }
+  finally { Object.assign(globalThis, previous); dom.window.close(); }
 });
 
-test('guest policy allows home and complete blog articles only', () => {
+test('guest policy allows home and blog articles while community conventions require login', () => {
   for (const page of ['home', 'notes', 'note']) assert.equal(publicRoute(page), true);
   for (const page of ['works', 'work', 'resources', 'software', 'resource-center', 'community', 'support', 'contact']) assert.equal(publicRoute(page), false);
+  assert.equal(publicRoute('community', 'rules'), false);
+  for (const view of ['home', 'board', 'manage', 'new', 'post', 'stardust', 'unknown']) assert.equal(publicRoute('community', view), false, view);
   assert.equal(publicKind('notes'), true);
   assert.equal(publicKind('works'), false);
   const guest = visibleBootstrap(data, false);
@@ -141,7 +159,7 @@ test('registration requires a phone field and owner sign-in opens the author stu
     phone.value = '13800138000';
     phone.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
     assert.equal(phone.validationMessage, '');
-    assert.match(document.body.textContent, /连续 30 天未登录/);
+    assert.match(document.body.textContent, /连续六个月未登录/);
     document.querySelector('[data-reader-mode="login"]').click();
     window.addEventListener('author:identity', event => { ownerIdentity = event.detail; render(); });
     const form = document.querySelector('[data-reader-form="login"]');
@@ -198,20 +216,23 @@ test('the password eye reveals and hides entered text without submitting login, 
   }
 });
 
-test('successful email verification shows a clear account-ready panel and sign-in action', async () => {
-  const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://127.0.0.1:4196/#/verify/test-token' });
-  const previous = Object.fromEntries(['document', 'fetch'].map(key => [key, globalThis[key]]));
-  globalThis.document = dom.window.document;
-  globalThis.fetch = async () => ({ ok: true, json: async () => ({ message: '邮箱验证成功，账号已启用。现在可以登录。' }) });
+test('registration nickname validation rejects more than eight visible characters before calling the API', async () => {
+  const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://127.0.0.1:4196/#/account' });
+  const previous = Object.fromEntries(['window', 'document', 'FormData', 'fetch'].map(key => [key, globalThis[key]]));
+  let requests = 0;
+  Object.assign(globalThis, { window: dom.window, document: dom.window.document, FormData: dom.window.FormData, fetch: async () => { requests++; } });
   try {
-    document.body.innerHTML = readerPage('verify', 'test-token');
-    const ui = mountReaderUI({ render: () => {}, onIdentity: () => {} });
-    assert.equal(document.querySelector('[data-reader-verified]').hidden, true);
-    ui.route('verify', 'test-token');
+    const render = () => { document.body.innerHTML = readerPage('account', '', null); };
+    render(); mountReaderUI({ render, onIdentity: () => {} });
+    document.querySelector('[data-reader-mode="register"]').click();
+    const input = document.querySelector('[name="nickname"]'); input.value = '一二三四五六七八九';
+    input.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    assert.equal(input.checkValidity(), false);
+    document.querySelector('form').dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }));
     await new Promise(resolve => setTimeout(resolve, 0));
-    assert.equal(document.querySelector('[data-reader-verified]').hidden, false);
-    assert.match(document.querySelector('[data-reader-verified]').textContent, /注册验证成功/);
-    assert.equal(document.querySelector('[data-reader-verified] a').getAttribute('href'), '#/account');
+    assert.equal(requests, 0);
+    input.value = '一二三四五六七八'; input.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    assert.equal(input.checkValidity(), true);
   } finally {
     Object.assign(globalThis, previous);
     dom.window.close();
@@ -286,4 +307,26 @@ test('a signed-in owner enters the writing studio, with management kept inside i
   assert.match(html, /data-author-login/);
   assert.doesNotMatch(html, /href="#\/admin"/);
   assert.doesNotMatch(html, /data-reader-form="login"/);
+});
+
+test('reader avatar files above 2 MB are rejected before making an upload request', () => {
+  const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://127.0.0.1/#/account' });
+  const previousDocument = globalThis.document, previousFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.document = dom.window.document;
+  globalThis.fetch = async () => { calls++; throw new Error('Unexpected upload'); };
+  try {
+    document.body.innerHTML = readerPage('account', '', { uid: '0008', nickname: '读者', email: 'reader@example.test', vip: false });
+    mountReaderUI({ render: () => {}, onIdentity: () => {} });
+    const input = document.querySelector('[data-reader-avatar-file]');
+    const file = new dom.window.File([new Uint8Array(2 * 1024 ** 2 + 1)], 'large.png', { type: 'image/png' });
+    Object.defineProperty(input, 'files', { value: [file] });
+    input.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    assert.equal(calls, 0);
+    assert.match(document.querySelector('[data-reader-avatar-message]').textContent, /2 MB/);
+  } finally {
+    globalThis.document = previousDocument;
+    globalThis.fetch = previousFetch;
+    dom.window.close();
+  }
 });

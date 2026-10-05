@@ -14,3 +14,5 @@
 *.example text eol=lf
 # Preserve original third-party bytes for provenance checksum tests.
 src/vendor/** -text
+# Level artwork and generated SVGs are checked by byte hashes on every platform.
+public/assets/community/levels/*.svg -text

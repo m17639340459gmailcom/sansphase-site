@@ -97,7 +97,7 @@ export function makePayloadConfig({ directory, secret, push = false, siteOrigin 
         auth: {
           verify: {
             generateEmailSubject: () => '验证你的 SANSPHASE 账号',
-            generateEmailHTML: ({ token }: {token: string}) => `<p>点击链接验证邮箱并启用账号：</p><p><a href="${siteOrigin}/#/verify/${encodeURIComponent(token)}">验证邮箱</a></p><p>如果不是你注册的账号，可以忽略这封邮件。</p>`,
+            generateEmailHTML: () => '<p>请返回本站注册页面获取邮箱验证码，输入验证码后才能创建账号。</p><p>如果不是你申请的，请忽略此邮件。</p>',
           },
           forgotPassword: {
             generateEmailSubject: () => '重置你的 SANSPHASE 密码',
