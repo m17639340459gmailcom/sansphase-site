@@ -11,6 +11,7 @@
     "check:types": "tsc --noEmit",
     "dev": "node scripts/dev.mjs",
     "preview": "node scripts/dev.mjs",
+    "preview:community": "pnpm build && node scripts/catalog-fixture-preview.mjs",
     "test:publishing": "node --test tests/payload-integration.test.mjs",
     "test:author": "node --test tests/payload-integration.test.mjs",
     "test": "node --experimental-vm-modules --test tests/*.test.mjs tests/*.test.ts tests/community-layout/*.test.ts tests/community-atlas/*.test.ts",
