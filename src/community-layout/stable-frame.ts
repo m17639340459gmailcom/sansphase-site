@@ -21,6 +21,7 @@ export function createStableCommunityFrame(document: Document, window: FrameWind
   let threadSidebar: ReturnType<typeof createFrameThreadSidebar> | null = null;
   let currentHash = '';
   let navigationHash: string | null = null;
+  let pendingHandoff: { hash: string; reset: boolean; top: number } | null = null;
   let sideKey = '';
   let hotKey = '';
   let restoreTop: number | null = null;
@@ -112,6 +113,7 @@ export function createStableCommunityFrame(document: Document, window: FrameWind
   };
   const preserveReadingPosition = () => {
     const hash = currentHash, revision = scrollRevision, top = restoreTop ?? readTop();
+    if (pendingHandoff) pendingHandoff.top = top;
     preserveReadingHeight();
     const restoreFocus = threadSidebar?.preserveFocus();
     return () => { if (center && currentHash === hash && revision === scrollRevision) { restoreAfterLayout(top); restoreFocus?.(); } };
@@ -131,6 +133,7 @@ export function createStableCommunityFrame(document: Document, window: FrameWind
     if (href !== currentHash) { navigationHash = href; return; }
     // A repeated route click has no hashchange. Do not remount or refetch it.
     event.preventDefault();
+    if (pendingHandoff) { pendingHandoff.reset = true; return; }
     resetToTop();
   };
   const placeCheckin = () => {
@@ -177,12 +180,21 @@ export function createStableCommunityFrame(document: Document, window: FrameWind
     root?.remove(); root = center = right = checkinDock = null;
     currentHash = sideKey = hotKey = '';
     navigationHash = null;
+    pendingHandoff = null;
     lastScrollTop = 0;
     document.body.classList.remove('community-frame-open');
     document.documentElement.classList.remove('community-frame-document');
   };
   const sync = (homeHTML: string) => {
     if (!root || !right) return;
+    // The controller owns the authority/core gate. Keep the actual old route
+    // and its supporting DOM together while waiting, without disabling rail
+    // navigation. New scope data is installed only at the real handoff.
+    if (routeSlot?.querySelector('[data-community-pending-route="true"]')) { navigation?.sync(); return; }
+    if (pendingHandoff?.hash === currentHash) {
+      const handoff = pendingHandoff; pendingHandoff = null;
+      if (handoff.reset) resetToTop(); else restoreAfterLayout(handoff.top);
+    }
     const data = fragment(homeHTML);
     const english = document.documentElement.lang.startsWith('en');
     const current = communityRoute(window.location.hash), view = current.view;
@@ -275,11 +287,25 @@ export function createStableCommunityFrame(document: Document, window: FrameWind
       && previous.board === next.board && previous.id === next.id;
     const changed = currentHash !== nextHash;
     const navigationEntry = navigationHash === nextHash;
+    const incoming = fragment(html);
+    const holding = incoming.querySelector('[data-community-pending-route="true"]');
+    const existing = routeSlot!.querySelector<HTMLElement>('[data-community]');
+    if (holding && existing) {
+      existing.setAttribute('data-community-pending-route', 'true');
+      existing.setAttribute('aria-busy', 'true'); existing.setAttribute('inert', '');
+      const active = document.activeElement;
+      if (active && existing.contains(active)) (active as HTMLElement).blur();
+      pendingHandoff = { hash: nextHash, reset: changed && (!samePage || navigationEntry), top };
+      navigationHash = null; currentHash = nextHash;
+      navigation?.sync();
+      return true;
+    }
     if (changed && (!samePage || navigationEntry)) releaseReadingHeight(); else preserveReadingHeight();
     navigationHash = null;
     currentHash = nextHash;
     center!.setAttribute('aria-label', document.documentElement.lang.startsWith('en') ? 'Community content' : '社区内容');
-    routeSlot!.replaceChildren(fragment(html));
+    pendingHandoff = null;
+    routeSlot!.replaceChildren(incoming);
     if (changed && (!samePage || navigationEntry)) resetToTop(); else restoreAfterLayout(top);
     sync(homeHTML);
     return true;

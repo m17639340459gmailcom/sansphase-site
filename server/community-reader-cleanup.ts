@@ -29,7 +29,7 @@ export function purgeCommunityReaderData(db: DatabaseSync, readerId: string, { q
       (i.topic_id IS NULL OR i.topic_id IN reader_cleanup_topics OR i.reply_id IN reader_cleanup_replies))
       OR i.topic_id IN reader_cleanup_topics OR i.reply_id IN reader_cleanup_replies)
     AND NOT EXISTS (SELECT 1 FROM community_shop_items s WHERE s.image=i.id)
-    AND NOT EXISTS (SELECT 1 FROM community_banner_entries b WHERE b.cover=i.id AND b.topic_id NOT IN reader_cleanup_topics)
+    AND NOT EXISTS (SELECT 1 FROM community_banner_entries b WHERE b.cover=i.id AND (b.topic_id IS NULL OR b.topic_id NOT IN reader_cleanup_topics))
     AND NOT EXISTS (SELECT 1 FROM community_profile_backgrounds p WHERE p.approved_image=i.id OR p.pending_image=i.id)`).run(readerId);
   const images = db.prepare('SELECT id FROM reader_cleanup_images').all() as Array<{ id: string }>;
   // Persist filenames before losing their registry rows. If SQL rolls back, the

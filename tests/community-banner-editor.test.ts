@@ -100,4 +100,30 @@ test('banner editor spacing belongs to the management stylesheet and follows sha
   assert.match(css, /\.community-banner-drop:focus-within\s*\{[^}]*border-color: var\(--focus-edge\)/);
   assert.match(css, /\.community-banner-preview\s*\{[^}]*color: #f7f4ee/);
   assert.doesNotMatch(css, /\.community-banner[^}]*!important/);
+  assert.match(css, /\.community-banner-preview\.is-image > img\s*\{[^}]*object-fit: contain/);
+  assert.match(css, /\.community-banner-preview\.is-image::before\s*\{[^}]*content: none/);
+});
+
+test('an empty scope exposes independent image upload without an available post', () => {
+  const dom = render({ configs: [home], scope: 'home', draft: home, candidates: { state: 'ready', data: { items: [], total: 0, page: 1, pageSize: 20 } } });
+  const button = dom.window.document.querySelector<HTMLButtonElement>('[data-action="community-banner-add-image"]');
+  assert.ok(button, 'image banners must be available even when no posts exist');
+  assert.equal(button.disabled, false);
+  assert.match(button.textContent!, /添加图片横幅/);
+  dom.window.close();
+});
+
+test('independent image previews have no fake post, preserve prepared artwork and share the five-slot limit', () => {
+  const standalone = { kind: 'image' as const, topicId: null, title: '活动 <公告>', cover: image, image, topicTitle: '', topicImage: null, board: 'qa' };
+  const dom = render({ draft: { ...qa, items: [standalone] } });
+  const first = dom.window.document.querySelector('[data-banner-item="0"]')!;
+  assert.equal(first.querySelector('a'), null);
+  assert.ok(first.querySelector('.community-banner-preview.is-image > img'));
+  assert.ok(first.querySelector('[data-banner-file]'));
+  assert.match(first.textContent!, /移除图片|等比例/);
+  assert.doesNotMatch(first.textContent!, /原帖|恢复帖子封面|使用帖子首图/);
+  dom.window.close();
+  const full = render({ draft: { ...qa, items: Array.from({ length: 5 }, () => ({ ...standalone })) } });
+  assert.ok(full.window.document.querySelector<HTMLButtonElement>('[data-action="community-banner-add-image"]')!.disabled);
+  full.window.close();
 });

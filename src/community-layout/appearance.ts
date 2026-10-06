@@ -5,9 +5,9 @@ type AppearanceWindow = Pick<Window, 'location'>;
 
 /** Community appearance is independent of the main site's theme and account. */
 export function createCommunityAppearance(document: Document, _window: AppearanceWindow) {
-  // Every fresh document starts dark. A manual choice stays in this controller
+  // Every fresh document starts light. A manual choice stays in this controller
   // across route/language updates, without restoring old URL or storage values.
-  let theme: CommunityTheme = 'dark';
+  let theme: CommunityTheme = 'light';
   let active = false;
   let previous: string | undefined;
   let translate: Translate = (zh) => zh;

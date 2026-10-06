@@ -58,6 +58,7 @@ const communityOnly = () => siteContent?.communityOnly === true;
 if (communityOnly()) {
   document.body.dataset.communityOnly = 'true';
   document.body.dataset.communityBoot = 'pending';
+  communityAppearance.sync(true);
   document.querySelector('#site-startup')?.remove();
   document.documentElement.classList.remove('is-home-boot', 'is-site-preparing');
   const initialRoute = communityHostRoute(siteContent, location.hash, true);

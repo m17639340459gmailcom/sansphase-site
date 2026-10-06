@@ -98,7 +98,7 @@ CREATE INDEX community_rate_time_idx ON community_rate_events(created_at);`,
   community_banner_entries: `CREATE TABLE community_banner_entries (
   scope TEXT NOT NULL,
   position INTEGER NOT NULL CHECK(position >= 0 AND position < 5),
-  topic_id TEXT NOT NULL,
+  topic_id TEXT,
   topic_board TEXT NOT NULL,
   title TEXT NOT NULL DEFAULT '',
   cover TEXT,
@@ -472,14 +472,16 @@ const missingParts = (db: DatabaseSync) => {
   const imagesPurposeUpgrade = /CHECK\s*\(\s*purpose\s+IN\s*\(\s*'content'\s*,\s*'shop'\s*(?:,\s*'banner'\s*)?\)\s*\)/i.test(imageSQL);
   const bannerSQL = (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='community_banner_entries'").get() as { sql: string } | undefined)?.sql || '';
   const bannerCapacityUpgrade = /\bposition\s*<\s*4\b/i.test(bannerSQL);
+  const bannerImagesUpgrade = has('community_banner_entries') && Boolean((db.prepare('PRAGMA table_info(community_banner_entries)').all() as Array<{ name: string; notnull: number }>)
+    .find(column => column.name === 'topic_id' && column.notnull));
   const shopSQL = (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='community_shop_items'").get() as { sql: string } | undefined)?.sql || '';
   const shopCoverUpgrade = /CHECK\s*\(\s*kind\s+IN\s*\(\s*'frame'\s*,\s*'color'\s*\)\s*\)/i.test(shopSQL);
-  return { tablesMissing, columnsMissing, imagesPurposeUpgrade, bannerCapacityUpgrade, shopCoverUpgrade };
+  return { tablesMissing, columnsMissing, imagesPurposeUpgrade, bannerCapacityUpgrade, bannerImagesUpgrade, shopCoverUpgrade };
 };
 // True when content.db has every community table and column.
 export const communitySchemaReady = (db: DatabaseSync) => {
-  const { tablesMissing, columnsMissing, imagesPurposeUpgrade, bannerCapacityUpgrade, shopCoverUpgrade } = missingParts(db);
-  return !tablesMissing.length && !columnsMissing.length && !imagesPurposeUpgrade && !bannerCapacityUpgrade && !shopCoverUpgrade;
+  const { tablesMissing, columnsMissing, imagesPurposeUpgrade, bannerCapacityUpgrade, bannerImagesUpgrade, shopCoverUpgrade } = missingParts(db);
+  return !tablesMissing.length && !columnsMissing.length && !imagesPurposeUpgrade && !bannerCapacityUpgrade && !bannerImagesUpgrade && !shopCoverUpgrade;
 };
 
 // SQLite cannot widen a column CHECK in place. Recreate only this table from its
@@ -496,17 +498,21 @@ function extendImagePurpose(db: DatabaseSync) {
   for (const object of objects) db.exec(object.sql);
 }
 
-// Existing local configurations use positions 0–3. Widen only their constraint;
-// preserve the ordered selections, original indexes and audit-related triggers.
-function extendBannerCapacity(db: DatabaseSync) {
+// Upgrade older four-position configurations and allow a nullable topic ID for
+// independent picture slides. Preserve rows, indexes and audit-related triggers;
+// no placeholder post is made.
+function extendBannerEntries(db: DatabaseSync) {
   const source = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='community_banner_entries'").get() as { sql: string };
   const objects = db.prepare("SELECT sql FROM sqlite_master WHERE tbl_name='community_banner_entries' AND type IN ('index','trigger') AND sql IS NOT NULL").all() as Array<{ sql: string }>;
-  const sql = source.sql.replace(/CREATE TABLE\s+["`\[]?community_banner_entries["`\]]?/i, 'CREATE TABLE community_banner_entries_capacity_upgrade')
-    .replace(/\bposition\s*<\s*4\b/i, 'position < 5');
-  if (sql === source.sql || !sql.includes('community_banner_entries_capacity_upgrade')) throw Error('Banner schema cannot be upgraded safely.');
+  const sql = source.sql.replace(/CREATE TABLE\s+["`\[]?community_banner_entries["`\]]?/i, 'CREATE TABLE community_banner_entries_upgrade')
+    .replace(/\bposition\s*<\s*4\b/i, 'position < 5')
+    .replace(/((?:\btopic_id\b|"topic_id"|`topic_id`|\[topic_id\])\s+TEXT)\s+NOT\s+NULL\b/i, '$1');
+  if (sql === source.sql || !sql.includes('community_banner_entries_upgrade')) throw Error('Banner schema cannot be upgraded safely.');
   const names = (db.prepare('PRAGMA table_info(community_banner_entries)').all() as Array<{ name: string }>).map(column => `"${column.name.replaceAll('"', '""')}"`).join(',');
   db.exec(sql);
-  db.exec(`INSERT INTO community_banner_entries_capacity_upgrade(${names}) SELECT ${names} FROM community_banner_entries; DROP TABLE community_banner_entries; ALTER TABLE community_banner_entries_capacity_upgrade RENAME TO community_banner_entries;`);
+  const topicId = (db.prepare('PRAGMA table_info(community_banner_entries_upgrade)').all() as Array<{ name: string; notnull: number }>).find(column => column.name === 'topic_id');
+  if (!topicId || topicId.notnull) throw Error('Independent banner image schema cannot be upgraded safely.');
+  db.exec(`INSERT INTO community_banner_entries_upgrade(${names}) SELECT ${names} FROM community_banner_entries; DROP TABLE community_banner_entries; ALTER TABLE community_banner_entries_upgrade RENAME TO community_banner_entries;`);
   for (const object of objects) db.exec(object.sql);
 }
 
@@ -549,8 +555,8 @@ export async function migrateCommunity(directory: string) {
   await stat(database);
   const db = new DatabaseSync(database);
   try {
-    const { tablesMissing, columnsMissing, imagesPurposeUpgrade, bannerCapacityUpgrade, shopCoverUpgrade } = missingParts(db);
-    if (!tablesMissing.length && !columnsMissing.length && !imagesPurposeUpgrade && !bannerCapacityUpgrade && !shopCoverUpgrade) return { changed: false };
+    const { tablesMissing, columnsMissing, imagesPurposeUpgrade, bannerCapacityUpgrade, bannerImagesUpgrade, shopCoverUpgrade } = missingParts(db);
+    if (!tablesMissing.length && !columnsMissing.length && !imagesPurposeUpgrade && !bannerCapacityUpgrade && !bannerImagesUpgrade && !shopCoverUpgrade) return { changed: false };
     const root = resolve(directory, 'schema-backups');
     await mkdir(root, { recursive: true });
     const snapshot = resolve(root, `before-community-${Date.now()}-${randomUUID()}.db`);
@@ -558,7 +564,7 @@ export async function migrateCommunity(directory: string) {
     // A table rebuild must not execute ON DELETE actions on referencing rows.
     // Keep references intact, then check them inside the transaction before committing.
     const foreignKeys = Number((db.prepare('PRAGMA foreign_keys').get() as { foreign_keys: number }).foreign_keys);
-    const rebuildTables = imagesPurposeUpgrade || bannerCapacityUpgrade || shopCoverUpgrade;
+    const rebuildTables = imagesPurposeUpgrade || bannerCapacityUpgrade || bannerImagesUpgrade || shopCoverUpgrade;
     if (rebuildTables) db.exec('PRAGMA foreign_keys=OFF');
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -566,7 +572,7 @@ export async function migrateCommunity(directory: string) {
       // Tables created just now also need the later columns.
       for (const [table, column, type] of missingParts(db).columnsMissing) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
       if (imagesPurposeUpgrade) extendImagePurpose(db);
-      if (bannerCapacityUpgrade) extendBannerCapacity(db);
+      if (bannerCapacityUpgrade || bannerImagesUpgrade) extendBannerEntries(db);
       if (shopCoverUpgrade) extendShopCover(db);
       if (tablesMissing.includes('community_banners')) snapshotHighlights(db);
       if (tablesMissing.includes('community_badge_events')) {

@@ -47,7 +47,7 @@ if(ticket){
     location.replace('/#/community/home');
   }catch(error){status.textContent=error instanceof Error?error.message:'暂时无法进入社区，请返回主站。';}
 }`;
-const entryStyle = 'html{color-scheme:dark}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#17263a;color:#eee7d8;font:16px system-ui,sans-serif}main{max-width:32rem;padding:2rem;text-align:center}h1{font-size:1.5rem}p{line-height:1.8;color:#c3cbd8}a{display:inline-block;padding:.75rem 1.4rem;border:1px solid #b9a16b;border-radius:999px;color:#ead3a2;text-decoration:none}a:focus-visible{outline:2px solid #ead3a2;outline-offset:4px}';
+const entryStyle = 'html{color-scheme:light}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#e8e2d6;color:#384355;font:16px system-ui,sans-serif}main{max-width:32rem;padding:2rem;text-align:center}h1{font-size:1.5rem}p{line-height:1.8;color:#556171}a{display:inline-block;padding:.75rem 1.4rem;border:1px solid #937149;border-radius:999px;color:#785f3e;text-decoration:none}a:focus-visible{outline:2px solid #785f3e;outline-offset:4px}';
 const styleHash = createHash('sha256').update(entryStyle).digest('base64');
 const publicAsset = (path: string) => /\.(?:mjs|js|css|png|webp|jpe?g|svg|ico|woff2?|ttf|otf|mp4|webm|mp3|ogg|glb|gltf|bin)$/i.test(path)
   && (/^\/(?:assets|chunks)\//.test(path) || /^\/[a-z0-9][a-z0-9._-]*$/i.test(path));

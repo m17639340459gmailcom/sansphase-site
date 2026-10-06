@@ -15,6 +15,10 @@ export function startCommunityLayout(document: Document, window: LayoutWindow): 
   const clearThread = () => { thread?.release(); thread = null; threadHost?.removeAttribute('data-thread-design'); threadHost = null; };
   const sync = () => {
     if (suspended) return;
+    // A pending handoff still displays the real previous route. Releasing its
+    // reversible image/layout enhancement on hashchange would visibly undo it
+    // before the controller has installed the confirmed replacement page.
+    if (document.querySelector('#main [data-community-pending-route="true"]')) return;
     const { view } = communityRoute(window.location.hash);
     const nextThread = view === 'post' ? document.querySelector<HTMLElement>('#main [data-community="post"]') : null;
     if (nextThread !== threadHost) clearThread();
@@ -29,9 +33,12 @@ export function startCommunityLayout(document: Document, window: LayoutWindow): 
   const observe = () => observer.observe(document.getElementById('main') || document.body, { childList: true, subtree: true });
   const hide = () => { suspended = true; observer.disconnect(); clearFeed(); clearThread(); };
   const show = (event: PageTransitionEvent) => { if (event.persisted) { suspended = false; observe(); sync(); } };
+  // app.mjs registers its hash renderer after this enhancer. Let that
+  // synchronous renderer establish its pending handoff before checking routes.
+  const onRouteChange = () => queueMicrotask(sync);
   observe(); sync();
-  window.addEventListener('hashchange', sync);
+  window.addEventListener('hashchange', onRouteChange);
   window.addEventListener('pagehide', hide);
   window.addEventListener('pageshow', show);
-  return () => { hide(); window.removeEventListener('hashchange', sync); window.removeEventListener('pagehide', hide); window.removeEventListener('pageshow', show); };
+  return () => { hide(); window.removeEventListener('hashchange', onRouteChange); window.removeEventListener('pagehide', hide); window.removeEventListener('pageshow', show); };
 }

@@ -65,6 +65,7 @@
   --manage-muted: #aebed2;
 }
 /* The community host reveals the current document once its own route is ready. */
+html:has(body[data-community-only="true"][data-community-boot="pending"]) { color-scheme: light; background: #e8e2d6; }
 body[data-community-only="true"][data-community-boot="pending"] { opacity: 0; }
 * {
   box-sizing: border-box;

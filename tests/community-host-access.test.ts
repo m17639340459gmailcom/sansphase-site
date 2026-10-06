@@ -7,6 +7,8 @@ import { resolve } from 'node:path';
 import { createCommunityHostStore, prepareCommunityHostDirectory } from '../server/community-host-store.ts';
 import { createCommunityHostAccess } from '../server/community-host-access.ts';
 import { signIdentityRequest } from '../server/community-identity-protocol.ts';
+import { JSDOM } from 'jsdom';
+import { createHash } from 'node:crypto';
 
 const origin = 'https://community.sansphase.com';
 const main = 'https://www.sansphase.com';
@@ -73,6 +75,14 @@ test('direct HTML access gets only entry prompt while API and private files rema
   assert.ok(text.includes('请从主站进入社区'));
   assert.ok(!text.includes('site-content'));
   assert.ok(!text.includes('app.mjs'));
+  const dom = new JSDOM(text);
+  try {
+    assert.equal(dom.window.getComputedStyle(dom.window.document.documentElement).colorScheme, 'light');
+    assert.equal(dom.window.getComputedStyle(dom.window.document.body).backgroundColor, 'rgb(232, 226, 214)');
+    const style = dom.window.document.querySelector('style')!.textContent;
+    const hash = createHash('sha256').update(style).digest('base64');
+    assert.ok(page.headers.get('content-security-policy')!.includes(`style-src 'sha256-${hash}'`), 'entry style stays compatible with its restrictive CSP');
+  } finally { dom.window.close(); }
   assert.equal((await fetch(env.url + '/api/community/summary')).status, 401);
   assert.equal((await fetch(env.url + '/server/community-host-store.ts')).status, 404);
   assert.equal((await fetch(env.url + '/assets/example.webp')).status, 200);

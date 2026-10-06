@@ -53,6 +53,31 @@ test('independent backup verifies both files of approved and pending personal ba
   await assert.rejects(backupCommunity({ ...env, target: resolve(env.root, 'missing-background-backup') }), /ENOENT|absent/i);
 });
 
+test('independent image banner configuration and both referenced files survive backup and restore', async t => {
+  const env = await fixture(t), store = createCommunityStore(env.directory);
+  const owner = { kind: 'owner' as const, id: 'owner' }, cover = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+  const access = { actor: owner, browsingAsReader: false, canSeeBoard: () => true };
+  let saved: ReturnType<typeof store.banners.replace> | undefined;
+  try {
+    store.addImage({ id: cover, uploader: owner, width: 1200, height: 520, purpose: 'banner', bannerScope: 'home' });
+    for (const kind of ['image', 'thumb']) await writeFile(resolve(env.directory, 'uploads', `community-${kind}-${cover}.webp`), `banner-${kind}`);
+    saved = store.banners.replace('home', 0, [{ kind: 'image', topicId: null, title: '', cover }], access);
+  } finally { store.close(); }
+  await backupCommunity(env);
+  const verified = await verifyCommunityBackup(env.target);
+  for (const kind of ['image', 'thumb']) assert.ok(verified.manifest.files.some(file => file.path === `uploads/community-${kind}-${cover}.webp`));
+  const restored = resolve(env.root, 'restored-image-banner');
+  await restoreCommunity({ backupPath: env.target, target: restored, configPath: resolve(env.root, 'restored-image-banner.json'), publicRoot: env.publicRoot });
+  const restoredStore = createCommunityStore(restored);
+  try {
+    assert.deepEqual(restoredStore.banners.get('home', access.canSeeBoard), saved);
+    assert.equal(restoredStore.listTopics({}).total, 0);
+  } finally { restoredStore.close(); }
+  for (const kind of ['image', 'thumb']) assert.equal(await readFile(resolve(restored, 'uploads', `community-${kind}-${cover}.webp`), 'utf8'), `banner-${kind}`);
+  await rm(resolve(env.directory, 'uploads', `community-thumb-${cover}.webp`));
+  await assert.rejects(backupCommunity({ ...env, target: resolve(env.root, 'missing-banner-backup') }), /ENOENT|absent/i);
+});
+
 test('pre-migration community data can be backed up and restored before optional profile background tables exist', async t => {
   const env = await fixture(t);
   const db = new DatabaseSync(resolve(env.directory, 'content.db'));

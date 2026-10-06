@@ -24,10 +24,14 @@ async function setup(t) {
     else if (url.includes('/topics?')) {
       const board = new URL(url, w.location.href).searchParams.get('board') || 'qa';
       data = { items: [{ id: `${board}-post`, title: `${board} 原帖`, board, author: me, createdAt: '2026-10-05T00:00:00Z', lastActivityAt: '2026-10-05T00:00:00Z', replies: 0 }], total: 1, page: 1, pageSize: 20 };
+    } else if (url.includes('/manage/banner-image?scope=')) {
+      data = { id: '11111111-1111-4111-8111-111111111111' };
     } else if (url.endsWith('/manage/banners')) {
       const body = JSON.parse(init.body); writes.push(body);
       const existing = configs.find(config => config.scope === body.scope);
-      data = { ...body, version: existing.version + 1, items: body.items.map(item => ({ ...item, board: 'qa', topicTitle: 'qa 原帖', image: null, topicImage: null })) };
+      data = { ...body, version: existing.version + 1, items: body.items.map(item => item.kind === 'image'
+        ? ({ ...item, board: body.scope === 'home' ? '' : body.scope, topicTitle: '', image: item.cover, topicImage: null })
+        : ({ ...item, board: 'qa', topicTitle: 'qa 原帖', image: null, topicImage: null })) };
       configs = configs.map(config => config.scope === body.scope ? data : config);
     } else throw Error(`Unexpected request ${url}`);
     return { ok: true, json: async () => structuredClone(data) };
@@ -71,4 +75,18 @@ test('identity reset clears banner drafts and a dirty banner cannot be lost by s
   assert.equal(ui.me().management.browsingAsReader, false);
   ui.clear();
   assert.equal(ui.me(), null);
+});
+
+test('management can add, upload and save a standalone image through its actual delegated form events', async t => {
+  const { main, w, writes, click } = await setup(t);
+  click('[data-action="community-banner-add-image"]');
+  assert.equal(main.querySelector('.community-banner-source'), null);
+  const field = main.querySelector('[data-banner-file]');
+  assert.ok(field);
+  Object.defineProperty(field, 'files', { value: [new File(['image'], 'banner.png', { type: 'image/png' })] });
+  field.dispatchEvent(new w.Event('change', { bubbles: true })); await turn();
+  assert.ok(main.querySelector('.community-banner-preview.is-image > img'));
+  main.querySelector('form[data-community-form="banners"]').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await turn();
+  assert.deepEqual(writes, [{ scope: 'home', version: 1, items: [{ kind: 'image', topicId: null, title: '', cover: '11111111-1111-4111-8111-111111111111' }] }]);
+  assert.match(main.querySelector('.community-form-status').textContent, /已保存/);
 });

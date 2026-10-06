@@ -218,3 +218,47 @@ test('cleared banners collapse the whole slot and later configuration restores i
     assert.equal(slot.hidden, false);
   } finally { frame.dispose(); window.close(); }
 });
+
+test('independent image banners share the carousel, keep artwork unobscured and never create a fake post link', () => {
+  const data: CommunityBannerConfig = { scope: 'home', version: 1, items: [
+    { kind: 'image', topicId: null, title: '活动图片', cover: imageId, image: imageId, board: '', topicTitle: '', topicImage: null },
+    { topicId: 'a', title: '推荐帖子', cover: null, image: null, board: 'qa', topicTitle: '原标题' },
+  ] };
+  const { window } = new JSDOM(`<main></main><div id="source">${communityFrameBannersHTML({ state: 'ready', data }, common)}</div>`, { url: 'https://community.sansphase.com/#/community/home' });
+  const host = window.document.querySelector('main')!, source = window.document.getElementById('source')!;
+  const clock = carouselClock(window);
+  const showcase = createSharedFeedShowcase(host);
+  try {
+    showcase.sync(source, false);
+    const cards = host.querySelectorAll<HTMLElement>('.community-feed-showcase-card');
+    assert.equal(cards.length, 2);
+    assert.equal(cards[0].tagName, 'DIV');
+    assert.equal(cards[0].getAttribute('href'), null);
+    assert.ok(cards[0].classList.contains('is-image'));
+    assert.equal(cards[0].querySelector('.community-feed-showcase-copy'), null);
+    assert.equal(cards[0].querySelector('img')!.getAttribute('src'), `/api/community/images/${imageId}.webp`);
+    assert.equal(cards[1].getAttribute('href'), '#/post/a');
+    assert.equal(clock.timers.size, 1);
+    clock.tick(); assert.equal(host.querySelector<HTMLElement>('.community-feed-showcase-track')!.scrollLeft, 640);
+    const card = cards[0]; showcase.sync(source, false);
+    assert.equal(host.querySelector('.community-feed-showcase-card'), card);
+    showcase.sync(source, false, 'qa');
+    assert.equal(host.querySelector('.community-feed-showcase-card'), null, 'home images cannot become a board banner');
+  } finally { showcase.release(); window.close(); }
+});
+
+test('standalone banners require server-resolved local image UUIDs and the current board', () => {
+  const data: CommunityBannerConfig = { scope: 'qa', version: 1, items: [
+    { kind: 'image', topicId: null, title: '', cover: imageId, image: imageId, board: 'qa', topicTitle: '', topicImage: null },
+    { kind: 'image', topicId: null, title: 'foreign', cover: imageId, image: imageId, board: 'meta', topicTitle: '', topicImage: null },
+    { kind: 'image', topicId: null, title: 'external', cover: imageId, image: 'https://other.example/image', board: 'qa', topicTitle: '', topicImage: null },
+  ] };
+  const { window } = new JSDOM(`<main></main><div id="source">${communityFrameBannersHTML({ state: 'ready', data }, common, 'qa')}</div>`, { url: 'https://community.sansphase.com/' });
+  const showcase = createSharedFeedShowcase(window.document.querySelector('main')!);
+  try {
+    showcase.sync(window.document.getElementById('source')!, false, 'qa');
+    assert.equal(window.document.querySelectorAll('main img').length, 1);
+    assert.equal(window.document.querySelector('main a'), null);
+    assert.doesNotMatch(window.document.querySelector('main')!.textContent!, /external|foreign/);
+  } finally { showcase.release(); window.close(); }
+});

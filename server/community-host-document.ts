@@ -5,6 +5,7 @@ export function communityHostDocument(html: string): string {
   const stylesheet = `<link rel="preload" as="style" href="${base}community.css"${base === './' ? '' : ' crossorigin="anonymous"'}>`;
   return html
     .replace(/<link\b[^>]*>/g, tag => /\brel="stylesheet"/.test(tag) && /\bhref="[^"?]*\/cosmos\.bundle\.css(?:\?[^\"]*)?"/.test(tag) ? '' : tag)
+    .replace(/(<meta\b[^>]*\bname="theme-color"[^>]*\bcontent=")[^"]*(")/, '$1#e8e2d6$2')
     .replace('</head>', `${stylesheet}</head>`)
-    .replace(/<body\b/, '<body data-community-only="true" data-community-boot="pending"');
+    .replace(/<body\b/, '<body data-community-only="true" data-community-boot="pending" data-community-theme="light"');
 }

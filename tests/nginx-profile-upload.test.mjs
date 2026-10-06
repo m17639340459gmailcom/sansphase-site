@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { readerImageBytes } from '../src/upload-policy.mjs';
+import { communityImageBytes } from '../src/community-rules.mjs';
 
 // Parse blocks and directives so the checks apply to each selected host/location,
 // rather than matching a limit or proxy setting elsewhere in the same file.
@@ -93,4 +94,23 @@ test('profile overrides preserve other API request limits and do not cover profi
   assert.equal(limitFor(main, '/api/author/upload'), 15361 * 1024 ** 2);
   assert.equal(limitFor(community, '/api/community-entry'), 8 * 1024);
   assert.equal(limitFor(community, '/api/community/images'), 21 * 1024 ** 2);
+});
+
+test('banner upload alone accepts existing moderator and owner file limits plus multipart headers', async () => {
+  const community = await host('nginx-community.conf', 'community.sansphase.com');
+  const path = '/api/community/manage/banner-image', selected = location(community, path);
+  assert.deepEqual(selected?.args, ['location', '=', path]);
+  assert.equal(limitFor(community, path), 26 * 1024 ** 2);
+  for (const owner of [false, true]) {
+    const form = new FormData(); form.set('file', new Blob([new Uint8Array(communityImageBytes(owner))], { type: 'image/png' }), 'banner.png');
+    const bytes = (await new Request('https://example.test/upload', { method: 'POST', body: form }).arrayBuffer()).byteLength;
+    assert.ok(bytes > communityImageBytes(owner));
+    assert.ok(bytes < limitFor(community, path), 'multipart does not reduce the advertised file allowance');
+  }
+  assert.deepEqual(directive(selected.children, 'limit_conn'), ['community_upload', '2']);
+  assert.deepEqual(directive(selected.children, 'limit_conn_status'), ['429']);
+  assert.deepEqual(directive(selected.children, 'proxy_request_buffering'), ['off']);
+  assert.deepEqual(directive(selected.children, 'proxy_pass'), ['http://127.0.0.1:4176']);
+  for (const other of ['/api/community/manage/banners', '/api/community/manage/banner-image/extra', '/api/community/topics'])
+    assert.equal(limitFor(community, other), 2 * 1024 ** 2);
 });

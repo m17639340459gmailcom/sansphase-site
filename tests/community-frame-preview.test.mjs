@@ -14,6 +14,7 @@ const boardListing = board => ({ ...listing, posters: [{ author: person, topics:
 const bannerConfig = scope => ({ scope, version: 1, items: (scope === 'home' ? listing : boardListing(scope)).items.slice(0, 2).map(item => ({ topicId: item.id, title: '', topicTitle: item.title, board: item.board, cover: null, image: null })) });
 const thread = { topic: { ...topic('p1'), body: '正在阅读的帖子正文', images: [], canReply: true, liked: false, bookmarked: false }, author: { ...person, topics: 3, replies: 4 }, related: [], replies: [] };
 const response = data => ({ ok: true, json: async () => structuredClone(data) });
+const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 
 async function setup(t, firstHash = '#/community/home', intercept = () => null) {
   const dom = new JSDOM('<html lang="zh"><header id="site-header" class="community-header"></header><main id="main"></main></html>', { url: `http://localhost:4212/?interior=feed&layout=stable${firstHash}`, pretendToBeVisual: true });
@@ -87,6 +88,171 @@ async function setup(t, firstHash = '#/community/home', intercept = () => null) 
   render(firstHash); await turn();
   return { w, main, frame, render, calls, ui, resizeWidth, resize(narrow) { reducedMotion = narrow; resizeWidth(narrow ? 390 : 1600); } };
 }
+
+for (const width of [1600, 390]) for (const first of ['identity', 'content']) test(`ordinary navigation at ${width}px keeps the actual readable page until fresh identity and core finish (${first} first)`, async t => {
+  let navigating = false;
+  const identity = deferred(), content = deferred();
+  const { w, main, frame, render, calls, resizeWidth } = await setup(t, '#/community/home', url => {
+    if (navigating && url.endsWith('/me')) return identity.promise;
+    if (navigating && url.endsWith('/topics/p1')) return content.promise;
+    return null;
+  });
+  resizeWidth(width); await turn();
+  const source = main.querySelector('[data-community="home"]'), title = source.querySelector('.community-topic a[href^="#/post/"]');
+  const sideAction = main.querySelector('[data-action="community-checkin"]');
+  const scroll = width === 390 ? w.document.documentElement : frame.center();
+  scroll.dispatchEvent(new w.Event('wheel', { bubbles: true })); scroll.scrollTop = 280;
+  navigating = true; render('#/post/p1'); await turn();
+  assert.equal(main.querySelector('[data-community="home"]'), source, 'the frame must retain the real source DOM');
+  assert.equal(title.isConnected, true);
+  assert.equal(source.getAttribute('data-community-pending-route'), 'true');
+  assert.equal(source.hasAttribute('inert'), true);
+  assert.equal(source.getAttribute('aria-busy'), 'true');
+  assert.equal(main.querySelector('[data-content-state="loading"]'), null);
+  assert.equal(scroll.scrollTop, 280, 'waiting does not jump the still-visible source page');
+  const navigation = w.document.querySelector('#navigation a[href="#/community/home"]');
+  assert.ok(navigation, 'use the real primary navigation in the desktop rail or mobile header');
+  assert.equal(navigation.closest('[inert]'), null);
+  let navigationBlocked = null;
+  const observeNavigation = event => { if (event.target === navigation) { navigationBlocked = event.defaultPrevented; event.preventDefault(); } };
+  w.document.addEventListener('click', observeNavigation);
+  navigation.dispatchEvent(new w.MouseEvent('click', { button: 0, bubbles: true, cancelable: true }));
+  w.document.removeEventListener('click', observeNavigation);
+  assert.equal(navigationBlocked, false, 'the controller and frame must allow real desktop/mobile navigation while waiting');
+  const writes = calls.filter(call => call.options.method === 'POST').length;
+  sideAction.click(); await turn();
+  assert.equal(calls.filter(call => call.options.method === 'POST').length, writes, 'retained sidebar actions are blocked while navigation awaits authority');
+  (first === 'identity' ? identity : content).resolve(response(first === 'identity' ? person : thread)); await turn();
+  assert.equal(main.querySelector('[data-community="home"]'), source, 'one finished read cannot hand over the page');
+  assert.equal(main.querySelector('.community-thread'), null);
+  (first === 'identity' ? content : identity).resolve(response(first === 'identity' ? thread : person)); await turn();
+  assert.equal(source.isConnected, false);
+  assert.ok(main.querySelector('.community-thread'));
+  assert.equal(main.querySelector('[data-community-pending-route]'), null);
+  assert.equal(main.querySelector('[data-content-state="loading"]'), null);
+  assert.equal(scroll.scrollTop, 0, 'the new page starts at the top only when handed over');
+});
+
+test('pending navigation blocks retained reply submissions and cannot release an older target after a newer navigation', async t => {
+  let navigating = false;
+  const oldIdentity = deferred(), latestIdentity = deferred(); let reads = 0;
+  const { w, main, render, calls } = await setup(t, '#/post/p1', url => navigating && url.endsWith('/me') ? (++reads === 1 ? oldIdentity.promise : latestIdentity.promise) : null);
+  const source = main.querySelector('[data-community="post"]'), form = source.querySelector('form[data-community-form="reply"]');
+  const field = form.querySelector('textarea'); field.focus();
+  navigating = true; render('#/community/boards/qa'); await turn();
+  assert.equal(main.querySelector('[data-community="post"]'), source);
+  assert.notEqual(w.document.activeElement, field, 'a retained form cannot keep keyboard focus');
+  const shortcut = new w.KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true });
+  field.dispatchEvent(shortcut); assert.equal(shortcut.defaultPrevented, true);
+  field.value = '不得向新路由提交旧页内容';
+  form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  field.dispatchEvent(new w.Event('input', { bubbles: true }));
+  await turn();
+  assert.equal(calls.filter(call => call.options.method === 'POST').length, 0);
+  render('#/community/boards/tools'); await turn();
+  oldIdentity.resolve(response(person)); await turn();
+  assert.equal(main.querySelector('[data-community="post"]'), source, 'the older authority result cannot release the retained page');
+  latestIdentity.resolve(response(person)); await turn();
+  assert.match(main.querySelector('[data-frame-route]').textContent, /tools/);
+  assert.equal(main.querySelector('[data-frame-route]').textContent.includes('qa 讨论'), false);
+  assert.equal(source.isConnected, false);
+});
+
+for (const status of [401, 403, 503]) test(`fresh me ${status} immediately retires a held page and exposes the real error action`, async t => {
+  let navigating = false;
+  const identity = deferred(), content = deferred();
+  const { main, render, ui } = await setup(t, '#/community/home', url => {
+    if (navigating && url.endsWith('/me')) return identity.promise;
+    if (navigating && url.endsWith('/topics/p1')) return content.promise;
+    return null;
+  });
+  const source = main.querySelector('[data-community="home"]');
+  navigating = true; render('#/post/p1'); await turn();
+  identity.resolve({ ok: false, status, json: async () => ({ error: 'identity unavailable' }) }); await turn();
+  assert.equal(source.isConnected, false);
+  assert.equal(main.querySelector('[data-community-pending-route]'), null);
+  assert.equal(main.querySelector('.community-topic'), null);
+  assert.equal(main.querySelector('.community-thread'), null);
+  assert.equal(main.querySelector('form[data-community-form="reply"]'), null);
+  assert.ok(main.querySelector(`[data-content-state="${status === 401 ? 'auth' : status === 403 ? 'forbidden' : 'error'}"]`));
+  if (status === 503) { assert.ok(main.querySelector('button[data-action="community-retry"]')); assert.equal(ui.me()?.uid, person.uid); }
+  else assert.equal(ui.me(), null);
+  content.resolve(response(thread)); await turn();
+  assert.equal(main.querySelector('.community-thread'), null);
+});
+
+test('handoff between posts keeps each reply draft with its own topic', async t => {
+  let navigating = false;
+  const identity = deferred();
+  const { w, main, render } = await setup(t, '#/post/p1', url => {
+    if (navigating && url.endsWith('/me')) return identity.promise;
+    if (url.endsWith('/topics/p2')) return response({ ...thread, topic: { ...thread.topic, id: 'p2', title: '第二篇讨论' } });
+    return null;
+  });
+  const oldField = main.querySelector('form[data-community-form="reply"] textarea');
+  oldField.value = '只属于第一篇的草稿'; oldField.dispatchEvent(new w.Event('input', { bubbles: true }));
+  navigating = true; render('#/post/p2'); await turn();
+  assert.equal(oldField.isConnected, true);
+  identity.resolve(response(person)); await turn();
+  assert.equal(main.querySelector('form[data-community-form="reply"] textarea').value, '', 'old visible form values cannot migrate to another topic');
+  navigating = false; render('#/post/p1'); await turn();
+  assert.equal(main.querySelector('form[data-community-form="reply"] textarea').value, '只属于第一篇的草稿');
+});
+
+for (const change of ['account', 'permission']) test(`a confirmed ${change} change retires held content before target core finishes`, async t => {
+  let navigating = false;
+  const identity = deferred(), content = deferred();
+  const next = change === 'account' ? { ...person, uid: 'u2' } : { ...person, vip: false };
+  const { main, render, ui } = await setup(t, '#/community/home', url => {
+    if (navigating && url.endsWith('/me')) return identity.promise;
+    if (navigating && url.endsWith('/topics/p1')) return content.promise;
+    return null;
+  });
+  const source = main.querySelector('[data-community="home"]');
+  navigating = true; render('#/post/p1'); await turn();
+  identity.resolve(response(next)); await turn();
+  assert.equal(source.isConnected, false);
+  assert.equal(main.querySelector('[data-community-pending-route]'), null);
+  assert.equal(main.querySelector('.community-topic'), null);
+  assert.equal(main.querySelector('form[data-community-form="reply"]'), null);
+  assert.equal(ui.me()?.uid, next.uid); assert.equal(ui.me()?.vip, next.vip);
+  content.resolve(response(thread)); await turn();
+  assert.ok(main.querySelector('.community-thread'));
+});
+
+for (const outcome of ['ready', 'abort', 'denied']) test(`real hashchange keeps the held feed enhancement and releases it once after ${outcome}`, async t => {
+  const imageId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  let navigating = false;
+  const identity = deferred(), content = deferred();
+  const { w, main, render } = await setup(t, '#/community/home', url => {
+    if (navigating && url.endsWith('/me')) return identity.promise;
+    if (navigating && url.endsWith('/topics/p1')) return content.promise;
+    if (url.includes('/topics?') && !new URL(url, 'http://localhost').searchParams.get('board'))
+      return response({ ...listing, items: [{ ...topic('p1'), thumbs: [imageId] }] });
+    return null;
+  });
+  const source = main.querySelector('[data-community="home"]'), image = source.querySelector('.community-topic-thumbs img');
+  assert.ok(image); assert.equal(image.getAttribute('src'), `/api/community/images/${imageId}.webp`);
+  let releases = 0; const setAttribute = image.setAttribute.bind(image);
+  image.setAttribute = (name, value) => { if (name === 'src' && value.endsWith('.thumb.webp')) releases++; setAttribute(name, value); };
+  // The real layout registers its listener before app.mjs registers rendering.
+  // Dispatch in that order; marking the route before hashchange hides the bug.
+  const renderRoute = () => render(w.location.hash);
+  w.addEventListener('hashchange', renderRoute); t.after(() => w.removeEventListener('hashchange', renderRoute));
+  const changeRoute = hash => { w.history.replaceState(null, '', hash); w.dispatchEvent(new w.HashChangeEvent('hashchange')); };
+  navigating = true; changeRoute('#/post/p1'); await turn();
+  assert.equal(source.dataset.homeDesign, 'feed');
+  assert.equal(image.isConnected, true); assert.equal(releases, 0);
+  assert.equal(image.getAttribute('src'), `/api/community/images/${imageId}.webp`);
+  if (outcome === 'abort') { changeRoute('#/community/boards/tools'); await turn(); }
+  identity.resolve(outcome === 'denied' ? { ok: false, status: 401, json: async () => ({ error: 'signed out' }) } : response(person));
+  content.resolve(response(thread)); await turn();
+  assert.equal(source.isConnected, false); assert.equal(releases, 1);
+  assert.equal(source.hasAttribute('data-home-design'), false);
+  if (outcome === 'ready') assert.equal(main.querySelector('[data-community="post"]').dataset.threadDesign, 'feed');
+  if (outcome === 'abort') assert.equal(main.querySelector('[data-community="board"]').dataset.homeDesign, 'feed');
+  if (outcome === 'denied') assert.ok(main.querySelector('[data-content-state="auth"]'));
+});
 
 for (const width of [1100, 800, 390]) test(`at ${width}px the relocated check-in still calls the real controller once`, async t => {
   const { main, ui, calls, resizeWidth } = await setup(t, '#/community/boards/qa');

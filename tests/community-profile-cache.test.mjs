@@ -33,7 +33,7 @@ async function fixture(t) {
     const member = /\/members\/(\d+)\?tab=([a-z]+)/.exec(url);
     if (member) {
       const value = structuredClone(members(member[1], member[2]));
-      if (pendingRead?.uid === member[1] && pendingRead.tab === member[2]) { const wait = pendingRead; pendingRead = null; await wait.promise; }
+      if (pendingRead?.uid === member[1] && pendingRead.tab === member[2]) { const wait = pendingRead; pendingRead = null; await wait.promise; if (wait.fail) throw Error('网络暂时断开'); }
       return response(value);
     }
     if (url.endsWith('/profile/background/remove')) { profile.background = { approved: null, pending: null }; profile.cover = null; profile.coverImage = null; return response(profile); }
@@ -52,11 +52,12 @@ async function fixture(t) {
   t.after(async () => { cleanup(); ui.clear(); await settle(); w.close(); for (const [name, saved] of previous) { if (saved === undefined) delete globalThis[name]; else globalThis[name] = saved; } });
   const mount = hash => { w.history.replaceState(null, '', hash); cleanup(); main.innerHTML = ui.html(common); cleanup = ui.mount(main, common); };
   const initialMember = async (uid, tab = 'replies') => {
-    // Confirm this route's account first, keeping the fresh member read pending
-    // so these assertions still verify the cached approved profile itself.
-    let release; const promise = new Promise(resolve => { release = resolve; }); pendingRead = { uid, tab, promise };
+    // Let this route's fresh identity and core read settle. A network failure
+    // forces the normal cached-profile fallback rather than masking stale
+    // cache state with another fresh server profile.
+    let release; const promise = new Promise(resolve => { release = resolve; }); pendingRead = { uid, tab, promise, fail: true };
     mount(`#/community/u/${uid}/${tab}`); await settle();
-    const cached = new JSDOM(ui.html(common)); release(); await settle(); return cached;
+    release(); await settle(); return new JSDOM(ui.html(common));
   };
   await settle();
   return { w, main, ui, profile, mount, initialMember, deferMember(uid, tab) { let release; const promise = new Promise(resolve => { release = resolve; }); pendingRead = { uid, tab, promise }; return release; } };

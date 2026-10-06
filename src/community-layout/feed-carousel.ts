@@ -72,7 +72,7 @@ export function createFeedCarousel({ section, track }: FeedCarouselOptions): { r
   const onMotion = () => { reduced = Boolean(motion?.matches); schedule(); };
   const refresh = () => {
     if (released) return;
-    count = track.querySelectorAll(':scope > a.community-feed-showcase-card').length;
+    count = track.querySelectorAll(':scope > .community-feed-showcase-card').length;
     index = Math.max(0, Math.min(Math.max(0, count - 1), index));
     const nextWidth = track.clientWidth;
     if (nextWidth > 0 && width !== nextWidth && track.scrollLeft !== index * nextWidth) scroll(index * nextWidth, 'auto');

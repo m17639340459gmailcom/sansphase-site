@@ -11,7 +11,12 @@ export function communityFrameBannersHTML(load: CommunityLoad<CommunityBannerCon
   const validScope = scope === 'home' || Boolean(communityBoard(scope));
   const state = !validScope ? 'error' : load?.state === 'ready' && load.data.scope !== scope ? 'loading' : load?.state || 'loading';
   const items = state === 'ready' && load?.state === 'ready' ? load.data.items : [];
-  const rows = items.filter(item => safeTopicId(item.topicId) && communityBoard(item.board) && (scope === 'home' || item.board === scope)).map(item => {
+  const rows = items.map(item => {
+    if (item.kind === 'image') {
+      if (!item.image || !imageId.test(item.image) || (scope === 'home' ? item.board !== '' : item.board !== scope)) return '';
+      return `<div data-frame-banner-item data-frame-banner-kind="image" data-frame-banner-board="${esc(item.board)}" data-frame-banner-image="${esc(item.image)}"><span data-frame-banner-title>${esc(item.title.trim())}</span></div>`;
+    }
+    if (!safeTopicId(item.topicId) || !communityBoard(item.board) || (scope !== 'home' && item.board !== scope)) return '';
     const title = item.title.trim() || item.topicTitle.trim();
     if (!title) return '';
     const image = item.image && imageId.test(item.image) ? item.image : '';

@@ -8,7 +8,7 @@ import type { createMembers } from './community-members.ts';
 const scopes = ['home', ...communityBoards.map(board => board.id)];
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 type Access = { actor: CommunityAuthor; browsingAsReader: boolean; canSeeBoard: (board: string) => boolean };
-type Entry = { scope: string; position: number; topic_id: string; topic_board: string; title: string; cover: string | null };
+type Entry = { scope: string; position: number; topic_id: string | null; topic_board: string; title: string; cover: string | null };
 type Topic = { id: string; board: string; title: string; body: string; pending: number; hidden_at: string | null; deleted_at: string | null };
 type Image = { id: string; uploader_kind: CommunityAuthor['kind']; uploader_id: string; purpose: string; banner_scope: string | null; deleted_at: string | null };
 
@@ -25,10 +25,15 @@ export function createCommunityBanners(db: DatabaseSync, tx: Transaction, member
   const clear = db.prepare('DELETE FROM community_banner_entries WHERE scope=?');
   const insert = db.prepare('INSERT INTO community_banner_entries(scope,position,topic_id,topic_board,title,cover) VALUES(?,?,?,?,?,?)');
   const validTopic = (entry: Entry, canSeeBoard: Access['canSeeBoard']) => {
+    if (entry.topic_id === null) return null;
     const topic = topicById.get(entry.topic_id) as Topic | undefined;
     return topic && !topic.deleted_at && !topic.pending && !topic.hidden_at && topic.board === entry.topic_board
       && (entry.scope === 'home' || entry.scope === topic.board) && canSeeBoard(topic.board) ? topic : null;
   };
+  const imageBoard = (scope: string) => scope === 'home' ? '' : scope;
+  const validImageEntry = (entry: Entry, canSeeBoard: Access['canSeeBoard']) => entry.topic_id === null
+    && scopes.includes(entry.scope) && entry.topic_board === imageBoard(entry.scope) && Boolean(entry.cover)
+    && (entry.scope === 'home' || canSeeBoard(entry.scope));
   const validateScope = (scope: string) => { if (!scopes.includes(scope)) throw fail('没有这个横幅范围。', 404); };
   const authorize = (scope: string, access: Access) => {
     validateScope(scope);
@@ -40,10 +45,16 @@ export function createCommunityBanners(db: DatabaseSync, tx: Transaction, member
     if (scope !== 'home' && !canSeeBoard(scope)) throw fail('没有这个版块。', 404);
     const items: CommunityBannerConfig['items'] = [];
     for (const entry of entries.all(scope) as Entry[]) {
-      const topic = validTopic(entry, canSeeBoard);
-      if (!topic) continue;
       const cover = entry.cover ? imageById.get(entry.cover) as Image | undefined : null;
       if (entry.cover && (!cover || cover.deleted_at || cover.purpose !== 'banner' || cover.banner_scope !== scope)) continue;
+      if (entry.topic_id === null) {
+        if (!validImageEntry(entry, canSeeBoard) || !entry.cover) continue;
+        items.push({ kind: 'image', topicId: null, title: entry.title, cover: entry.cover, board: imageBoard(scope),
+          topicTitle: '', topicImage: null, image: entry.cover });
+        continue;
+      }
+      const topic = validTopic(entry, canSeeBoard);
+      if (!topic) continue;
       const topicImage = (firstImage.get(topic.id) as { id: string } | undefined)?.id ?? null;
       items.push({ topicId: topic.id, title: entry.title, cover: entry.cover, board: topic.board,
         topicTitle: topic.title || ([...topic.body.replace(/\s+/g, ' ').trim()].slice(0, 36).join('') + ([...topic.body].length > 36 ? '…' : '')),
@@ -69,13 +80,17 @@ export function createCommunityBanners(db: DatabaseSync, tx: Transaction, member
         const prepared = value.map((input: unknown) => {
           if (!input || typeof input !== 'object' || Array.isArray(input)) throw fail('横幅内容格式无效。');
           const item = input as Record<string, unknown>;
-          if (typeof item.topicId !== 'string' || !item.topicId || used.has(item.topicId)) throw fail('请选择不同的帖子作为横幅。');
-          used.add(item.topicId);
+          const independent = item.kind === 'image';
+          if (item.kind !== undefined && item.kind !== 'post' && !independent) throw fail('横幅类型无效。');
+          if (independent ? item.topicId !== null : typeof item.topicId !== 'string' || !item.topicId || used.has(item.topicId))
+            throw fail(independent ? '独立图片不能关联帖子。' : '请选择不同的帖子作为横幅。');
+          if (!independent) used.add(item.topicId as string);
           if (typeof item.title !== 'string' || [...item.title.trim()].length > 80 || /[\u0000-\u001f\u007f]/.test(item.title)) throw fail('横幅标题最多 80 个字。');
-          const topic = topicById.get(item.topicId) as Topic | undefined;
-          if (!topic || topic.deleted_at || topic.pending || topic.hidden_at || !access.canSeeBoard(topic.board) || scope !== 'home' && topic.board !== scope)
+          const topic = independent ? null : topicById.get(item.topicId as string) as Topic | undefined;
+          if (!independent && (!topic || topic.deleted_at || topic.pending || topic.hidden_at || !access.canSeeBoard(topic.board) || scope !== 'home' && topic.board !== scope))
             throw fail('只能选择这个范围内已发布且正常显示的帖子。');
           let cover: string | null = null;
+          if (independent && item.cover === null) throw fail('请上传独立横幅图片。');
           if (item.cover !== null) {
             if (typeof item.cover !== 'string' || !uuid.test(item.cover)) throw fail('请重新选择横幅封面。');
             const image = imageById.get(item.cover) as Image | undefined;
@@ -85,7 +100,7 @@ export function createCommunityBanners(db: DatabaseSync, tx: Transaction, member
               throw fail('这张图片不能用于当前页面横幅。');
             cover = item.cover;
           }
-          return { topicId: topic.id, board: topic.board, title: item.title.trim(), cover };
+          return { topicId: topic?.id ?? null, board: topic?.board ?? imageBoard(scope), title: item.title.trim(), cover };
         });
         ensure.run(scope);
         if (bump.run(scope, Number(version)).changes !== 1) throw fail('横幅已被其他管理者更新，请刷新后再保存。', 409);
@@ -99,7 +114,8 @@ export function createCommunityBanners(db: DatabaseSync, tx: Transaction, member
       if (!image || image.deleted_at || image.purpose !== 'banner') return false;
       const references = imageEntries.all(id) as Entry[];
       if (!references.length) return same(actor, { kind: image.uploader_kind, id: image.uploader_id });
-      return references.some(entry => image.banner_scope === entry.scope && Boolean(validTopic(entry, canSeeBoard)));
+      return references.some(entry => image.banner_scope === entry.scope
+        && (entry.topic_id === null ? validImageEntry(entry, canSeeBoard) : Boolean(validTopic(entry, canSeeBoard))));
     },
   };
 }

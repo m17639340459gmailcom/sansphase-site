@@ -40,15 +40,15 @@ function fixture(query = '') {
   return { window, document: window.document };
 }
 
-test('each new community document starts dark despite legacy light links and preferences', () => {
-  const { window, document } = fixture('?communityTheme=light');
-  window.localStorage.setItem('sansphase-community-study-theme', 'light');
-  window.localStorage.setItem('sansphase-theme', 'light');
+test('each new community document starts light despite legacy dark links and preferences', () => {
+  const { window, document } = fixture('?communityTheme=dark');
+  window.localStorage.setItem('sansphase-community-study-theme', 'dark');
+  window.localStorage.setItem('sansphase-theme', 'dark');
   const appearance = createCommunityAppearance(document, window);
   appearance.sync(true);
-  assert.equal(document.body.dataset.communityTheme, 'dark');
-  assert.equal(window.localStorage.getItem('sansphase-theme'), 'light');
-  assert.equal(window.localStorage.getItem('sansphase-community-study-theme'), 'light', 'obsolete community preferences are neither adopted nor rewritten');
+  assert.equal(document.body.dataset.communityTheme, 'light');
+  assert.equal(window.localStorage.getItem('sansphase-theme'), 'dark');
+  assert.equal(window.localStorage.getItem('sansphase-community-study-theme'), 'dark', 'obsolete community preferences are neither adopted nor rewritten');
   appearance.sync(false);
   assert.equal(document.body.dataset.communityTheme, undefined);
   window.close();
@@ -66,7 +66,7 @@ test('switching changes presentation in place and retains the draft, focus, rout
   const initialHref = window.location.href;
   button.focus();
   appearance.toggle();
-  assert.equal(document.body.dataset.communityTheme, 'light');
+  assert.equal(document.body.dataset.communityTheme, 'dark');
   assert.equal(document.querySelector('textarea'), editor);
   assert.equal(editor.value, '未发布的草稿');
   assert.equal(center.scrollTop, 360);
@@ -74,14 +74,14 @@ test('switching changes presentation in place and retains the draft, focus, rout
   assert.equal(window.location.hash, '#/community/checkin');
   assert.equal(new URL(window.location.href).searchParams.get('v'), 'genshin-light-2');
   assert.equal(window.location.href, initialHref, 'a presentation toggle does not encode a startup preference in the URL');
-  assert.equal(button.getAttribute('aria-pressed'), 'true');
-  assert.equal(button.getAttribute('aria-label'), '切换为深色模式');
-  assert.ok(button.querySelector('[data-test-sun]'));
+  assert.equal(button.getAttribute('aria-pressed'), 'false');
+  assert.equal(button.getAttribute('aria-label'), '切换为明亮模式');
+  assert.ok(button.querySelector('[data-test-moon]'));
   assert.equal(window.localStorage.getItem('sansphase-community-study-theme'), null, 'a manual choice lasts for this document only');
   appearance.toggle();
-  assert.equal(document.body.dataset.communityTheme, 'dark');
-  assert.equal(button.getAttribute('aria-pressed'), 'false');
-  assert.ok(button.querySelector('[data-test-moon]'));
+  assert.equal(document.body.dataset.communityTheme, 'light');
+  assert.equal(button.getAttribute('aria-pressed'), 'true');
+  assert.ok(button.querySelector('[data-test-sun]'));
   window.close();
 });
 
@@ -92,21 +92,21 @@ test('a manual theme choice survives community route and language updates; leavi
   document.body.dataset.communityTheme = 'external';
   const appearance = createCommunityAppearance(document, window);
   appearance.sync(true);
-  assert.equal(document.body.dataset.communityTheme, 'dark');
+  assert.equal(document.body.dataset.communityTheme, 'light');
   appearance.toggle();
   window.location.hash = '#/community/new/showcase';
   appearance.sync(true);
-  assert.equal(document.body.dataset.communityTheme, 'light');
-  assert.match(appearance.buttonHTML((_zh, en) => en, icons), /Use dark mode/);
+  assert.equal(document.body.dataset.communityTheme, 'dark');
+  assert.match(appearance.buttonHTML((_zh, en) => en, icons), /Use light mode/);
   appearance.sync(false);
   assert.equal(document.body.dataset.communityTheme, 'external');
   assert.equal(document.body.classList.contains('theme-light'), true);
   appearance.sync(true);
-  assert.equal(document.body.dataset.communityTheme, 'light');
+  assert.equal(document.body.dataset.communityTheme, 'dark');
   window.close();
 });
 
-test('a manual light choice follows every community and management route in the same document', () => {
+test('a manual dark choice follows every community and management route in the same document', () => {
   const { window, document } = fixture();
   const appearance = createCommunityAppearance(document, window);
   appearance.sync(true);
@@ -114,14 +114,14 @@ test('a manual light choice follows every community and management route in the 
   for (const route of ['home', 'boards/qa', 'checkin', 'manage', 'manage/items']) {
     window.location.hash = `#/community/${route}`;
     appearance.sync(true);
-    assert.equal(document.body.dataset.communityTheme, 'light', `${route} keeps the current document's manual light choice`);
-    assert.match(appearance.buttonHTML(t, icons), /aria-pressed="true"/);
+    assert.equal(document.body.dataset.communityTheme, 'dark', `${route} keeps the current document's manual dark choice`);
+    assert.match(appearance.buttonHTML(t, icons), /aria-pressed="false"/);
   }
   const reopened = fixture(new URL(window.location.href).search);
   reopened.window.location.hash = '#/community/manage/items';
   const fresh = createCommunityAppearance(reopened.document, reopened.window);
   fresh.sync(true);
-  assert.equal(reopened.document.body.dataset.communityTheme, 'dark', 'a fresh management document still starts dark');
+  assert.equal(reopened.document.body.dataset.communityTheme, 'light', 'a fresh management document starts light');
   window.close();
   reopened.window.close();
 });
@@ -131,27 +131,27 @@ test('unavailable local storage and history never prevent the default or manual 
   const unavailable = { location: window.location, get localStorage(): Storage { throw new Error('Storage blocked'); } };
   const appearance = createCommunityAppearance(document, unavailable);
   appearance.sync(true);
-  assert.equal(document.body.dataset.communityTheme, 'dark');
-  assert.doesNotThrow(() => appearance.toggle());
   assert.equal(document.body.dataset.communityTheme, 'light');
+  assert.doesNotThrow(() => appearance.toggle());
+  assert.equal(document.body.dataset.communityTheme, 'dark');
   window.close();
 });
 
-test('reopening or refreshing after a light choice starts dark again without a light paint', () => {
-  const first = fixture('?communityTheme=light');
+test('reopening or refreshing after a dark choice starts light without an intermediate dark paint', () => {
+  const first = fixture('?communityTheme=dark');
   const appearance = createCommunityAppearance(first.document, first.window);
   appearance.sync(true);
   appearance.toggle();
-  assert.equal(first.document.body.dataset.communityTheme, 'light');
+  assert.equal(first.document.body.dataset.communityTheme, 'dark');
   const reopened = fixture(new URL(first.window.location.href).search);
-  reopened.window.localStorage.setItem('sansphase-community-study-theme', 'light');
+  reopened.window.localStorage.setItem('sansphase-community-study-theme', 'dark');
   const changes = new reopened.window.MutationObserver(() => {});
   changes.observe(reopened.document.body, { attributes: true, attributeFilter: ['data-community-theme'], attributeOldValue: true });
   const fresh = createCommunityAppearance(reopened.document, reopened.window);
   fresh.sync(true);
-  assert.equal(reopened.document.body.dataset.communityTheme, 'dark');
+  assert.equal(reopened.document.body.dataset.communityTheme, 'light');
   const paints = changes.takeRecords();
-  assert.equal(paints.length, 1, 'startup applies its dark theme once, with no intermediate pale theme');
+  assert.equal(paints.length, 1, 'startup applies its light theme once, with no intermediate dark theme');
   assert.equal(paints[0].oldValue, null);
   changes.disconnect();
   first.window.close();

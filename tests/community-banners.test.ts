@@ -253,3 +253,116 @@ test('separate store connections enforce the same version and persist the indepe
     assert.throws(() => another.banners.replace('tools', 0, [], { ...access, actor: { kind: 'reader', id: 'mod' } }), { status: 403 }, 'storage also enforces real appointments');
   } finally { another.close(); }
 });
+
+const imageSlide = (cover: string | null, title = '') => ({ kind: 'image' as const, topicId: null, title, cover });
+async function bannerImage(fixture: Awaited<ReturnType<typeof setup>>, scope: string, as = 'owner') {
+  const png = await sharp({ create: { width: 32, height: 16, channels: 3, background: '#456789' } }).png().toBuffer();
+  const response = await fixture.upload(scope, png, as);
+  assert.equal(response.status, 201);
+  return (await response.json() as { id: string }).id;
+}
+
+test('independent image banners use the existing upload/save routes without creating posts and mix with unchanged post DTOs', async t => {
+  const f = await setup(t), cover = await bannerImage(f, 'home');
+  const response = await f.post({ scope: 'home', version: 0, items: [imageSlide(cover)] });
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).items, [{ kind: 'image', topicId: null, title: '', cover, board: '', topicTitle: '', topicImage: null, image: cover }]);
+  assert.equal(f.store.listTopics({}).total, 0, 'an independent picture never creates a placeholder post');
+  const id = f.topic();
+  assert.equal((await f.post({ scope: 'home', version: 1, items: [{ kind: 'post', topicId: id, title: '原帖子', cover: null }, imageSlide(cover, '  图标题  ')] })).status, 200);
+  const saved = await (await f.get('banners?scope=home')).json();
+  assert.deepEqual(saved.items.map((item: { topicId: string | null }) => item.topicId), [id, null]);
+  assert.equal(Object.hasOwn(saved.items[0], 'kind'), false, 'the historical post response shape stays unchanged');
+  assert.equal(saved.items[1].title, '图标题');
+  assert.equal((await f.get(`images/${cover}.webp`)).status, 200);
+});
+
+test('image banners retain scoped authority, uploaded-image ownership and strict saved fields', async t => {
+  const f = await setup(t), cover = await bannerImage(f, 'qa', 'mod'), ownerCover = await bannerImage(f, 'qa');
+  const save = (scope: string, items: unknown[], as = 'mod', version = 0) => f.post({ scope, version, items }, as);
+  assert.equal((await save('home', [imageSlide(cover)])).status, 403);
+  assert.equal((await save('tools', [imageSlide(cover)])).status, 403);
+  assert.equal((await save('qa', [imageSlide(cover)], 'reader')).status, 403);
+  assert.equal((await save('qa', [imageSlide(cover)], 'mod; community_browse=reader')).status, 403);
+  assert.equal((await save('qa', [imageSlide(ownerCover)])).status, 400, 'a new cover cannot be taken from another uploader');
+  const unrelated = randomUUID();
+  f.store.addImage({ id: unrelated, uploader: f.mod, width: 1, height: 1, purpose: 'shop' });
+  for (const invalid of [imageSlide(null), imageSlide(randomUUID()), imageSlide('https://example.com/banner.webp'), imageSlide(unrelated),
+    { ...imageSlide(cover), kind: 'unknown' }, { ...imageSlide(cover), topicId: f.topic() },
+    { ...imageSlide(cover), kind: undefined }, { ...imageSlide(cover), title: '字'.repeat(81) }, { ...imageSlide(cover), title: 'bad\nheading' }]) {
+    assert.equal((await save('qa', [invalid])).status, 400);
+    assert.equal((await (await f.get('banners?scope=qa')).json()).version, 0);
+  }
+  assert.equal((await save('qa', [{ ...imageSlide(cover), board: 'tools', image: 'https://example.com/banner.webp' }])).status, 200);
+  const saved = await (await f.get('banners?scope=qa')).json();
+  assert.equal(saved.items[0].board, 'qa', 'the board is derived from authorized scope');
+  assert.equal(saved.items[0].image, cover, 'caller URLs cannot enter the published DTO');
+  assert.equal((await save('tools', [imageSlide(cover)], 'owner')).status, 400, 'a banner cover cannot cross scopes');
+  assert.equal((await save('qa', [imageSlide(cover)], 'owner', 1)).status, 200, 'a new manager can retain a currently configured cover');
+  f.store.members.setSteward(f.mod, false);
+  assert.equal((await save('qa', [imageSlide(cover)], 'mod', 2)).status, 403);
+});
+
+test('five independent image rows preserve order and concurrent versions while six slides fail atomically', async t => {
+  const f = await setup(t), cover = await bannerImage(f, 'home');
+  const items = Array.from({ length: 5 }, (_, index) => imageSlide(cover, `独立图${index}`));
+  assert.equal((await f.post({ scope: 'home', version: 0, items })).status, 200);
+  assert.equal((await f.post({ scope: 'home', version: 1, items: [...items, imageSlide(cover)] })).status, 400);
+  const concurrent = await Promise.all([
+    f.post({ scope: 'home', version: 1, items: [items[2], items[0]] }),
+    f.post({ scope: 'home', version: 1, items: [items[3], items[1]] }),
+  ]);
+  assert.deepEqual(concurrent.map(response => response.status).sort(), [200, 409]);
+  const saved = await (await f.get('banners?scope=home')).json();
+  assert.equal(saved.version, 2); assert.equal(saved.items.length, 2);
+  const another = createCommunityStore(f.directory);
+  try { assert.deepEqual(another.banners.get('home', () => true), saved); } finally { another.close(); }
+});
+
+test('new board appointments take effect for independent uploads and saves without granting other scopes', async t => {
+  const f = await setup(t), reader = { kind: 'reader' as const, id: 'reader' };
+  const png = await sharp({ create: { width: 32, height: 16, channels: 3, background: '#456789' } }).png().toBuffer();
+  assert.equal((await f.upload('tools', png, 'reader')).status, 403);
+  f.store.members.setSteward(reader, true, ['tools']);
+  const cover = await bannerImage(f, 'tools', 'reader');
+  assert.equal((await f.post({ scope: 'tools', version: 0, items: [imageSlide(cover)] }, 'reader')).status, 200);
+  assert.equal((await f.post({ scope: 'home', version: 0, items: [imageSlide(cover)] }, 'reader')).status, 403);
+  assert.equal((await f.upload('qa', png, 'reader')).status, 403);
+  assert.equal((await f.post({ scope: 'tools', version: 1, items: [] }, 'reader; community_browse=reader')).status, 403);
+  f.store.members.setSteward(reader, false);
+  assert.equal((await f.post({ scope: 'tools', version: 1, items: [] }, 'reader')).status, 403);
+});
+
+test('independent pictures survive unrelated hidden posts while post covers and private boards keep their visibility rules', async t => {
+  const f = await setup(t), independent = await bannerImage(f, 'qa', 'mod'), postCover = await bannerImage(f, 'qa', 'mod'), id = f.topic();
+  assert.equal((await f.post({ scope: 'qa', version: 0, items: [imageSlide(independent), { topicId: id, title: '帖子标题', cover: postCover }] }, 'mod')).status, 200);
+  f.store.hide({ kind: 'topic', id }, '隐藏');
+  assert.deepEqual((await (await f.get('banners?scope=qa')).json()).items.map((item: { cover: string }) => item.cover), [independent]);
+  assert.equal((await f.get(`images/${independent}.webp`)).status, 200);
+  assert.equal((await f.get(`images/${postCover}.webp`)).status, 404);
+  const vipCover = await bannerImage(f, 'vip');
+  assert.equal((await f.post({ scope: 'vip', version: 0, items: [imageSlide(vipCover)] })).status, 200);
+  assert.equal((await f.get('banners?scope=vip')).status, 404);
+  assert.equal((await f.get(`images/${vipCover}.webp`)).status, 404);
+  assert.equal((await f.get(`images/${vipCover}.webp`, 'vip')).status, 200);
+  const db = new DatabaseSync(resolve(f.directory, 'content.db'));
+  db.prepare("UPDATE community_images SET deleted_at='2026-10-07T00:00:00Z' WHERE id=?").run(independent); db.close();
+  assert.deepEqual((await (await f.get('banners?scope=qa')).json()).items, []);
+  assert.equal((await f.get(`images/${independent}.webp`)).status, 404);
+});
+
+test('account purge and stale-upload cleanup retain independently configured moderator pictures but remove unused ones', async t => {
+  const f = await setup(t), cover = await bannerImage(f, 'qa', 'mod'), unused = await bannerImage(f, 'qa', 'mod');
+  assert.equal((await f.post({ scope: 'qa', version: 0, items: [imageSlide(cover)] }, 'mod')).status, 200);
+  const db = new DatabaseSync(resolve(f.directory, 'content.db'));
+  db.prepare("UPDATE community_images SET created_at='2000-01-01T00:00:00Z' WHERE id=?").run(cover); db.close();
+  assert.equal(f.store.sweepImages().includes(cover), false);
+  const queued: string[] = [];
+  f.store.purgeReaderData(f.mod.id, filename => queued.push(filename));
+  assert.ok(f.store.image(cover), 'a NULL topic reference still protects a shared configured image');
+  assert.equal(queued.includes(`community-image-${cover}.webp`), false);
+  assert.equal(f.store.image(unused), null);
+  assert.equal(queued.includes(`community-image-${unused}.webp`), true);
+  assert.equal((await f.get(`images/${cover}.webp`)).status, 200);
+  assert.equal((await (await f.get('banners?scope=qa')).json()).items[0].cover, cover);
+});

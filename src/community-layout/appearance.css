@@ -81,7 +81,7 @@ body.community-open:is(.community-frame-open, .community-management-open)[data-c
 body.community-open:is(.community-frame-open, .community-management-open)[data-community-theme="light"] #blog-backdrop { background: radial-gradient(80% 65% at 18% 0, rgb(255 252 243 / 80%), transparent 78%), radial-gradient(60% 70% at 98% 80%, rgb(181 194 204 / 12%), transparent 80%), var(--bg); }
 body.community-open:is(.community-frame-open, .community-management-open)[data-community-theme="light"] #site-header { background: rgb(243 238 228 / 97%); }
 body.community-open:is(.community-frame-open, .community-management-open)[data-community-theme="light"] .community-sky { opacity: .05; }
-html:has(body.community-open:is(.community-frame-open, .community-management-open)[data-community-theme="light"]) { color-scheme: light; }
+html:has(body.community-open:is(.community-frame-open, .community-management-open)[data-community-theme="light"]) { color-scheme: light; background: #e8e2d6; }
 /* The main site's selection uses pale accent ink; paper needs its own pair. */
 body.community-open:is(.community-frame-open, .community-management-open)[data-community-theme="light"] ::selection { background: #d7c7a6; color: #243248; -webkit-text-fill-color: #243248; text-shadow: none; }
 

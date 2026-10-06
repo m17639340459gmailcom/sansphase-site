@@ -373,8 +373,8 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-badge-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .community-badge-row.is-large { gap: 18px 22px; }
 .community-badge-row.is-large .community-badge { flex-direction: column; }
-.community-badge-art { display: block; flex: 0 0 auto; position: relative; isolation: isolate; width: var(--emblem-size, 116px); aspect-ratio: 248 / 300; background-image: url('/assets/community/badges/badge-atlas.png'); background-size: 619.354839% 341.333333%; background-position: var(--atlas-x) var(--atlas-y); background-repeat: no-repeat; }
-.community-badge-art[data-finish="aurora"]::before, .community-badge-art[data-finish="aurora"]::after { content: ''; position: absolute; inset: 0; pointer-events: none; mask-image: url('/assets/community/badges/badge-atlas.png'); mask-size: 619.354839% 341.333333%; mask-position: var(--atlas-x) var(--atlas-y); mask-repeat: no-repeat; mask-mode: alpha; background-size: 200% 100%; animation: community-sheen 4s linear infinite; }
+.community-badge-art { display: block; flex: 0 0 auto; position: relative; isolation: isolate; width: var(--emblem-size, 116px); aspect-ratio: 248 / 300; background-image: url('./assets/community/badges/badge-atlas.png'); background-size: 619.354839% 341.333333%; background-position: var(--atlas-x) var(--atlas-y); background-repeat: no-repeat; }
+.community-badge-art[data-finish="aurora"]::before, .community-badge-art[data-finish="aurora"]::after { content: ''; position: absolute; inset: 0; pointer-events: none; mask-image: url('./assets/community/badges/badge-atlas.png'); mask-size: 619.354839% 341.333333%; mask-position: var(--atlas-x) var(--atlas-y); mask-repeat: no-repeat; mask-mode: alpha; background-size: 200% 100%; animation: community-sheen 4s linear infinite; }
 .community-badge-art[data-finish="aurora"]::after { background-image: linear-gradient(90deg, var(--cm-badge-aurora-start), var(--cm-badge-aurora-mid), var(--cm-badge-aurora-end), var(--cm-badge-aurora-start)); mix-blend-mode: color; opacity: var(--cm-badge-aurora-tint); }
 .community-badge-art[data-finish="aurora"]::before { background-image: linear-gradient(100deg, transparent 0%, rgb(143 227 200 / .12) 30%, rgb(223 241 255 / .68) 44%, rgb(201 182 242 / .18) 57%, transparent 73%, transparent); mix-blend-mode: screen; opacity: .62; }
 .community-badge-ic .community-badge-art { width: 100%; }
@@ -956,7 +956,7 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-star-count strong { color: #f2e5cb; font: 500 28px/1.3 var(--font-mono); font-variant-numeric: tabular-nums; }
 .community-star-count > span { font: 12px var(--font-mono); color: var(--dim); }
 .community-star-map { position: relative; height: clamp(360px, 45cqi, 460px); margin: 24px 0 22px; isolation: isolate; }
-.community-star-map::before { content: ''; position: absolute; inset: -24px -16px; z-index: -1; pointer-events: none; background: url('/assets/community/checkin-astral-depth-v2.webp') center / cover; opacity: .95; mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 28%, rgb(0 0 0 / 80%) 55%, transparent 100%); }
+.community-star-map::before { content: ''; position: absolute; inset: -24px -16px; z-index: -1; pointer-events: none; background: url('./assets/community/checkin-astral-depth-v2.webp') center / cover; opacity: .95; mask-image: radial-gradient(ellipse 50% 50% at 50% 50%, #000 28%, rgb(0 0 0 / 80%) 55%, transparent 100%); }
 .community-star-dust { position: absolute; inset: 0; pointer-events: none; mask-image: radial-gradient(ellipse, #000 28%, transparent 74%); }
 .community-star-dust i { position: absolute; width: var(--grain-size); height: var(--grain-size); background: #d6e5f5; border-radius: 50%; }
 .community-star-links { position: absolute; inset: 0; width: 100%; height: 100%; fill: none; stroke: none; pointer-events: none; }

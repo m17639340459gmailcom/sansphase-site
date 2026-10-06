@@ -76,12 +76,15 @@ body.community-management-open #main { z-index: auto; }
 .community-banner-item-head .community-action-group { gap: 6px; }
 .community-banner-item-grid { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1fr); gap: 18px; align-items: start; }
 .community-banner-preview-column { display: grid; gap: 8px; min-width: 0; }
-.community-banner-preview { display: block; position: relative; isolation: isolate; overflow: hidden; width: 100%; aspect-ratio: 2.3 / 1; min-height: 128px; border: 1px solid var(--line-strong); border-radius: 10px; background: #102137 url('/assets/community/atlas-space.webp') center 42% / cover; color: #f7f4ee; }
+.community-banner-preview { display: block; position: relative; isolation: isolate; overflow: hidden; width: 100%; aspect-ratio: 2.3 / 1; min-height: 128px; border: 1px solid var(--line-strong); border-radius: 10px; background: #102137 url('./assets/community/atlas-space.webp') center 42% / cover; color: #f7f4ee; }
 .community-banner-preview > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: -2; }
 .community-banner-preview::before { content: ''; position: absolute; inset: 0; z-index: -1; background: linear-gradient(180deg, rgb(8 14 22 / 12%) 5%, rgb(8 14 22 / 90%) 100%); }
 .community-banner-preview > div { display: grid; gap: 6px; align-content: end; min-height: inherit; height: 100%; padding: 16px; }
 .community-banner-preview strong { color: inherit; font-size: 17px; line-height: 1.5; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .community-banner-preview div > span { color: #e5eaf2; font-size: 12px; }
+.community-banner-preview.is-image { background: var(--cm-panel); }
+.community-banner-preview.is-image > img { object-fit: contain; }
+.community-banner-preview.is-image::before { content: none; }
 .community-banner-preview-caption { color: var(--muted); font-size: 12px; line-height: 1.6; }
 .community-banner-item-fields { display: grid; gap: 14px; min-width: 0; }
 .community-banner-item-fields .community-field-l { margin-bottom: 8px; }

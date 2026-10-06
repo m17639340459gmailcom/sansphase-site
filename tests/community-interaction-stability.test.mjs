@@ -436,7 +436,7 @@ test('an appointment in flight remains visibly locked through same-route remount
 
 test('an older roster response cannot overwrite the refreshed list after appointment', async t => {
   const older = deferred(); let rosterRequests = 0;
-  const { main, remount } = await setup(t, '#/community/manage/stewards', url => {
+  const { main, w } = await setup(t, '#/community/manage/stewards', url => {
     if (url.endsWith('/me')) return response(managementViewer);
     if (url.includes('/manage?tab=stewards')) {
       rosterRequests++;
@@ -447,7 +447,10 @@ test('an older roster response cannot overwrite the refreshed list after appoint
     if (url.endsWith('/members/10002/steward')) return response({ ok: true });
     return null;
   });
-  await remount('#/community/manage/reports'); await remount('#/community/manage/stewards');
+  // Refresh an already readable roster. New-route handoffs now wait for their
+  // own core response, while the current roster remains interactive during a
+  // normal refresh and must reject its older in-flight response after a write.
+  const retry = w.document.createElement('button'); retry.dataset.action = 'community-retry'; main.append(retry); retry.click(); await turn();
   const button = main.querySelector('[data-action="community-steward"]'); button.click(); button.click(); await turn(); await turn();
   assert.equal(main.querySelector('[data-action="community-steward"]'), null);
   older.resolve(response({ ...managementData, stewards: [moderatorCandidate(true).person] })); await turn();

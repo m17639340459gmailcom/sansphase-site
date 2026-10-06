@@ -3,7 +3,7 @@ import { communityBoard, imageSrc } from "../community.ts";
 export { communityFrameBannersHTML } from '../community-frame-banners.mjs';
 
 type Highlight = {
-  href: string;
+  href: string | null;
   title: string;
   board: string;
   image: string | null;
@@ -32,13 +32,20 @@ function recommendations(config: HTMLElement | undefined, scope: string, english
   const items: Highlight[] = [];
   const selected = new Set<string>();
   if (config?.dataset.frameBannersState !== 'ready') return items;
-  for (const source of config.querySelectorAll<HTMLAnchorElement>(':scope > a[data-frame-banner-item]')) {
-    const href = postLink(source);
-    const title = source.querySelector('[data-frame-banner-title]')?.textContent?.trim();
+  for (const source of config.querySelectorAll<HTMLElement>(':scope > [data-frame-banner-item]')) {
+    const title = source.querySelector('[data-frame-banner-title]')?.textContent?.trim() || '';
     const boardId = source.dataset.frameBannerBoard || '';
+    const image = source.dataset.frameBannerImage || '';
+    if (source.dataset.frameBannerKind === 'image') {
+      if (!imageId.test(image) || (scope === 'home' ? boardId !== '' : boardId !== scope)) continue;
+      items.push({ href: null, title, board: '', image: imageSrc(image, false) });
+      if (items.length === 5) break;
+      continue;
+    }
+    if (source.tagName !== 'A') continue;
+    const href = postLink(source as HTMLAnchorElement);
     const board = communityBoard(boardId);
     if (!href || !title || !board || (scope !== 'home' && scope !== boardId) || selected.has(href)) continue;
-    const image = source.dataset.frameBannerImage || '';
     items.push({ href, title, board: english ? board.en : board.zh, image: imageId.test(image) ? imageSrc(image, false) : null });
     selected.add(href);
     if (items.length === 5) break;
@@ -62,9 +69,10 @@ function renderShowcase(document: Document, items: Highlight[], english: boolean
   track.setAttribute("aria-label", title);
   for (const item of items) {
     const kind = english ? "Recommended" : "推荐";
-    const card = document.createElement("a");
-    card.className = "community-feed-showcase-card";
-    card.setAttribute("href", item.href);
+    const card = document.createElement(item.href ? "a" : "div");
+    card.className = `community-feed-showcase-card${item.href ? '' : ' is-image'}`;
+    if (item.href) card.setAttribute("href", item.href);
+    else { card.setAttribute('role', 'img'); card.setAttribute('aria-label', item.title || (english ? 'Community image banner' : '社区图片横幅')); }
     const art = document.createElement("div");
     art.className = "community-feed-showcase-art";
     art.setAttribute("aria-hidden", "true");
@@ -85,7 +93,8 @@ function renderShowcase(document: Document, items: Highlight[], english: boolean
       label.textContent = text;
       copy.append(label);
     }
-    card.append(art, copy);
+    card.append(art);
+    if (item.href) card.append(copy);
     track.append(card);
   }
   section.append(track, heading);

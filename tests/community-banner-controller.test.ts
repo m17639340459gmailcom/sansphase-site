@@ -99,3 +99,48 @@ test('conflicting saves retain the draft and require explicit reload before subm
   ui.action(action('cancel') as HTMLElement); assert.equal(ui.state().draft?.version, 2); assert.equal(ui.state().conflicted, false);
   ui.action(action('add', { id: 'p1' }) as HTMLElement); await ui.save(); assert.deepEqual(versions, [1, 2]); assert.equal(ui.dirty(), false);
 });
+
+test('an independent image uses the existing upload and save APIs without a topic and requires its image before save', async () => {
+  const image = '11111111-1111-4111-8111-111111111111';
+  const writes: Array<{ path: string; body: unknown }> = [];
+  const ui = createCommunityBannerController({ request: async <T>(path: string, init?: RequestInit) => {
+    if (!init?.method) return { ...listing(), items: [], total: 0 } as T;
+    if (path.startsWith('manage/banner-image')) { writes.push({ path, body: init.body }); return { id: image } as T; }
+    const body = JSON.parse(String(init.body)); writes.push({ path, body });
+    return { ...body, version: 2, items: body.items.map((item: { kind: 'image'; topicId: null; cover: string; title: string }) => ({ ...item, board: 'qa', topicTitle: '', topicImage: null, image: item.cover })) } as T;
+  }, paint() {}, notify() {}, t: zh => zh, active: () => true, owner: () => false, saved() {} });
+  ui.sync([config('qa')]); await turn();
+  ui.action(action('add-image') as HTMLElement);
+  assert.equal(ui.state().draft?.items.length, 1);
+  assert.equal(ui.state().draft?.items[0].topicId, null);
+  await ui.save();
+  assert.equal(writes.length, 0, 'empty image drafts must not be published');
+  assert.match(ui.state().message || '', /上传.*图片/);
+  const file = new File(['image'], 'banner.png', { type: 'image/png' });
+  ui.change({ matches: () => true, dataset: { index: '0' }, files: [file], value: '' } as unknown as HTMLInputElement);
+  await turn();
+  assert.equal(writes[0].path, 'manage/banner-image?scope=qa');
+  assert.ok(writes[0].body instanceof FormData);
+  await ui.save();
+  assert.deepEqual(writes[1], { path: 'manage/banners', body: { scope: 'qa', version: 1, items: [{ kind: 'image', topicId: null, title: '', cover: image }] } });
+  assert.equal(ui.dirty(), false);
+  ui.action(action('cover-remove', { index: '0' }) as HTMLElement);
+  assert.equal(ui.state().draft?.items[0].cover, null);
+  assert.equal(ui.state().draft?.items[0].image, null);
+});
+
+test('image and post drafts share the maximum five slots and retain their order across scopes', async () => {
+  const ui = createCommunityBannerController({ request: async <T>() => listing() as T, paint() {}, notify() {}, t: zh => zh, active: () => true, owner: () => true, saved() {} });
+  ui.sync([config(), config('qa')]); await turn();
+  ui.action(action('add', { id: 'p1' }) as HTMLElement);
+  for (let index = 0; index < 5; index++) ui.action(action('add-image') as HTMLElement);
+  assert.equal(ui.state().draft?.items.length, 5);
+  ui.action(action('up', { index: '1' }) as HTMLElement);
+  assert.deepEqual(ui.state().draft?.items.map(item => item.topicId), [null, 'p1', null, null, null]);
+  ui.action(action('scope', { scope: 'qa' }) as HTMLElement); await turn();
+  assert.equal(ui.state().draft?.items.length, 0);
+  ui.action(action('scope', { scope: 'home' }) as HTMLElement);
+  assert.equal(ui.state().draft?.items.length, 5);
+  ui.action(action('cancel') as HTMLElement);
+  assert.equal(ui.state().draft?.items.length, 0);
+});

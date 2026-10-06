@@ -14,7 +14,7 @@ type Options = {
   conflict?: () => Promise<void>;
 };
 const copy = (config: CommunityBannerConfig): CommunityBannerConfig => ({ ...config, items: config.items.map(item => ({ ...item })) });
-const editable = (config: CommunityBannerConfig | undefined) => JSON.stringify(config?.items.map(({ topicId, title, cover }) => ({ topicId, title, cover })) || []);
+const editable = (config: CommunityBannerConfig | undefined) => JSON.stringify(config?.items.map(item => ({ ...(item.kind === 'image' ? { kind: 'image' } : {}), topicId: item.topicId, title: item.title, cover: item.cover })) || []);
 
 /** Local drafts belong to a verified account and an independently saved scope. */
 export function createCommunityBannerController(options: Options) {
@@ -82,7 +82,10 @@ export function createCommunityBannerController(options: Options) {
       if (!selected || selected === scope || !configs.some(config => config.scope === selected)) return true;
       scope = selected; query = ''; loadedKey = ''; void search(); return true;
     }
-    if (name === 'community-banner-add') {
+    if (name === 'community-banner-add-image') {
+      if (current.items.length >= 5) return true;
+      current.items.push({ kind: 'image', topicId: null, title: '', cover: null, board: scope === 'home' ? '' : scope, topicTitle: '', image: null, topicImage: null });
+    } else if (name === 'community-banner-add') {
       const topic = candidates.state === 'ready' ? candidates.data.items.find(item => item.id === target.dataset.id) : null;
       if (!topic || current.items.length >= 5 || current.items.some(item => item.topicId === topic.id)) return true;
       current.items.push({ topicId: topic.id, title: '', cover: null, board: topic.board, topicTitle: topic.title, image: topic.thumbs?.[0] || null, topicImage: topic.thumbs?.[0] || null });
@@ -116,8 +119,9 @@ export function createCommunityBannerController(options: Options) {
     const current = draft();
     if (!valid() || busy || !current || conflicts.has(scope)) return;
     if (current.items.some(item => [...item.title.trim()].length > 80)) { message = options.t('展示标题最多 80 个字。', 'Display titles can have up to 80 characters.'); paint(); return; }
+    if (current.items.some(item => item.kind === 'image' && !item.cover)) { message = options.t('请先为图片横幅上传图片，再保存。', 'Upload an image for each image banner before saving.'); paint(); return; }
     const identity = epoch, selected = scope;
-    const payload = { scope, version: current.version, items: current.items.map(({ topicId, title, cover }) => ({ topicId, title: title.trim(), cover })) };
+    const payload = { scope, version: current.version, items: current.items.map(item => ({ ...(item.kind === 'image' ? { kind: 'image' } : {}), topicId: item.topicId, title: item.title.trim(), cover: item.cover })) };
     busy = true; message = ''; paint();
     try {
       const saved = await options.request<CommunityBannerConfig>('manage/banners', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Reader-Request': '1' }, body: JSON.stringify(payload) });

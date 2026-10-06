@@ -102,6 +102,13 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   let permissionRevision = 0;
   let paintedAccount: string | null = null;
   let paintedPage: { hash: string; frame: number; markup: string; style: string | null; main: string | null; banner: string | null; aside: string | null } | null = null;
+  // Only an already confirmed page may remain visible during a route handoff.
+  // Its DOM is retained by the stable frame and is inert until the new page's
+  // own authority and core reads finish; this is not an identity cache.
+  let confirmedPage: { hash: string; frame: number; revision: number; account: string; markup: string } | null = null;
+  let pendingRoute: { hash: string; frame: number; account: string } | null = null;
+  let coreRoute: { hash: string; frame: number; request: number } | null = null;
+  let renderedHash = '';
   let browseRequest = 0;
   let switchingBrowseMode = false;
   let me: CommunityLoad<CommunityMe> | null = null;
@@ -445,7 +452,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     else if (lostPermission) {
       // Retire permission-bearing reads, including responses still in flight.
       // This same-account change leaves personal dialog drafts and writes alone.
-      permissionRevision++; summary = null; lists.clear(); listRequests.clear(); threads.clear(); manages.clear(); manageRequests.clear();
+      permissionRevision++; confirmedPage = null; pendingRoute = null; coreRoute = null;
+      summary = null; lists.clear(); listRequests.clear(); threads.clear(); manages.clear(); manageRequests.clear();
       memberPages.clear(); frameHighlights.clear(); frameHighlightsPending.clear(); banners.clear(); bannerRequests.clear();
       shop = null; shopMine = null; bookmarks = null; rank = null; stardusts.clear(); stardustRequest++;
       reviewSelection.clear(); managementBoard = ''; stewardCandidate = null; stewardLookupRequest++;
@@ -539,27 +547,27 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (communityReaderReadOnly(viewer)) return viewer?.management?.role === 'owner' && viewer.vip === true;
     return viewer ? Boolean(viewer.vip || viewer.owner || (viewer.mod && viewer.moderationBoards?.includes('vip'))) : Boolean(ctx?.members);
   };
-  function loadsFor(current: CommunityRoute): Array<() => Promise<void>> {
-    const page = ((): Array<() => Promise<void>> => {
-      switch (current.view) {
-        case 'home': return [loadSummary, () => loadList('')];
-        case 'boards': return [loadSummary];
-        case 'board': return current.board === 'vip' && !members() ? [loadSummary] : [loadSummary, () => loadList(current.board)];
-        case 'tag': return [() => loadList(`tag:${current.id}`)];
-        case 'post': case 'edit': return [() => loadThread(current.id)];
-        case 'checkin': return [async () => { await loadCheckin(); }];
-        case 'bookmarks': return [loadBookmarks];
-        case 'manage': return [() => loadManage(['contact', 'convention'].includes(current.tab) ? 'queue' : current.tab), ...(current.tab === 'convention' ? [loadConvention] : [])];
-        case 'rules': return [loadModerationContacts, loadConvention];
-        case 'member': return [() => loadMember(current.id, current.tab)];
-        case 'profile': return [loadProfile];
-        case 'stardust': return [async () => { await loadStardust(); }];
-        case 'inbox': return [() => loadInbox(current.tab)];
-        case 'shop': return [current.tab === 'mine' ? loadShopMine : loadShop];
-        case 'rank': return [loadRank];
-        default: return [];
-      }
-    })();
+  function pageLoadsFor(current: CommunityRoute): Array<() => Promise<void>> {
+    switch (current.view) {
+      case 'home': return [loadSummary, () => loadList('')];
+      case 'boards': return [loadSummary];
+      case 'board': return current.board === 'vip' && !members() ? [loadSummary] : [loadSummary, () => loadList(current.board)];
+      case 'tag': return [() => loadList(`tag:${current.id}`)];
+      case 'post': case 'edit': return [() => loadThread(current.id)];
+      case 'checkin': return [async () => { await loadCheckin(); }];
+      case 'bookmarks': return [loadBookmarks];
+      case 'manage': return [() => loadManage(['contact', 'convention'].includes(current.tab) ? 'queue' : current.tab), ...(current.tab === 'convention' ? [loadConvention] : [])];
+      case 'rules': return [loadModerationContacts, loadConvention];
+      case 'member': return [() => loadMember(current.id, current.tab)];
+      case 'profile': return [loadProfile];
+      case 'stardust': return [async () => { await loadStardust(); }];
+      case 'inbox': return [() => loadInbox(current.tab)];
+      case 'shop': return [current.tab === 'mine' ? loadShopMine : loadShop];
+      case 'rank': return [loadRank];
+      default: return [];
+    }
+  }
+  function loadsFor(current: CommunityRoute, page = pageLoadsFor(current)): Array<() => Promise<void>> {
     const sharedFrame = Boolean(mounted?.ctx.painted);
     const highlightScope = current.view === 'board' ? current.board : '';
     const canLoadHighlights = current.view === 'home' || current.view === 'board' && (current.board !== 'vip' || members());
@@ -573,28 +581,39 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   }
   async function refresh(current = route()) {
     const hash = location.hash, identity = frameIdentity;
+    if (renderedHash !== hash) { renderedHash = hash; coreRoute = null; }
     let viewerRequest = meRequest;
     const valid = () => location.hash === hash && identity === frameIdentity && viewerRequest === meRequest;
-    if (current.view === 'board' && current.board === 'vip') {
+    const preflight = current.view === 'board' && current.board === 'vip';
+    if (preflight) {
       await loadMe();
       viewerRequest = meRequest;
       if (location.hash !== hash || identity !== frameIdentity) return;
       if (!viewerVerified) return;
     }
-    const reads = loadsFor(current);
-    let viewerFinished = !reads.includes(loadMe), queued = false;
+    const page = pageLoadsFor(current);
+    // Summary is a supporting area on lists, but the board index itself needs
+    // it. A slow supporting card must not delay a readable discussion.
+    const core = page.filter(run => run !== loadSummary || current.view === 'boards');
+    const reads = loadsFor(current, page).filter(run => !preflight || run !== loadMe);
+    let viewerFinished = !reads.includes(loadMe), coreFinished = false, queued = false;
     const showReady = () => {
-      if (!valid() || !viewerFinished || !viewerVerified || queued) return;
+      if (!valid() || !viewerFinished || !coreFinished || !viewerVerified || queued) return;
+      coreRoute = { hash, frame: identity, request: viewerRequest };
       queued = true;
       queueMicrotask(() => { queued = false; if (valid() && viewerVerified) paint(true); });
     };
-    const pending = reads.map(async run => { await run(); if (run === loadMe) viewerFinished = true; showReady(); });
+    const pending = reads.map(run => ({ run, done: (async () => { await run(); if (run === loadMe) viewerFinished = true; showReady(); })() }));
     viewerRequest = meRequest;
-    await Promise.all(pending);
-    if (current.view === 'profile' && location.hash === hash && identity === frameIdentity) {
-      const uid = readyData(me)?.uid || readyData(profile)?.person.uid;
-      if (uid) await loadMember(uid, 'topics');
-    }
+    const coreDone = (async () => {
+      await Promise.all(pending.filter(item => core.includes(item.run) || current.view === 'profile' && item.run === loadMe).map(item => item.done));
+      if (current.view === 'profile' && valid() && viewerVerified) {
+        const uid = readyData(me)?.uid || readyData(profile)?.person.uid;
+        if (uid) await loadMember(uid, 'topics');
+      }
+      coreFinished = true; showReady();
+    })();
+    await Promise.all([...pending.map(item => item.done), coreDone]);
     if (!valid() || !viewerVerified) return;
     paint(true);
   }
@@ -637,7 +656,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const identityFailure = displayedViewerFailure(ctx.t);
     if (identityFailure && current.view !== 'unknown' && current.view !== 'landing')
       return `<section class="page community-page" data-community="${current.view}">${communityStatusHTML(identityFailure, common)}</section>`;
-    if (viewerHash !== location.hash && current.view !== 'unknown' && current.view !== 'landing')
+    if ((viewerHash !== location.hash || !coreRoute && confirmedPage?.hash !== location.hash) && current.view !== 'unknown' && current.view !== 'landing')
       return `<section class="page community-page" data-community="${current.view}">${communityStatusHTML(loading, common)}</section>`;
     if (current.view === 'manage' && (!(identity?.owner || identity?.mod) || identity.management?.browsingAsReader))
       return `<section class="page community-page" data-community="manage">${communityStatusHTML({ state: 'error', status: 403, message: '' }, common)}</section>`;
@@ -675,8 +694,23 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     }
   }
   function html(ctx: CommunityContext) {
+    const hash = location.hash, account = draftIdentity(), current = route();
+    if (renderedHash !== hash) { renderedHash = hash; coreRoute = null; }
+    if (['unknown', 'landing', 'manage'].includes(current.view) || viewerFailure) {
+      confirmedPage = null; pendingRoute = null;
+    }
+    const previous = confirmedPage;
+    const ready = coreRoute?.hash === hash && coreRoute.frame === frameIdentity && coreRoute.request === meRequest
+      && viewerVerified && viewerHash === hash;
+    if (previous && previous.account === account && previous.frame === frameIdentity && previous.revision === permissionRevision
+      && (pendingRoute || previous.hash !== hash) && !ready) {
+      pendingRoute = { hash, frame: frameIdentity, account: previous.account };
+      return previous.markup.replace('<section ', '<section data-community-pending-route="true" aria-busy="true" inert ');
+    }
+    pendingRoute = null;
     return pageHTML(ctx);
   }
+  const routeHandoffPending = () => pendingRoute?.hash === location.hash && pendingRoute.frame === frameIdentity && pendingRoute.account === draftIdentity();
 
   function renderedPage(): HTMLElement | null {
     if (!mounted) return null;
@@ -841,6 +875,10 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       main: page.querySelector('.community-main')?.outerHTML ?? null,
       banner: page.querySelector('.community-banner, .community-board-hero')?.outerHTML ?? null,
       aside: page.querySelector('.community-aside')?.outerHTML ?? null };
+    const account = draftIdentity();
+    if (account && !viewerFailure && !routeHandoffPending() && viewerVerified && viewerHash === location.hash
+      && coreRoute?.hash === location.hash && coreRoute.frame === frameIdentity)
+      confirmedPage = { hash: location.hash, frame: frameIdentity, revision: permissionRevision, account, markup };
   }
   // The feed enhances thumbnails to originals after painting. Both URLs name
   // one protected file, but only for this origin and the existing UUID route.
@@ -860,11 +898,13 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const section = mounted.main.querySelector<HTMLElement>('[data-community]');
     const markup = html(mounted.ctx);
     if (!section || markup === null) return;
+    if (routeHandoffPending()) return;
     const template = document.createElement('template');
     template.innerHTML = markup;
     const next = template.content.firstElementChild as HTMLElement;
     const currentAccount = draftIdentity();
     const sameAccount = currentAccount !== null && paintedAccount === currentAccount;
+    const preserveControls = sameAccount && !section.hasAttribute('data-community-pending-route');
     const samePage = paintedPage?.hash === location.hash && paintedPage.frame === frameIdentity;
     if (staged && sameAccount && samePage && paintedPage) {
       if (paintedPage.markup === markup) {
@@ -894,7 +934,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     // Keep the template's generated snapshot, rather than enhanced DOM or
     // editor drafts, for the next supporting-only comparison.
     rememberPaint(markup, next);
-    for (const field of sameAccount ? section.querySelectorAll<Field>('input[name], textarea[name], select[name]') : []) {
+    for (const field of preserveControls ? section.querySelectorAll<Field>('input[name], textarea[name], select[name]') : []) {
       const sourceForm = field.closest('form');
       const form = sourceForm?.dataset.communityForm;
       // Banner values are keyed by scope and item in the controller. Copying
@@ -914,16 +954,16 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       if (choice) (twin as HTMLInputElement).checked = (field as HTMLInputElement).checked;
       else twin.value = field.value;
     }
-    const previews = [...section.querySelectorAll<HTMLElement>('[data-action="community-md-preview"][aria-pressed="true"]')].map(button => button.dataset.for || '');
+    const previews = preserveControls ? [...section.querySelectorAll<HTMLElement>('[data-action="community-md-preview"][aria-pressed="true"]')].map(button => button.dataset.for || '') : [];
     const extras = next.querySelector<HTMLDetailsElement>('[data-compose-extras]');
-    if (extras) extras.open = Boolean(section.querySelector<HTMLDetailsElement>('[data-compose-extras]')?.open);
-    for (const description of section.querySelectorAll<HTMLDetailsElement>('[data-shop-description][open]')) {
+    if (extras) extras.open = preserveControls && Boolean(section.querySelector<HTMLDetailsElement>('[data-compose-extras]')?.open);
+    for (const description of preserveControls ? section.querySelectorAll<HTMLDetailsElement>('[data-shop-description][open]') : []) {
       const twin = next.querySelector<HTMLDetailsElement>(`[data-shop-description=${quoted(description.dataset.shopDescription || '')}]`);
       if (twin) twin.open = true;
     }
     const categoryManager = next.querySelector<HTMLDetailsElement>('[data-management-categories]');
-    if (categoryManager) categoryManager.open = Boolean(section.querySelector<HTMLDetailsElement>('[data-management-categories]')?.open);
-    const previousItemForm = section.querySelector<Form>('form[data-community-form="item"]');
+    if (categoryManager) categoryManager.open = preserveControls && Boolean(section.querySelector<HTMLDetailsElement>('[data-management-categories]')?.open);
+    const previousItemForm = preserveControls ? section.querySelector<Form>('form[data-community-form="item"]') : null;
     const nextItemForm = next.querySelector<Form>('form[data-community-form="item"]');
     const preserveItemOperation = previousItemForm?.dataset.uploading === 'true' && nextItemForm && previousItemForm.dataset.id === nextItemForm.dataset.id;
     if (previousItemForm && nextItemForm && previousItemForm.dataset.id === nextItemForm.dataset.id) {
@@ -933,7 +973,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     }
     const active = document.activeElement as HTMLInputElement | null;
     const caret = active && 'selectionStart' in active && active.selectionStart !== null ? [active.selectionStart, active.selectionEnd ?? active.selectionStart] as const : null;
-    const focusSource = active?.closest('.community-select-menu') ? section.querySelector<HTMLElement>('.community-select-trigger[data-state="open"]')
+    const focusSource = !preserveControls ? null : active?.closest('.community-select-menu') ? section.querySelector<HTMLElement>('.community-select-trigger[data-state="open"]')
       : active && section.contains(active) ? active : null;
     const data = focusSource?.dataset;
     const focusSelector = focusSource
@@ -949,9 +989,9 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       const previous = images.get(imageKey(image))?.shift();
       if (previous) { previous.alt = image.alt; image.replaceWith(previous); }
     }
-    const fieldScroll = new Map([...section.querySelectorAll<HTMLElement>('textarea[id]')].map(field => [field.id, field.scrollTop]));
+    const fieldScroll = new Map((preserveControls ? [...section.querySelectorAll<HTMLElement>('textarea[id]')] : []).map(field => [field.id, field.scrollTop]));
     for (const editor of editors.values()) {
-      if (!sameAccount) continue;
+      if (!preserveControls) continue;
       if (!section.contains(editor.root)) continue;
       const nextEditor = next.querySelector<HTMLTextAreaElement>(`[id=${quoted(editor.field.id)}]`)?.closest<HTMLElement>('[data-inline-editor]');
       if (!nextEditor || nextEditor.closest('form')?.dataset.id !== editor.field.form?.dataset.id) continue;
@@ -1806,6 +1846,10 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   }
 
   function onClick(event: Event) {
+    if (routeHandoffPending()) {
+      if ((event.target as Element).closest?.('[data-community-pending-route], [data-action^="community-"]')) event.preventDefault();
+      return;
+    }
     const target = (event.target as Element).closest<HTMLButtonElement>('[data-action^="community-"]');
     if (postMenu && !(event.target as Element).closest?.('.community-more-menu')) setPostMenu(false);
     if (!target || !mounted) return;
@@ -2074,6 +2118,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   }
   // Ctrl+Enter (⌘+Enter on Mac) sends a reply or publishes a post; Escape closes the post menu.
   function onKeydown(event: KeyboardEvent) {
+    if (routeHandoffPending()) { if ((event.target as Element).closest?.('[data-community-pending-route]')) event.preventDefault(); return; }
     if (event.defaultPrevented) return;
     levelExplorer.keydown(event);
     if (event.defaultPrevented) return;
@@ -2136,6 +2181,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const form = (event.target as Element).closest<Form>('form[data-community-form]');
     if (!form || !mounted) return;
     event.preventDefault();
+    if (routeHandoffPending()) return;
     if (switchingBrowseMode) { status(form, tr('正在切换浏览身份，请稍候。', 'Switching browsing perspective; please wait.')); return; }
     if (communityReaderReadOnly(readyData(me)) && form.dataset.communityForm !== 'search') { status(form, tr('请先返回管理身份。', 'Restore management first.')); return; }
     if (form.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled) return;
@@ -2151,6 +2197,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     void handlers[form.dataset.communityForm || '']?.(form);
   }
   function onInput(event: Event) {
+    if (routeHandoffPending()) return;
     const field = event.target;
     if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) return;
     if (!field.closest?.('form[data-community-form]')) return;
@@ -2268,6 +2315,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     finally { if (form.isConnected) setEquipmentBusy(form, false); }
   }
   function equipmentForm() {
+    if (routeHandoffPending()) return null;
     // Only an open author product editor accepts desktop files. Other page
     // editors retain their own drag handlers, including inline reply images.
     return mounted?.main.querySelector<Form>('form[data-community-form="item"]') || null;
@@ -2332,6 +2380,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     root.querySelectorAll<HTMLButtonElement>('[data-action="community-management-board"]').forEach(button => { button.disabled = reviewBusy; });
   }
   function onChange(event: Event) {
+    if (routeHandoffPending()) return;
     const field = event.target as HTMLInputElement;
     if (field instanceof HTMLInputElement && bannerEditor.change(field)) return;
     if (field.matches?.('[data-community-review-select], [data-community-review-all]')) {
@@ -2370,9 +2419,11 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   }
   // A click outside the page closes the post menu without rebuilding the thread.
   function onDocumentClick(event: Event) {
+    if (routeHandoffPending()) return;
     if (postMenu && mounted && !event.composedPath().includes(mounted.main)) setPostMenu(false);
   }
   const onDraftNavigation = (event: Event) => {
+    if (routeHandoffPending()) return;
     if (!hasUnsavedDraft()) return;
     const link = (event.target as Element).closest?.<HTMLAnchorElement>('a[href^="#/"]');
     if (!link || link.getAttribute('href') === location.hash || link.target === '_blank' || link.hasAttribute('download')) return;
@@ -2389,6 +2440,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     event.returnValue = tr('还有未发布的内容。', 'You have an unsent draft.');
   };
   const onHistoryNavigation = () => {
+    if (pendingRoute) return;
     if (restoringHistory) {
       if (location.hash === lastHash) restoringHistory = false;
       return;
@@ -2426,6 +2478,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     levelExplorer.reset();
     badgeExplorer.reset();
     frameIdentity++; permissionRevision++; meRequest++; viewerVerified = false; viewerHash = ''; viewerFailure = null; paintedPage = null;
+    confirmedPage = null; pendingRoute = null; coreRoute = null; renderedHash = '';
     frameHighlightsPending.clear(); frameHighlights.clear(); listRequests.clear();
     summary = null; me = null; profile = null; profileWrite = null; moderationContacts = null; checkin = null; bookmarks = null; shop = null; shopMine = null; rank = null; headerKey = '';
     stardusts.clear(); memberPages.clear(); memberProfileEpochs.clear(); inboxes.clear(); manages.clear(); manageRequests.clear(); lists.clear(); threads.clear(); lastHash = '';
@@ -2524,7 +2577,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         legacyProfileOpened = false;
         stewardCandidate = null; stewardLookupUid = ''; stewardLookupRequest++;
       }
-      syncForms(main);
+      if (!routeHandoffPending()) syncForms(main);
       paint();
       // Re-render for language or identity changes reuses the data; a new route refreshes it.
       if (location.hash !== lastHash) {
@@ -2575,6 +2628,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         // Leaving for another page: coming back to this one refreshes it.
         if (location.hash !== lastHash) {
           const previous = communityRoute(lastHash), current = route();
+          if (['unknown', 'landing', 'manage'].includes(current.view)) { confirmedPage = null; pendingRoute = null; coreRoute = null; }
           if (previous.view !== 'manage' || current.view !== 'manage' || !['queue', 'reports'].includes(previous.tab) || !['queue', 'reports'].includes(current.tab)) managementBoard = '';
           stewardCandidate = null; stewardLookupUid = ''; stewardLookupRequest++; stewardEditingUid = null; stewardScopeDraft = null;
           reviewSelection.clear();
