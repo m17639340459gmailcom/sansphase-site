@@ -77,7 +77,7 @@ async function setup(t, { store: withStore = true, simplePosting = false, useDef
     avatarFile: async (uid) => uid === "u1" ? resolve(directory, "uploads", `reader-avatar-${avatarId}.webp`) : null,
     audit: async (action, details) => { audits.push({ action, ...details }); },
   });
-  const server = createPreviewServer({ contentService: { snapshot: async () => ({ data: { notes: [] } }) }, communityService });
+  const server = createPreviewServer({ contentService: { snapshot: async () => ({ data: { notes: [] } }) }, communityService, communityEnabled: true });
   await new Promise((done) => server.listen(port, "127.0.0.1", done));
   t.after(async () => {
     await new Promise((done) => server.close(done));

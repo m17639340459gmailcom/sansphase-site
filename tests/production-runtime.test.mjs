@@ -10,6 +10,7 @@ import { setTimeout as pause } from 'node:timers/promises';
 import { getPayload } from 'payload';
 import { makePayloadConfig } from '../server/payload/config.ts';
 import { migrateReaderAccounts } from '../server/payload/reader-migration.ts';
+import { migrateCommunity } from '../server/payload/community-migration.ts';
 
 test('production entry starts with an isolated restored database and exposes only public routes',{timeout:60000},async()=>{
   const directory=await mkdtemp(resolve(tmpdir(),'sansphase-production-'));
@@ -24,6 +25,7 @@ test('production entry starts with an isolated restored database and exposes onl
     await payload.destroy();payload.db.client.close();payload=null;
     await writeFile(resolve(dataDirectory,'migration-complete.json'),JSON.stringify({provider:'payload'}));
     await migrateReaderAccounts(dataDirectory);
+    await migrateCommunity(dataDirectory);
     const config=resolve(directory,'private.json');await writeFile(config,JSON.stringify(settings),{mode:0o600});
     const socket=createServer();await new Promise(resolve=>socket.listen(0,'127.0.0.1',resolve));
     const port=socket.address().port;await new Promise(resolve=>socket.close(resolve));
@@ -41,7 +43,13 @@ test('production entry starts with an isolated restored database and exposes onl
     const manifest=JSON.parse(await readFile('dist/build-info.json','utf8'));
     assert.equal(health?.release,manifest.release);
     const publicResponse=await fetch(base+'/api/content');
-    assert.equal(publicResponse.status,200);assert.equal((await publicResponse.json()).profile.name,'Production test owner');
+    assert.equal(publicResponse.status,200);
+    const publicData=await publicResponse.json();
+    assert.equal(publicData.profile.name,'Production test owner');
+    assert.equal(publicData.communityEnabled,false,'a migrated community remains closed unless explicitly enabled');
+    const community=await fetch(base+'/api/community/summary');
+    assert.equal(community.status,503);
+    assert.match((await community.json()).error,/尚未开放/);
     for(const path of ['/.local/payload-env.json','/server.mjs','/package.json','/api/debug']) {
       const response=await fetch(base+path);assert.equal(response.status,404,path);await response.body?.cancel();
     }

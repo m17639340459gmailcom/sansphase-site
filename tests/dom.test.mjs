@@ -21,7 +21,7 @@ import {
   mountUniverse as mountActualUniverse,
 } from "../dist/universe.mjs";
 
-test("local prototype DOM flows", async (t) => {
+for (const communityEnabled of [null, false, true]) test(communityEnabled ? "local prototype DOM flows" : communityEnabled === null ? "static pages without bootstrap keep the community closed" : "closed community routes keep the main site available", async (t) => {
   const html = await readFile(
     new URL("../dist/index.html", import.meta.url),
     "utf8",
@@ -31,7 +31,7 @@ test("local prototype DOM flows", async (t) => {
   virtualConsole.on("jsdomError", (error) => runtimeErrors.push(error.message));
   virtualConsole.on("error", (...messages) => runtimeErrors.push(messages.map(String).join(" ")));
   const dom = new JSDOM(html, {
-    url: "http://127.0.0.1:4173/?view=universe#/notes",
+    url: `http://127.0.0.1:4173/?view=universe#/${communityEnabled ? 'notes' : 'community/home'}`,
     runScripts: "outside-only",
     pretendToBeVisual: true,
     virtualConsole,
@@ -39,21 +39,22 @@ test("local prototype DOM flows", async (t) => {
   const { window: w } = dom;
   const d = w.document;
   const published=d.createElement('script');published.id='site-content';published.type='application/json';
-  published.textContent=JSON.stringify({notes:data.notes,resources:data.resources.map(item=>({...item,downloadUrl:'./assets/'+item.file})),works:[],software:[],announcements:[1,2,3].map(i=>({title:"测试公告 "+i,summary:"公告内容"})),profile:null,author:null});
-  d.head.append(published);
+  published.textContent=JSON.stringify({communityEnabled,...(!communityEnabled ? {reader:null} : {}),notes:data.notes,resources:data.resources.map(item=>({...item,downloadUrl:'./assets/'+item.file})),works:[],software:[],announcements:[1,2,3].map(i=>({title:"测试公告 "+i,summary:"公告内容"})),profile:null,author:null});
+  if (communityEnabled !== null) d.head.append(published);
   w.structuredClone = structuredClone;
   // jsdom provides randomUUID but not SubtleCrypto. Use the real browser
   // primitive from Node so protected writes hash their payload asynchronously.
   Object.defineProperty(w.crypto, 'subtle', { value: webcrypto.subtle });
   // An in-memory community API with the server's response shapes. Two topics
   // per page, so "load more" is exercised.
-  const community = { topics: [], replies: [], next: 1, requests: [], checkedIn: false, balance: 30, frame: null, redeemed: [],
+  const community = { topics: [], replies: [], next: 1, requests: [], apiRequests: [], checkedIn: false, balance: 30, frame: null, redeemed: [],
     notices: [{ id: "n1", type: "reply", read: false }, { id: "n2", type: "follow", read: false }] };
   const person = (name) => ({ name, role: "reader", uid: name === "林间" ? "u1" : "u2", avatar: null, vip: false, level: 1, steward: false, frame: name === "林间" ? community.frame : null, color: null });
   w.fetch = async (url, init = {}) => {
     const { pathname, searchParams } = new URL(url, "http://127.0.0.1:4173");
     const path = pathname.replace("/api/community/", "");
     const method = init.method || "GET";
+    if (pathname.startsWith('/api/community/')) community.apiRequests.push(`${method} ${path}`);
     community.requests.push(`${method} ${path}${[...searchParams].length ? `?${searchParams}` : ""}`);
     const respond = (status, value) => ({ ok: status < 400, status, json: async () => value });
     if (method === "POST" && init.headers?.["X-Reader-Request"] !== "1") return respond(403, { error: "请求来源验证失败" });
@@ -371,6 +372,28 @@ test("local prototype DOM flows", async (t) => {
     await tick();
   };
   try {
+    if (!communityEnabled) {
+      await t.test('landing, deep links and legacy posts are closed before authentication or community mounting', async () => {
+        assert.ok(d.querySelector('[data-content-state="not-open"]'), 'the cold initial render is already closed');
+        assert.equal(d.querySelector('.reader-gate-action,.community-sky,[data-community-frame]'), null, 'no authentication or community layer appears on the first render');
+        for (const route of ['community/home', 'community', 'community/all', 'community/new/qa', 'community/manage', 'community/checkin', 'community/stardust/levels', 'community/u/u1', 'post/t1']) {
+          await navigate(route);
+          assert.ok(d.querySelector('[data-content-state="not-open"]'), route);
+          assert.match(q('main').textContent, /社区尚未开放/);
+          assert.equal(q('#site-header').classList.contains('community-header'), false);
+          assert.equal(d.body.classList.contains('community-open'), false);
+          assert.equal(d.querySelector('[data-community-frame],.community-sky,.community-enter,.reader-gate-action,form[data-community-form]'), null, route);
+          assert.ok(q('main a[href="#/notes"]'));
+          assert.deepEqual(community.apiRequests, [], 'closed pages make no community requests');
+        }
+        await navigate('notes');
+        assert.ok(d.querySelector('#content-search'), 'the blog remains available');
+        await navigate('account');
+        assert.ok(d.querySelector('[data-reader-form="login"]'), 'the real reader sign-in remains available');
+        assert.deepEqual(community.apiRequests, []);
+      });
+      return;
+    }
     await t.test("reload restores view state before restoring scroll, in the initial render", async () => {
       assert.equal(q("#blog-calendar-body").hidden, false);
       assert.equal(q("#blog-weather-details").hidden, false);
@@ -1244,7 +1267,7 @@ test("local prototype DOM flows", async (t) => {
     await t.test('published catalogs support stable view toggle, pagination, search and software details', async () => {
       await navigate('works');
       const catalogItems = Array.from({length:15},(_,i)=>({id:`tool-${i}`,title:`验证软件 ${i}`,category:'桌面工具',summary:'软件用途',tags:['Windows'],date:'2026-09-15',coverSrc:'./assets/materials/blog-space.png',bodyHTML:'<h2>安装与使用</h2><p>详情内容</p>',file:'tool.zip',downloadUrl:'/api/media/test?download=1'}));
-      w.dispatchEvent(new w.CustomEvent('author:content',{detail:{notes:data.notes,works:catalogItems,resources:[],software:[catalogItems[0]],profile:null,announcements:[]}}));
+      w.dispatchEvent(new w.CustomEvent('author:content',{detail:{communityEnabled:true,notes:data.notes,works:catalogItems,resources:[],software:[catalogItems[0]],profile:null,announcements:[]}}));
       assert.equal(d.querySelectorAll('.catalog-card').length,12);
       assert.equal(d.querySelector('[data-action="catalog-view"]'),null);
       assert.equal(q('.catalog-grid').classList.contains('is-list'),false);

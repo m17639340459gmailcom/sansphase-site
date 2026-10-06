@@ -44,11 +44,13 @@ export function createPreviewServer({
   readerService,
   readerAdminService,
   communityService,
+  communityEnabled = false,
   healthCheck = async () => {},
   release = 'development',
   requestLogger,
 } = {}) {
   const rootPath = resolve(root);
+  const communityOpen = communityEnabled === true && Boolean(communityService);
   const rootPrefix = rootPath.endsWith(sep) ? rootPath : rootPath + sep;
   return http.createServer({requestTimeout:uploadTimeoutMs}, async (req, res) => {
     let fileHandle;
@@ -80,7 +82,12 @@ export function createPreviewServer({
         await readerService.handle(req, res);
         return;
       }
-      if (req.url.startsWith('/api/community/') && communityService) {
+      if (req.url.startsWith('/api/community/')) {
+        if (!communityOpen) {
+          res.writeHead(503, {'Content-Type':'application/json; charset=utf-8','Cache-Control':'private, no-store'});
+          res.end(req.method === 'HEAD' ? undefined : JSON.stringify({error:'社区尚未开放。'}));
+          return;
+        }
         await communityService.handle(req, res);
         return;
       }
@@ -225,6 +232,7 @@ export function createPreviewServer({
             ? view ? publicPage(visible,requestURL.searchParams) : {...visible}
             : publicBootstrap(visible);
           if (authorService) data.author = await authorService.identity(req);
+          data.communityEnabled = communityOpen;
           if (readerService) {
             data.reader = await readerService.identity(req);
             data.readerRegistrationEnabled = readerService.registrationEnabled;

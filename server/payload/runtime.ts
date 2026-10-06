@@ -15,7 +15,7 @@ import { createReaderRetention } from '../reader-retention.ts';
 import { createReaderWorkflow } from '../reader-workflow.ts';
 import { createMediaRetention } from './media-retention.ts';
 import { createCommunityRuntime } from '../community-runtime.ts';
-type RuntimeSettings = {directory: string; secret: string; siteOrigin: string; sourceURL: string; authorId: string; smtp?: unknown; push?: boolean};
+type RuntimeSettings = {directory: string; secret: string; siteOrigin: string; sourceURL: string; authorId: string; smtp?: unknown; push?: boolean; communityEnabled?: boolean};
 
 export async function createPayloadRuntime(
   configPath = process.env.PAYLOAD_CONFIG_FILE || ".local/payload-env.json",
@@ -60,6 +60,8 @@ export async function createPayloadRuntime(
     authorService,
     readerService,
     communityService: community.service,
+    // Access is opt-in; the store still serves the existing account cleanup path.
+    communityEnabled: settings.communityEnabled === true && Boolean(community.store),
     readerAdminService:createReaderAdminService({payload,authorService,siteOrigin:settings.siteOrigin,directory:settings.directory,authorId:settings.authorId,loginLedger,uidStore,workflow,mediaRetention,purgeCommunity}),
     readerRetention,
     healthCheck:async()=>{await payload.find({collection:'site_profile',limit:1,depth:0});},

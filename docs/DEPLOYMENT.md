@@ -21,7 +21,8 @@
 2. 安装官方 Node.js 24 和 package.json 指定的 pnpm，安装 Nginx、Certbot。核对 systemd 文件中 /usr/bin/node 与实际路径一致。
 3. 在新代码目录执行 pnpm install --frozen-lockfile、pnpm build、pnpm test。4 GB 服务器尽量不同时运行其他构建任务；测试与生产使用隔离数据。
 4. 在本地运行 cms:backup，把完整私有备份安全传到服务器。使用 cms:restore 写入新的 /var/lib/sansphase/payload 和新的 /etc/sansphase/payload.json；恢复会拒绝覆盖已有目录和配置。保留原 secret 与 authorId，不重新生成或初始化数据库。运行配置使用生产绝对路径，日常启动 push:false。
-   社区首次上线或本次升级，先校验完整备份及恢复副本，再在确认的私有数据目录执行 `node scripts/migrate-community.mjs <private-payload-directory>`。它会先创建数据库快照，再事务补齐横幅、请求去重与持久限速等表；旧帖子、账号与权益保留。未完成迁移时社区保持关闭，不靠生产自动推表补齐。详细步骤见 [源码与服务器维护](MAINTENANCE.md) 和 [社区上线前验收](COMMUNITY-PRELAUNCH.md)。
+   社区默认关闭：私有 Payload 配置中的 `communityEnabled` 缺失或不是布尔值 `true` 时，全部社区页面显示待开放，社区 API 返回 503；主站博客、作品、资料、账号和作者台照常运行。此次只上线主站时保持该字段缺失或 `false`，不执行社区迁移、不删除已有社区表或上传文件。社区数据存储继续供原有账号清理与删除流程使用，关闭访问不等于清空数据。
+   单独授权社区上线后，先校验完整备份及恢复副本，再在确认的私有数据目录执行 `node scripts/migrate-community.mjs <private-payload-directory>`。它会先创建数据库快照，再事务补齐横幅、请求去重与持久限速等表；旧帖子、账号与权益保留。迁移及验收完成后才将 `communityEnabled` 设置为布尔值 `true` 并重启；表结构未准备好时仍关闭，不靠生产自动推表补齐。日后关停访问改回 `false` 并重启，数据库和上传文件保留。本地 `preview:community` 使用临时数据并显式开启，与生产开关分离。详细步骤见 [源码与服务器维护](MAINTENANCE.md) 和 [社区上线前验收](COMMUNITY-PRELAUNCH.md)。
 5. 安装 deploy/site.env.example 和 deploy/sansphase.service。systemctl daemon-reload 后启用 sansphase；查看 journalctl -u sansphase，并执行 pnpm healthcheck。读取健康检查中的版本，与 dist/build-info.json 对比。
 6. 证书尚不存在时先安装 nginx-bootstrap.conf，准备 /var/www/letsencrypt，执行 nginx -t。使用 Certbot webroot 方式为 www.sansphase.com 申请证书，再用 nginx.conf 替换临时配置。两个配置不要同时启用。再次 nginx -t，通过后 reload。确认 Certbot 自动续期任务正常。不擅自添加未确认的根域名跳转或 DNS 记录。
 7. 初次签发证书后，将 deploy/certbot-renew-hook.sh 安装至 /etc/letsencrypt/renewal-hooks/deploy/sansphase-nginx，所有者 root、权限 0755；核对其中 Nginx 与 systemctl 绝对路径。此钩子只处理 www.sansphase.com，先 nginx -t，通过后 reload。运行 certbot renew --cert-name www.sansphase.com --dry-run --run-deploy-hooks 验证续期流程与钩子，并确认续期 timer 存在且启用。

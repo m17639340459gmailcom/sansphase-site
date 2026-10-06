@@ -38,7 +38,7 @@ function setup(t, hash = '#/community/manage/content') {
   w.scrollTo = options => { scrolls.push(options); top = options.top; };
   const context = dom.getInternalVMContext();
   Object.assign(context, {
-    parseRoute, communityRoute, inCommunityArea, main,
+    parseRoute, communityRoute, inCommunityArea, communityEnabled: () => true, main,
     homeRoot: w.document.getElementById('home-root'),
     communityFrame: { enabled: () => communityRoute(w.location.hash).view !== 'manage', center: () => main },
     routeTransitions: { run: (_from, _to, update) => update() },
