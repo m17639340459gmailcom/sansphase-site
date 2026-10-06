@@ -1,15 +1,20 @@
 import {communityGrowthLevel} from './community-growth.mjs';
 
-// Approved C artwork. URLs are fixed site assets, never member-supplied values.
+// Approved level art for all three ladders. URLs are fixed site assets, never member-supplied values.
+// Growth: constellation medallions.
+// Colour, rank track and motion live inside each self-contained SVG (scripts/growth-constellation.ts).
+// Permission levels use the approved moon-phase badges. One file serves both themes.
+export function communityTrustArtHTML(level: number): string {
+  const rank = Math.max(0, Math.min(3, Math.trunc(level) || 0));
+  return `<span class="community-trust-art" data-trust-art="${rank}" data-level-icon="trust-l${rank}" aria-hidden="true"><img class="community-trust-art-image" src="/assets/community/levels/trust-l${rank}.svg" width="512" height="512" alt="" decoding="async" draggable="false"></span>`;
+}
+// VIP ranks use the approved hexagonal badges. One file serves both themes.
+export function communityVipArtHTML(level: number): string {
+  const rank = Math.max(1, Math.min(8, Math.trunc(level) || 1));
+  return `<span class="community-vip-art" data-vip-art="${rank}" data-level-icon="vip-${rank}" aria-hidden="true"><img class="community-vip-art-image" src="/assets/community/levels/vip-${rank}.svg" width="512" height="512" alt="" decoding="async" draggable="false"></span>`;
+}
 export function communityGrowthArtHTML(level = 1): string {
   const grade = communityGrowthLevel(level).level;
-  const slug = grade === 1 ? 'feather' : `c-g${grade}-v3`;
-  const file = grade === 1 ? 'feather.svg' : `${slug}.webp`;
-  const url = `/assets/community/levels/${file}`;
-  const moving = grade >= 7;
-  const displayURL = moving ? `/assets/community/levels/c-g${grade}-motion-v2.svg` : url;
-  const image = grade === 1
-    ? '<span class="community-growth-art-mask" aria-hidden="true"></span>'
-    : `<img class="community-growth-art-image" src="${displayURL}" width="512" height="512" alt="" decoding="async" draggable="false">`;
-  return `<span class="community-growth-art community-level-mark" data-growth-art="${grade}" data-growth-motion="${moving ? grade : 0}"${moving ? ` data-growth-rig="${grade < 9 ? 'phoenix' : 'dragon'}"` : ''} data-tier="${grade}" data-level-icon="${slug}" style="--growth-art:url('${url}')" aria-hidden="true">${image}</span>`;
+  const slug = `constellation-g${grade}`;
+  return `<span class="community-growth-art community-level-mark" data-growth-art="${grade}" data-tier="${grade}" data-level-icon="${slug}" aria-hidden="true"><img class="community-growth-art-image" src="/assets/community/levels/${slug}.svg" width="512" height="512" alt="" decoding="async" draggable="false"></span>`;
 }

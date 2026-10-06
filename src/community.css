@@ -347,7 +347,6 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-steward-icon { font-size: 12px; line-height: 1; }
 .community-lv { padding: 0 6px; border: 1px solid currentColor; border-radius: 5px; color: var(--lv); font-size: 12px; line-height: 17px; letter-spacing: 0.04em; white-space: nowrap; }
 .is-lv0 { --lv: var(--cm-lv0); } .is-lv1 { --lv: var(--cm-lv1); } .is-lv2 { --lv: var(--cm-lv2); } .is-lv3 { --lv: var(--cm-lv3); } .is-lv4 { --lv: var(--cm-lv4); }
-.community-vip { padding: 0 5px; border: 1px solid rgb(201 182 242 / 45%); border-radius: 5px; color: var(--cm-vip); font: 600 10.5px/16px var(--font-mono); letter-spacing: 0.1em; }
 .community-dot { width: 3px; height: 3px; flex-shrink: 0; border-radius: 50%; background: var(--cm-faint); }
 /* 帖子标记 */
 .community-flag { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; border-radius: 6px; background: rgb(238 233 224 / 8%); color: var(--muted); font: 500 12px/20px var(--font); white-space: nowrap; vertical-align: 2px; }
@@ -1015,13 +1014,13 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-level-body { display: grid; grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr); gap: 28px; min-height: 330px; align-items: start; }
 .community-level-visual { display: grid; align-content: center; gap: 14px; min-width: 0; min-height: 320px; padding-right: 22px; border-right: 1px solid var(--line); }
 .community-level-stage { display: grid; grid-template-columns: minmax(36px, 1fr) minmax(110px, 170px) minmax(36px, 1fr); align-items: center; gap: 4px; min-height: 220px; }
-.community-level-mark { --level-accent: #bdcddd; --level-high: #f6f9ff; --level-low: color-mix(in srgb, var(--level-accent) 55%, #2b415d); --level-ink: var(--level-accent); --level-fill: linear-gradient(145deg, var(--level-high) 6%, var(--level-accent) 28%, var(--level-low) 47%, var(--level-high) 51%, var(--level-accent) 75%, var(--level-low)); }
+.community-level-mark { --level-accent: #bdcddd; --level-ink: var(--level-accent); }
 .community-level-mark[data-tier="1"] { --level-accent: #aebdd0; }
 .community-level-mark[data-tier="2"] { --level-accent: #78d4c6; }
 .community-level-mark[data-tier="3"] { --level-accent: #79caff; }
 .community-level-mark[data-tier="4"] { --level-accent: #91adff; }
 .community-level-mark[data-tier="5"] { --level-accent: #bba1ff; }
-.community-level-mark[data-tier="6"] { --level-accent: #e6c990; --level-high: #fff4dc; }
+.community-level-mark[data-tier="6"] { --level-accent: #e6c990; }
 .community-level-mark[data-tier="7"] { --level-accent: #97cdf3; }
 .community-level-mark[data-tier="8"] { --level-accent: #c5befa; }
 .community-level-mark[data-tier="9"] { --level-accent: #94cfdb; }
@@ -1030,21 +1029,31 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-level-preview:focus-visible { outline: 1px solid var(--focus-edge); outline-offset: 5px; }
 .community-level-preview h2 { margin: 14px 0 0; color: var(--level-ink); font: 600 25px/1.3 var(--font-serif); letter-spacing: 0.12em; }
 .community-level-emblem { display: grid; place-items: center; width: 100%; aspect-ratio: 1; }
-.community-level-icon { display: block; width: 100%; aspect-ratio: 1; background: var(--level-fill); mask: var(--level-icon) center / contain no-repeat; -webkit-mask: var(--level-icon) center / contain no-repeat; }
-.community-level-emblem .community-level-icon { width: 88%; filter: drop-shadow(0 3px 3px rgb(0 0 0 / 20%)); }
-.community-growth-art { position: relative; display: inline-block; flex: 0 0 auto; width: 100%; aspect-ratio: 1; isolation: isolate; line-height: 0; vertical-align: middle; background: none; border: 0; transform-origin: 50% 55%; }
-.community-growth-art-image { display: block; width: 100%; height: 100%; object-fit: contain; }
-.community-growth-art-mask { display: block; width: 100%; height: 100%; background: var(--level-fill); mask: var(--growth-art) center / contain no-repeat; -webkit-mask: var(--growth-art) center / contain no-repeat; }
-.community-level-emblem .community-growth-art { width: 88%; }
+.community-growth-art, .community-trust-art, .community-vip-art { position: relative; display: inline-block; flex: 0 0 auto; width: 100%; aspect-ratio: 1; isolation: isolate; line-height: 0; vertical-align: middle; background: none; border: 0; transform-origin: 50% 55%; }
+.community-growth-art-image, .community-trust-art-image, .community-vip-art-image { display: block; width: 100%; height: 100%; object-fit: contain; }
+.community-level-emblem .community-growth-art, .community-level-emblem .community-trust-art { width: 88%; }
 .community-growth-chip .community-growth-art { width: 20px; height: 20px; }
-/* High-grade SVG assets own anatomy, iridescence and reduced-motion fallback.
-   Keeping motion inside the asset makes the colour mask follow wings and whiskers. */
+/* 昵称旁的三枚等级图标。三套图形占各自画布的比例不同：成长星盘的盘面只有画布的 50%～61%，权限菱形
+   对角 96%、VIP 六角 76%。框按比例取不同大小，让三枚看起来一样大；负外边距收回各自的留白。 */
+.community-level-marks { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; }
+.community-level-badge { display: inline-flex; flex: 0 0 auto; width: 28px; height: 28px; }
+.community-level-badge.is-growth { width: 40px; height: 40px; margin: -6px; }
+.community-level-badge.is-trust { width: 30px; height: 30px; margin-inline: -2px; }
+.community-level-badge.is-vip { width: 30px; height: 30px; margin-inline: -3px; }
+/* 个人主页：图标在昵称上方单独成行，按同样的比例放大。 */
+.community-level-marks.is-large { gap: 8px; justify-self: start; margin-block: 2px 4px; }
+.community-level-marks.is-large .community-level-badge.is-growth { width: 64px; height: 64px; margin: -10px; }
+.community-level-marks.is-large .community-level-badge.is-trust { width: 48px; height: 48px; margin-inline: -3px; }
+.community-level-marks.is-large .community-level-badge.is-vip { width: 48px; height: 48px; margin-inline: -5px; }
+/* Growth medallions and permission icons own their colour, motion and reduced-motion rule inside each SVG asset. */
 .community-level-neighbour { display: grid; justify-items: center; gap: 10px; min-width: 0; padding: 8px 2px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--muted); cursor: pointer; font: 12px/1.5 var(--font); }
-.community-level-neighbour .community-level-icon { width: min(100%, 46px); }
-.community-level-neighbour .community-growth-art { width: min(100%, 46px); }
+.community-level-neighbour .community-growth-art, .community-level-neighbour .community-trust-art { width: min(100%, 46px); }
+/* The VIP hexagon fills 82% of its canvas so the high ranks have room outside the frame; its box is larger to match. */
+.community-level-emblem .community-vip-art { width: 100%; }
+.community-level-neighbour .community-vip-art { width: min(100%, 56px); }
 .community-level-neighbour:hover { border-color: var(--line-strong); background: var(--cm-signal-soft); color: var(--text); }
 .community-level-neighbour:focus-visible { border-color: var(--focus-edge); outline: 1px solid var(--focus-edge); outline-offset: 2px; }
-body.community-open[data-community-theme="light"] .community-level-mark { --level-low: color-mix(in srgb, var(--level-accent) 38%, #30445e); --level-ink: color-mix(in srgb, var(--level-accent) 32%, #273a54); }
+body.community-open[data-community-theme="light"] .community-level-mark { --level-ink: color-mix(in srgb, var(--level-accent) 32%, #273a54); }
 
 .community-level-controls { display: flex; align-items: center; width: fit-content; gap: 4px; margin-inline: auto; padding: 4px; border: 1px solid var(--cm-signal-edge); border-radius: 10px; background: linear-gradient(160deg, var(--cm-signal-soft), transparent 65%), var(--cm-panel); box-shadow: inset 0 1px 0 var(--cm-signal-soft); }
 .community-level-nav-button { display: grid; place-items: center; min-width: 52px; min-height: 44px; padding: 8px; border: 1px solid transparent; border-radius: 6px; background: var(--cm-signal-soft); color: var(--cm-signal-2); cursor: pointer; }
@@ -1061,12 +1070,6 @@ body.community-open[data-community-theme="light"] .community-level-mark { --leve
 .community-level-detail h4 { margin: 0; color: var(--text); font-size: 13px; font-weight: 600; line-height: 1.5; }
 .community-level-perks { display: grid; gap: 7px; margin: 0; padding: 0 0 0 16px; color: var(--muted); font-size: 13px; line-height: 1.65; list-style: disc; }
 .community-level-note { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
-.community-vip-emblem { display: flex; align-items: baseline; justify-content: center; gap: 5px; color: var(--signal); font-family: var(--font-mono); }
-.community-vip-emblem > span { font-size: 23px; font-weight: 500; letter-spacing: -0.04em; }
-.community-vip-emblem > strong { font-size: 82px; font-weight: 500; line-height: 1; }
-.community-level-neighbour .community-vip-emblem { gap: 2px; color: var(--muted); }
-.community-level-neighbour .community-vip-emblem > span { font-size: 10px; }
-.community-level-neighbour .community-vip-emblem > strong { font-size: 28px; }
 .community-vip-benefit { display: grid; gap: 10px; padding: 16px 0 20px; border-bottom: 1px solid var(--line); }
 .community-vip-benefit > span { color: var(--muted); font-size: 13px; line-height: 1.5; }
 .community-vip-benefit > strong { color: var(--signal); font: 500 52px/1.05 var(--font-mono); }
@@ -1085,8 +1088,6 @@ body.community-open[data-community-theme="light"] .community-level-mark { --leve
   .community-level-detail { min-height: 290px; }
   .community-level-head > .community-seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; }
   .community-level-head > .community-seg button { justify-content: center; min-width: 0; min-height: 40px; white-space: normal; padding-inline: 8px; text-align: center; text-wrap: balance; }
-  .community-vip-emblem > strong { font-size: 64px; }
-  .community-vip-emblem > span { font-size: 18px; }
 }
 
 /* ================= 兑换所 ================= */

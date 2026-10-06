@@ -1,5 +1,5 @@
 import { communityGrowthLevel } from './community-growth.mjs';
-import { communityGrowthArtHTML } from './community-growth-art.mjs';
+import { communityGrowthArtHTML, communityTrustArtHTML, communityVipArtHTML } from './community-growth-art.mjs';
 import { communityLevels, communityLevelPerks } from './community-rules.mjs';
 import type { Common } from './community.ts';
 import type { CommunityStardust } from './community-pages.ts';
@@ -30,13 +30,10 @@ const selectedLevel = (data: CommunityStardust, selection: CommunityLevelSelecti
   selection[selection.mode] ?? (selection.mode === 'growth' ? data.owner ? 1 : data.growth?.level ?? 1 : selection.mode === 'vip' ? 1 : data.owner ? 0 : data.level), selection.mode,
 );
 
-// Trust retains its existing symbols; growth uses the approved C sequence.
-const trustIcons = ['flower-star', 'polar-star', 'beveled-star', 'justice-star'] as const;
 const levelIconHTML = (level: number, mode: Mode) => {
   if (mode === 'growth') return communityGrowthArtHTML(level);
-  if (mode === 'vip') return `<span class="community-vip-emblem" aria-hidden="true"><span>VIP</span><strong>${level}</strong></span>`;
-  const slug = trustIcons[level];
-  return `<span class="community-level-icon" data-level-icon="${slug}" style="--level-icon:url('/assets/community/levels/${slug}.svg')" aria-hidden="true"></span>`;
+  if (mode === 'vip') return communityVipArtHTML(level);
+  return communityTrustArtHTML(level);
 };
 
 function vipProgressHTML(data: CommunityStardust, { esc, t }: Common) {

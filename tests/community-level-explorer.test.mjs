@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import sharp from 'sharp';
 import { createCommunityUI } from '../src/community-ui.ts';
 import { communityLevelExplorerHTML, communityExperienceDraft, communityVIPMultipliers } from '../src/community-level-explorer.ts';
 import { communityGrowthConfigured, communityGrowthState } from '../src/community-growth.ts';
@@ -223,45 +222,41 @@ test('VIP selection, keyboard bounds and mode changes preserve page position and
   assert.equal(w.location.hash, '#/community/stardust/levels');
 });
 
-test('ten approved C icons retain file hashes and provenance without an on-page credit entry', async () => {
+test('ten approved constellation medallions retain file hashes and provenance without an on-page credit entry', async () => {
   const directory = new URL('../public/assets/community/levels/', import.meta.url);
   const sources = JSON.parse(await readFile(new URL('sources.json', directory), 'utf8'));
   assert.equal(sources.icons.length, 10);
   assert.equal(new Set(sources.icons.map(item => item.slug)).size, 10);
+  assert.equal(sources.motion, undefined, 'the superseded raster motion records are gone');
   const files = new Set();
   for (let level = 1; level <= 10; level++) {
     const record = sources.icons[level - 1];
     assert.equal(record.level, level);
+    assert.equal(record.slug, `constellation-g${level}`);
+    assert.equal(record.file, `constellation-g${level}.svg`);
     const asset = await readFile(new URL(record.file, directory));
     const hash = createHash('sha256').update(asset).digest('hex');
     assert.equal(hash, record.sha256);
+    assert.equal(record.bytes, asset.length);
     files.add(hash);
-    if (level === 1) {
-      assert.equal(record.slug, 'feather');
-      assert.equal(record.author, 'Lorc');
-      assert.match(record.source, /^https:\/\/game-icons\.net\/1x1\//);
-      assert.equal(record.license, 'CC BY 3.0');
-      const svg = new JSDOM(asset.toString(), { contentType: 'image/svg+xml' });
-      assert.equal(svg.window.document.querySelector('script, foreignObject, image, use'), null);
-      svg.window.close();
-    } else {
-      assert.equal(record.kind, 'generated-raster');
-      assert.ok(record.originalPngSha256);
-      assert.equal(record.license, undefined, 'generated art is not attributed to the stock artists');
-      const metadata = await sharp(asset).metadata();
-      assert.equal(metadata.format, 'webp');
-      assert.equal(metadata.hasAlpha, true);
-      assert.ok(metadata.width <= 512 && metadata.height <= 512);
-    }
+    assert.equal(record.kind, 'original-vector');
+    assert.equal(record.generator, 'scripts/build-growth-constellation.mjs');
+    assert.equal(record.license, undefined, 'project artwork is not attributed to stock artists');
+    const svg = new JSDOM(asset.toString(), { contentType: 'image/svg+xml' });
+    assert.equal(svg.window.document.querySelector('script, foreignObject, image, use, a'), null);
+    svg.window.close();
     const page = new JSDOM(communityLevelExplorerHTML(data, common, { mode: 'growth', growth: level, trust: null }));
     const icon = page.window.document.querySelector('[data-level-preview] [data-level-icon]');
     assert.equal(icon.dataset.levelIcon, record.slug);
-    assert.equal(page.window.document.querySelector('[data-level-preview] svg, [data-level-preview] b'), null, 'no generated SVG or grade text inside the artwork');
+    assert.equal(page.window.document.querySelector('[data-level-preview] svg, [data-level-preview] b'), null, 'no inline SVG or grade text inside the artwork');
     assert.equal(page.window.document.querySelector('[data-level-preview]').getAttribute('aria-controls'), 'community-level-detail');
     assert.equal(page.window.document.querySelector('a[href="/assets/community/levels/credits.html"]'), null);
     page.window.close();
   }
   assert.equal(files.size, 10);
+  for (const old of ['feather.svg', 'c-g2-v3.webp', 'c-g7-motion-v2.svg', 'c-g10-v3.webp', 'c-g10-motion-v2.svg']) {
+    await assert.rejects(readFile(new URL(old, directory)), { code: 'ENOENT' }, `superseded asset ${old} must not ship`);
+  }
 });
 
 test('owner and legacy views do not fabricate personal experience; hostile translated labels are escaped', () => {

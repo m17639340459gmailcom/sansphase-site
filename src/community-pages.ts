@@ -3,7 +3,7 @@
 
 import {
   communityBoards, boardName, boardHref, postHref, memberHref, stardustHref, inboxHref, shopHref, manageHref, communityHomeHref, rulesHref,
-  avatarHTML, whoHTML, nameHTML, nameLabelHTML, growthChipHTML, levelChipHTML, vipChipHTML, badgeHTML, cardHead, moreLink, bannerHTML, statsHTML, emptyHTML,
+  avatarHTML, whoHTML, nameHTML, nameLabelHTML, growthChipHTML, levelMarksHTML, roleChipHTML, badgeHTML, cardHead, moreLink, bannerHTML, statsHTML, emptyHTML,
   communityStatusHTML, communityTopicsHTML, communityBodyHTML, relativeTime, beijingTime, readyData, communityLevelName, plainText,
 } from './community.mjs';
 import type { Common, CommunityLoad, CommunityMe, CommunityPerson, CommunityTopic, CommunityUnread, CommunityInventory, CommunityModerationContacts, Translate } from './community.ts';
@@ -449,7 +449,7 @@ export function communityMemberHTML({ member, me = null, muting = false, ...comm
   const hue = [...person.name].reduce((sum, char) => sum + (char.codePointAt(0) || 0), 0) % 360;
   return `<section class="page community-page community-member" data-community="member" data-tab="${esc(data.tab)}">`
     + `<header class="community-m-hero community-rv" style="--i:0;--h:${hue}"><div class="community-m-intro"><div class="community-m-cover${cover}" aria-hidden="true"><i></i><i></i></div>`
-    + `<div class="community-m-id">${avatarHTML(person, common, "xl", false)}<div class="community-m-name"><h1>${nameLabelHTML(person, common)}</h1><div class="community-m-tags">${levelChipHTML(person, common)}${vipChipHTML(person)}${person.uid && person.showUid ? `<span class="community-muted is-mono">UID ${esc(person.uid)}</span>` : ""}</div>`
+    + `<div class="community-m-id">${avatarHTML(person, common, "xl", false)}<div class="community-m-name">${levelMarksHTML(person, common, true)}<h1>${nameLabelHTML(person, common, false)}</h1><div class="community-m-tags">${roleChipHTML(person, common)}${person.uid && person.showUid ? `<span class="community-muted is-mono">UID ${esc(person.uid)}</span>` : ""}</div>`
     + (data.bio ? `<p>${esc(data.bio)}</p>` : "") + `<p class="community-muted">${days ? t(`加入 ${days} 天`, `Joined ${days} days`) : ""}${days && data.streak ? " · " : ""}${data.streak ? t(`连签 ${data.streak} 天`, `${data.streak}-day streak`) : ""}</p></div>`
     + `<div class="community-m-acts">${actions}</div></div></div>`
     + `<dl class="community-m-stats"><div><dt>${t("主题", "Topics")}</dt><dd>${stats.topics}</dd></div><div><dt>${t("回复", "Replies")}</dt><dd>${stats.replies}</dd></div><div><dt>${t("收到的赞", "Likes")}</dt><dd>${stats.likes}</dd></div><div><dt>${t("被采纳", "Accepted")}</dt><dd>${stats.accepted}</dd></div><div><dt>${t("精华", "Featured")}</dt><dd>${stats.featured}</dd></div><div><dt>${t("关注者", "Followers")}</dt><dd>${data.follows.followers}</dd></div></dl></header>`

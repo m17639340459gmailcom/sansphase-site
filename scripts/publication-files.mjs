@@ -13,7 +13,9 @@ export async function publicationFiles(root=resolve('.')) {
   result.push('scripts/compose-community-styles.mjs', 'docs/COMMUNITY-LOCAL-INTEGRATION.md', 'docs/COMMUNITY-APPEARANCE.md', 'docs/CHECKIN-SKY-PROMPT.md');
   result.push('scripts/fixtures/community-preview-identity.ts', 'docs/COMMUNITY-PRELAUNCH.md', 'docs/COMMUNITY-BANNERS.md');
   result.push('docs/COMMUNITY-CONVENTION.md', 'docs/COMMUNITY-EXPERIENCE-RULES.md');
-  result.push('scripts/build-growth-motion.mjs', 'scripts/growth-motion-rig.ts', 'docs/COMMUNITY-STARDUST-RULES.md');
+  result.push('scripts/build-growth-constellation.mjs', 'scripts/growth-constellation.ts', 'docs/COMMUNITY-STARDUST-RULES.md');
+  result.push('scripts/build-trust-moon.mjs', 'scripts/trust-moon.ts');
+  result.push('scripts/build-vip-badge.mjs', 'scripts/vip-badge.ts', 'scripts/vip-badge-glyphs.ts');
   async function visit(directory) {
     for(const entry of await readdir(directory,{withFileTypes:true})) {
       const path=resolve(directory,entry.name);
