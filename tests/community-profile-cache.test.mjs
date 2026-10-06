@@ -51,7 +51,13 @@ async function fixture(t) {
   main.innerHTML = ui.html(common); let cleanup = ui.mount(main, common);
   t.after(async () => { cleanup(); ui.clear(); await settle(); w.close(); for (const [name, saved] of previous) { if (saved === undefined) delete globalThis[name]; else globalThis[name] = saved; } });
   const mount = hash => { w.history.replaceState(null, '', hash); cleanup(); main.innerHTML = ui.html(common); cleanup = ui.mount(main, common); };
-  const initialMember = (uid, tab = 'replies') => { w.history.replaceState(null, '', `#/community/u/${uid}/${tab}`); return new JSDOM(ui.html(common)); };
+  const initialMember = async (uid, tab = 'replies') => {
+    // Confirm this route's account first, keeping the fresh member read pending
+    // so these assertions still verify the cached approved profile itself.
+    let release; const promise = new Promise(resolve => { release = resolve; }); pendingRead = { uid, tab, promise };
+    mount(`#/community/u/${uid}/${tab}`); await settle();
+    const cached = new JSDOM(ui.html(common)); release(); await settle(); return cached;
+  };
   await settle();
   return { w, main, ui, profile, mount, initialMember, deferMember(uid, tab) { let release; const promise = new Promise(resolve => { release = resolve; }); pendingRead = { uid, tab, promise }; return release; } };
 }
@@ -71,9 +77,9 @@ test('profile reset and confirmed details update every cached tab for that UID w
   const form = w.document.querySelector('[data-community-form="profile-signature"]');
   form.elements.namedItem('signature').value = '已确认的新资料';
   form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await settle();
-  const self = initialMember('10001', 'topics');
+  const self = await initialMember('10001', 'topics');
   try { assert.match(self.window.document.querySelector('.community-m-name').textContent, /已确认的新资料/); } finally { self.window.close(); }
-  const other = initialMember('20002');
+  const other = await initialMember('20002');
   try { assert.match(other.window.document.querySelector('.community-m-name').textContent, /别人的资料/); } finally { other.window.close(); }
 });
 
@@ -87,9 +93,9 @@ for (const action of ['equip', 'redeem']) test(`applying an author background th
     main.querySelector('[data-community-form="redeem"]').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
   }
   await settle();
-  const self = initialMember('10001');
+  const self = await initialMember('10001');
   try { assert.equal(self.window.document.querySelector('.community-m-cover img'), null, 'the retired background cannot be rendered before the new member response'); } finally { self.window.close(); }
-  const other = initialMember('20002');
+  const other = await initialMember('20002');
   try { assert.match(other.window.document.querySelector('.community-m-name').textContent, /别人的资料/); } finally { other.window.close(); }
   mount('#/community/u/10001/replies'); await settle();
   assert.equal(main.querySelector('.community-m-cover img').getAttribute('src'), `/api/community/images/${authorImage}.webp`);

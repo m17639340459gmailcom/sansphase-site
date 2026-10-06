@@ -179,6 +179,9 @@ export function createCommunityStore(directory: string, { previewCatalog = false
   const oneImage = db.prepare('SELECT id, uploader_kind, uploader_id, topic_id, reply_id, width, height, created_at, deleted_at, purpose, frame_ready, banner_scope FROM community_images WHERE id = ?');
   const topicImages = db.prepare('SELECT id, width, height FROM community_images WHERE topic_id = ? AND reply_id IS NULL AND deleted_at IS NULL ORDER BY position');
   const replyImages = db.prepare('SELECT id, width, height FROM community_images WHERE topic_id = ? AND reply_id = ? AND deleted_at IS NULL ORDER BY position');
+  const threadReplyImages = db.prepare(`SELECT i.id, i.width, i.height, i.reply_id FROM community_images i
+    JOIN community_replies r ON r.id = i.reply_id AND r.topic_id = i.topic_id
+    WHERE i.topic_id = ? AND i.deleted_at IS NULL AND r.deleted_at IS NULL ORDER BY i.position, i.rowid`);
   const attachImage = db.prepare('UPDATE community_images SET topic_id = ?, reply_id = ?, position = ? WHERE id = ?');
   const removeImage = db.prepare('UPDATE community_images SET deleted_at = ? WHERE id = ?');
   const imageUnreferenced = `NOT EXISTS (SELECT 1 FROM community_shop_items WHERE image = community_images.id)
@@ -405,9 +408,21 @@ export function createCommunityStore(directory: string, { previewCatalog = false
     topic(id: string) {
       const row = topicRow(id);
       if (!row) return null;
-      const replies = (topicReplies.all(id) as ReplyRow[]).map(reply => ({
+      const replyRows = topicReplies.all(id) as ReplyRow[];
+      // Hidden replies remain available for the service's viewer-specific mask;
+      // deleted replies and images never enter the detail. Read attachments once
+      // per fresh detail, retaining each reply's position and insertion order.
+      const imagesByReply = new Map<string, Array<{ id: string; width: number; height: number }>>();
+      if (replyRows.length) {
+        for (const image of threadReplyImages.all(id) as Array<{ id: string; width: number; height: number; reply_id: string }>) {
+          const images = imagesByReply.get(image.reply_id) || [];
+          images.push({ id: image.id, width: image.width, height: image.height });
+          imagesByReply.set(image.reply_id, images);
+        }
+      }
+      const replies = replyRows.map(reply => ({
         id: reply.id, author: authorOf(reply), body: reply.body, createdAt: reply.created_at,
-        images: replyImages.all(id, reply.id) as Array<{ id: string; width: number; height: number }>,
+        images: imagesByReply.get(reply.id) || [],
         edited: Boolean(reply.edited_at), likes: Number(reply.likes), quoteId: reply.quote_id, hidden: Boolean(reply.hidden_at),
       }));
       const vote = voteCounts.get(id) as { alive: number; dead: number };

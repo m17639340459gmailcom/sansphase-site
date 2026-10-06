@@ -89,6 +89,14 @@ test('clearing identity while a visit is pending discards its result', async t =
   assert.notEqual(main.querySelector('[data-experience-current]')?.textContent, '20');
 });
 
+test('daily XP processing does not block the first paint of the ready growth page', async t => {
+  const { main, visits, release } = await setup(t, { delayed: true });
+  assert.equal(visits().length, 1);
+  assert.equal(main.querySelector('[data-experience-current]')?.textContent, '0');
+  release(); await settle();
+  assert.equal(main.querySelector('[data-experience-current]')?.textContent, '20');
+});
+
 test('only a new Beijing day with a visible return starts another visit request', async t => {
   const original = Date.now;
   let now = Date.parse('2026-10-06T15:59:50Z');

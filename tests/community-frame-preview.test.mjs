@@ -7,7 +7,7 @@ import { createStableCommunityFrame } from '../src/community-layout/stable-frame
 import { startCommunityLayout } from '../src/community-layout/runtime.ts';
 
 const turn = () => new Promise(resolve => setTimeout(resolve, 30));
-const person = { name: '测试成员', uid: 'u1', role: 'reader', level: 1, owner: false, mod: false, balance: 30, checkedIn: false, streak: 1, nextReward: { total: 1, bonus: 0 }, unread: { all: 0 }, inventory: {}, agreed: true };
+const person = { name: '测试成员', uid: 'u1', role: 'reader', level: 1, owner: false, mod: false, vip: true, balance: 30, checkedIn: false, streak: 1, nextReward: { total: 1, bonus: 0 }, unread: { all: 0 }, inventory: {}, agreed: true };
 const topic = id => ({ id, board: 'qa', title: `讨论 ${id}`, pinned: id === 'p1' || id === 'p2', author: person, createdAt: '2026-10-01T10:00:00Z', lastActivityAt: '2026-10-01T10:00:00Z', replies: 2, likes: 1 });
 const listing = { items: ['p1', 'p2', 'p3'].map(topic), total: 3, page: 1, pageSize: 20 };
 const boardListing = board => ({ ...listing, posters: [{ author: person, topics: 3 }], items: listing.items.map(item => ({ ...item, id: `${board}-${item.id}`, board, title: `${board} ${item.pinned ? '置顶公告' : '讨论'} ${item.id}` })) });

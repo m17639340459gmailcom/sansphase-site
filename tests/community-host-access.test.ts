@@ -21,6 +21,8 @@ async function setup(t: test.TestContext) {
   let vip = false;
   const calls: Array<{ operation: string; input: unknown }> = [];
   let purged = '';
+  let heldResponse: { started: () => void; released: Promise<void> } | null = null;
+  const releases: Array<() => void> = [];
   const client = { async request<T>(operation: string, input: unknown): Promise<T> {
     calls.push({ operation, input });
     if (unavailable) throw Object.assign(new Error('bridge unavailable'), { status: 503 });
@@ -30,21 +32,37 @@ async function setup(t: test.TestContext) {
       assert.equal(data.binding, 'valid-binding');
       return { sessionRef: 'ref-' + data.ticket, identity: identity(data.ticket || '') } as T;
     }
-    await new Promise(done => setTimeout(done, data.sessionRef?.endsWith('slow') ? 20 : 1));
-    return identity(data.sessionRef?.slice(4) || '', vip) as T;
+    // A source response can already contain a verified snapshot while its
+    // transport promise is still pending. New requests need their own check.
+    const snapshot = identity(data.sessionRef?.slice(4) || '', vip);
+    const gate = operation === 'session' ? heldResponse : null;
+    if (gate) { heldResponse = null; gate.started(); await gate.released; }
+    else await new Promise(done => setTimeout(done, data.sessionRef?.endsWith('slow') ? 20 : 1));
+    return snapshot as T;
   } };
   const access = createCommunityHostAccess({ store, client, siteOrigin: origin, mainSiteOrigin: main, secret, purge: async readerId => { purged = readerId; return { topics: 0 }; } });
-  const server = createServer((req, res) => { void access.requestMiddleware(req, res, async () => {
+  const arrivals = new Map<string, () => void>();
+  const server = createServer((req, res) => {
+    const arrived = arrivals.get(req.url || ''); arrivals.delete(req.url || ''); arrived?.();
+    void access.requestMiddleware(req, res, async () => {
     const value = access.current(req);
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify(value?.identity || { asset: true }));
-  }); });
+    });
+  });
   await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
   const port = (server.address() as { port: number }).port;
-  t.after(async () => { await new Promise<void>(done => server.close(() => done())); store.close(); await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
+  t.after(async () => { for (const release of releases) release(); await new Promise<void>(done => server.close(() => done())); store.close(); await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
   const url = `http://127.0.0.1:${port}`;
   const exchange = (ticket: string, headers = {}) => fetch(url + '/api/community-entry', { method: 'POST', headers: { Origin: origin, 'X-Reader-Request': '1', 'Content-Type': 'application/json', Cookie: 'sansphase_community_handoff=valid-binding', ...headers }, body: JSON.stringify({ ticket }) });
-  return { url, exchange, calls, access, store, setUnavailable: (value: boolean) => { unavailable = value; }, setInvalid: (value: boolean) => { invalid = value; }, setVip: (value: boolean) => { vip = value; }, purged: () => purged };
+  const holdNextSessionResponse = () => {
+    let started!: () => void, release!: () => void;
+    const waiting = new Promise<void>(done => { started = done; }), released = new Promise<void>(done => { release = done; });
+    heldResponse = { started, released }; releases.push(release);
+    return { waiting, release };
+  };
+  const waitForRequest = (path: string) => new Promise<void>(done => { arrivals.set(path, done); });
+  return { url, exchange, calls, access, store, holdNextSessionResponse, waitForRequest, setUnavailable: (value: boolean) => { unavailable = value; }, setInvalid: (value: boolean) => { invalid = value; }, setVip: (value: boolean) => { vip = value; }, purged: () => purged };
 }
 
 test('direct HTML access gets only entry prompt while API and private files remain inaccessible', async t => {
@@ -104,6 +122,39 @@ test('concurrent requests cannot share identity context and refresh needs the or
   const bodies = await Promise.all(cookies.map(async cookie => (await fetch(env.url + '/api/community/me', { headers: { cookie } })).json()));
   assert.deepEqual(bodies.map(value => value.viewer.id), ['slow', 'fast']);
   assert.equal(env.access.current(), null);
+});
+
+test('a next request sees changed VIP while an earlier verified source response is still pending', { timeout: 5000 }, async t => {
+  const env = await setup(t), entered = await env.exchange('reader');
+  const cookie = entered.headers.getSetCookie().find(value => value.startsWith('sansphase_community_session='))!.split(';')[0];
+  env.setVip(true); const gate = env.holdNextSessionResponse();
+  const earlier = fetch(env.url + '/api/community/me', { headers: { cookie } }); await gate.waiting;
+  env.setVip(false);
+  const nextPath = '/api/community/me?fresh=1', arrived = env.waitForRequest(nextPath);
+  const later = fetch(env.url + nextPath, { headers: { cookie } });
+  await arrived; gate.release();
+  try {
+    const current = await later; assert.equal(current.status, 200);
+    assert.equal((await current.json()).viewer.vip, false, 'a new HTTP request cannot inherit the older pending VIP snapshot');
+    assert.equal((await (await earlier).json()).viewer.vip, true);
+    assert.equal(env.calls.filter(call => call.operation === 'session').length, 2);
+  } finally { gate.release(); }
+});
+
+test('a next request rejects main-site logout while an earlier verified source response is still pending', { timeout: 5000 }, async t => {
+  const env = await setup(t), entered = await env.exchange('reader');
+  const cookie = entered.headers.getSetCookie().find(value => value.startsWith('sansphase_community_session='))!.split(';')[0];
+  const gate = env.holdNextSessionResponse();
+  const earlier = fetch(env.url + '/api/community/me', { headers: { cookie } }); await gate.waiting;
+  env.setInvalid(true);
+  const nextPath = '/api/community/me?fresh=1', arrived = env.waitForRequest(nextPath);
+  const later = fetch(env.url + nextPath, { headers: { cookie } });
+  await arrived; gate.release();
+  try {
+    assert.equal((await later).status, 401, 'main-site revocation applies even before the older network promise resolves');
+    assert.equal((await earlier).status, 401, 'the old response cannot resurrect the now-revoked local session');
+    assert.equal(env.calls.filter(call => call.operation === 'session').length, 2);
+  } finally { gate.release(); }
 });
 
 test('new main-site handoff always uses exchange page even when an older host cookie is valid or revoked', async t => {

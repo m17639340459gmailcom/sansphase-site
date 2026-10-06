@@ -1,10 +1,10 @@
 // 社区页面的数据和交互：读接口、排序、搜索、加载更多、发帖（按版块类型）、编辑、回复（引用、@、排序）、
 // 赞、收藏、感谢、采纳、举报、删除、悬赏、提示词解锁、资源投票、付费置顶和高亮、签到和补签、星尘明细、
 // 兑换所、关注、通知，以及站长和协管的置顶、精华、锁帖、移动、审核、禁言、举报处理、发货和上架。
-// 页面 HTML 由 community.ts、community-post.ts 和 community-pages.ts 生成；这里先用缓存立即渲染，再在路由变化时刷新。
+// 页面 HTML 由 community.ts、community-post.ts 和 community-pages.ts 生成；这里先确认当前路由的身份，再显示缓存与新的页面结果。
 import {
   communityRoute, communityHomeHTML, communityBoardsHTML, communityBoardHTML, communityTagHTML, communityBookmarksHTML,
-  communityBodyHTML, communityBoards, communityRules, communitySearchLimit, isCommunitySort, boardHref, postHref, readyData, imageLimit, avatarHTML, nameLabelHTML, communityManagementRole, communityReaderReadOnly,
+  communityBodyHTML, communityBoards, communityRules, communitySearchLimit, isCommunitySort, boardHref, postHref, readyData, imageLimit, avatarHTML, nameLabelHTML, communityManagementRole, communityReaderReadOnly, communityStatusHTML,
 } from './community.mjs';
 import type {
   CommunityLoad, CommunityListing, CommunitySort, CommunitySummary, CommunityRoute, CommunityMe, CommunityPerson, CommunityModerationContact, CommunityModerationContacts, Escape, Translate,
@@ -99,10 +99,16 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   const banners = new Map<string, CommunityLoad<CommunityBannerConfig>>();
   const bannerRequests = new Map<string, Promise<void>>();
   let frameIdentity = 0;
+  let permissionRevision = 0;
   let paintedAccount: string | null = null;
+  let paintedPage: { hash: string; frame: number; markup: string; style: string | null; main: string | null; banner: string | null; aside: string | null } | null = null;
   let browseRequest = 0;
   let switchingBrowseMode = false;
   let me: CommunityLoad<CommunityMe> | null = null;
+  let meRequest = 0;
+  let viewerVerified = false;
+  let viewerHash = '';
+  let viewerFailure: ReturnType<typeof failure> | null = null;
   let profile: CommunityLoad<CommunityProfile> | null = null;
   let profileWrite: object | null = null;
   let profileRequest = 0;
@@ -266,7 +272,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   let activeVisitRetryAt = 0;
   async function recordActiveVisit(): Promise<boolean> {
     const current = readyData(me), view = route().view;
-    if (!mounted || mounted.main.ownerDocument.visibilityState !== 'visible' || !current?.uid || current.role !== 'reader' || current.owner || communityReaderReadOnly(current) || !current.agreed || current.convention?.agreed === false || !current.growth?.configured || view === 'unknown' || view === 'landing') return false;
+    if (!viewerVerified || viewerHash !== location.hash || !mounted || mounted.main.ownerDocument.visibilityState !== 'visible' || !current?.uid || current.role !== 'reader' || current.owner || communityReaderReadOnly(current) || !current.agreed || current.convention?.agreed === false || !current.growth?.configured || view === 'unknown' || view === 'landing') return false;
     const identity = frameIdentity;
     const key = `${current.uid}:${new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10)}`;
     if (key === activeVisitDone) return false;
@@ -376,9 +382,9 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   }
 
   async function assignLoad<T>(path: string, current: CommunityLoad<T> | null | undefined, assign: (value: CommunityLoad<T>) => void) {
-    const identity = frameIdentity;
+    const identity = frameIdentity, revision = permissionRevision;
     const value = await load<T>(path, current);
-    if (identity === frameIdentity) assign(value);
+    if (identity === frameIdentity && revision === permissionRevision) assign(value);
   }
   async function loadSummary() { await assignLoad('summary', summary, value => { summary = value; }); }
   async function loadModerationContacts() { await assignLoad('moderation-contacts', moderationContacts, value => { moderationContacts = value; }); }
@@ -386,10 +392,10 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   function loadFrameHighlights(scope: string): Promise<void> {
     const existing = frameHighlightsPending.get(scope);
     if (existing) return existing;
-    const identity = frameIdentity;
+    const identity = frameIdentity, revision = permissionRevision;
     const params = new URLSearchParams({ ...(scope ? { board: scope } : {}), sort: 'active', page: '1' });
     const pending = load<CommunityListing>(`topics?${params}`, frameHighlights.get(scope)).then(value => {
-      if (identity === frameIdentity) frameHighlights.set(scope, value);
+      if (identity === frameIdentity && revision === permissionRevision) frameHighlights.set(scope, value);
     }).finally(() => { if (frameHighlightsPending.get(scope) === pending) frameHighlightsPending.delete(scope); });
     frameHighlightsPending.set(scope, pending);
     return pending;
@@ -406,13 +412,56 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     return pending;
   }
   async function loadMe() {
-    const identity = frameIdentity;
-    await assignLoad('me', me, value => { me = value; });
-    if (identity !== frameIdentity) return;
+    const identity = frameIdentity, requestId = ++meRequest, hash = location.hash;
+    viewerVerified = false;
+    let next: CommunityMe;
+    try { next = await api<CommunityMe>('me'); }
+    catch (error) {
+      if (identity !== frameIdentity || requestId !== meRequest) return;
+      const rejected = failure(error);
+      if (rejected.status === 401 || rejected.status === 403) {
+        // A definite authority rejection retires every cached permission and
+        // outstanding read. Keep unconfirmed writes owned by their account.
+        clearData(false);
+        me = rejected; viewerFailure = rejected;
+        mounted?.ctx.headerChanged?.(); paint();
+      } else if (rejected.status || !readyData(me) || viewerHash !== hash) {
+        // Unavailability is not logout. Keep the last account for the header,
+        // but show the existing error page instead of protected controls.
+        viewerFailure = rejected;
+        if (!readyData(me)) me = rejected;
+        paint();
+      }
+      return;
+    }
+    if (identity !== frameIdentity || requestId !== meRequest) return;
+    const previous = readyData(me);
+    const changedAccount = previous && (previous.uid !== next.uid || previous.role !== next.role);
+    const lostPermission = previous && !changedAccount && (previous.vip === true && next.vip !== true
+      || previous.owner && !next.owner || previous.mod && !next.mod
+      || Boolean(previous.management && !next.management)
+      || (previous.moderationBoards || []).some(board => !(next.moderationBoards || []).includes(board)));
+    if (changedAccount) clearData(false);
+    else if (lostPermission) {
+      // Retire permission-bearing reads, including responses still in flight.
+      // This same-account change leaves personal dialog drafts and writes alone.
+      permissionRevision++; summary = null; lists.clear(); listRequests.clear(); threads.clear(); manages.clear(); manageRequests.clear();
+      memberPages.clear(); frameHighlights.clear(); frameHighlightsPending.clear(); banners.clear(); bannerRequests.clear();
+      shop = null; shopMine = null; bookmarks = null; rank = null; stardusts.clear(); stardustRequest++;
+      reviewSelection.clear(); managementBoard = ''; stewardCandidate = null; stewardLookupRequest++;
+    }
+    me = { state: 'ready', data: next }; viewerFailure = null; viewerVerified = true; viewerHash = hash;
     const data = readyData(me);
-    const key = data ? [data.name, data.uid, data.avatar, data.frame, data.color, JSON.stringify(data.nameEffect), data.level, JSON.stringify(data.growth), JSON.stringify(data.vipGrowth), data.steward, data.mod, JSON.stringify(data.management), data.balance, data.checkedIn, data.unread.all].join('|') : '';
+    const key = data ? [data.name, data.uid, data.role, data.owner, data.vip, data.avatar, data.frame, data.color, JSON.stringify(data.nameEffect), data.level, JSON.stringify(data.growth), JSON.stringify(data.vipGrowth), data.steward, data.mod, JSON.stringify(data.management), JSON.stringify(data.moderationBoards), data.balance, data.checkedIn, data.unread.all].join('|') : '';
     if (key !== headerKey) { headerKey = key; mounted?.ctx.headerChanged?.(); }
     syncConvention();
+    const verifiedFrame = frameIdentity, verifiedRequest = meRequest;
+    // A real entrance is recorded as soon as identity is confirmed, even if
+    // supporting cards are slow or the reader leaves before they finish.
+    void recordActiveVisit().then(changed => {
+      if (changed && verifiedFrame === frameIdentity && verifiedRequest === meRequest && hash === location.hash) paint(true);
+    });
+    if (changedAccount || lostPermission) { paint(); void refresh(); }
   }
   async function loadProfile() {
     const requestId = ++profileRequest;
@@ -488,7 +537,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   const members = (ctx = mounted?.ctx) => {
     const viewer = readyData(me);
     if (communityReaderReadOnly(viewer)) return viewer?.management?.role === 'owner' && viewer.vip === true;
-    return Boolean(ctx?.members || viewer?.vip || viewer?.owner || (viewer?.mod && viewer.moderationBoards?.includes('vip')));
+    return viewer ? Boolean(viewer.vip || viewer.owner || (viewer.mod && viewer.moderationBoards?.includes('vip'))) : Boolean(ctx?.members);
   };
   function loadsFor(current: CommunityRoute): Array<() => Promise<void>> {
     const page = ((): Array<() => Promise<void>> => {
@@ -524,23 +573,36 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   }
   async function refresh(current = route()) {
     const hash = location.hash, identity = frameIdentity;
-    if (current.view === 'board' && current.board === 'vip' && !readyData(me)) {
+    let viewerRequest = meRequest;
+    const valid = () => location.hash === hash && identity === frameIdentity && viewerRequest === meRequest;
+    if (current.view === 'board' && current.board === 'vip') {
       await loadMe();
+      viewerRequest = meRequest;
       if (location.hash !== hash || identity !== frameIdentity) return;
+      if (!viewerVerified) return;
     }
-    await Promise.all(loadsFor(current).map(run => run()));
+    const reads = loadsFor(current);
+    let viewerFinished = !reads.includes(loadMe), queued = false;
+    const showReady = () => {
+      if (!valid() || !viewerFinished || !viewerVerified || queued) return;
+      queued = true;
+      queueMicrotask(() => { queued = false; if (valid() && viewerVerified) paint(true); });
+    };
+    const pending = reads.map(async run => { await run(); if (run === loadMe) viewerFinished = true; showReady(); });
+    viewerRequest = meRequest;
+    await Promise.all(pending);
     if (current.view === 'profile' && location.hash === hash && identity === frameIdentity) {
       const uid = readyData(me)?.uid || readyData(profile)?.person.uid;
       if (uid) await loadMember(uid, 'topics');
     }
-    if (location.hash === hash && identity === frameIdentity) await recordActiveVisit();
-    if (location.hash === hash && identity === frameIdentity) paint();
+    if (!valid() || !viewerVerified) return;
+    paint(true);
   }
   // Reloads what the current page shows, then repaints.
   async function reload(...extra: Array<() => Promise<void>>) {
     const identity = frameIdentity;
     await Promise.all([...loadsFor(route()), ...extra].map(run => run()));
-    if (identity === frameIdentity) paint();
+    if (identity === frameIdentity && viewerVerified && viewerHash === location.hash) paint();
   }
 
   // Compose images belong to one page: a new post starts empty, editing starts with the post's images.
@@ -562,10 +624,16 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   // The page for the current route, from what is cached; null outside the pages this module owns.
   function pageHTML(ctx: CommunityContext) {
     const identity = readyData(me);
-    const canPostMembers = !communityReaderReadOnly(identity) && Boolean(ctx.members || identity?.vip || identity?.owner);
+    const canPostMembers = !communityReaderReadOnly(identity) && Boolean(identity ? identity.vip || identity.owner : ctx.members);
     ctx = { ...ctx, members: members(ctx) };
     const current = route();
     const common = { t: ctx.t, esc: ctx.esc, icons: ctx.icons, ownerAvatar: ctx.ownerAvatar ?? null, showTopicCovers: ctx.simpleCompose, meForSort: identity };
+    if (viewerFailure && current.view !== 'unknown' && current.view !== 'landing')
+      return `<section class="page community-page" data-community="${current.view}">${communityStatusHTML(viewerFailure, common)}</section>`;
+    if (viewerHash !== location.hash && current.view !== 'unknown' && current.view !== 'landing')
+      return `<section class="page community-page" data-community="${current.view}">${communityStatusHTML(loading, common)}</section>`;
+    if (current.view === 'manage' && (!(identity?.owner || identity?.mod) || identity.management?.browsingAsReader))
+      return `<section class="page community-page" data-community="manage">${communityStatusHTML({ state: 'error', status: 403, message: '' }, common)}</section>`;
     const viewer = readyData(me);
     const savedCompose = draftComposeValues(current);
     if (!ctx.simpleCompose && current.view === 'new' && composeBoard === null && !current.board && savedCompose?.board) composeBoard = savedCompose.board;
@@ -624,8 +692,14 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   }
   function paintList(append = false) {
     const results = mounted?.main.querySelector('.community-results');
-    const next = renderedPage()?.querySelector('.community-results');
+    const page = renderedPage(), next = page?.querySelector('.community-results');
     if (!results || !next) return;
+    if (paintedPage?.hash === location.hash && paintedPage.frame === frameIdentity) {
+      // The list changed in place. Supporting reads must compare against that
+      // new core, while still updating their own previously painted areas.
+      paintedPage.main = page?.querySelector('.community-main')?.outerHTML ?? null;
+      paintedPage.markup = '';
+    }
     const restoreView = mounted?.ctx.beforePaint?.();
     const section = results.closest<HTMLElement>('[data-community]');
     const documentPosition = !restoreView && section ? preserveDocumentReading(section) : null;
@@ -674,6 +748,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     mounted?.main.querySelectorAll<HTMLElement>('[data-action="community-reply-sort"]').forEach(button => {
       button.setAttribute('aria-pressed', String(button.dataset.sort === replySort));
     });
+    if (mounted && rows && paintedPage?.hash === location.hash && paintedPage.frame === frameIdentity)
+      paintedPage.markup = html(mounted.ctx) || '';
   }
 
   // Structural panels still repaint, retaining fields, previews and focus.
@@ -753,18 +829,64 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     documentReading.left = window.scrollX; documentReading.top = window.scrollY;
   }
 
-  function paint() {
+  function rememberPaint(markup: string, page: HTMLElement) {
+    paintedPage = { hash: location.hash, frame: frameIdentity, markup, style: page.getAttribute('style'),
+      main: page.querySelector('.community-main')?.outerHTML ?? null,
+      banner: page.querySelector('.community-banner, .community-board-hero')?.outerHTML ?? null,
+      aside: page.querySelector('.community-aside')?.outerHTML ?? null };
+  }
+  // The feed enhances thumbnails to originals after painting. Both URLs name
+  // one protected file, but only for this origin and the existing UUID route.
+  function imageKey(image: HTMLImageElement) {
+    const source = image.getAttribute('src') || '';
+    try {
+      const url = new URL(source, location.href);
+      if (url.origin === location.origin && !url.search && !url.hash) {
+        const id = /^\/api\/community\/images\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\.thumb)?\.webp$/.exec(url.pathname)?.[1];
+        if (id) return `community:${id}|${image.className}`;
+      }
+    } catch { /* An unrelated URL keeps its exact identity. */ }
+    return `${source}|${image.className}`;
+  }
+  function paint(staged = false) {
     if (!mounted) return;
     const section = mounted.main.querySelector<HTMLElement>('[data-community]');
     const markup = html(mounted.ctx);
     if (!section || markup === null) return;
-    const restoreView = mounted.ctx.beforePaint?.();
-    const documentPosition = restoreView ? null : preserveDocumentReading(section);
     const template = document.createElement('template');
     template.innerHTML = markup;
     const next = template.content.firstElementChild as HTMLElement;
     const currentAccount = draftIdentity();
     const sameAccount = currentAccount !== null && paintedAccount === currentAccount;
+    const samePage = paintedPage?.hash === location.hash && paintedPage.frame === frameIdentity;
+    if (staged && sameAccount && samePage && paintedPage) {
+      if (paintedPage.markup === markup) {
+        // Supporting frame reads do not recreate an unchanged readable page.
+        mounted.ctx.painted?.(); return;
+      }
+      const view = route().view;
+      const core = section.querySelector('.community-main'), nextCore = next.querySelector('.community-main');
+      if (['home', 'board', 'tag'].includes(view) && core && nextCore && paintedPage.main === nextCore.outerHTML
+        && paintedPage.style === next.getAttribute('style')
+        && ['.community-banner, .community-board-hero', '.community-aside'].every(selector => Boolean(section.querySelector(selector)) === Boolean(next.querySelector(selector)))) {
+        const restoreView = mounted.ctx.beforePaint?.();
+        const previousBanner = paintedPage.banner, previousAside = paintedPage.aside;
+        rememberPaint(markup, next);
+        // Only these existing list-page supporting areas can change here. The
+        // results, editor, focus and text selection remain attached in place.
+        for (const [selector, previous] of [['.community-banner, .community-board-hero', previousBanner], ['.community-aside', previousAside]] as const) {
+          const current = section.querySelector(selector), replacement = next.querySelector(selector);
+          if (current && replacement && previous !== replacement.outerHTML) current.replaceWith(replacement);
+        }
+        mountSelects(); mounted.ctx.painted?.(); restoreView?.();
+        return;
+      }
+    }
+    const restoreView = mounted.ctx.beforePaint?.();
+    const documentPosition = restoreView ? null : preserveDocumentReading(section);
+    // Keep the template's generated snapshot, rather than enhanced DOM or
+    // editor drafts, for the next supporting-only comparison.
+    rememberPaint(markup, next);
     for (const field of sameAccount ? section.querySelectorAll<Field>('input[name], textarea[name], select[name]') : []) {
       const sourceForm = field.closest('form');
       const form = sourceForm?.dataset.communityForm;
@@ -812,12 +934,12 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         : data?.action ? `[data-action=${quoted(data.action)}]${data.sort ? `[data-sort=${quoted(data.sort)}]` : ''}${data.kind ? `[data-kind=${quoted(data.kind)}]` : ''}${data.id ? `[data-id=${quoted(data.id)}]` : ''}${data.value ? `[data-value=${quoted(data.value)}]` : ''}${data.board !== undefined ? `[data-board=${quoted(data.board)}]` : ''}${data.uid ? `[data-uid=${quoted(data.uid)}]` : ''}${data.index !== undefined ? `[data-index=${quoted(data.index)}]` : ''}${data.scope ? `[data-scope=${quoted(data.scope)}]` : ''}` : ''
       : '';
     const images = new Map<string, HTMLImageElement[]>();
-    for (const image of section.querySelectorAll<HTMLImageElement>('img[src]')) {
-      const key = `${image.getAttribute('src')}|${image.className}`;
+    for (const image of sameAccount && samePage ? section.querySelectorAll<HTMLImageElement>('img[src]') : []) {
+      const key = imageKey(image);
       const group = images.get(key) || []; group.push(image); images.set(key, group);
     }
     for (const image of next.querySelectorAll<HTMLImageElement>('img[src]')) {
-      const previous = images.get(`${image.getAttribute('src')}|${image.className}`)?.shift();
+      const previous = images.get(imageKey(image))?.shift();
       if (previous) { previous.alt = image.alt; image.replaceWith(previous); }
     }
     const fieldScroll = new Map([...section.querySelectorAll<HTMLElement>('textarea[id]')].map(field => [field.id, field.scrollTop]));
@@ -1734,11 +1856,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       }
       case 'community-retry': {
         const current = route();
-        threads.delete(current.id);
-        summary = null; checkin = null; bookmarks = null; shop = null; shopMine = null; rank = null;
-        stardusts.clear(); memberPages.clear(); inboxes.clear(); manages.clear();
-        lists.delete(listKey(scopeOf(current)));
-        paint();
+        // Refresh reaches every authority again. Keep the currently readable
+        // page attached while it runs; definitive errors replace it afterward.
         void refresh(current);
         return;
       }
@@ -2299,7 +2418,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     checkinRequest++; stardustRequest++;
     levelExplorer.reset();
     badgeExplorer.reset();
-    frameIdentity++; frameHighlightsPending.clear(); frameHighlights.clear(); listRequests.clear();
+    frameIdentity++; permissionRevision++; meRequest++; viewerVerified = false; viewerHash = ''; viewerFailure = null; paintedPage = null;
+    frameHighlightsPending.clear(); frameHighlights.clear(); listRequests.clear();
     summary = null; me = null; profile = null; profileWrite = null; moderationContacts = null; checkin = null; bookmarks = null; shop = null; shopMine = null; rank = null; headerKey = '';
     stardusts.clear(); memberPages.clear(); memberProfileEpochs.clear(); inboxes.clear(); manages.clear(); manageRequests.clear(); lists.clear(); threads.clear(); lastHash = '';
     deleting = null; itemEditing = null; rejecting = null; shippingOrder = null; redeeming = null; delivery = null;
@@ -2356,11 +2476,14 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       const activityBoard = current.view === 'board' || current.view === 'new' ? current.board
         : current.view === 'post' || current.view === 'edit' ? readyData(threads.get(current.id))?.topic.board || '' : '';
       const visibleMembers = members(ctx);
-      const list: CommunityLoad<CommunityListing> = scope === 'vip' && !visibleMembers
-        ? { state: 'error', status: 403, message: '' } : highlightsFor(scope);
+      const rejected = viewerFailure || (viewerHash !== location.hash ? loading : null);
+      const list: CommunityLoad<CommunityListing> = rejected || (scope === 'vip' && !visibleMembers
+        ? { state: 'error', status: 403, message: '' } : highlightsFor(scope));
+      const frameMembers = !viewerFailure && visibleMembers;
       return `<div data-frame-highlights-state="${list.state}" data-frame-board="${ctx.esc(activityBoard)}">` + communityHomeHTML({ t: ctx.t, esc: ctx.esc, icons: ctx.icons,
-        summary: summary || loading, list, sort: 'active', members: visibleMembers, me, activityBoard, showTopicCovers: ctx.simpleCompose })
-        + communityFrameBannersHTML(scope === 'vip' && !visibleMembers ? { state: 'error', status: 403, message: '' } : banners.get(scope || 'home') || loading, ctx, scope || 'home') + '</div>';
+        summary: viewerFailure || summary || loading, list, sort: 'active', members: frameMembers, me: viewerFailure ? null : me, activityBoard,
+        showCompose: !rejected, showTopicCovers: ctx.simpleCompose })
+        + communityFrameBannersHTML(rejected || (scope === 'vip' && !visibleMembers ? { state: 'error', status: 403, message: '' } : banners.get(scope || 'home') || loading), ctx, scope || 'home') + '</div>';
     },
     // What the header needs (bell, account menu, check-in dot); null until it is read.
     me: () => readyData(me),
@@ -2368,6 +2491,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     mount(main: HTMLElement, ctx: CommunityContext) {
       mounted = { main, ctx };
       paintedAccount = draftIdentity();
+      paintedPage = null;
       main.addEventListener('click', onClick);
       main.addEventListener('submit', onSubmit);
       main.addEventListener('input', onInput);
