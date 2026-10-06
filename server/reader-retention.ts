@@ -5,6 +5,7 @@ import { registrationLifetimeMs } from './reader-workflow.ts';
 import { cleanReaderFiles } from './reader-file-cleanup.ts';
 import type { createReaderWorkflow } from './reader-workflow.ts';
 import type { Payload } from 'payload';
+import { readOwnerReaderId } from './owner-reader.ts';
 
 type ReaderRow = { id: string; createdAt: string; _verified?: boolean; vip_until?: string | null };
 type ReaderPayload = {
@@ -22,12 +23,16 @@ type RetentionOptions = {
   loginLedger: LoginLedger; workflow?: ReturnType<typeof createReaderWorkflow>;
   mediaRetention?: { sweep: () => Promise<unknown> };
   purgeCommunity?: PurgeCommunity;
+  ownerReaderId?: string;
 };
 
 export { readerCleanupDue } from './reader-retention-policy.ts';
 
-export function createReaderRetention({ payload, directory, uidStore, loginLedger, workflow, mediaRetention, purgeCommunity }: RetentionOptions) {
+export function createReaderRetention({ payload, directory, uidStore, loginLedger, workflow, mediaRetention, purgeCommunity, ownerReaderId }: RetentionOptions) {
   if (!payload || !directory || !uidStore || !loginLedger) throw Error('Reader retention requires the private reader store and login ledger.');
+  // This exact private binding follows the owner's account lifecycle. It has
+  // no independent reader login clock and receives no fabricated VIP or event.
+  const ownerPersonal = readOwnerReaderId({ ownerReaderId });
   const audit = readerAudit(directory, 'system');
   let initial: NodeJS.Timeout | null = null, interval: NodeJS.Timeout | null = null;
   let pendingInitial: NodeJS.Timeout | null = null, pendingInterval: NodeJS.Timeout | null = null;
@@ -40,6 +45,7 @@ export function createReaderRetention({ payload, directory, uidStore, loginLedge
       const legacy = await payload.find({ collection: 'readers', depth: 0, limit,
         where: { and: [{ _verified: { equals: false } }, { createdAt: { less_than_equal: new Date(at.getTime() - registrationLifetimeMs).toISOString() } }] } });
       for (const row of legacy.docs) {
+        if (row.id === ownerPersonal) continue;
         const removed = await removeReaderAccount({ payload, directory, uidStore, row, audit, action: 'auto-delete-unverified', workflow, purgeCommunity,
           cleanupCondition: { now: at.getTime(), unverifiedOnly: true } });
         if (removed.deleted) result.legacy++;
@@ -61,6 +67,7 @@ export function createReaderRetention({ payload, directory, uidStore, loginLedge
     }
     for (const id of candidates) {
       results.checked++;
+      if (id === ownerPersonal) { results.kept++; continue; }
       const row = await payload.findByID({ collection: 'readers', id });
       if (!row || !readerCleanupDue(row, loginLedger.latest('reader', id)?.at, at)) continue;
       results.eligible++;

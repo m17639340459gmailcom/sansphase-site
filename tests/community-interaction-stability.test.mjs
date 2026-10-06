@@ -16,6 +16,7 @@ const response = data => ({ ok: true, json: async () => structuredClone(data) })
 const turn = () => new Promise(resolve => setTimeout(resolve, 0));
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 const readerPreview = role => ({ ...person, management: { role, browsingAsReader: true } });
+const personalReader = { ...person, uid: '10001', vip: true, management: { role: 'owner', browsingAsReader: true, interactive: true } };
 function clipboardFixture(t) {
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
   const copied = [];
@@ -132,6 +133,102 @@ test('verified owner reader preview loads the VIP board and frame while interact
   assert.match(notices.at(-1), /当前预览仅供查看/);
   assert.match(reply.querySelector('.community-form-status').textContent, /请先返回管理身份/);
   assert.equal(requests.some(entry => entry.init.method === 'POST'), false);
+});
+
+test('verified owner personal reader can like and reply, while stale management controls never write', async t => {
+  const shown = thread(); shown.topic.canModerate = true;
+  const notices = [];
+  const { main, w, requests } = await setup(t, '#/post/p1', (url, init) => {
+    if (url.endsWith('/me')) return response(personalReader);
+    if (url.endsWith('/topics/p1')) return response(shown);
+    if (url.endsWith('/topics/p1/replies')) return response({ id: 'new-reply', reward: 0 });
+    return null;
+  }, { notify: value => notices.push(value) });
+  main.querySelector('[data-action="community-pin"]').click(); await turn();
+  assert.equal(requests.some(entry => entry.url.endsWith('/pin')), false);
+  assert.match(notices.at(-1), /管理身份/);
+  main.querySelector('[data-action="community-like"]').click(); await turn();
+  assert.ok(requests.some(entry => entry.url.endsWith('/like') && entry.init.method === 'POST'));
+  const form = main.querySelector('[data-community-form="reply"]');
+  form.elements.namedItem('body').value = '真实读者身份的正常回复。';
+  form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await turn(); await turn();
+  assert.ok(requests.some(entry => entry.url.endsWith('/topics/p1/replies') && entry.init.method === 'POST'));
+  const account = new JSDOM(communityAccountHTML({ ...ctxForAccount(), me: personalReader })).window.document;
+  assert.equal(account.querySelector('a[href="#/community/manage"]'), null);
+  assert.equal(account.querySelector('a[href="#/community/u/10001"]').textContent, '我的主页');
+});
+
+const ctxForAccount = () => ({ t: zh => zh, esc: value => String(value ?? ''), icons: {} });
+
+test('verified owner personal reader can check in and mark its own notifications read', async t => {
+  let checked = false;
+  const { main, requests, remount } = await setup(t, '#/community/home', (url, init) => {
+    if (url.endsWith('/me')) return response({ ...personalReader, checkedIn: checked });
+    if (url.endsWith('/checkin') && init.method === 'POST') { checked = true; return response({ reward: 10, bonus: 0, streak: 1 }); }
+    if (url.includes('/inbox?')) return response({ tab: 'all', unread: { all: 1 }, items: [{ id: 'own-n1', type: 'reply', actor: person, text: '正式通知', title: '正式帖子', href: '#/post/p1', createdAt: '2026-10-01T10:00:00Z', read: false }] });
+    if (url.endsWith('/inbox/read')) return response({ ok: true });
+    return null;
+  });
+  const checkin = main.querySelector('[data-action="community-checkin"]'); assert.ok(checkin);
+  checkin.click(); await turn(); await turn();
+  assert.equal(requests.filter(entry => entry.url.endsWith('/checkin') && entry.init.method === 'POST').length, 1);
+  await remount('#/community/inbox');
+  main.querySelector('[data-action="community-notice"]').click(); await turn();
+  assert.deepEqual(JSON.parse(requests.find(entry => entry.url.endsWith('/inbox/read')).init.body), { id: 'own-n1' });
+});
+
+test('verified owner personal reader publishes in the VIP board as its real reader identity', async t => {
+  const { main, w, requests } = await setup(t, '#/community/new/vip', (url, init) => {
+    if (url.endsWith('/me')) return response(personalReader);
+    if (url.endsWith('/topics') && init.method === 'POST') return response({ id: 'reader-topic', reward: 0 });
+    return null;
+  }, { members: false });
+  const form = main.querySelector('[data-community-form="topic"]'); assert.ok(form);
+  form.elements.namedItem('title').value = '个人读者的会员主题';
+  form.elements.namedItem('body').value = '通过真实读者身份发布的会员主题正文。'.repeat(8);
+  form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await turn(); await turn();
+  const write = requests.find(entry => entry.url.endsWith('/topics') && entry.init.method === 'POST'); assert.ok(write, form.querySelector('.community-form-status')?.textContent);
+  assert.equal(JSON.parse(write.init.body).board, 'vip');
+  assert.equal(JSON.parse(write.init.body).owner, undefined);
+  assert.equal(requests.some(entry => /\/manage(?:\/|\?)/.test(entry.url)), false);
+});
+
+test('owner personal reader reply drafts are isolated from the owner identity and restored on return', async t => {
+  let reader = false;
+  const { main, w, ui } = await setup(t, '#/post/p1', (url, init) => {
+    if (url.endsWith('/me')) return response(reader ? personalReader : managementViewer);
+    if (url.endsWith('/browse-mode')) { reader = JSON.parse(init.body).reader; return response({ ok: true }); }
+    return null;
+  });
+  const writeDraft = value => { const field = main.querySelector('[data-community-form="reply"] textarea'); assert.ok(field); field.value = value; field.dispatchEvent(new w.Event('input', { bubbles: true })); };
+  writeDraft('管理身份的草稿'); await ui.setBrowsing(true); await turn();
+  assert.equal(main.querySelector('[data-community-form="reply"] textarea').value, '');
+  writeDraft('个人读者的草稿'); await ui.setBrowsing(false); await turn();
+  assert.equal(main.querySelector('[data-community-form="reply"] textarea').value, '管理身份的草稿');
+  await ui.setBrowsing(true); await turn();
+  assert.equal(main.querySelector('[data-community-form="reply"] textarea').value, '个人读者的草稿');
+  assert.equal(w.location.hash, '#/post/p1');
+});
+
+test('an uncertain personal reader publication blocks identity switching until the same operation is confirmed', async t => {
+  let reader = true, attempts = 0;
+  const notices = [];
+  const { main, w, ui, requests } = await setup(t, '#/post/p1', (url, init) => {
+    if (url.endsWith('/me')) return response(reader ? personalReader : managementViewer);
+    if (url.endsWith('/browse-mode')) { reader = JSON.parse(init.body).reader; return response({ ok: true }); }
+    if (url.endsWith('/topics/p1/replies')) { if (!attempts++) throw Error('response lost'); return response({ id: 'confirmed', reward: 0 }); }
+    return null;
+  }, { notify: value => notices.push(value) });
+  const publish = () => { const form = main.querySelector('[data-community-form="reply"]'); form.elements.namedItem('body').value = '结果需要确认的正式回复。'; form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); };
+  publish(); await turn(); await turn();
+  await ui.setBrowsing(false);
+  assert.equal(requests.some(entry => entry.url.endsWith('/browse-mode')), false);
+  assert.match(notices.at(-1), /提交.*确认|确认.*提交/);
+  publish(); await turn(); await turn();
+  const writes = requests.filter(entry => entry.url.endsWith('/topics/p1/replies'));
+  assert.equal(writes.length, 2);
+  assert.equal(writes[0].init.headers['X-Idempotency-Key'], writes[1].init.headers['X-Idempotency-Key']);
+  await ui.setBrowsing(false); assert.equal(reader, false);
 });
 
 for (const [label, managementRole, vip] of [
@@ -759,7 +856,7 @@ test('redemption retries retain their operation key after a lost response and a 
   assert.notEqual(attempts[2], attempts[0], 'a new deliberate purchase remains possible');
 });
 
-test('switching a moderator perspective preserves an unresolved purchase key for the same actual account', async t => {
+test('a moderator cannot switch perspective until an unresolved purchase is confirmed with its original key', async t => {
   let reader = false;
   const attempts = [];
   const merchandise = { balance: 100, level: 1, owner: false, inventory: {}, decorations: {}, items: [{ id: 'card-makeup', cat: 'card', kind: 'card', ref: 'makeup', name: '补签卡', price: 30, builtin: true, active: true, state: { owned: false, left: null, ok: true, code: 'ok', why: '' } }] };
@@ -787,9 +884,11 @@ test('switching a moderator perspective preserves an unresolved purchase key for
   };
   await purchase(1);
   await ui.setBrowsing(true); await ui.setBrowsing(false);
+  assert.equal(reader, false, 'an uncertain purchase retains its active identity');
   await purchase(2);
   assert.ok(attempts[0]);
   assert.equal(attempts[1], attempts[0], 'changing only the browsing perspective must not create another economic operation');
+  await ui.setBrowsing(true); assert.equal(reader, true);
 });
 
 for (const role of ['owner', 'steward']) test(`a read-only ${role} perspective can browse previous check-in months with its correct identity note and no write requests`, async t => {

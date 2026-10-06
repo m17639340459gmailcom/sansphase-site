@@ -53,19 +53,19 @@ test('self profile edit link stays within the community', () => {
 });
 
 const settle = async () => { for (let n = 0; n < 7; n++) await new Promise(resolve => setTimeout(resolve, 0)); };
-async function controller(t, { delayed = false, rejected = false, preview = false, moderator = false, manage = false } = {}) {
+async function controller(t, { delayed = false, rejected = false, preview = false, interactive = false, moderator = false, manage = false } = {}) {
   const dom = new JSDOM('<main></main>', { url: `http://localhost/#/community/${manage ? 'manage/profiles' : 'profile'}`, pretendToBeVisual: true });
   const w = dom.window;
   const names = ['window', 'document', 'location', 'HTMLElement', 'Element', 'Node', 'HTMLInputElement', 'HTMLTextAreaElement', 'HTMLSelectElement', 'HTMLButtonElement', 'HTMLFormElement', 'HTMLAnchorElement', 'FormData', 'File', 'Event'];
   const previous = new Map(names.map(name => [name, globalThis[name]]));
   for (const name of names) globalThis[name] = name === 'window' ? w : w[name];
   w.scrollTo = () => {};
-  let value = structuredClone({ ...profile, pendingSignature: null, canEditProfile: !preview });
+  let value = structuredClone({ ...profile, pendingSignature: null, canEditProfile: !preview || interactive });
   const calls = []; let release;
   const request = async (url, init = {}) => {
     calls.push({ url, init });
     const response = (data, status = 200) => ({ ok: status === 200, status, json: async () => structuredClone(data) });
-    if (url.endsWith('/me')) return response({ ...person, agreed: true, owner: false, mod: moderator || manage, unread: { all: 0 }, management: preview ? { role: 'owner', browsingAsReader: true } : moderator || manage ? { role: 'steward', browsingAsReader: false } : undefined });
+    if (url.endsWith('/me')) return response({ ...person, agreed: true, owner: false, mod: moderator || manage, unread: { all: 0 }, management: preview ? { role: 'owner', browsingAsReader: true, ...(interactive ? { interactive: true } : {}) } : moderator || manage ? { role: 'steward', browsingAsReader: false } : undefined });
     if (url.endsWith('/manage?tab=profiles')) return response({ owner: false, tab: 'profiles', counts: { queue: 0, reports: 0, orders: 0, sanctions: 0 }, kpis: { topics24h: 0, replies24h: 0 }, profiles: [{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', kind: 'avatar', nickname: '读者', uid: '10001', proposedValue: null, avatarUrl: null, createdAt: '2026-10-07T00:00:00Z' }], backgrounds: [] });
     if (/\/manage\/profiles\/[^/]+\/(approve|reject)$/.test(url)) { if (delayed) await new Promise(resolve => { release = resolve; }); return response({ ok: true }); }
     if (url.endsWith('/profile') && !init.method) return response(value);
@@ -180,6 +180,18 @@ test('reader perspective contains no editable profile forms and never submits a 
   const { main, calls } = await controller(t, { preview: true });
   assert.equal(main.querySelector('[data-community-form]'), null);
   assert.equal(calls.some(call => call.init.method === 'POST'), false);
+});
+
+test('the verified owner personal reader saves signature and owned frame through the normal profile forms', async t => {
+  const { main, calls, submit } = await controller(t, { preview: true, interactive: true });
+  assert.ok(main.querySelector('[data-community-form="profile-avatar"]'));
+  submit('signature', '站长的个人签名'); await settle();
+  const signature = calls.find(call => call.url.endsWith('/profile') && call.init.method === 'POST');
+  assert.deepEqual(JSON.parse(signature.init.body), { signature: '站长的个人签名' });
+  submit('frame'); await settle();
+  assert.ok(calls.some(call => call.url.endsWith('/shop/equip') && call.init.method === 'POST'));
+  assert.equal(calls.some(call => /\/manage(?:\/|\?)/.test(call.url)), false);
+  assert.equal(main.querySelector('[data-profile-return]').getAttribute('href'), '#/community/u/10001');
 });
 
 test('leaving an unsaved community signature asks once and keeps the draft when cancelled', async t => {

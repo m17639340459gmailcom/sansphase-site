@@ -63,11 +63,12 @@ export function createCommunityService(options: ServiceOptions) {
     const live = store!;
     options.assertActive?.(req);
     const me: CommunityAuthor = { kind: viewer.kind, id: viewer.id };
-    const actualOwner = viewer.kind === 'owner';
+    const actualOwner = viewer.kind === 'owner' || viewer.ownerAccountId === ownerMember.id;
     live.members.visit(me);
     const actualModerationBoards = live.members.moderationBoards(me);
     const actualMod = actualOwner || live.members.steward(me) && actualModerationBoards.length > 0;
     const browsingAsReader = actualMod && /(?:^|;\s*)community_browse=reader(?:;|$)/.test(String(req.headers.cookie || ''));
+    const readOnly = browsingAsReader && !viewer.ownerAccountId;
     const ownerReaderPreview = actualOwner && browsingAsReader ? createOwnerReaderPreview() : null;
     const owner = actualOwner && !browsingAsReader;
     const trustLevel = ownerReaderPreview?.trustLevel ?? (browsingAsReader ? 1 : live.members.trustLevel(me));
@@ -84,7 +85,7 @@ export function createCommunityService(options: ServiceOptions) {
       if (!info) return { name: '已注销用户', role: author.kind, uid: null, avatar: null, vip: false, level: 0, growth: null, vipGrowth: null, frame: null, color: null };
       const decorations = live.members.decorations(author);
       const steward = live.members.steward(author);
-      const preview = same(author, me) ? ownerReaderPreview : null;
+      const preview = author.kind === 'reader' && info.ownerReader ? createOwnerReaderPreview() : same(author, me) ? ownerReaderPreview : null;
       const nameEffect = live.economy.nameEffect(decorations.color);
       const canSeeUid = author.kind === 'owner' || same(author, me) || mod();
       return {
@@ -119,7 +120,7 @@ export function createCommunityService(options: ServiceOptions) {
     };
     return {
       req, res, url: new URL(req.url || '', siteOrigin), path, method: req.method || 'GET',
-      viewer, me, live, options, level, trustLevel, owner, canModerateBoard, ownerMember, actualOwner, actualMod, browsingAsReader, ownerReaderPreview,
+      viewer, me, live, options, level, trustLevel, owner, canModerateBoard, ownerMember, actualOwner, actualMod, browsingAsReader, readOnly, ownerReaderPreview,
       get mod() { return mod(); },
       get moderationBoards() { return moderationBoards(); },
       canSeeBoard, hiddenBoard: canSeeBoard(membersBoard) ? '' : membersBoard,
@@ -159,8 +160,8 @@ export function createCommunityService(options: ServiceOptions) {
       if (image.topic_id) {
         const topic = ctx.live.topic(image.topic_id);
         const reply = image.reply_id ? ctx.live.reply(image.reply_id) : null;
-        return Boolean(topic && ctx.canSeeBoard(topic.board) && (!topic.pending && !topic.hidden || ctx.canModerateBoard(topic.board) || !ctx.browsingAsReader && same(topic.author, ctx.me))
-          && (!image.reply_id || reply && (!reply.hidden || ctx.canModerateBoard(topic.board) || !ctx.browsingAsReader && same(reply.author, ctx.me))));
+        return Boolean(topic && ctx.canSeeBoard(topic.board) && (!topic.pending && !topic.hidden || ctx.canModerateBoard(topic.board) || !ctx.readOnly && same(topic.author, ctx.me))
+          && (!image.reply_id || reply && (!reply.hidden || ctx.canModerateBoard(topic.board) || !ctx.readOnly && same(reply.author, ctx.me))));
       }
       return same(ctx.me, { kind: image.uploader_kind, id: image.uploader_id }) || image.purpose === 'shop' && ctx.live.economy.imageVisible(id, ctx.me);
     };
@@ -192,9 +193,19 @@ export function createCommunityService(options: ServiceOptions) {
       try {
         if (!['GET', 'POST'].includes(req.method || '')) throw fail('不支持这个请求。', 405);
         if (!store) throw fail('社区尚未开放。', 503);
-        const viewer = await identify(req);
+        const identified = await identify(req);
         options.assertActive?.(req);
-        if (!viewer) throw fail('请先登录。', 401);
+        if (!identified) throw fail('请先登录。', 401);
+        // The management principal stays in its host session. Only this verified
+        // resolver chooses a personal execution identity; a cookie is not authority.
+        let viewer: CommunityViewer = { kind: identified.kind, id: identified.id, name: identified.name, vip: identified.vip };
+        if (path !== 'browse-mode' && viewer.kind === 'owner' && /(?:^|;\s*)community_browse=reader(?:;|$)/.test(String(req.headers.cookie || ''))) {
+          if (viewer.id !== ownerMember.id) throw fail('作者身份无效。', 401);
+          const personal = await options.ownerReaderIdentity?.(req);
+          options.assertActive?.(req);
+          if (!personal || personal.kind !== 'reader' || !personal.id || personal.id === viewer.id) throw fail('站长的个人读者身份尚未配置或已停用，请返回站长身份。', 503);
+          viewer = { kind: 'reader', id: personal.id, name: personal.name, vip: personal.vip, ownerAccountId: viewer.id };
+        }
         if (req.method === 'GET' && path === 'moderation-contacts') {
           const url = new URL(req.url || '', siteOrigin);
           sendTo(res, await publicModerationContacts(store, ownerMember, people, url.searchParams.get('board') || ''));
@@ -209,7 +220,7 @@ export function createCommunityService(options: ServiceOptions) {
           const avatar = /^avatar\/([0-9a-z]{1,15})\.webp$/.exec(path);
           if (avatar) { await serveAvatar(ctx, avatar[1]); return; }
         } else if (req.headers.origin !== siteOrigin || req.headers['x-reader-request'] !== '1') throw fail('请求来源验证失败，请从本站操作。', 403);
-        if (req.method === 'POST' && ctx.browsingAsReader && !consentExemptPaths.has(path)) throw fail('当前是读者浏览视角，请先返回管理身份再操作。', 403);
+        if (req.method === 'POST' && ctx.readOnly && !consentExemptPaths.has(path)) throw fail('当前是读者浏览视角，请先返回管理身份再操作。', 403);
         ctx.requireConsent();
         for (const routes of [profileRoutes, manageRoutes, contentRoutes, memberRoutes]) if (await routes(ctx)) return;
         throw fail('Not found', 404);

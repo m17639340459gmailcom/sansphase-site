@@ -21,6 +21,7 @@ import { acceptCommunityConvention } from './fixtures/community-convention-conse
 const owner: CommunityAuthor = { kind: 'owner', id: 'owner' };
 const reader: CommunityAuthor = { kind: 'reader', id: 'reader' };
 const steward: CommunityAuthor = { kind: 'reader', id: 'steward' };
+const personal: CommunityAuthor = { kind: 'reader', id: '11111111-1111-4111-8111-111111111111' };
 const cleanup = (directory: string) => rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 let template: string;
 test.before(async () => {
@@ -34,10 +35,11 @@ async function setup(t: TestContext) {
   const directory = await mkdtemp(resolve(tmpdir(), 'community-owner-reader-'));
   await copyFile(resolve(template, 'content.db'), resolve(directory, 'content.db'));
   const store = createCommunityStore(directory);
-  acceptCommunityConvention(store, [owner, reader, steward]);
+  acceptCommunityConvention(store, [owner, reader, steward, personal]);
   store.members.setSteward(steward, true, ['qa']);
-  const profiles = new Map<string, { name: string; uid: string; vip: boolean }>([
+  const profiles = new Map<string, { name: string; uid: string; vip: boolean; ownerReader?: true }>([
     ['owner:owner', { name: '站长', uid: 'owner', vip: true }],
+    [`reader:${personal.id}`, { name: '个人身份', uid: '10008', vip: false, ownerReader: true }],
     ['reader:reader', { name: '真实读者', uid: '10001', vip: false }],
     ['reader:steward', { name: '真实协管', uid: '10002', vip: false }],
   ]);
@@ -54,11 +56,12 @@ async function setup(t: TestContext) {
       const info = profiles.get(`${member.kind}:${member.id}`)!;
       return { ...member, name: info.name, vip: info.vip };
     },
+    ownerReaderIdentity: async req => String(req.headers.cookie).split(';')[0] === 'owner' ? { ...personal, name: '个人身份', vip: false } : null,
     people: async authors => new Map(authors.flatMap(author => {
       const key = `${author.kind}:${author.id}`, profile = profiles.get(key);
       return profile ? [[key, { ...profile, avatar: null, joinedAt: author.kind === 'reader' ? '2026-10-01T00:00:00.000Z' : null, bio: '' }]] : [];
     })),
-    findMember: async uid => uid === 'owner' ? owner : uid === '10001' ? reader : uid === '10002' ? steward : null,
+    findMember: async uid => uid === 'owner' ? owner : uid === '10001' ? reader : uid === '10002' ? steward : uid === '10008' ? personal : null,
   });
   t.after(async () => { await new Promise<void>(done => server.close(() => done())); store.close(); await cleanup(directory); });
   const get = (path: string, identity = 'owner; community_browse=reader') => fetch(`${origin}/api/community/${path}`, { headers: { cookie: identity } });
@@ -80,7 +83,7 @@ test('owner reader perspective uses the same reader DTO with top growth, VIP and
   assert.equal(me.owner, false);
   assert.equal(me.mod, false);
   assert.deepEqual(me.moderationBoards, []);
-  assert.deepEqual(me.management, { role: 'owner', browsingAsReader: true });
+  assert.deepEqual(me.management, { role: 'owner', browsingAsReader: true, interactive: true });
   assert.equal(me.level, 3, 'ordinary trust ends before appointed moderation');
   assert.equal(me.trustLevel, 3);
   assert.equal(me.vip, true);
@@ -106,9 +109,9 @@ test('owner reader perspective uses the same reader DTO with top growth, VIP and
   assert.equal((await json<CommunityShop>('shop')).level, me.trustLevel, 'shop requirements use the same highest ordinary trust projection');
 });
 
-test('only the owner self projection has all aurora badges; other members and public owner stay real', async t => {
+test('owner personal badge presentation is shared while other readers and author identity remain real', async t => {
   const { json } = await setup(t);
-  const self = await json<CommunityMember>('members/owner?tab=badges');
+  const self = await json<CommunityMember>('members/10008?tab=badges');
   assert.equal(self.self, true);
   assert.equal(self.person.role, 'reader');
   assert.equal(self.badgeState?.families.length, communityBadgeFamilies.length);
@@ -150,7 +153,7 @@ test('top owner reader presentation preserves hidden-content and management boun
   const vip = store.createTopic({ board: 'vip', author: owner, title: '会员测试', body: '正式会员可见正文' });
   const thread = await json<CommunityThread>(`topics/${vip.id}`);
   assert.equal(thread.viewer?.level, 3, 'topic controls receive the same highest ordinary trust projection');
-  assert.equal(thread.topic.canReply, false);
+  assert.equal(thread.topic.canReply, true);
   assert.equal(thread.topic.canModerate, false);
   assert.equal(thread.topic.canFeature, false);
   assert.equal(thread.topic.mine, false);
@@ -158,13 +161,16 @@ test('top owner reader presentation preserves hidden-content and management boun
   assert.equal((await get(`topics/${pending.id}`)).status, 404);
   assert.equal((await get(`topics/${hidden.id}`)).status, 404);
   assert.equal((await get('manage')).status, 403);
-  for (const path of ['checkin', 'active/visit', 'topics', 'shop/redeem', 'shop/equip', 'inbox/read-all', 'manage/items'])
-    assert.equal((await post(path)).status, 403, path);
+  assert.equal((await post('manage/items')).status, 403);
+  assert.equal((await post('inbox/read-all')).status, 200);
+  assert.equal((await post('checkin')).status, 200);
+  assert.equal(store.economy.checked(personal), true);
+  assert.equal(store.economy.checked(owner), false);
   assert.equal((await json<CommunityMe>('me', 'owner')).owner, true);
   assert.equal((await get('manage', 'owner')).status, 200);
 });
 
-test('owner preview never fills persistent experience, VIP days, badge honors, stardust or inventory', async t => {
+test('owner presentation never fills persistent experience, VIP days, badge honors, stardust or inventory', async t => {
   const { directory, store, json } = await setup(t);
   await json<CommunityMe>('me', 'owner');
   const tables = ['community_experience_ledger', 'community_experience_visits', 'community_vip_growth_days', 'community_badge_honors', 'community_badge_honor_reviews', 'community_badges', 'community_ledger', 'community_checkins', 'community_inventory', 'community_notifications'];
@@ -177,7 +183,7 @@ test('owner preview never fills persistent experience, VIP days, badge honors, s
   for (let repeat = 0; repeat < 2; repeat++) {
     const me = await json<CommunityMe>('me');
     const levels = await json<CommunityStardust>('stardust');
-    await json<CommunityMember>('members/owner?tab=badges');
+    await json<CommunityMember>('members/10008?tab=badges');
     await json<CommunityCheckin>('checkin');
     assert.equal(me.balance, 0);
     assert.equal(levels.balance, 0);

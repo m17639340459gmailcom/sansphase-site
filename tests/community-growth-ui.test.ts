@@ -140,6 +140,9 @@ test('stardust only invites an eligible real reader to check in, not owners or r
   const readerPage = documentOf(communityStardustHTML({ ...common, stardust: { state: 'ready', data: { ...stardust, checkedIn: false } }, tab: 'ledger' }));
   try { assert.equal(readerPage.window.document.querySelector('.community-banner a[href="#/community/checkin"]')!.textContent, '去签到'); }
   finally { readerPage.window.close(); }
+  const personal = documentOf(communityStardustHTML({ ...common, stardust: { state: 'ready', data: { ...stardust, checkedIn: false, browsingAsReader: true, readOnly: false } }, tab: 'ledger' }));
+  try { assert.equal(personal.window.document.querySelector('.community-banner a[href="#/community/checkin"]')!.textContent, '去签到'); }
+  finally { personal.window.close(); }
 });
 
 

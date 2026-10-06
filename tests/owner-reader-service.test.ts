@@ -1,0 +1,35 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { createServer } from 'node:http';
+import type { IncomingMessage } from 'node:http';
+import type { Payload } from 'payload';
+import { createReaderService } from '../server/reader-service.ts';
+import type { createReaderUidStore } from '../server/reader-uids.ts';
+
+test('owner personal account reuses profile and frame endpoints while ordinary bridge identity stays owner-only',async t=>{
+  const directory=await mkdtemp(resolve(tmpdir(),'owner-reader-http-')),id=randomUUID(),otherId=randomUUID();
+  const row={id,collection:'readers',email:'owner@example.invalid',nickname:'个人读者',signature:'已批准个人签名',avatar:null as string|null,_verified:true,disabled:false,createdAt:'2026-01-01T00:00:00Z'};
+  let ownerActive=true,frame:string|null='gold';
+  const payload={config:{secret:'owner-reader-http-secret-at-least-32-characters'},auth:async()=>({user:null}),findByID:async({id:target}:{id:string})=>{if(target!==id)throw Object.assign(Error('missing'),{status:404});return{...row};},update:async({id:target,data}:{id:string;data:Partial<typeof row>})=>{assert.equal(target,id);Object.assign(row,data);return{...row};}}as unknown as Payload;
+  const authorService={identityStrict:async(req:IncomingMessage)=>ownerActive&&req.headers.cookie==='sansphase_author_session=owner.token'?{name:'品牌作者'}:null,loginCredentials:async()=>({name:'品牌作者'})};
+  const uidStore={get:()=> '100123'}as unknown as ReturnType<typeof createReaderUidStore>;
+  const frames={state:async(readerId:string)=>{assert.equal(readerId,id);return{frame,frameImage:null,items:[],available:true};},equip:async(readerId:string,ref:string|null)=>{assert.equal(readerId,id);frame=ref;return{frame,frameImage:null,items:[],available:true};},image:async()=>Buffer.from('RIFF0000WEBP')};
+  let service:ReturnType<typeof createReaderService>;
+  const server=createServer((req,res)=>void service.handle(req,res));await new Promise<void>(done=>server.listen(0,'127.0.0.1',done));
+  const origin=`http://127.0.0.1:${(server.address()as{port:number}).port}`,cookie='sansphase_author_session=owner.token';
+  service=createReaderService({payload,directory,siteOrigin:origin,authorService,uidStore,frames,ownerReaderId:id});
+  t.after(async()=>{await new Promise<void>(done=>server.close(()=>done()));await rm(directory,{recursive:true,force:true,maxRetries:10,retryDelay:100});});
+  const req={headers:{cookie}}as IncomingMessage;
+  assert.equal(await service.identity(req),null);assert.equal(await service.identityStrict(req),null);
+  const personal=await service.ownerReaderIdentity(req);assert.equal(personal?.id,id);assert.equal(personal?.avatar,null);
+  let response=await fetch(origin+'/api/reader/session',{headers:{cookie}}),state=await response.json();assert.equal(state.id,id);assert.equal(state.nickname,'个人读者');assert.equal(state.frame,'gold');
+  const post=(path:string,body:unknown)=>fetch(origin+'/api/reader/'+path,{method:'POST',headers:{cookie,Origin:origin,'X-Reader-Request':'1','Content-Type':'application/json'},body:JSON.stringify(body)});
+  response=await post('profile',{nickname:'个人新昵称',signature:'待审个人签名',readerId:otherId});assert.equal(response.status,200);state=await response.json();assert.equal(state.id,id);assert.equal(state.signature,'已批准个人签名');assert.equal(state.pendingSignature,'待审个人签名');assert.equal(row.nickname,'个人新昵称');
+  response=await post('frame',{ref:null});assert.equal(response.status,200);assert.equal(frame,null);
+  ownerActive=false;assert.equal((await post('profile',{nickname:'不能写入'})).status,401);assert.equal((await fetch(origin+'/api/reader/session',{headers:{cookie}})).status,200);assert.equal(await service.ownerReaderIdentity(req),null);
+  ownerActive=true;row.disabled=true;assert.equal(await service.ownerReaderIdentity(req),null);assert.equal((await post('avatar/remove',{})).status,401);
+});

@@ -26,6 +26,7 @@ function validEntry(value: unknown): value is PendingWrite {
 export function createCommunityWriteRequest(options: Options) {
   const pending = new Map<string, PendingWrite>();
   const inFlight = new Map<string, Promise<unknown>>();
+  const submissions = new Set<object>();
   let activeIdentity: string | null | undefined;
   let epoch = 0;
   const storage = () => {
@@ -63,9 +64,16 @@ export function createCommunityWriteRequest(options: Options) {
     }
     return id;
   };
-  const clear = () => { epoch++; activeIdentity = undefined; pending.clear(); inFlight.clear(); persist(); };
+  const clear = () => { epoch++; activeIdentity = undefined; pending.clear(); inFlight.clear(); submissions.clear(); persist(); };
+  const hasPending = () => { currentIdentity(); return submissions.size > 0 || pending.size > 0; };
 
   async function send<T>(path: string, body: unknown = {}): Promise<T> {
+    const operation = {};
+    submissions.add(operation);
+    try { return await perform<T>(path, body); }
+    finally { submissions.delete(operation); }
+  }
+  async function perform<T>(path: string, body: unknown): Promise<T> {
     const json = JSON.stringify(body);
     if (typeof json !== 'string') throw failure('提交内容不正确，请检查后重试。');
     const headers: Record<string, string> = { 'Content-Type': 'application/json', 'X-Reader-Request': '1' };
@@ -108,5 +116,5 @@ export function createCommunityWriteRequest(options: Options) {
     inFlight.set(token, request); persist();
     return await request;
   }
-  return { send, clear };
+  return { send, clear, hasPending };
 }

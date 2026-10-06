@@ -18,6 +18,7 @@ export async function publicationFiles(root=resolve('.')) {
   result.push('docs/COMMUNITY-EXPERIENCE-READINESS.md');
   result.push('docs/COMMUNITY-HOSTING.md', 'scripts/start-community.mjs', 'scripts/prepare-community-identity.mjs', 'scripts/backup-community.mjs', 'scripts/restore-community.mjs');
   result.push('scripts/scheduled-community-backup.mjs');
+  result.push('scripts/prepare-owner-reader.mjs');
   result.push('scripts/build-growth-constellation.mjs', 'scripts/growth-constellation.ts', 'docs/COMMUNITY-STARDUST-RULES.md');
   result.push('scripts/build-trust-moon.mjs', 'scripts/trust-moon.ts');
   result.push('scripts/build-vip-badge.mjs', 'scripts/vip-badge.ts', 'scripts/vip-badge-glyphs.ts');

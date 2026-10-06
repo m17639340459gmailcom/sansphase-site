@@ -44,6 +44,23 @@ test('a confirmed success releases the pending key for the next active purchase'
   assert.notEqual(f.calls[0].key, f.calls[1].key);
 });
 
+test('identity switching stays blocked while a protected request is in progress, uncertain or restored after refresh', async () => {
+  const storage = memoryStorage(); let finish!: (value: unknown) => void;
+  let attempt = 0;
+  const f = fixture(async () => { if (!attempt++) return new Promise(resolve => { finish = resolve; }); throw fail(); }, () => storage);
+  const writer = f.create();
+  assert.equal(writer.hasPending(), false);
+  const write = writer.send('shop/redeem', { item: 'card1' });
+  assert.equal(writer.hasPending(), true, 'preparing the request key also belongs to the in-flight operation');
+  while (!finish) await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(f.create().hasPending(), true, 'a reload keeps an unresolved key');
+  finish({}); await write; assert.equal(writer.hasPending(), false);
+  await assert.rejects(writer.send('topics', { body: 'draft' }));
+  assert.equal(writer.hasPending(), true);
+  assert.equal(f.create().hasPending(), true);
+  writer.clear(); assert.equal(writer.hasPending(), false);
+});
+
 for (const status of [0, 500, 503]) test(`an uncertain ${status} result reuses the pending key on retry`, async () => {
   let attempt = 0;
   const f = fixture(async () => { if (!attempt++) throw fail(status); return { order: 'one' }; }); const writer = f.create();

@@ -3,7 +3,7 @@
 
 import {
   communityBoards, boardName, boardHref, postHref, memberHref, stardustHref, inboxHref, shopHref, manageHref, communityHomeHref, rulesHref,
-  avatarHTML, whoHTML, nameHTML, nameLabelHTML, growthChipHTML, levelMarksHTML, roleChipHTML, badgeHTML, cardHead, moreLink, bannerHTML, statsHTML, emptyHTML, communityManagementRole,
+  avatarHTML, whoHTML, nameHTML, nameLabelHTML, growthChipHTML, levelMarksHTML, roleChipHTML, badgeHTML, cardHead, moreLink, bannerHTML, statsHTML, emptyHTML, communityManagementRole, communityReaderReadOnly,
   communityStatusHTML, communityTopicsHTML, communityBodyHTML, relativeTime, beijingTime, readyData, communityLevelName, plainText,
 } from './community.mjs';
 import type { Common, CommunityLoad, CommunityMe, CommunityPerson, CommunityTopic, CommunityUnread, CommunityInventory, CommunityModerationContacts, Translate } from './community.ts';
@@ -39,7 +39,7 @@ export type CommunityEarlyBird = { person: CommunityPerson; at: string };
 export type CommunityMakeup = { used: number; allowed: number; left: number; free: boolean; cards: number; cost: number; days: string[] };
 export type CommunityCheckin = {
   badgeState?: CommunityBadgeState;
-  checkedIn: boolean; streak: number; balance: number; gainedToday: number; behaviourToday: number; vip: boolean; owner?: boolean; browsingAsReader?: boolean; uid?: string | null;
+  checkedIn: boolean; streak: number; balance: number; gainedToday: number; behaviourToday: number; vip: boolean; owner?: boolean; browsingAsReader?: boolean; readOnly?: boolean; uid?: string | null;
   month: string; days: string[]; monthBonus?: number; checkinsToday: number; earlyBirds: CommunityEarlyBird[]; makeup: CommunityMakeup; badges: string[];
 };
 export type CommunityLedgerRow = {
@@ -53,7 +53,7 @@ export type CommunityFlow = "all" | "in" | "out";
 export type CommunityStardust = {
   balance: number; gainedToday: number; behaviourToday: number; dailyCap: number; checkedIn: boolean;
   month: { gained: number; spent: number }; flow: CommunityFlow; ledger: CommunityLedgerRow[];
-  level: number; owner: boolean; steward: boolean; vip?: boolean; browsingAsReader?: boolean; growth?: CommunityGrowthState | null; stats: Record<string, number>; progress: CommunityLevelProgress | null;
+  level: number; owner: boolean; steward: boolean; vip?: boolean; browsingAsReader?: boolean; readOnly?: boolean; growth?: CommunityGrowthState | null; stats: Record<string, number>; progress: CommunityLevelProgress | null;
   experienceCatalogue?: CommunityExperienceCatalogueItem[]; vipCatalogue?: CommunityVIPCatalogueItem[]; vipGrowth?: CommunityVIPGrowthState | null;
 };
 export type CommunityRedeemState = { owned: boolean; left: number | null; ok: boolean; code: string; why: string };
@@ -121,7 +121,7 @@ const pageHead = (eyebrow: string, title: string, text: string, side = "") =>
 /* ---------- 签到 ---------- */
 // 月历：签过的日子点亮；最近 7 天里漏掉的日子可以补签（橙色虚线）。
 function calendarHTML(data: CommunityCheckin, today: string, { t, icons = {} }: Common, owner = false, me: CommunityMe | null = null) {
-  const preview = Boolean(data.browsingAsReader);
+  const preview = data.readOnly ?? Boolean(data.browsingAsReader && (!me || communityReaderReadOnly(me)));
   const [year, month] = data.month.split("-").map(Number);
   const first = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
   const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
@@ -166,7 +166,7 @@ export function communityCheckinHTML({ checkin, me = null, ...common }: Common &
     : managementRole === 'steward' ? t('当前是只读的读者浏览视角；返回版主身份后可以签到。', 'This reader preview is read-only. Restore your moderator perspective to check in.')
     : t('当前是只读的读者浏览视角；请先返回管理身份。', 'This reader preview is read-only. Restore management first.');
   const text = data.owner ? t("站长不参与签到；这里保留签到星图和日历供查看。", "The owner does not check in; the star map and calendar remain viewable.")
-    : data.browsingAsReader ? previewText
+    : (data.readOnly ?? Boolean(data.browsingAsReader && (!me || communityReaderReadOnly(me)))) ? previewText
     : t(`每日签到 +${r.checkinBase} 星尘，自然月满勤额外 +${r.monthBonus}。补签计入满勤，北京时间 0 点换日。`, `Daily check-in +${r.checkinBase} stardust; full calendar month +${r.monthBonus} extra. Make-ups count. Days change at midnight Beijing time.`);
   const early = data.earlyBirds.length
     ? `<ol class="community-rank">${data.earlyBirds.map((bird, i) => `<li><span class="community-hot-rank${i < 3 ? " is-top" : ""}">${i + 1}</span>${avatarHTML(bird.person, common, "sm")}${whoHTML(bird.person, common)}<span class="community-rank-count">${esc(beijingTime(bird.at).slice(6))}</span></li>`).join("")}</ol>`
@@ -257,7 +257,7 @@ export function communityStardustHTML({ stardust, tab, levelSelection, ...common
   const tabs: Array<[string, string]> = [[stardustHref(), t("明细", "Ledger")], [stardustHref("levels"), t("等级", "Levels")], [stardustHref("rules"), t("规则", "Rules")]];
   const index = String(["ledger", "levels", "rules"].indexOf(tab));
   const body = tab === "levels" ? communityLevelExplorerHTML(data, common, levelSelection) : tab === "rules" ? stardustRulesHTML(common) : ledgerHTML(data, common);
-  const showCheckin = !data.owner && !data.browsingAsReader && !data.checkedIn;
+  const showCheckin = !data.owner && !(data.readOnly ?? data.browsingAsReader) && !data.checkedIn;
   const text = t(`今天获得 <b>${data.gainedToday}</b> 星尘，行为星尘 <b>${data.behaviourToday} / ${data.dailyCap}</b>。${showCheckin ? "今天还没签到。" : ""}`, `+<b>${data.gainedToday}</b> today; <b>${data.behaviourToday} / ${data.dailyCap}</b> from activity.${showCheckin ? " Not checked in yet." : ""}`);
   return `<section class="page community-page" data-community="stardust" data-tab="${esc(tab)}">`
     + bannerHTML({ eyebrow: "STARDUST", title: t("我的星尘", "My stardust"), text, esc, html: true, side: statsHTML([[t("余额", "Balance"), data.balance]]) + (showCheckin ? `<a class="community-button is-gold is-small" href="#/community/checkin">${icons.calendar || ""}${t("去签到", "Check in")}</a>` : "") })

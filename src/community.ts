@@ -221,7 +221,7 @@ export type CommunityModerationContacts = { items: CommunityModerationContactPer
 export type CommunityMe = CommunityPerson & {
   badgeState?: CommunityBadgeState;
   convention?: { version: string; agreed: boolean };
-  management?: { role: 'owner' | 'steward'; browsingAsReader: boolean } | null;
+  management?: { role: 'owner' | 'steward'; browsingAsReader: boolean; interactive?: true } | null;
   moderationContact?: CommunityModerationContact | null;
   owner: boolean; mod: boolean; trustLevel?: number; balance: number; checkedIn: boolean; streak: number;
   nextReward: { total: number; bonus: number }; gainedToday: number; behaviourToday: number; dailyCap: number;
@@ -507,6 +507,14 @@ export function communityManagementRole(me: CommunityMe | null | undefined) {
   return me?.management === undefined && me?.mod ? me.owner ? 'owner' : 'steward' : null;
 }
 
+// A real owner-linked reader can act as that reader. Other browsing
+// perspectives remain previews, including malformed mixed-role responses.
+export function communityReaderReadOnly(me: CommunityMe | null | undefined) {
+  const management = me?.management;
+  return Boolean(management?.browsingAsReader && !(management.role === 'owner' && management.interactive === true
+    && me?.role === 'reader' && me.uid && !me.owner && !me.mod));
+}
+
 // 右上角：通知铃铛和个人入口。兑换和返回主站沿用左侧导航入口。
 export function communityAccountHTML({ t, esc, icons, nickname, author, me = null, ownerAvatar = null, communityOnly = false }: AccountOptions) {
   const common: Common = { t, esc, icons, ownerAvatar };
@@ -523,7 +531,7 @@ export function communityAccountHTML({ t, esc, icons, nickname, author, me = nul
       + item(stardustHref(), "star", t("我的星尘", "My stardust"), `<span class="community-menu-num">${me.balance}</span>`)
       + item(inboxHref(), "bell", t("通知", "Notifications"), unread ? `<span class="community-menu-badge">${unread > 99 ? "99+" : unread}</span>` : "")
       + item("#/community/bookmarks", "bookmark", t("我的收藏", "Bookmarks"))
-      + (managementRole && !browsingAsReader ? item(manageHref(), "shield", t("管理台", "Management"), me.manageTodo ? `<span class="community-menu-badge">${me.manageTodo > 99 ? "99+" : me.manageTodo}</span>` : "") : "")
+      + ((me.owner || me.mod) && !browsingAsReader ? item(manageHref(), "shield", t("管理台", "Management"), me.manageTodo ? `<span class="community-menu-badge">${me.manageTodo > 99 ? "99+" : me.manageTodo}</span>` : "") : "")
       + (managementRole ? `<button type="button" role="menuitem" data-action="community-browse-mode" data-reader="${!browsingAsReader}">${icons.eye || ''}<span>${browsingAsReader ? managementRole === 'owner' ? t('返回作者身份', 'Restore owner perspective') : t('返回版主身份', 'Restore moderator perspective') : t('以读者身份浏览', 'Browse as a reader')}</span></button>` : '')
     : signedIn ? item("#/community/bookmarks", "bookmark", t("我的收藏", "Bookmarks")) : "";
   const account = author
@@ -601,7 +609,7 @@ type HomeOptions = Common & { summary: CommunityLoad<CommunitySummary>; list: Co
 // 横幅里的签到胶囊：没签到时直接签，签过了去签到页。
 function checkinPill(me: CommunityMe | null, { t, icons = {} }: Common) {
   if (!me || me.owner || me.role === 'owner') return "";
-  if (me.management?.browsingAsReader) return '';
+  if (communityReaderReadOnly(me)) return '';
   if (!me.checkedIn) return `<div class="community-ck-pill is-todo"><span class="community-ck-dot" aria-hidden="true"></span><span>${t(`今天还没签到 · 签到后连签 ${me.streak + 1} 天 <b>+${me.nextReward.total}</b>`, `Not checked in today · check in for a ${me.streak + 1}-day streak <b>+${me.nextReward.total}</b>`)}</span><button type="button" class="community-button is-gold is-small" data-action="community-checkin">${icons.star || ""}${t("签到", "Check in")}</button></div>`;
   return `<a class="community-ck-pill is-done" href="#/community/checkin">${icons.check || ""}<span>${t(`已连续签到 <b>${me.streak}</b> 天 · 明天 +${me.nextReward.total}`, `<b>${me.streak}</b>-day streak · +${me.nextReward.total} tomorrow`)}</span>${icons["chevron-right"] || ""}</a>`;
 }

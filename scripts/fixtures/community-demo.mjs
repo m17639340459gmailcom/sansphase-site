@@ -14,6 +14,7 @@ import { migrateCommunity } from '../../server/payload/community-migration.ts';
 import { createCommunityStore } from '../../server/community-store.ts';
 import { createCommunityService } from '../../server/community-service.ts';
 import { createCommunityPreviewProfile } from './community-preview-profile.ts';
+import { createCommunityFrameAuthority } from '../../server/community-frame-authority.ts';
 import { communityBoards } from '../../src/community.mjs';
 
 // Sample members: nickname, public UID, VIP, days since joining, signature and level (null: computed).
@@ -27,6 +28,7 @@ const people = {
   spam: { name: '广告号', uid: '10007', vip: false, days: 1, bio: '', level: 0 },
 };
 const ownerName = '無相';
+export const previewOwnerReaderId = 'ffffffff-ffff-4fff-8fff-fffffffffff8';
 const member = (id) => id === 'owner' ? { kind: 'owner', id: 'owner' } : { kind: 'reader', id };
 const palettes = [['#1c2a4a', '#d9c49c'], ['#3b1f3a', '#e7a9c6'], ['#12343a', '#8fd0c8'], ['#2a2440', '#c9b6f2']];
 
@@ -51,7 +53,7 @@ export async function createCommunityDemo({ simplePosting = true, visualDemo = f
   const store = createCommunityStore(directory, { previewCatalog: true });
   const now = Date.now();
   const at = (minutesAgo) => new Date(now - minutesAgo * 60000).toISOString();
-  const joinedDays = id => visualDemo && id === 'demo' ? 180 : visualDemo && id === 'linjian' ? 500 : people[id].days;
+  const joinedDays = id => id === previewOwnerReaderId ? 0 : visualDemo && id === 'demo' ? 180 : visualDemo && id === 'linjian' ? 500 : people[id].days;
   const images = async (author, count, offset) => {
     const ids = [];
     for (let i = 0; i < count; i++) {
@@ -207,10 +209,19 @@ export async function createCommunityDemo({ simplePosting = true, visualDemo = f
       chosen.map(topic => ({ topicId: topic.id, title: '', cover: null })), bannerAccess);
   }
 
-  const byUid = new Map(Object.entries(people).map(([id, info]) => [info.uid, member(id)]));
-  const profiles = createCommunityPreviewProfile(directory, people);
+  // A distinct sample reader backs the owner's personal identity. Its balance,
+  // inventory, visits and achievement history start empty; display privileges
+  // come from the same owner-reader marker used by the production service.
+  const profilePeople = { ...people, [previewOwnerReaderId]: { name: '無相·个人', uid: '10008', vip: true, days: 0, bio: '这是我的个人资料。', ownerReader: true } };
+  const byUid = new Map(Object.entries(profilePeople).map(([id, info]) => [info.uid, member(id)]));
+  const profiles = createCommunityPreviewProfile(directory, profilePeople, { ownerReaderId: previewOwnerReaderId });
+  const frames = createCommunityFrameAuthority({ store, directory });
   const serviceFor = (siteOrigin) => createCommunityService({
     store, siteOrigin, directory, ownerId: 'owner', simplePosting, profile: profiles.access,
+    ownerReaderIdentity: async req => {
+      const reader = await profiles.ownerReaderIdentity(req);
+      return reader ? { kind: 'reader', id: reader.id, name: reader.nickname, vip: reader.vip } : null;
+    },
     identify: async (req) => {
       const as = /(?:^|;\s*)preview_as=([a-z]+)/.exec(String(req.headers.cookie || ''))?.[1] || 'demo';
       if (as === 'owner') return { kind: 'owner', id: 'owner', name: ownerName, vip: true };
@@ -219,12 +230,12 @@ export async function createCommunityDemo({ simplePosting = true, visualDemo = f
     },
     people: async (authors) => new Map(authors.flatMap((author) => {
       if (author.kind === 'owner') return [[`owner:${author.id}`, { name: ownerName, uid: 'owner', avatar: null, vip: true, joinedAt: null, bio: '' }]];
-      const info = people[author.id];
+      const info = profilePeople[author.id];
       const current = profiles.publicRow(author.id);
-      return info ? [[`reader:${author.id}`, { name: info.name, uid: info.uid, avatar: current?.avatar ? `/api/community/avatar/${info.uid}.webp?v=${current.avatar}` : null, vip: info.vip, joinedAt: at(joinedDays(author.id) * 24 * 60), bio: current?.signature ?? info.bio }]] : [];
+      return info ? [[`reader:${author.id}`, { name: current?.nickname ?? info.name, uid: info.uid, avatar: current?.avatar ?? null, vip: info.vip, joinedAt: at(joinedDays(author.id) * 24 * 60), bio: current?.signature ?? info.bio, ...(info.ownerReader ? { ownerReader: true } : {}) }]] : [];
     })),
     findMember: async (uid) => uid === 'owner' ? member('owner') : byUid.get(uid) || null,
-    findByNames: async (names) => new Map([...Object.entries(people).map(([id, info]) => [info.name, member(id)]), [ownerName, member('owner')]].filter(([name]) => names.includes(name))),
+    findByNames: async (names) => new Map([...Object.entries(profilePeople).map(([id, info]) => [profiles.publicRow(id)?.nickname ?? info.name, member(id)]), [ownerName, member('owner')]].filter(([name]) => names.includes(name))),
     avatarFile: profiles.avatarFile,
     audit: async () => {},
     words: ['赌博'],
@@ -235,6 +246,19 @@ export async function createCommunityDemo({ simplePosting = true, visualDemo = f
     service(port) {
       const services = new Map([`127.0.0.1:${port}`, `localhost:${port}`].map((host) => [host, serviceFor(`http://${host}`)]));
       return { handle: (req, res) => (services.get(req.headers.host) || services.get(`127.0.0.1:${port}`)).handle(req, res) };
+    },
+    readerService(port) {
+      const services = new Map([`127.0.0.1:${port}`, `localhost:${port}`].map(host => [host, profiles.readerService(`http://${host}`, frames)]));
+      const service = req => services.get(req.headers.host) || services.get(`127.0.0.1:${port}`);
+      return { registrationEnabled: false, identity: req => service(req).identity(req), displayIdentity: req => service(req).displayIdentity(req), handle: (req, res) => service(req).handle(req, res) };
+    },
+    authorService: {
+      identity: async req => /(?:^|;\s*)preview_as=owner(?:;|$)/.test(String(req.headers.cookie || '')) ? { name: ownerName } : null,
+      async handle(req, res) {
+        const session = req.method === 'GET' && String(req.url || '').split('?')[0] === '/api/author/session';
+        res.writeHead(session ? 200 : 404, { 'Content-Type': 'application/json', 'Cache-Control': 'private, no-store' });
+        res.end(JSON.stringify(session ? await this.identity(req) : { error: '本地样例不开放品牌编辑。' }));
+      },
     },
     close() {
       store.close();

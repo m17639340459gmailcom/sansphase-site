@@ -4,7 +4,7 @@
 // 页面 HTML 由 community.ts、community-post.ts 和 community-pages.ts 生成；这里先用缓存立即渲染，再在路由变化时刷新。
 import {
   communityRoute, communityHomeHTML, communityBoardsHTML, communityBoardHTML, communityTagHTML, communityBookmarksHTML,
-  communityBodyHTML, communityBoards, communityRules, communitySearchLimit, isCommunitySort, boardHref, postHref, readyData, imageLimit, avatarHTML, nameLabelHTML, communityManagementRole,
+  communityBodyHTML, communityBoards, communityRules, communitySearchLimit, isCommunitySort, boardHref, postHref, readyData, imageLimit, avatarHTML, nameLabelHTML, communityManagementRole, communityReaderReadOnly,
 } from './community.mjs';
 import type {
   CommunityLoad, CommunityListing, CommunitySort, CommunitySummary, CommunityRoute, CommunityMe, CommunityPerson, CommunityModerationContact, CommunityModerationContacts, Escape, Translate,
@@ -99,6 +99,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   const banners = new Map<string, CommunityLoad<CommunityBannerConfig>>();
   const bannerRequests = new Map<string, Promise<void>>();
   let frameIdentity = 0;
+  let paintedAccount: string | null = null;
   let browseRequest = 0;
   let switchingBrowseMode = false;
   let me: CommunityLoad<CommunityMe> | null = null;
@@ -186,12 +187,20 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   const draftPrefix = 'sansphase:community:draft:';
   const memoryDrafts = new Map<string, string>();
   const storage = () => { try { return window.localStorage; } catch { return null; } };
-  const draftKey = (kind: 'compose' | 'reply', id: string) => `${draftPrefix}${kind}:${id}`;
-  const readDraft = <T>(key: string): T | null => {
+  const draftIdentity = () => {
+    const current = readyData(me);
+    return current?.uid ? `${current.role}:${current.uid}` : null;
+  };
+  const draftKey = (kind: 'compose' | 'reply', id: string) => {
+    const identity = draftIdentity();
+    return identity ? `${draftPrefix}${encodeURIComponent(identity)}:${kind}:${id}` : null;
+  };
+  const readDraft = <T>(key: string | null): T | null => {
+    if (!key) return null;
     try { const raw = memoryDrafts.get(key) || storage()?.getItem(key); return raw ? JSON.parse(raw) as T : null; } catch { const raw = memoryDrafts.get(key); return raw ? JSON.parse(raw) as T : null; }
   };
-  const writeDraft = (key: string, value: unknown) => { const raw = JSON.stringify(value); memoryDrafts.set(key, raw); try { storage()?.setItem(key, raw); } catch { /* storage is optional */ } };
-  const removeDraft = (key: string) => { memoryDrafts.delete(key); try { storage()?.removeItem(key); } catch { /* storage is optional */ } };
+  const writeDraft = (key: string | null, value: unknown) => { if (!key) return; const raw = JSON.stringify(value); memoryDrafts.set(key, raw); try { storage()?.setItem(key, raw); } catch { /* storage is optional */ } };
+  const removeDraft = (key: string | null) => { if (!key) return; memoryDrafts.delete(key); try { storage()?.removeItem(key); } catch { /* storage is optional */ } };
   type SavedComposeDraft = { board: string; title: string; body: string; tags: string[]; bounty: number };
   const draftHasText = (value: SavedComposeDraft | { body: string } | null) => Boolean(value && (value.body.trim() || ('title' in value && value.title.trim()) || ('tags' in value && value.tags.length) || ('bounty' in value && value.bounty)));
   const hasUnsavedDraft = (hash = location.hash) => {
@@ -212,7 +221,19 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     go(hash);
   };
 
+  const businessWrites = new Map<object, number>();
   async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const writing = init.method === 'POST' && path !== 'browse-mode';
+    const operation = {};
+    if (writing) businessWrites.set(operation, frameIdentity);
+    try {
+      const viewer = readyData(me);
+      if (writing && /^manage(?:\/|\?|$)/.test(path) && (!(viewer?.owner || viewer?.mod) || viewer.management?.browsingAsReader))
+        throw Object.assign(Error(tr('请先返回管理身份。', 'Restore management first.')), { status: 403 });
+      return await requestAPI<T>(path, init);
+    } finally { businessWrites.delete(operation); }
+  }
+  async function requestAPI<T>(path: string, init: RequestInit): Promise<T> {
     let response: Response;
     try { response = await request('/api/community/' + path, { credentials: 'same-origin', ...init }); }
     catch { throw Object.assign(new Error('网络连接失败，请稍后重试。'), { status: 0 }); }
@@ -242,7 +263,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   let activeVisitRetryAt = 0;
   async function recordActiveVisit(): Promise<boolean> {
     const current = readyData(me), view = route().view;
-    if (!mounted || mounted.main.ownerDocument.visibilityState !== 'visible' || !current?.uid || current.role !== 'reader' || current.owner || current.management?.browsingAsReader || !current.agreed || current.convention?.agreed === false || !current.growth?.configured || view === 'unknown' || view === 'landing') return false;
+    if (!mounted || mounted.main.ownerDocument.visibilityState !== 'visible' || !current?.uid || current.role !== 'reader' || current.owner || communityReaderReadOnly(current) || !current.agreed || current.convention?.agreed === false || !current.growth?.configured || view === 'unknown' || view === 'landing') return false;
     const identity = frameIdentity;
     const key = `${current.uid}:${new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10)}`;
     if (key === activeVisitDone) return false;
@@ -416,7 +437,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   async function loadThread(id: string) { await assignLoad(`topics/${enc(id)}`, threads.get(id), value => { threads.set(id, value); }); }
   const members = (ctx = mounted?.ctx) => {
     const viewer = readyData(me);
-    if (viewer?.management?.browsingAsReader) return viewer.management.role === 'owner' && viewer.vip === true;
+    if (communityReaderReadOnly(viewer)) return viewer?.management?.role === 'owner' && viewer.vip === true;
     return Boolean(ctx?.members || viewer?.vip || viewer?.owner || (viewer?.mod && viewer.moderationBoards?.includes('vip')));
   };
   function loadsFor(current: CommunityRoute): Array<() => Promise<void>> {
@@ -487,7 +508,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   // The page for the current route, from what is cached; null outside the pages this module owns.
   function pageHTML(ctx: CommunityContext) {
     const identity = readyData(me);
-    const canPostMembers = !identity?.management?.browsingAsReader && Boolean(ctx.members || identity?.vip || identity?.owner);
+    const canPostMembers = !communityReaderReadOnly(identity) && Boolean(ctx.members || identity?.vip || identity?.owner);
     ctx = { ...ctx, members: members(ctx) };
     const current = route();
     const common = { t: ctx.t, esc: ctx.esc, icons: ctx.icons, ownerAvatar: ctx.ownerAvatar ?? null, showTopicCovers: ctx.simpleCompose, meForSort: identity };
@@ -689,7 +710,9 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const template = document.createElement('template');
     template.innerHTML = markup;
     const next = template.content.firstElementChild as HTMLElement;
-    for (const field of section.querySelectorAll<Field>('input[name], textarea[name], select[name]')) {
+    const currentAccount = draftIdentity();
+    const sameAccount = currentAccount !== null && paintedAccount === currentAccount;
+    for (const field of sameAccount ? section.querySelectorAll<Field>('input[name], textarea[name], select[name]') : []) {
       const sourceForm = field.closest('form');
       const form = sourceForm?.dataset.communityForm;
       // Banner values are keyed by scope and item in the controller. Copying
@@ -746,6 +769,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     }
     const fieldScroll = new Map([...section.querySelectorAll<HTMLElement>('textarea[id]')].map(field => [field.id, field.scrollTop]));
     for (const editor of editors.values()) {
+      if (!sameAccount) continue;
       if (!section.contains(editor.root)) continue;
       const nextEditor = next.querySelector<HTMLTextAreaElement>(`[id=${quoted(editor.field.id)}]`)?.closest<HTMLElement>('[data-inline-editor]');
       if (!nextEditor || nextEditor.closest('form')?.dataset.id !== editor.field.form?.dataset.id) continue;
@@ -761,6 +785,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       next.style.minHeight = `${Math.ceil(documentPosition.height)}px`;
     }
     section.replaceWith(next);
+    paintedAccount = currentAccount;
     for (const field of next.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input[name], textarea[name]')) { count(field); autosize(field); }
     for (const id of previews) { const button = next.querySelector<HTMLButtonElement>(`[data-action="community-md-preview"][data-for=${quoted(id)}]`); if (button) togglePreview(button, true); }
     const current = route();
@@ -1592,7 +1617,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (switchingBrowseMode) { notify(tr('正在切换浏览身份，请稍候。', 'Switching browsing perspective; please wait.')); return; }
     const { action, id = '', kind } = target.dataset;
     if (route().view === 'manage' && ['community-ship', 'community-reject', 'community-queue-delete', 'community-batch-reject', 'community-uphold'].includes(action || '')) managementOpener = { action: action!, id };
-    if (readyData(me)?.management?.browsingAsReader && ![
+    if (communityReaderReadOnly(readyData(me)) && ![
       'community-browse-mode', 'community-sort', 'community-more', 'community-search-clear', 'community-retry', 'community-reply-sort',
       'community-lightbox', 'community-post-menu', 'community-copy-link', 'community-copy-prompt', 'community-copy-delivery',
       'community-delivery', 'community-delivery-close', 'community-month', 'community-flow', 'community-notice',
@@ -1600,6 +1625,12 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     ].includes(action || '')) {
       notify(tr('当前预览仅供查看，请先返回管理身份。', 'This preview is read-only. Restore management first.')); return;
     }
+    if (readyData(me)?.management?.browsingAsReader && [
+      'community-pin', 'community-feature', 'community-lock', 'community-approve', 'community-batch-approve', 'community-batch-reject',
+      'community-restore', 'community-queue-delete', 'community-move', 'community-management-board', 'community-profile-review',
+      'community-mute', 'community-steward', 'community-steward-edit', 'community-lift', 'community-ship', 'community-reject',
+      'community-cancel-order', 'community-item-edit', 'community-uphold', 'community-dismiss',
+    ].includes(action || '')) { notify(tr('请先返回管理身份。', 'Restore management first.')); return; }
     if (bannerEditor.action(target)) return;
     if (levelExplorer.action(target)) return;
     if (badgeExplorer.action(target)) return;
@@ -1784,7 +1815,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       case 'community-notice': {
         const href = target.dataset.href || '';
         void act(target, async () => {
-          if (!readyData(me)?.management?.browsingAsReader) {
+          if (!communityReaderReadOnly(readyData(me))) {
             await send('inbox/read', { id });
             inboxes.clear();
           }
@@ -1906,7 +1937,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (!form || !mounted) return;
     event.preventDefault();
     if (switchingBrowseMode) { status(form, tr('正在切换浏览身份，请稍候。', 'Switching browsing perspective; please wait.')); return; }
-    if (readyData(me)?.management?.browsingAsReader && form.dataset.communityForm !== 'search') { status(form, tr('请先返回管理身份。', 'Restore management first.')); return; }
+    if (communityReaderReadOnly(readyData(me)) && form.dataset.communityForm !== 'search') { status(form, tr('请先返回管理身份。', 'Restore management first.')); return; }
     if (form.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled) return;
     if (bannerEditor.submit(form)) return;
     const handlers: Record<string, (form: Form) => unknown> = {
@@ -2199,6 +2230,10 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       notify(tr('只有作者和版主可以切换浏览身份。', 'Only owners and moderators can switch browsing perspectives.'));
       return;
     }
+    if (writeRequests.hasPending() || [...businessWrites.values()].includes(frameIdentity)) {
+      notify(tr('还有提交尚未确认，请先重试原操作并确认结果，再切换身份。', 'A submission is still unconfirmed. Retry it and confirm the result before switching identities.'));
+      return;
+    }
     // Existing-content edits and product forms have no independent saved
     // draft. Do not discard them when their write permissions disappear.
     if (route().view === 'profile' && hasUnsavedDraft() || reader && (bannerEditor.dirty() || bannerEditor.state().busy || mounted?.main.querySelector('form[data-community-form="topic"][data-edit], form[data-community-form="reply-edit"], form[data-community-form="item"]'))) {
@@ -2211,8 +2246,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     try {
       await send('browse-mode', { reader });
       if (identity !== frameIdentity) return;
-      // The actual account has not changed. Preserve unresolved writes so a
-      // later retry cannot become a second purchase after changing perspective.
+      // Switching is allowed only after writes are confirmed. Keep request
+      // ownership intact; the writer reconciles the next reader identity.
       clearData(false);
       identity = frameIdentity;
       operation = browseRequest;
@@ -2252,6 +2287,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     // Called after each render of a community page; returns the cleanup for the next render.
     mount(main: HTMLElement, ctx: CommunityContext) {
       mounted = { main, ctx };
+      paintedAccount = draftIdentity();
       main.addEventListener('click', onClick);
       main.addEventListener('submit', onSubmit);
       main.addEventListener('input', onInput);

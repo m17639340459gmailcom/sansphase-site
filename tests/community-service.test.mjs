@@ -19,6 +19,7 @@ import { acceptCommunityConvention } from './fixtures/community-convention-conse
 const avatarId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const allModerationBoards = communityBoards.map(board => board.id);
 const members = {
+  p1: { name: '無相', uid: 'u6', vip: false, ownerReader: true },
   r1: { name: "林间", uid: "u1", vip: false, avatar: avatarId, bio: "喜欢画画" },
   r2: { name: "远山", uid: "u2", vip: false },
   r3: { name: "新人", uid: "u3", vip: false },
@@ -69,9 +70,10 @@ async function setup(t, { store: withStore = true, simplePosting = false, useDef
       const id = cookies.get('reader');
       return members[id] ? { kind: "reader", id, name: members[id].name, vip: members[id].vip } : null;
     },
+    ownerReaderIdentity: async req => /(?:^|;\s*)owner=yes(?:;|$)/.test(String(req.headers.cookie || '')) ? {kind:'reader',id:'p1',name:members.p1.name,vip:false} : null,
     people: async (authors) => new Map(authors.flatMap((author) => {
       const info = author.kind === "owner" ? { name: "無相", uid: "owner", vip: true } : members[author.id];
-      return info ? [[`${author.kind}:${author.id}`, { name: info.name, uid: info.uid, avatar: info.avatar || null, vip: info.vip, joinedAt: author.kind === "owner" ? null : "2026-01-01T00:00:00.000Z", bio: info.bio || "" }]] : [];
+      return info ? [[`${author.kind}:${author.id}`, { name: info.name, uid: info.uid, avatar: info.avatar || null, vip: info.vip, joinedAt: author.kind === "owner" ? null : "2026-01-01T00:00:00.000Z", bio: info.bio || "", ...(info.ownerReader ? {ownerReader:true} : {}) }]] : [];
     })),
     findMember: async (uid) => authorOf(uid),
     findByNames: async (names) => new Map([...Object.entries(members).map(([id, m]) => [m.name, { kind: "reader", id }]), ["無相", { kind: "owner", id: "owner" }]].filter(([name]) => names.includes(name))),
@@ -307,7 +309,7 @@ test('moderation deletion requires a reason, stores it and tells the author', as
   finally { db.close(); }
 });
 
-test('owner and steward reader perspective retains identity and rejects writes until restored', async t => {
+test('owner switches to a distinct interactive reader while steward perspective stays read-only', async t => {
   const { post, get, upload } = await setup(t);
   await post('members/u5/steward', { on: true, boards: allModerationBoards }, 'owner=yes');
   for (const identity of ['owner=yes', 'reader=s1']) {
@@ -322,7 +324,8 @@ test('owner and steward reader perspective retains identity and rejects writes u
     assert.equal(during.mod, false);
     assert.equal(during.management.browsingAsReader, true);
     assert.equal((await get('manage', cookie)).status, 403);
-    assert.equal((await post('shop/redeem', { item: 'card-makeup' }, cookie)).status, 403);
+    assert.equal((await post('shop/redeem', { item: 'card-makeup' }, cookie)).status, identity === 'owner=yes' ? 402 : 403, 'a personal reader has no gifted balance or manager exemption');
+    assert.equal(during.uid, identity === 'owner=yes' ? 'u6' : before.uid);
     assert.equal((await post('browse-mode', { reader: false }, cookie)).status, 200);
     assert.equal((await get('manage', identity)).status, 200);
   }
@@ -335,7 +338,7 @@ test('owner and steward reader perspective retains identity and rejects writes u
   const preview = await (await get(`topics/${work.id}`, 'owner=yes; community_browse=reader')).json();
   assert.equal(preview.topic.meta.prompt, null, 'reader perspective masks the owner-only prompt');
   assert.equal(preview.topic.mine, false);
-  assert.equal(preview.topic.canReply, false);
+  assert.equal(preview.topic.canReply, true);
 });
 
 test('check-in reads distinguish manager preview from a reader and preserve real author eligibility', async t => {
@@ -354,8 +357,9 @@ test('check-in reads distinguish manager preview from a reader and preserve real
     assert.equal(stardust.owner, false, 'the preview shows reader progression without adding earned account state');
     assert.equal(stardust.browsingAsReader, true, 'stardust identifies a read-only moderator perspective');
     assert.deepEqual([(await json(get('stardust', identity))).owner, (await json(get('stardust', identity))).browsingAsReader], [owner, false]);
-    assert.equal((await post('checkin', {}, cookie)).status, 403);
-    assert.equal((await post('checkin/makeup', { day: '2026-09-29' }, cookie)).status, 403);
+    assert.equal(preview.readOnly, !owner);
+    assert.equal((await post('checkin', {}, cookie)).status, owner ? 200 : 403);
+    if (!owner) assert.equal((await post('checkin/makeup', { day: '2026-09-29' }, cookie)).status, 403);
   }
   assert.equal((await post('checkin', {}, 'owner=yes')).status, 403);
   assert.equal(store.ledger.balance({ kind: 'owner', id: 'owner' }), 0);
@@ -445,7 +449,7 @@ test('thank request keys replay once and never grant permissions after a role or
   credit('owner', 100);
   const ownerHeaders = { 'X-Idempotency-Key': 'owner-redeem-000001' };
   assert.equal((await post('shop/redeem', { item: 'card-highlight' }, 'owner=yes', ownerHeaders)).status, 201);
-  assert.equal((await post('shop/redeem', { item: 'card-highlight' }, 'owner=yes; community_browse=reader', ownerHeaders)).status, 403, 'a cached result cannot bypass read-only preview');
+  assert.equal((await post('shop/redeem', { item: 'card-highlight' }, 'owner=yes; community_browse=reader', ownerHeaders)).status, 402, 'a different real execution identity cannot replay the owner inventory grant or bypass its own balance');
 });
 
 test('economic actions share durable action throttling while completed request replay consumes no quota', async t => {
@@ -507,7 +511,7 @@ test('growth DTOs settle real experience independently of currency, earned trust
   assert.equal(moderator.trustLevel, 1);
   assert.equal(moderator.mod, true);
   assert.deepEqual((await json(get('me', 'owner=yes'))).growth, null, 'the real author does not display reader growth');
-  assert.equal((await json(get('stardust', 'owner=yes; community_browse=reader'))).growth.level, 10, 'the read-only owner perspective displays the highest growth title');
+  assert.equal((await json(get('stardust', 'owner=yes; community_browse=reader'))).growth.level, 10, 'the real owner personal identity retains its approved highest growth presentation');
   store.deleteTopic(topic.id);
   assert.deepEqual((await json(get('me'))).growth, { ...emptyGrowth, points: 10, remaining: 1190, progress: 10 / 1200 }, 'content reversal retains valid login experience');
 });

@@ -22,8 +22,9 @@ import { createCommunityRuntime } from '../community-runtime.ts';
 import { createIdentityAuthority } from '../community-identity-authority.ts';
 import { createIdentityClient } from '../community-identity-protocol.ts';
 import { createIdentityStore } from '../community-identity-store.ts';
+import { readOwnerReaderId } from '../owner-reader.ts';
 export type MainCommunityIdentitySettings = { communityOrigin: 'https://community.sansphase.com'; bridgeSecret: string; stateEncryptionKey: string };
-type RuntimeSettings = {directory: string; secret: string; siteOrigin: string; sourceURL: string; authorId: string; smtp?: unknown; push?: boolean; communityEnabled?: boolean; communityIdentity?: unknown};
+type RuntimeSettings = {directory: string; secret: string; siteOrigin: string; sourceURL: string; authorId: string; ownerReaderId?: string; smtp?: unknown; push?: boolean; communityEnabled?: boolean; communityIdentity?: unknown};
 
 export function readMainCommunityIdentitySettings(settings: Pick<RuntimeSettings, 'secret' | 'communityIdentity'>): MainCommunityIdentitySettings | null {
   const config = settings.communityIdentity;
@@ -41,6 +42,7 @@ export async function createPayloadRuntime(
   const settings = JSON.parse(await readFile(resolve(configPath), "utf8")) as RuntimeSettings;
   settings.directory = resolve(settings.directory);
   settings.siteOrigin = process.env.SITE_ORIGIN || settings.siteOrigin;
+  const ownerReaderId = readOwnerReaderId(settings);
   const bridgeSettings = readMainCommunityIdentitySettings(settings);
   if (bridgeSettings) {
     // Fail before opening the account runtime if explicit state preparation is
@@ -67,11 +69,12 @@ export async function createPayloadRuntime(
   const options = { ...settings, url: settings.sourceURL, store, loginLedger };
   const authorService=createAuthorService(options);
   const frames = bridgeSettings ? createCommunityFrameClient({ origin: bridgeSettings.communityOrigin, secret: bridgeSettings.bridgeSecret }) : undefined;
-  const readerService=createReaderService({payload,siteOrigin:settings.siteOrigin,directory:settings.directory,emailReady:smtpConfigured(settings.smtp),authorService,loginLedger,uidStore,workflow,profileCommands,frames});
+  const readerService=createReaderService({payload,siteOrigin:settings.siteOrigin,directory:settings.directory,emailReady:smtpConfigured(settings.smtp),authorService,loginLedger,uidStore,workflow,profileCommands,frames,ownerReaderId});
   const community = createCommunityRuntime({
     payload, directory: settings.directory, siteOrigin: settings.siteOrigin, authorId: settings.authorId, uidStore,
     readerIdentity: readerService.identity,
-    profile: createLocalCommunityProfileAccess({ commands: profileCommands, readerIdentity: readerService.identityStrict, ownerIdentity: req => authorService.identityStrict(req), ownerId: settings.authorId }),
+    ownerReaderIdentity: readerService.ownerReaderIdentity, ownerReaderId,
+    profile: createLocalCommunityProfileAccess({ commands: profileCommands, readerIdentity: readerService.identityStrict, ownerReaderIdentity: readerService.ownerReaderIdentity, ownerIdentity: req => authorService.identityStrict(req), ownerId: settings.authorId }),
     ownerIdentity: req => authorService.identity(req),
     ownerName: async () => {
       const found = await payload.find({ collection: 'site_profile', limit: 1, depth: 0, overrideAccess: true });
@@ -83,6 +86,7 @@ export async function createPayloadRuntime(
     directory: settings.directory, siteOrigin: settings.siteOrigin, communityOrigin: bridgeSettings.communityOrigin,
     ownerId: settings.authorId, secret: bridgeSettings.bridgeSecret, stateEncryptionKey: bridgeSettings.stateEncryptionKey,
     readerIdentity: readerService.identityStrict, ownerIdentity: req => authorService.identityStrict(req),
+    ownerReaderIdentity: readerService.ownerReaderIdentity,
     profiles: profileCommands,
     profileReviewer: createCommunityProfileReviewerClient({ origin: bridgeSettings.communityOrigin, secret: bridgeSettings.bridgeSecret }),
     ...community.directory,
@@ -95,7 +99,7 @@ export async function createPayloadRuntime(
     community.purgeReaderData(id, workflow.queueFile);
     if (identityAuthority) await identityAuthority.purgeReaderData(id);
   };
-  const readerRetention = createReaderRetention({ payload: payload as unknown as Parameters<typeof createReaderRetention>[0]['payload'], directory: settings.directory, uidStore, loginLedger, workflow, mediaRetention, purgeCommunity });
+  const readerRetention = createReaderRetention({ payload: payload as unknown as Parameters<typeof createReaderRetention>[0]['payload'], directory: settings.directory, uidStore, loginLedger, workflow, mediaRetention, purgeCommunity, ownerReaderId });
   return {
     payload,
     store,

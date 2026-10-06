@@ -17,7 +17,7 @@ const flag = (body: Body) => body.on !== false;
 // 发帖后可以编辑多久：站长不限，观测以上 30 天，其他 24 小时。
 const editWindow = (ctx: Ctx) => ctx.owner ? Infinity : ctx.level >= 2 ? r.editWindowDaysL2 * 24 * 3600 * 1000 : r.editWindowHours * 3600 * 1000;
 const canEdit = (ctx: Ctx, author: CommunityAuthor, createdAt: string) =>
-  !ctx.browsingAsReader && (ctx.owner || (same(ctx.me, author) && Date.now() - Date.parse(createdAt) < editWindow(ctx)));
+  !ctx.readOnly && (ctx.owner || (same(ctx.me, author) && Date.now() - Date.parse(createdAt) < editWindow(ctx)));
 function assertNotMuted(ctx: Ctx) {
   const muted = ctx.live.members.muted(ctx.me);
   if (muted) throw fail(`你被禁言到 ${new Date(Date.parse(muted.until) + 8 * 3600e3).toISOString().slice(0, 16).replace('T', ' ')}，原因：${muted.reason}。`, 403);
@@ -26,7 +26,7 @@ const canParticipateBoard = (ctx: Ctx, board: string) => board !== 'vip' || ctx.
 // A topic the viewer may see: pending and hidden ones only for their author and moderators.
 function visibleTopic(ctx: Ctx, id: string) {
   const topic = ctx.live.topic(id);
-  if (!topic || !ctx.canSeeBoard(topic.board) || ((topic.pending || topic.hidden) && !ctx.canModerateBoard(topic.board) && (ctx.browsingAsReader || !same(topic.author, ctx.me))))
+  if (!topic || !ctx.canSeeBoard(topic.board) || ((topic.pending || topic.hidden) && !ctx.canModerateBoard(topic.board) && (ctx.readOnly || !same(topic.author, ctx.me))))
     throw fail('帖子不存在，或已被删除。', 404);
   return topic;
 }
@@ -34,7 +34,7 @@ function visibleReply(ctx: Ctx, id: string) {
   const reply = ctx.live.reply(id);
   if (!reply) throw fail('回复不存在，或已被删除。', 404);
   const topic = visibleTopic(ctx, reply.topicId);
-  if (reply.hidden && !ctx.canModerateBoard(topic.board) && (ctx.browsingAsReader || !same(reply.author, ctx.me)))
+  if (reply.hidden && !ctx.canModerateBoard(topic.board) && (ctx.readOnly || !same(reply.author, ctx.me)))
     throw fail('回复不存在，或已被删除。', 404);
   return { reply, topic };
 }
@@ -51,9 +51,9 @@ async function threadDTO(ctx: Ctx, id: string) {
   const quoted = new Map(topic.replies.map(reply => [reply.id, reply]));
   const authors = [topic.author, ...topic.replies.map(reply => reply.author), ...related.flatMap(item => [item.author, ...(item.lastReply ? [item.lastReply.author] : [])])];
   const map = await ctx.people(authors);
-  const isAuthor = !ctx.browsingAsReader && same(me, topic.author);
+  const isAuthor = !ctx.readOnly && same(me, topic.author);
   const target = { kind: 'topic' as const, id: topic.id };
-  const visibleReplyText = topic.replies.filter(reply => !reply.hidden || canModerate || !ctx.browsingAsReader && same(reply.author, me)).map(reply => reply.body);
+  const visibleReplyText = topic.replies.filter(reply => !reply.hidden || canModerate || !ctx.readOnly && same(reply.author, me)).map(reply => reply.body);
   const names = [...new Set([topic.body, ...visibleReplyText].flatMap(text => [...text.matchAll(/@([\p{Script=Han}A-Za-z0-9_\-·]{1,30})/gu)].map(match => match[1])))];
   const mentioned = names.length && ctx.options.findByNames ? await ctx.options.findByNames(names.slice(0, 30)) : new Map<string, CommunityAuthor>();
   const mentionMap = await ctx.people([...mentioned.values()]);
@@ -62,7 +62,7 @@ async function threadDTO(ctx: Ctx, id: string) {
   const mentions = Object.fromEntries([...mentioned].map(([name, member]) => [name, mentionMap.get(memberKey(member))?.uid || null]).filter(([, uid]) => uid));
   const replies = topic.replies.map(reply => {
     const replyTarget = { kind: 'reply' as const, id: reply.id };
-    const mine = !ctx.browsingAsReader && same(me, reply.author), byTopicAuthor = same(reply.author, topic.author);
+    const mine = !ctx.readOnly && same(me, reply.author), byTopicAuthor = same(reply.author, topic.author);
     const hiddenFromViewer = reply.hidden && !mine && !canModerate;
     const quote = reply.quoteId ? quoted.get(reply.quoteId) : null;
     return {
@@ -71,7 +71,7 @@ async function threadDTO(ctx: Ctx, id: string) {
       edited: reply.edited, likes: reply.likes, liked: live.liked(replyTarget, me), thanked: live.thanked(replyTarget, me), thanks: live.thanks(replyTarget),
       byTopicAuthor, accepted: topic.acceptedReplyId === reply.id, mine, hidden: reply.hidden,
       quote: quote && !(quote.hidden && !canModerate) ? { id: quote.id, author: ctx.person(quote.author, map).name, excerpt: [...quote.body].slice(0, 80).join('') } : null,
-      canDelete: !ctx.browsingAsReader && (canModerate || mine), deleteReasonRequired: canModerate, canEdit: canEdit(ctx, reply.author, reply.createdAt), canRestore: canModerate && reply.hidden,
+      canDelete: !ctx.readOnly && (canModerate || mine), deleteReasonRequired: canModerate, canEdit: canEdit(ctx, reply.author, reply.createdAt), canRestore: canModerate && reply.hidden,
       canAccept: topic.board === 'qa' && isAuthor && !topic.acceptedReplyId && !byTopicAuthor && !reply.hidden,
     };
   });
@@ -86,9 +86,9 @@ async function threadDTO(ctx: Ctx, id: string) {
       ...(ctx.options.simplePosting ? { rawTitle: topic.rawTitle } : {}),
       liked: live.liked(target, me), bookmarked: live.bookmarked(topic.id, me), bookmarks: topic.bookmarks,
       thanked: live.thanked(target, me), thanks: topic.thanks, mine: isAuthor,
-      canDelete: !ctx.browsingAsReader && (canModerate || isAuthor), deleteReasonRequired: canModerate, canEdit: canEdit(ctx, topic.author, topic.createdAt), canModerate, canFeature: ctx.owner,
-      canRetag: !ctx.browsingAsReader && (ctx.trustLevel >= 3 || canModerate), canPaidPin: isAuthor && (topic.board === 'showcase' || topic.board === 'tools') && !topic.paidPin,
-      canHighlight: isAuthor && !topic.glow, canReply: !ctx.browsingAsReader && canParticipateBoard(ctx, topic.board) && !topic.locked && !muted && !topic.pending,
+      canDelete: !ctx.readOnly && (canModerate || isAuthor), deleteReasonRequired: canModerate, canEdit: canEdit(ctx, topic.author, topic.createdAt), canModerate, canFeature: ctx.owner,
+      canRetag: !ctx.readOnly && (ctx.trustLevel >= 3 || canModerate), canPaidPin: isAuthor && (topic.board === 'showcase' || topic.board === 'tools') && !topic.paidPin,
+      canHighlight: isAuthor && !topic.glow, canReply: !ctx.readOnly && canParticipateBoard(ctx, topic.board) && !topic.locked && !muted && !topic.pending,
       meta: meta && {
         tools: meta.tools, model: meta.model, usage: meta.usage, promptMode: meta.promptMode, price: meta.price,
         prompt: promptVisible ? meta.prompt : null, preview: !promptVisible && meta.prompt && meta.promptMode === 'paid' ? maskPrompt(meta.prompt) : null,

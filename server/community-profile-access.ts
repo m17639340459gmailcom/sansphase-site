@@ -17,13 +17,20 @@ export type CommunityProfileAccess = {
 type Options = {
   commands: ReaderProfileCommands;
   readerIdentity: (req: IncomingMessage) => Promise<{id:string} | null>;
+  ownerReaderIdentity?: (req: IncomingMessage) => Promise<{id:string} | null>;
   ownerIdentity: (req: IncomingMessage) => Promise<unknown>;
   ownerId: string;
 };
 const denied = () => Object.assign(Error('当前身份没有修改或审核这类资料的权限。'), { status: 403 });
 /** Same-host adapter; the independent HK host supplies the equivalent finite bridge adapter. */
-export function createLocalCommunityProfileAccess({ commands, readerIdentity, ownerIdentity, ownerId }: Options): CommunityProfileAccess {
-  const reader = async (req: IncomingMessage) => { const identity = await readerIdentity(req); if (!identity) throw denied(); return identity.id; };
+export function createLocalCommunityProfileAccess({ commands, readerIdentity, ownerReaderIdentity, ownerIdentity, ownerId }: Options): CommunityProfileAccess {
+  const reader = async (req: IncomingMessage) => {
+    const identity = await readerIdentity(req);
+    if (identity) return identity.id;
+    const asReader = /(?:^|;\s*)community_browse=reader(?:;|$)/.test(String(req.headers.cookie || ''));
+    const personal = asReader ? await ownerReaderIdentity?.(req) : null;
+    if (!personal) throw denied(); return personal.id;
+  };
   const guardReader = (req: IncomingMessage, id: string) => async () => { if (await reader(req) !== id) throw denied(); };
   const reviewer = async (req: IncomingMessage, moderation: CommunityProfileModeration, check: Guard) => {
     check();

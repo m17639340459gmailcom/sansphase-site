@@ -8,7 +8,7 @@ const avatarSizeLabel = uploadSizeLabel(readerImageBytes);
 
 type ReaderMode = 'login' | 'register' | 'forgot' | 'verify';
 type ReaderIdentity = {
-  uid?: string; nickname: string; email: string; phone?: string; signature?: string;
+  uid?: string; nickname: string; email: string; phone?: string; signature?: string; ownerReader?: true;
   pendingSignature?: string | null; pendingAvatar?: boolean; avatar?: string | null;
   frame?: string | null; frameImage?: string | null;
   vip?: boolean; vipUntil?: string | null; reviewPending?: boolean; role?: string; message?: string;
@@ -30,10 +30,11 @@ function rememberRegistration(email: string, requestId: string) {
   } catch { /* Registration can continue when browser storage is unavailable. */ }
 }
 let returnTo = '#/notes';
-const field = (name: string, label: string, type: string, autocomplete: string, extra = '', english = false) => {
+const field = (name: string, label: string, type: string, autocomplete: string, extra = '', english = false, required = true) => {
   if (type === 'password') return `<div class="reader-field"><label for="reader-password">${label}</label><div class="reader-password-field"><input id="reader-password" name="${name}" type="password" autocomplete="${autocomplete}" ${extra} required><button class="reader-password-toggle" type="button" data-reader-password-toggle aria-controls="reader-password" aria-pressed="false" aria-label="${english ? 'Show password' : '显示密码'}" title="${english ? 'Show password' : '显示密码'}"><svg class="reader-eye-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg><svg class="reader-eye-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M10.6 6.1A11.4 11.4 0 0 1 12 6c6.4 0 10 6 10 6a13 13 0 0 1-3.1 3.5M6.3 6.3C3.5 8.2 2 12 2 12s3.6 6 10 6a10.8 10.8 0 0 0 4.3-.9"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2M3 3l18 18"/></svg></button></div></div>`;
-  return `<label class="reader-field"><span>${label}</span><input name="${name}" type="${type}" autocomplete="${autocomplete}" ${extra} required></label>`;
+  return `<label class="reader-field"><span>${label}</span><input name="${name}" type="${type}" autocomplete="${autocomplete}" ${extra}${required ? ' required' : ''}></label>`;
 };
+const optionalOwnerPhone = (reader: ReaderIdentity | null) => reader?.ownerReader === true && !String(reader.phone || '').trim();
 const submit = (label: string) => `<button class="button reader-primary" type="submit">${label}</button>`;
 const shell = (body: string, english: boolean, variant = '') => `<section class="page reader-page"><div class="reader-card reader-card--auth ${variant}"><div class="reader-visual" aria-hidden="true"><span class="reader-visual-brand">無相 <i></i> SANSPHASE</span><div class="reader-visual-copy"><span class="reader-visual-symbol">✦</span><strong>${english ? 'A space to keep<br>exploring.' : '星光之下，<br>继续探索。'}</strong><span>${english ? 'Works · Notes · Library' : '作品 · 资料 · 资源中心'}</span></div></div><div class="reader-content"><div class="reader-topline"><span class="eyebrow">SANSPHASE / ACCOUNT</span><a href="#/notes" class="reader-exit">${english ? '← Read the blog' : '← 返回博客'}</a></div>${body}</div></div></section>`;
 
@@ -54,7 +55,7 @@ export function readerPage(page: string, id: string, reader: ReaderIdentity | nu
   // Old emailed links never auto-activate an account. Verification needs a code.
   if (page === 'verify') mode = 'verify';
   if (page === 'reset') return shell(`<div class="reader-heading"><span class="reader-kicker">PASSWORD RESET</span><h1>${tr('设置新密码', 'Set a new password')}</h1></div><form data-reader-form="reset" data-token="${esc(id)}">${field('password', tr('新密码（至少 8 个字符）', 'New password (at least 8 characters)'), 'password', 'new-password', 'minlength="8" maxlength="128"', english)}${submit(tr('保存新密码', 'Save new password'))}</form><p data-reader-message role="status"></p>`, english);
-  if (owner) return shell(`<div class="reader-heading"><span class="reader-kicker">OWNER ACCOUNT</span><h1>${tr('作者账号', 'Owner account')}</h1><p>${tr('已以作者身份登录：', 'Signed in as the owner: ')}${esc(owner.name || tr('作者', 'Owner'))}</p><p>${tr('进入作者台编辑和发布内容，也可从作者台管理读者账号。', 'Open the author studio to publish content and manage reader accounts.')}</p></div><button type="button" class="button reader-primary reader-gate-action" data-author-login>${tr('进入作者台', 'Open author studio')} <span aria-hidden="true">↗</span></button>`, english);
+  if (owner && !reader) return shell(`<div class="reader-heading"><span class="reader-kicker">OWNER ACCOUNT</span><h1>${tr('作者账号', 'Owner account')}</h1><p>${tr('已以作者身份登录：', 'Signed in as the owner: ')}${esc(owner.name || tr('作者', 'Owner'))}</p><p>${tr('进入作者台编辑和发布内容，也可从作者台管理读者账号。', 'Open the author studio to publish content and manage reader accounts.')}</p></div><button type="button" class="button reader-primary reader-gate-action" data-author-login>${tr('进入作者台', 'Open author studio')} <span aria-hidden="true">↗</span></button>`, english);
   if (reader) {
     const initial = Array.from(String(reader.nickname || '').trim())[0] || '✦';
     const signature = reader.signature ? esc(reader.signature) : `<span class="reader-profile-empty">${tr('还没有填写个性签名', 'No signature yet')}</span>`;
@@ -64,7 +65,7 @@ export function readerPage(page: string, id: string, reader: ReaderIdentity | nu
     const frameOverlay = frame.image ? `<img class="reader-profile-frame-image" src="${esc(frame.image)}" alt="" aria-hidden="true" decoding="async">` : '';
     const avatarControl = `<div class="reader-avatar-anchor" data-reader-frame-owner="${esc(readerFrameOwner(reader))}"><button class="reader-profile-avatar${frame.className ? ` ${frame.className}` : ''}" type="button" data-reader-avatar-trigger aria-label="${tr('修改头像', 'Edit avatar')}" aria-expanded="false" aria-controls="reader-avatar-panel"><span aria-hidden="true">${avatarFace}</span>${frameOverlay}</button><div class="reader-avatar-panel" id="reader-avatar-panel" data-reader-avatar-panel role="group" aria-label="${tr('头像设置', 'Avatar settings')}" hidden><strong>${tr('修改头像', 'Edit avatar')}</strong><p>${reader.pendingAvatar ? tr('新头像正在审核，当前头像会保持显示。', 'The new avatar is pending review; the current one remains visible.') : tr(`JPG、PNG 或 WebP，最多 ${avatarSizeLabel}；审核通过后更新。请勿包含手机号、微信号或二维码。`, `JPG, PNG or WebP, up to ${avatarSizeLabel}. Updated after review. Do not include phone numbers, WeChat contacts or QR codes.`)}</p><input type="file" accept="image/jpeg,image/png,image/webp" data-reader-avatar-file hidden><div class="reader-avatar-actions"><button type="button" data-reader-avatar-pick>${tr(avatar ? '更换图片' : '上传图片', avatar ? 'Change image' : 'Upload image')}</button>${avatar || reader.pendingAvatar ? `<button type="button" data-reader-avatar-remove>${tr(avatar ? '恢复默认' : '取消待审核', avatar ? 'Use default' : 'Cancel pending')}</button>` : ''}</div><p data-reader-avatar-message role="status" aria-live="polite"></p>${readerFrameSettingsHTML(english)}</div></div>`;
     const profileCard = `<section class="reader-profile-card${reader.vip ? ' reader-profile-card--vip' : ''}" aria-label="${tr('个人资料卡', 'Profile card')}"><div class="reader-profile-card-head"><span>${tr('个人资料', 'PROFILE')}</span><span class="reader-profile-status${reader.vip ? ' reader-profile-status--vip' : ''}">${reader.vip ? `<span aria-hidden="true">✦</span> ${tr('VIP 会员', 'VIP MEMBER')}` : tr('普通读者', 'Reader')}</span></div><div class="reader-profile-person">${avatarControl}<div><strong>${esc(reader.nickname)}</strong><span class="reader-account-uid">UID ${esc(reader.uid || '—')}</span></div></div><p class="reader-profile-signature">${signature}</p><dl class="reader-profile-facts"><div><dt>${tr('登录邮箱', 'Email')}</dt><dd>${esc(reader.email)}</dd></div>${reader.vip && reader.vipUntil ? `<div><dt>${tr('会员有效至', 'VIP until')}</dt><dd>${esc(new Date(reader.vipUntil).toLocaleString(english ? 'en-US' : 'zh-CN'))}</dd></div>` : ''}</dl></section>`;
-    const profileForm = `<form class="reader-profile-form" data-reader-form="profile">${field('nickname', tr('昵称（2–8 个字符）', 'Nickname (2–8 characters)'), 'text', 'nickname', `data-reader-nickname minlength="2" maxlength="128" value="${esc(reader.nickname)}"`)}<label class="reader-field"><span>${tr('个性签名', 'Signature')}</span><input name="signature" type="text" maxlength="100" autocomplete="off" placeholder="${tr('写一句介绍自己或记录此刻的心情', 'A few words about yourself')}" aria-describedby="reader-signature-hint" value="${esc(reader.pendingSignature ?? reader.signature ?? '')}"><small id="reader-signature-hint">${reader.pendingSignature !== null && reader.pendingSignature !== undefined ? tr('当前修改待审核；上方仍显示已通过的个签。', 'Pending review; the card still shows the approved signature.') : tr('最多 100 字，可留空；审核通过后生效。请勿填写手机号或微信号。', 'Up to 100 characters. Changes appear after review. Do not include phone or WeChat contacts.')}</small></label>${field('phone', tr('中国大陆手机号（11 位，未经短信验证）', 'Mainland China mobile number (11 digits, not SMS-verified)'), 'tel', 'tel', `data-reader-phone inputmode="numeric" pattern="1[3-9][0-9]{9}" minlength="11" maxlength="11" value="${esc(reader.phone || '')}"`)}${submit(tr('保存资料', 'Save profile'))}</form>`;
+    const profileForm = `<form class="reader-profile-form" data-reader-form="profile">${field('nickname', tr('昵称（2–8 个字符）', 'Nickname (2–8 characters)'), 'text', 'nickname', `data-reader-nickname minlength="2" maxlength="128" value="${esc(reader.nickname)}"`)}<label class="reader-field"><span>${tr('个性签名', 'Signature')}</span><input name="signature" type="text" maxlength="100" autocomplete="off" placeholder="${tr('写一句介绍自己或记录此刻的心情', 'A few words about yourself')}" aria-describedby="reader-signature-hint" value="${esc(reader.pendingSignature ?? reader.signature ?? '')}"><small id="reader-signature-hint">${reader.pendingSignature !== null && reader.pendingSignature !== undefined ? tr('当前修改待审核；上方仍显示已通过的个签。', 'Pending review; the card still shows the approved signature.') : tr('最多 100 字，可留空；审核通过后生效。请勿填写手机号或微信号。', 'Up to 100 characters. Changes appear after review. Do not include phone or WeChat contacts.')}</small></label>${field('phone', tr('中国大陆手机号（11 位，未经短信验证）', 'Mainland China mobile number (11 digits, not SMS-verified)'), 'tel', 'tel', `data-reader-phone inputmode="numeric" pattern="1[3-9][0-9]{9}" minlength="11" maxlength="11" value="${esc(reader.phone || '')}"`, false, !optionalOwnerPhone(reader))}${submit(tr('保存资料', 'Save profile'))}</form>`;
     return shell(`<div class="reader-heading reader-heading--profile"><span class="reader-kicker">YOUR SPACE</span><h1>${tr('我的账号', 'My account')}</h1><p>${tr('管理你的个人资料与阅读身份。', 'Manage your profile and reading identity.')}</p></div>${profileCard}${renderMembership(reader,english)}<div class="reader-profile-edit-title"><div><h2>${tr('编辑个人资料', 'Edit profile')}</h2><p>${tr('个签和头像需审核通过后更新上方资料卡。', 'Signature and avatar changes appear after approval.')}</p></div></div>${profileForm}<p data-reader-message role="status"></p><button class="reader-quiet-link" type="button" data-reader-logout>${tr('退出登录', 'Sign out')}</button>`, english, 'reader-card--profile');
   }
   if (!registrationEnabled && ['forgot', 'verify'].includes(mode)) mode = 'login';
@@ -91,6 +92,12 @@ export function readerPage(page: string, id: string, reader: ReaderIdentity | nu
 export function mountReaderUI({ render, onIdentity, english = () => false, onLogout, readIdentity = () => null }: { render: ReaderRender; onIdentity: (reader: ReaderIdentity | null) => void; english?: () => boolean; onLogout?: () => Promise<void>; readIdentity?: () => ReaderIdentity | null }) {
   const tr = (zh: string, en: string) => english() ? en : zh;
   const membershipClock = mountMembershipClock(document, english);
+  let identityEpoch = 0;
+  const invalidateIdentity = () => { identityEpoch++; };
+  document.defaultView?.addEventListener('reader:identity', invalidateIdentity);
+  document.defaultView?.addEventListener('author:identity', invalidateIdentity);
+  const identityStamp = () => ({ epoch: identityEpoch, owner: readerFrameOwner(readIdentity()) });
+  const currentIdentity = (stamp: ReturnType<typeof identityStamp>) => stamp.epoch === identityEpoch && stamp.owner === readerFrameOwner(readIdentity());
   const checkPhone = (input: HTMLInputElement) => input.setCustomValidity(input.value && !/^1[3-9]\d{9}$/.test(input.value) ? tr('请输入正确的手机号', 'Enter a valid mainland China mobile number') : '');
   const checkNickname = (input: HTMLInputElement) => input.setCustomValidity(input.value && !validReaderNickname(input.value.trim().normalize('NFC')) ? tr('昵称需为 2 至 8 个可见字符', 'Nickname must contain 2–8 visible characters') : '');
   const syncResend = () => {
@@ -98,8 +105,8 @@ export function mountReaderUI({ render, onIdentity, english = () => false, onLog
     if (button) button.disabled = Date.now() < resendAfter;
   };
   const startResendCooldown = () => { resendAfter = Date.now() + 60000; syncResend(); window.setTimeout(syncResend, 60000); };
-  async function api<T = ApiResult>(path: string, body: Record<string, unknown>): Promise<T> {
-    const response = await fetch('/api/reader/' + path, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', 'X-Reader-Request': '1' }, body: JSON.stringify(body) });
+  async function api<T = ApiResult>(path: string, body: Record<string, unknown>, namespace: 'reader' | 'author' = 'reader'): Promise<T> {
+    const response = await fetch('/api/' + namespace + '/' + path, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', [namespace === 'author' ? 'X-Author-Request' : 'X-Reader-Request']: '1' }, body: JSON.stringify(body) });
     const value = await response.json() as T & { error?: string };
     if (!response.ok) throw new Error(value.error || tr('操作失败，请稍后重试。', 'Please try again later.'));
     return value;
@@ -108,7 +115,11 @@ export function mountReaderUI({ render, onIdentity, english = () => false, onLog
     const reader = readIdentity();
     if (reader) { reader.frame = state.frame; reader.frameImage = state.frameImage; }
   } });
-  const profileIdentity = (value: ReaderIdentity) => onIdentity(retainReaderFrame(value, readIdentity()));
+  const profileIdentity = (value: ReaderIdentity, stamp: ReturnType<typeof identityStamp>) => {
+    if (!currentIdentity(stamp)) return false;
+    onIdentity(retainReaderFrame(value, readIdentity()));
+    return true;
+  };
   const message = (value: string) => { const target = document.querySelector('[data-reader-message]'); if (target) target.textContent = value; };
   const avatarMessage = (value: string) => { const target = document.querySelector('[data-reader-avatar-message]'); if (target) target.textContent = value; };
   const profileDirty = () => [...(document.querySelector('[data-reader-form="profile"]')?.querySelectorAll<HTMLInputElement>('input') || [])].some(input => input.value !== input.defaultValue);
@@ -161,15 +172,24 @@ export function mountReaderUI({ render, onIdentity, english = () => false, onLog
     const removeAvatar = target.closest<HTMLButtonElement>('[data-reader-avatar-remove]');
     if (removeAvatar) {
       if (profileDirty()) { avatarMessage(tr('请先保存其他资料，再恢复默认头像。', 'Save your other profile changes first.')); return; }
+      const identity = identityStamp();
       removeAvatar.disabled = true;
-      try { profileIdentity(await api('avatar/remove', {})); avatarMessage(tr('已恢复默认头像。', 'Default avatar restored.')); }
-      catch (error) { avatarMessage(errorMessage(error)); removeAvatar.disabled = false; }
+      try { if (profileIdentity(await api('avatar/remove', {}), identity)) avatarMessage(tr('已恢复默认头像。', 'Default avatar restored.')); }
+      catch (error) { if (currentIdentity(identity)) { avatarMessage(errorMessage(error)); removeAvatar.disabled = false; } }
       return;
     }
     if (target.closest('[data-reader-logout]')) {
       if (onLogout) { await onLogout(); return; }
-      try { await api('logout', {}); onIdentity(null); location.hash = '#/notes'; }
-      catch (error) { message(errorMessage(error)); }
+      const identity = identityStamp();
+      try {
+        const ownerReader = readIdentity()?.ownerReader === true;
+        await api('logout', {}, ownerReader ? 'author' : 'reader');
+        if (!currentIdentity(identity)) return;
+        invalidateIdentity();
+        if (ownerReader) window.dispatchEvent(new CustomEvent('author:identity', { detail: null }));
+        onIdentity(null); location.hash = '#/notes';
+      }
+      catch (error) { if (currentIdentity(identity)) message(errorMessage(error)); }
     }
     const resend = target.closest<HTMLButtonElement>('[data-reader-resend-code]');
     if (resend && !resend.disabled) {
@@ -204,6 +224,7 @@ export function mountReaderUI({ render, onIdentity, english = () => false, onLog
       avatarMessage(tr(`请选择不超过 ${avatarSizeLabel} 的 JPG、PNG 或 WebP 图片。`, `Choose a JPG, PNG or WebP image up to ${avatarSizeLabel}.`)); return;
     }
     const button = document.querySelector<HTMLButtonElement>('[data-reader-avatar-pick]');
+    const identity = identityStamp();
     if (button) button.disabled = true;
     avatarMessage(tr('头像上传中…', 'Uploading avatar…'));
     try {
@@ -211,9 +232,8 @@ export function mountReaderUI({ render, onIdentity, english = () => false, onLog
       const response = await fetch('/api/reader/avatar', { method: 'POST', credentials: 'same-origin', headers: { 'X-Reader-Request': '1' }, body: form });
       const value = await response.json() as ApiResult;
       if (!response.ok) throw new Error(value.error || tr('上传失败，请重试。', 'Upload failed. Please try again.'));
-      profileIdentity(value);
-      avatarMessage(tr('头像已提交审核；通过后会自动更新。', 'Avatar submitted for review and will update after approval.'));
-    } catch (error) { avatarMessage(errorMessage(error)); if (button) button.disabled = false; }
+      if (profileIdentity(value, identity)) avatarMessage(tr('头像已提交审核；通过后会自动更新。', 'Avatar submitted for review and will update after approval.'));
+    } catch (error) { if (currentIdentity(identity)) { avatarMessage(errorMessage(error)); if (button) button.disabled = false; } }
   });
   document.addEventListener('submit', async event => {
     const form = (event.target as Element | null)?.closest<HTMLFormElement>('[data-reader-form]');
@@ -224,8 +244,18 @@ export function mountReaderUI({ render, onIdentity, english = () => false, onLog
     const values: Record<string, unknown> = Object.fromEntries(new FormData(form));
     const name = form.querySelector<HTMLInputElement>('[data-reader-nickname]');
     if (name) { checkNickname(name); if (!name.reportValidity()) return; }
+    if (action === 'profile') {
+      const phone = form.querySelector<HTMLInputElement>('[data-reader-phone]');
+      if (phone) {
+        phone.required = !optionalOwnerPhone(readIdentity());
+        checkPhone(phone);
+        if (!phone.reportValidity()) return;
+        if (!phone.required && !phone.value) delete values.phone;
+      }
+    }
     if (action === 'reset') values.token = form.dataset.token;
     if (action === 'verify') values.requestId = registrationRequestId;
+    const identity = identityStamp();
     button.disabled = true;
     try {
       const value = await api(action, values);
@@ -254,9 +284,9 @@ export function mountReaderUI({ render, onIdentity, english = () => false, onLog
         history.replaceState(history.state, '', location.pathname + location.search + '#/account');
         await render({ silent: true }); message(tr('邮箱验证成功，请登录。', 'Email verified. You can now sign in.'));
       }
-      else if (action === 'profile') { profileIdentity(value); message(value.reviewPending ? tr('资料已保存，个性签名待审核。', 'Profile saved; signature pending review.') : tr('资料已保存。', 'Profile saved.')); }
+      else if (action === 'profile') { if (profileIdentity(value, identity)) message(value.reviewPending ? tr('资料已保存，个性签名待审核。', 'Profile saved; signature pending review.') : tr('资料已保存。', 'Profile saved.')); }
       else message(value.message || '');
-    } catch (error) { message(errorMessage(error)); }
+    } catch (error) { if (action !== 'profile' || currentIdentity(identity)) message(errorMessage(error)); }
     finally { button.disabled = false; }
   });
   return {

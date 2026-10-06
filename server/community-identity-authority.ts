@@ -15,6 +15,7 @@ type ReaderSource = { id: string; uid?: string | null; nickname: string; signatu
 export type IdentityAuthorityOptions = {
   directory: string; siteOrigin: string; communityOrigin: string; ownerId: string; secret: string; stateEncryptionKey: string;
   readerIdentity: (req: IncomingMessage) => Promise<ReaderSource | null>;
+  ownerReaderIdentity?: (req: IncomingMessage) => Promise<ReaderSource | null>;
   ownerIdentity: (req: IncomingMessage) => Promise<{ name: string } | null>;
   people: (authors: CommunityAuthor[]) => Promise<Map<string, PersonInfo>>;
   findMember: (uid: string) => Promise<CommunityAuthor | null>;
@@ -63,7 +64,10 @@ export function createIdentityAuthority(options: IdentityAuthorityOptions) {
     const owner = await options.ownerIdentity(request);
     if (owner) {
       if (source && (source.kind !== 'owner' || source.id !== options.ownerId)) throw invalidSession();
-      return { viewer: { kind: 'owner', id: options.ownerId, name: owner.name, vip: true }, reader: null, author: { name: owner.name } };
+      const personal = await options.ownerReaderIdentity?.(request);
+      return { viewer: { kind: 'owner', id: options.ownerId, name: owner.name, vip: true }, reader: null, author: { name: owner.name },
+        ...(personal ? { ownerReader: { id: String(personal.id), uid: personal.uid || null, nickname: personal.nickname, signature: personal.signature || '',
+          avatar: personal.avatar || null, role: 'reader' as const, vip: personal.vip === true, vipStartedAt: personal.vipStartedAt || null, vipUntil: personal.vipUntil || null } } : {}) };
     }
     throw invalidSession();
   }
@@ -136,25 +140,34 @@ export function createIdentityAuthority(options: IdentityAuthorityOptions) {
             if (!store.limit(`profile-review:${dto.viewer.kind}:${dto.viewer.id}`, 60, 60_000, now())) throw new IdentityBridgeError('操作过于频繁，请稍后再试。', 429);
             send(res, await profiles.review(input.id, input.decision, { ...actor, source: 'community' }, kinds, reviewCheck)); return;
           }
-          if (dto.viewer.kind !== 'reader') throw new IdentityBridgeError('当前身份不能修改读者资料。', 403);
-          exactKeys(input, ['sessionRef', ...(value.operation === 'profile-signature' ? ['signature'] : value.operation === 'profile-avatar' ? ['base64'] : [])]);
-          if (value.operation === 'profile') { send(res, await profiles.state(dto.viewer.id)); return; }
-          if (value.operation === 'profile-avatar-pending') { const image = await profiles.pendingAvatar(dto.viewer.id, check); send(res, { base64: image.toString('base64') }); return; }
-          if (!store.limit(`profile-write:${dto.viewer.id}`, 30, 60_000, now())) throw new IdentityBridgeError('操作过于频繁，请稍后再试。', 429);
-          if (value.operation === 'profile-signature') { send(res, await profiles.submitSignature(dto.viewer.id, input.signature, check)); return; }
-          if (value.operation === 'profile-avatar-remove') { send(res, await profiles.removeAvatar(dto.viewer.id, check)); return; }
+          exactKeys(input, ['sessionRef', 'asReader', ...(value.operation === 'profile-signature' ? ['signature'] : value.operation === 'profile-avatar' ? ['base64'] : [])]);
+          const asReader = Object.hasOwn(input, 'asReader');
+          if (asReader && (input.asReader !== true || dto.viewer.kind !== 'owner')) throw invalidInput();
+          if (dto.viewer.kind !== 'reader' && !asReader) throw new IdentityBridgeError('当前身份不能修改读者资料。', 403);
+          const target = asReader ? dto.ownerReader?.id : dto.viewer.id;
+          if (!target) throw new IdentityBridgeError('站长个人读者身份尚未配置或已停用。', 503);
+          const personalCheck = async () => {
+            const current = await validateSession(req, input);
+            if (current.viewer.kind !== dto.viewer.kind || current.viewer.id !== dto.viewer.id || (asReader ? current.ownerReader?.id : current.viewer.id) !== target) throw invalidSession();
+          };
+          if (value.operation === 'profile') { const state = await profiles.state(target); await personalCheck(); send(res, state); return; }
+          if (value.operation === 'profile-avatar-pending') { const image = await profiles.pendingAvatar(target, personalCheck); send(res, { base64: image.toString('base64') }); return; }
+          if (!store.limit(`profile-write:${target}`, 30, 60_000, now())) throw new IdentityBridgeError('操作过于频繁，请稍后再试。', 429);
+          if (value.operation === 'profile-signature') { send(res, await profiles.submitSignature(target, input.signature, personalCheck)); return; }
+          if (value.operation === 'profile-avatar-remove') { send(res, await profiles.removeAvatar(target, personalCheck)); return; }
           if (typeof input.base64 !== 'string' || input.base64.length > Math.ceil(readerProfileAvatarBytes / 3) * 4 || !/^[A-Za-z0-9+/]+={0,2}$/.test(input.base64)) throw invalidInput();
           const bytes = Buffer.from(input.base64, 'base64');
           if (bytes.toString('base64') !== input.base64 || bytes.length > readerProfileAvatarBytes) throw invalidInput();
           const image = await normalizeReaderAvatar(bytes, 'image/webp');
-          send(res, await profiles.submitAvatar(dto.viewer.id, image, check)); return;
+          send(res, await profiles.submitAvatar(target, image, personalCheck)); return;
         }
         if (value.operation === 'session') { send(res, dto); return; }
         if (value.operation === 'people') {
           if (!Array.isArray(input.authors) || input.authors.length > 100) throw invalidInput();
           const authors = input.authors.map(memberValue), map = await options.people(authors);
           const requested = new Set(authors.map(author => `${author.kind}:${author.id}`));
-          send(res, [...map].filter(([key]) => requested.has(key)).map(([key, info]) => [key, { name: info.name, uid: info.uid, avatar: info.avatar, vip: info.vip === true, joinedAt: info.joinedAt, bio: info.bio }])); return;
+          send(res, [...map].filter(([key]) => requested.has(key)).map(([key, info]) => [key, { name: info.name, uid: info.uid, avatar: info.avatar, vip: info.vip === true, joinedAt: info.joinedAt, bio: info.bio,
+            ...(info.ownerReader === true ? { ownerReader: true } : {}) }])); return;
         }
         if (value.operation === 'member' || value.operation === 'avatar') {
           if (typeof input.uid !== 'string' || !/^[0-9a-z]{1,15}$/.test(input.uid)) throw invalidInput();

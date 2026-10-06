@@ -19,6 +19,7 @@ import { acceptCommunityConvention } from './fixtures/community-convention-conse
 const reader: CommunityAuthor = { kind: 'reader', id: 'reader' };
 const moderator: CommunityAuthor = { kind: 'reader', id: 'moderator' };
 const candidate: CommunityAuthor = { kind: 'reader', id: 'candidate' };
+const ownerPersonal: CommunityAuthor = { kind: 'reader', id: 'ffffffff-ffff-4fff-8fff-fffffffffff8' };
 const boardIds = communityBoards.map(board => board.id);
 const cleanup = (directory: string) => rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 let template: string;
@@ -34,10 +35,10 @@ async function setup(t: TestContext, simplePosting = true) {
   await copyFile(resolve(template, 'content.db'), resolve(directory, 'content.db'));
   await mkdir(resolve(directory, 'uploads'));
   const store = createCommunityStore(directory);
-  acceptCommunityConvention(store, [reader, moderator, candidate, { kind: 'owner', id: 'owner' }]);
+  acceptCommunityConvention(store, [reader, moderator, candidate, ownerPersonal, { kind: 'owner', id: 'owner' }]);
   for (const member of [reader, moderator, candidate]) store.members.visit(member);
   const audits: Array<{ action: string; details: Record<string, unknown> }> = [];
-  const accounts = new Map([['reader', { uid: '10001', name: '读者' }], ['candidate', { uid: '10002', name: '候选' }], ['moderator', { uid: '10003', name: '版主' }]]);
+  const accounts = new Map([['reader', { uid: '10001', name: '读者' }], ['candidate', { uid: '10002', name: '候选' }], ['moderator', { uid: '10003', name: '版主' }], [ownerPersonal.id, { uid: '10008', name: '站长个人' }]]);
   const waitingBodyReads = new Map<string, () => void>();
   let service: ReturnType<typeof createCommunityService>;
   const server = createServer((req, res) => {
@@ -51,6 +52,8 @@ async function setup(t: TestContext, simplePosting = true) {
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   service = createCommunityService({
     store, siteOrigin: origin, directory, simplePosting,
+    ownerReaderIdentity: async req => String(req.headers.cookie || '').split(';')[0] === 'owner'
+      ? { ...ownerPersonal, name: '站长个人', vip: false } : null,
     identify: async req => {
       const id = String(req.headers.cookie || 'reader').split(';')[0];
       if (id === 'owner') return { kind: 'owner', id: 'owner', name: '無相', vip: true };

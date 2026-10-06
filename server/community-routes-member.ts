@@ -4,6 +4,7 @@ import { experienceCatalogue, vipCatalogue } from './community-experience.ts';
 import { fail, same, memberKey } from './community-db.ts';
 import type { CommunityAuthor } from './community-db.ts';
 import type { Ctx } from './community-context.ts';
+import { createOwnerReaderPreview } from './community-owner-reader-preview.ts';
 
 const r = communityRules;
 const flag = (value: unknown) => value !== false;
@@ -46,7 +47,8 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
       const orders = ctx.owner ? economy.goodsOrders().filter(order => order.status === 'pending').length : 0;
       ctx.send({
         ...ctx.person(me, map), vip: viewer.vip, owner: ctx.owner, mod: ctx.mod, trustLevel: ctx.trustLevel, moderationBoards: ctx.moderationBoards, balance: ledger.balance(me),
-        management: ctx.actualMod ? { role: ctx.actualOwner ? 'owner' : 'steward', browsingAsReader: ctx.browsingAsReader } : null,
+        management: ctx.actualMod ? { role: ctx.actualOwner ? 'owner' : 'steward', browsingAsReader: ctx.browsingAsReader,
+          ...(ctx.actualOwner && ctx.browsingAsReader && !ctx.readOnly ? { interactive: true } : {}) } : null,
         moderationContact: members.moderationContact(me),
         convention: live.convention.state(me),
         checkedIn: checked, streak, nextReward: economy.nextCheckinReward(me),
@@ -65,7 +67,7 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
       const streak = economy.currentStreak(me);
       const checkedIn = economy.checked(me);
       ctx.send({
-        checkedIn, streak, balance: ledger.balance(me), gainedToday: ledger.gainedToday(me), behaviourToday: ledger.behaviourToday(me), vip: viewer.vip, owner: ctx.owner, browsingAsReader: ctx.browsingAsReader, uid: ctx.person(me, map).uid,
+        checkedIn, streak, balance: ledger.balance(me), gainedToday: ledger.gainedToday(me), behaviourToday: ledger.behaviourToday(me), vip: viewer.vip, owner: ctx.owner, browsingAsReader: ctx.browsingAsReader, readOnly: ctx.readOnly, uid: ctx.person(me, map).uid,
         month, days: economy.checkinDays(me, `${month}-01`, `${month}-31`), monthBonus: economy.monthBonus(me, month), checkinsToday: economy.checkinsToday(),
         earlyBirds: early.map(bird => ({ person: ctx.person(bird.member, map), at: bird.at })),
         makeup: economy.makeupState(me, { vip: viewer.vip }), badges: members.badges(me), badgeState: ctx.ownerReaderPreview?.badgeState ?? members.badgeState(me, { joinedAt: map.get(memberKey(me))?.joinedAt }),
@@ -90,7 +92,7 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
         balance: ledger.balance(me), gainedToday: ledger.gainedToday(me), behaviourToday: ledger.behaviourToday(me), dailyCap: r.dailyCap,
         checkedIn: economy.checked(me), month: ledger.month(me), flow,
         ledger: rows.map(({ ref, ...row }) => ({ ...row, topic: titles.get(row.id) || null, detail: detail(ref) })),
-        level, owner: ctx.owner, vip: ctx.ownerReaderPreview !== null || me.kind === 'reader' && profile?.vip === true, browsingAsReader: ctx.browsingAsReader, steward: members.steward(me), stats: members.stats(me),
+        level, owner: ctx.owner, vip: ctx.ownerReaderPreview !== null || me.kind === 'reader' && profile?.vip === true, browsingAsReader: ctx.browsingAsReader, readOnly: ctx.readOnly, steward: members.steward(me), stats: members.stats(me),
         growth: ctx.ownerReaderPreview?.growth ?? live.experience.state(me), vipGrowth: ctx.ownerReaderPreview?.vipGrowth ?? live.experience.vipState(me, profile?.vip === true), experienceCatalogue, vipCatalogue,
         progress: ctx.owner || level >= 3 ? null : members.levelProgress(me, level),
       });
@@ -147,7 +149,7 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
         cover: members.decorations(member).cover, background: live.profileBackgrounds.state(member).approved,
         streak: economy.currentStreak(member), stats: { ...stats, topics: topics.length, replies: replies.length },
         follows: members.followCounts(member), following: !self && members.following(me, member), self, badges: members.badges(member),
-        badgeState: self && ctx.ownerReaderPreview ? ctx.ownerReaderPreview.badgeState : members.badgeState(member, { joinedAt: info.joinedAt }),
+        badgeState: info.ownerReader ? createOwnerReaderPreview().badgeState : self && ctx.ownerReaderPreview ? ctx.ownerReaderPreview.badgeState : members.badgeState(member, { joinedAt: info.joinedAt }),
         muted: (self || ctx.mod) && muted ? { id: muted.id, until: muted.until, reason: muted.reason } : null,
         canMute: ctx.mod && !self && member.kind === 'reader', canAppoint: ctx.owner && member.kind === 'reader', steward: members.steward(member),
         reasons: ctx.mod ? communityReportReasons : undefined,
@@ -179,6 +181,7 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
   if (path === 'browse-mode') {
     if (!ctx.actualMod) throw fail('只有作者和版主可以切换浏览视角。', 403);
     if (typeof body.reader !== 'boolean') throw fail('请选择浏览视角。');
+    if (ctx.actualOwner && body.reader && !await ctx.options.ownerReaderIdentity?.(ctx.req)) throw fail('站长的个人读者身份尚未配置或已停用。', 503);
     const secure = ctx.options.siteOrigin.startsWith('https:') ? '; Secure' : '';
     ctx.res.setHeader('Set-Cookie', `community_browse=${body.reader ? 'reader' : ''}; Path=/; HttpOnly; SameSite=Strict${secure}${body.reader ? '' : '; Max-Age=0'}`);
     ctx.send({ ok: true, browsingAsReader: body.reader });

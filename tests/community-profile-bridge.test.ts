@@ -24,13 +24,15 @@ import { acceptCommunityConvention } from './fixtures/community-convention-conse
 const secret='profile-bridge-test-secret-at-least-32-characters';
 const siteOrigin='https://www.sansphase.com', communityOrigin='https://community.sansphase.com';
 const path='/api/community-identity/bridge';
-async function fixture(t:test.TestContext){
+async function fixture(t:test.TestContext,options:{ownerReader?:boolean}={}){
   const directory=await mkdtemp(resolve(tmpdir(),'community-profile-bridge-'));
   prepareIdentityStore(directory);
-  const readerId=randomUUID(), moderatorId=randomUUID(), ownerId=randomUUID();
+  const readerId=randomUUID(), moderatorId=randomUUID(), ownerId=randomUUID(),personalId=randomUUID();
   const reader={id:readerId,uid:'10001',nickname:'普通读者',signature:'已经通过',avatar:null as string|null,_verified:true,disabled:false};
   const moderator={...reader,id:moderatorId,uid:'10002',nickname:'社区版主'};
   const rows=new Map([[readerId,reader],[moderatorId,moderator]]);
+  const personal={...reader,id:personalId,uid:'10003',nickname:'站长个人',signature:'个人已批准签名'};
+  if(options.ownerReader)rows.set(personalId,personal);
   const payload={
     findByID:async({id}:{id:string})=>{const row=rows.get(id);if(!row)throw Object.assign(Error('missing'),{status:404});return{...row};},
     update:async({id,data}:{id:string;data:Partial<typeof reader>})=>{const row=rows.get(id)!;Object.assign(row,data);return{...row};},
@@ -38,7 +40,7 @@ async function fixture(t:test.TestContext){
   }as unknown as Payload;
   const workflow=createReaderWorkflow(directory,'profile-main-key-at-least-32-characters');
   const commands=createReaderProfileCommands({payload,directory,workflow,uidStore:{get:id=>rows.get(id)?.uid||null}});
-  let enabled=true;
+  let enabled=true,ownerActive=true;
   let checkReviewer: CommunityProfileReviewerCheck=async(actor,role)=>{
     if (!(actor.kind==='owner'&&actor.id===ownerId&&role==='owner' || actor.kind==='reader'&&actor.id===moderatorId&&role==='steward')) throw Object.assign(Error('denied'),{status:403});
   };
@@ -46,7 +48,8 @@ async function fixture(t:test.TestContext){
   const authority=createIdentityAuthority({directory,siteOrigin,communityOrigin,ownerId,secret,stateEncryptionKey:'separate-main-encryption-key-at-least-32-characters',profiles:commands,
     profileReviewer:(actor,role)=>checkReviewer(actor,role),
     readerIdentity:async req=>{if(!enabled)return null;const cookie=String(req.headers.cookie);const row=cookie==='sansphase_reader_session=reader.token'?reader:cookie==='sansphase_reader_session=mod.token'?moderator:null;return row&&!row.disabled?{...row,avatar:row.avatar?`/api/reader/avatar/${row.avatar}.webp`:null}:null;},
-    ownerIdentity:async req=>req.headers.cookie==='sansphase_author_session=owner.token'?{name:'站长'}:null,
+    ownerIdentity:async req=>ownerActive&&req.headers.cookie==='sansphase_author_session=owner.token'?{name:'站长'}:null,
+    ownerReaderIdentity:async req=>options.ownerReader&&ownerActive&&!personal.disabled&&personal._verified&&req.headers.cookie==='sansphase_author_session=owner.token'?{...personal}:null,
     people:async authors=>new Map(authors.flatMap(author=>{
       const row=rows.get(author.id);if(row)return[[`reader:${row.id}`,{name:row.nickname,uid:row.uid,avatar:row.avatar,bio:row.signature,vip:false,joinedAt:'2026-01-01T00:00:00Z'}]as const];
       return author.kind==='owner'&&author.id===ownerId?[[`owner:${ownerId}`,{name:'站长',uid:'owner',avatar:null,bio:'',vip:true,joinedAt:null}]as const]:[];
@@ -69,7 +72,7 @@ async function fixture(t:test.TestContext){
   const host=async()=>{
     const hkDirectory=resolve(directory,'hk');await mkdir(hkDirectory);await prepareCommunityHostDirectory(hkDirectory);
     const store=createCommunityStore(hkDirectory);
-    acceptCommunityConvention(store,[{kind:'reader',id:readerId},{kind:'reader',id:moderatorId},{kind:'owner',id:ownerId}]);
+    acceptCommunityConvention(store,[{kind:'reader',id:readerId},{kind:'reader',id:moderatorId},{kind:'owner',id:ownerId},...(options.ownerReader?[{kind:'reader' as const,id:personalId}]:[])]);
     const runtime=createCommunityHostRuntime({directory:hkDirectory,siteOrigin:communityOrigin,mainSiteOrigin:siteOrigin,bridgeSecret:secret,authorId:ownerId},{request:async(operation,input)=>{if(operation==='profile-review')reviewForwarded?.();return client.request(operation,input);}});
     const hkServer=createPreviewServer({...runtime,root:hkDirectory});await new Promise<void>(done=>hkServer.listen(0,'127.0.0.1',done));
     const base=`http://127.0.0.1:${(hkServer.address()as{port:number}).port}`;
@@ -86,7 +89,7 @@ async function fixture(t:test.TestContext){
     return{directory:hkDirectory,store,base,enter,get,post};
   };
   t.after(async()=>{await closeHost?.();await new Promise<void>(done=>server.close(()=>done()));authority.close();await rm(directory,{recursive:true,force:true,maxRetries:10,retryDelay:100});});
-  return{readerId,moderatorId,ownerId,commands,payload,client,bridge,session,host,onReviewForwarded:(callback:()=>void)=>{reviewForwarded=callback;},revoke:()=>{enabled=false;}};
+  return{readerId,moderatorId,ownerId,personalId,personal,commands,payload,client,bridge,session,host,onReviewForwarded:(callback:()=>void)=>{reviewForwarded=callback;},revoke:()=>{enabled=false;},revokeOwner:()=>{ownerActive=false;}};
 }
 
 test('self profile bridge keeps approved/pending separate and rejects caller-selected identities',async t=>{
@@ -145,7 +148,7 @@ test('real HK management checks current appointment, rejects forged roles, and e
   hk.store.members.setSteward({kind:'reader',id:f.moderatorId},true,['qa']);
   let response=await hk.get('manage?tab=profiles',modCookie);assert.equal(response.status,200);let queue=await response.json();assert.deepEqual(queue.profiles.map((row:{kind:string})=>row.kind),['avatar']);assert.deepEqual(queue.backgrounds,[]);
   response=await hk.get('manage?tab=profiles',ownerCookie);assert.equal(response.status,200);queue=await response.json();assert.equal(queue.profiles.length,2);
-  assert.equal((await hk.get(`manage/profiles/${proposal.id}/avatar.webp`,ownerCookie+'; community_browse=reader')).status,403);
+  assert.equal((await hk.get(`manage/profiles/${proposal.id}/avatar.webp`,ownerCookie+'; community_browse=reader')).status,503,'an unconfigured owner personal identity cannot silently fall back to the old preview');
   const [signature]=await f.commands.reviews(['signature']);assert.equal((await hk.post(`manage/profiles/${signature.id}/approve`,modCookie)).status,403);
   response=await hk.post(`manage/profiles/${proposal.id}/approve`,modCookie);assert.equal(response.status,200);assert.equal((await response.json()).kind,'avatar');
   assert.equal((await hk.post(`manage/profiles/${proposal.id}/approve`,modCookie)).status,404);
@@ -188,4 +191,44 @@ test('HK reports a committed review successfully if the appointment changes afte
   const response=await hk.post(`manage/profiles/${proposal.id}/approve`,cookie);assert.equal(response.status,200);
   assert.deepEqual(await response.json(),{ok:true,id:proposal.id,kind:'avatar',decision:'approve'});
   assert.equal((await f.commands.state(f.readerId)).pendingAvatar,false);assert.ok((await f.commands.state(f.readerId)).avatar);
+});
+
+test('owner reader metadata preserves original management identity and personal writes require explicit delegation',async t=>{
+  const f=await fixture(t,{ownerReader:true}),sessionRef=await f.session('sansphase_author_session=owner.token');
+  let response=await f.bridge('session',{sessionRef}),dto=await response.json();assert.equal(dto.viewer.kind,'owner');assert.equal(dto.viewer.id,f.ownerId);assert.equal(dto.reader,null);assert.equal(dto.author.name,'站长');assert.equal(dto.ownerReader.id,f.personalId);assert.equal(dto.ownerReader.role,'reader');
+  for(const key of ['email','phone','password'])assert.ok(!Object.hasOwn(dto.ownerReader,key));
+  assert.equal((await f.bridge('profile',{sessionRef})).status,403);
+  assert.equal((await f.bridge('profile-signature',{sessionRef,asReader:true,signature:'新个人签名',readerId:f.readerId})).status,400);
+  response=await f.bridge('profile-signature',{sessionRef,asReader:true,signature:'新个人签名'});assert.equal(response.status,200);dto=await response.json();assert.equal(dto.id,f.personalId);assert.equal(dto.signature,'个人已批准签名');assert.equal(dto.pendingSignature,'新个人签名');
+  assert.equal((await f.commands.state(f.readerId)).pendingSignature,null);
+  const ordinary=await f.session('sansphase_reader_session=reader.token');assert.equal((await f.bridge('profile',{sessionRef:ordinary,asReader:true})).status,400);
+  assert.equal((await f.bridge('profile-reviews',{sessionRef,asReader:true,moderation:{role:'owner',actor:{kind:'owner',id:f.ownerId}}})).status,400);
+  response=await f.bridge('session',{sessionRef});dto=await response.json();assert.equal(dto.viewer.kind,'owner');assert.equal(dto.ownerReader.signature,'个人已批准签名');
+});
+
+test('queued owner-personal writes reject a revoked owner session and retain approved reader data',async t=>{
+  const f=await fixture(t,{ownerReader:true}),sessionRef=await f.session('sansphase_author_session=owner.token');
+  let release!:()=>void,started!:()=>void,queued!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;}),waiting=new Promise<void>(resolve=>{started=resolve;}),queuedRequest=new Promise<void>(resolve=>{queued=resolve;});
+  const blocking=f.commands.accountMutation(async()=>{started();await gate;});await waiting;
+  const submit=f.commands.submitSignature.bind(f.commands);f.commands.submitSignature=async(...args)=>{queued();return submit(...args);};
+  const pending=f.bridge('profile-signature',{sessionRef,asReader:true,signature:'不可写入'});
+  await queuedRequest;f.revokeOwner();release();await blocking;
+  assert.equal((await pending).status,401);assert.equal(f.personal.signature,'个人已批准签名');
+  // No command may have created a proposal for another account.
+  assert.equal((await f.commands.state(f.personalId)).pendingSignature,null);
+});
+
+test('real owner handoff supports personal profile editing in reader mode without modifying the author brand',{timeout:20000},async t=>{
+  const f=await fixture(t,{ownerReader:true}),hk=await f.host(),ownerCookie=await hk.enter('sansphase_author_session=owner.token'),personalCookie=ownerCookie+'; community_browse=reader';
+  let response=await hk.get('profile',ownerCookie),state=await response.json();assert.equal(response.status,200);assert.equal(state.canEditProfile,false);assert.equal(state.person.role,'owner');
+  assert.equal((await hk.post('profile',ownerCookie,{signature:'不允许改个人'})).status,403);
+  response=await hk.get('profile',personalCookie);assert.equal(response.status,200);state=await response.json();assert.equal(state.canEditProfile,true);assert.equal(state.person.uid,'10003');assert.equal(state.person.name,'站长个人');assert.equal(state.signature,'个人已批准签名');
+  response=await hk.post('profile',personalCookie,{signature:'社区个人新签名'});assert.equal(response.status,200);state=await response.json();assert.equal(state.signature,'个人已批准签名');assert.equal(state.pendingSignature,'社区个人新签名');
+  const png=await sharp({create:{width:128,height:128,channels:4,background:'#ccddff'}}).png().toBuffer(),form=new FormData();form.set('file',new Blob([png],{type:'image/png'}),'personal-avatar.png');
+  response=await fetch(hk.base+'/api/community/profile/avatar',{method:'POST',headers:{Origin:communityOrigin,'X-Reader-Request':'1',Cookie:personalCookie},body:form});assert.equal(response.status,200);assert.equal((await response.json()).pendingAvatar,true);
+  assert.equal((await hk.get('profile/avatar/pending.webp',personalCookie)).status,200);assert.equal((await hk.get('manage?tab=profiles',personalCookie)).status,403);
+  for(const proposal of await f.commands.reviews())assert.equal((await hk.post(`manage/profiles/${proposal.id}/approve`,ownerCookie)).status,200);
+  response=await hk.get('profile',personalCookie);assert.equal(response.status,200);state=await response.json();assert.equal(state.signature,'社区个人新签名');assert.equal(state.pendingSignature,null);assert.equal(state.pendingAvatar,false);assert.match(state.person.avatar,/\/avatar\/10003\.webp/);
+  const sessionRef=await f.session('sansphase_author_session=owner.token'),identity=await(await f.bridge('session',{sessionRef})).json();assert.equal(identity.viewer.kind,'owner');assert.equal(identity.author.name,'站长');assert.equal(identity.ownerReader.signature,'社区个人新签名');assert.equal(identity.ownerReader.avatar,f.personal.avatar);
+  assert.equal((await f.commands.state(f.readerId)).signature,'已经通过');assert.equal((await hk.get('profile',ownerCookie)).status,200);
 });

@@ -19,6 +19,8 @@ type Options = {
   siteOrigin: string;
   readerIdentity: (req: IncomingMessage) => Promise<ReaderIdentity>;
   ownerIdentity: (req: IncomingMessage) => Promise<{ name: string } | null>;
+  ownerReaderIdentity?: (req: IncomingMessage) => Promise<ReaderIdentity>;
+  ownerReaderId?: string;
   ownerName: () => Promise<string>;
   authorId: string;
   uidStore: { get: (id: string) => string; readerId: (uid: string) => string | null };
@@ -34,7 +36,7 @@ function readWords(directory: string) {
 
 // Both the local service and the narrow identity bridge use this approved
 // profile directory. It does not open or mutate a community business database.
-export function createCommunityDirectory({ payload, directory, ownerName, authorId, uidStore }: Pick<Options, 'payload' | 'directory' | 'ownerName' | 'authorId' | 'uidStore'>) {
+export function createCommunityDirectory({ payload, directory, ownerName, authorId, uidStore, ownerReaderId }: Pick<Options, 'payload' | 'directory' | 'ownerName' | 'authorId' | 'uidStore' | 'ownerReaderId'>) {
   const owner: CommunityAuthor = { kind: 'owner', id: authorId };
   const readers = async (where: Where, limit: number) =>
     (await payload.find({ collection: 'readers', where, limit, depth: 0, pagination: false, overrideAccess: true })).docs as unknown as ReaderRow[];
@@ -48,6 +50,7 @@ export function createCommunityDirectory({ payload, directory, ownerName, author
       map.set(`reader:${row.id}`, {
         name: row.nickname, uid: uidOf(String(row.id)), avatar: uuid.test(row.avatar || '') ? row.avatar! : null,
         vip: membershipState(row).vip, joinedAt: row.createdAt || null, bio: row.signature || '',
+        ...(String(row.id) === ownerReaderId && !row.disabled ? { ownerReader: true as const } : {}),
       });
     }
     if (authors.some(author => author.kind === 'owner' && author.id === authorId)) {
@@ -117,7 +120,9 @@ export function createCommunityRuntime(options: Options) {
         return { topics: 0, replies: 0, images: 0 };
       } finally { db.close(); }
     },
-    service: createCommunityService({ store, siteOrigin, directory, ownerId: authorId, identify, ...profiles, audit, words: readWords(directory), profile: options.profile }),
+    service: createCommunityService({ store, siteOrigin, directory, ownerId: authorId, identify,
+      ownerReaderIdentity: async req => { const personal = await options.ownerReaderIdentity?.(req); return personal ? { kind: 'reader', id: personal.id, name: personal.nickname, vip: personal.vip === true } : null; },
+      ...profiles, audit, words: readWords(directory), profile: options.profile }),
     close() { store?.close(); },
   };
 }

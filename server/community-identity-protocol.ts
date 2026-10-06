@@ -13,7 +13,7 @@ export type IdentityOperation = 'exchange' | 'session' | 'people' | 'member' | '
   | 'profile' | 'profile-signature' | 'profile-avatar' | 'profile-avatar-remove' | 'profile-avatar-pending'
   | 'profile-reviews' | 'profile-review-image' | 'profile-review';
 export type IdentityReader = { id: string; uid: string | null; nickname: string; signature: string; avatar: string | null; role: 'reader'; vip: boolean; vipStartedAt: string | null; vipUntil: string | null };
-export type IdentityDTO = { viewer: CommunityViewer; reader: IdentityReader | null; author: { name: string } | null };
+export type IdentityDTO = { viewer: CommunityViewer; reader: IdentityReader | null; author: { name: string } | null; ownerReader?: IdentityReader };
 export class IdentityBridgeError extends Error {
   status: number;
   constructor(message: string, status = 503) { super(message); this.name = 'IdentityBridgeError'; this.status = status; }

@@ -76,6 +76,12 @@ test('owner, reader preview and missing current consent cannot trigger active XP
   }
 });
 
+test('a verified interactive owner personal reader records the actual reader daily entrance', async t => {
+  const { visits, main } = await setup(t, { person: { management: { role: 'owner', browsingAsReader: true, interactive: true } } });
+  assert.equal(visits().length, 1);
+  assert.equal(main.querySelector('[data-experience-current]').textContent, '20');
+});
+
 test('clearing identity while a visit is pending discards its result', async t => {
   const { main, ui, visits, release } = await setup(t, { delayed: true });
   assert.equal(visits().length, 1);

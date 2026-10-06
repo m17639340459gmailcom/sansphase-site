@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { communityAccountHTML } from '../src/community.mjs';
+import { communityAccountHTML, communityReaderReadOnly } from '../src/community.mjs';
 
 const common = { t: zh => zh, esc: value => String(value ?? ''), icons: { eye: '<svg data-eye></svg>', shield: '<svg data-shield></svg>' } };
 const person = {
@@ -21,6 +21,16 @@ test('ordinary readers never receive identity switching or management, even with
   for (const options of [{ author: true }, { nickname: '無相' }, { me: { ...person, role: 'owner', level: 4, steward: true } }]) {
     assert.doesNotMatch(communityAccountHTML({ ...common, ...options }), /community-browse-mode|href="#\/community\/manage"/);
   }
+});
+
+test('only a verified owner-linked actual reader becomes interactive without acquiring active management', () => {
+  const me = { ...person, management: { role: 'owner', browsingAsReader: true, interactive: true } };
+  assert.equal(communityReaderReadOnly(me), false);
+  for (const invalid of [{ ...me, uid: null }, { ...me, role: 'owner' }, { ...me, owner: true }, { ...me, mod: true },
+    { ...me, management: { ...me.management, role: 'steward' } }]) assert.equal(communityReaderReadOnly(invalid), true);
+  const doc = new JSDOM(communityAccountHTML({ ...common, me })).window.document;
+  assert.equal(doc.querySelector('a[href="#/community/manage"]'), null);
+  assert.ok(doc.querySelector('[data-action="community-browse-mode"]'));
 });
 
 test('verified authors and moderators switch perspective inline and open management through a separate link', () => {

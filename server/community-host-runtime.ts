@@ -131,21 +131,33 @@ export function createCommunityHostRuntime(config: CommunityHostConfig, client: 
     if (!value) throw new IdentityBridgeError('请从主站重新进入社区。', 401);
     return value;
   };
+  const readerMode = (req: IncomingMessage) => /(?:^|;\s*)community_browse=reader(?:;|$)/.test(String(req.headers.cookie || ''));
+  const ownerReader = (req: IncomingMessage) => {
+    const { identity } = current(req), personal = identity.ownerReader;
+    if (identity.viewer.kind !== 'owner' || identity.viewer.id !== authorId || !personal) return null;
+    if (personal.role !== 'reader' || personal.id === authorId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(personal.id)
+      || !personal.uid || !/^[0-9a-z]{1,15}$/.test(personal.uid) || typeof personal.nickname !== 'string') throw failure('Owner personal identity projection is invalid.');
+    if (hostStore.readerDeleted(personal.id)) return null;
+    return personal;
+  };
   const memberAlive = (member: CommunityAuthor) => member.kind !== 'reader' || !hostStore.readerDeleted(member.id);
   const request = async <T>(operation: IdentityOperation, input: Record<string, unknown>): Promise<T> => {
     const sessionRef = current().session.sessionRef;
-    const result = await client.request<T>(operation, { ...input, sessionRef });
+    const selfProfile = ['profile', 'profile-signature', 'profile-avatar', 'profile-avatar-remove', 'profile-avatar-pending'].includes(operation);
+    const result = await client.request<T>(operation, { ...input, sessionRef,
+      ...(selfProfile && current().identity.viewer.kind === 'owner' && readerMode(current().req) ? { asReader: true } : {}) });
     current();
     return result;
   };
   const readerIdentity = async (req: IncomingMessage) => {
-    const reader = current(req).identity.reader;
+    const reader = current(req).identity.reader || (readerMode(req) ? ownerReader(req) : null);
     return reader && { ...reader, avatar: reader.avatar && reader.uid ? `/api/community/avatar/${encodeURIComponent(reader.uid)}.webp` : null };
   };
-  const authorIdentity = async (req: IncomingMessage) => current(req).identity.author;
+  const authorIdentity = async (req: IncomingMessage) => readerMode(req) && ownerReader(req) ? null : current(req).identity.author;
   const profileState = (value: ReaderProfileState, req: IncomingMessage) => {
-    const actor = current(req).identity.viewer;
-    if (actor.kind !== 'reader' || !value || value.id !== actor.id || typeof value.signature !== 'string'
+    const original = current(req).identity.viewer;
+    const actor = original.kind === 'owner' && readerMode(req) ? ownerReader(req) : original;
+    if (!actor || ('kind' in actor ? actor.kind !== 'reader' : actor.role !== 'reader') || !value || value.id !== actor.id || typeof value.signature !== 'string'
       || typeof value.nickname !== 'string' || typeof value.pendingAvatar !== 'boolean' || value.pendingSignature !== null && typeof value.pendingSignature !== 'string')
       throw failure('Profile authority returned an invalid projection.');
     return value;
@@ -180,6 +192,7 @@ export function createCommunityHostRuntime(config: CommunityHostConfig, client: 
   const communityService = createCommunityService({
     store, directory, siteOrigin, ownerId: authorId, profile,
     identify: async req => current(req).identity.viewer,
+    ownerReaderIdentity: async req => { const personal = ownerReader(req); return personal ? { kind: 'reader', id: personal.id, name: personal.nickname, vip: personal.vip } : null; },
     assertActive: req => { current(req); },
     people: async (authors: CommunityAuthor[]) => {
       const unique = [...new Map(authors.filter(memberAlive).map(author => [`${author.kind}:${author.id}`, author])).values()];

@@ -12,16 +12,21 @@ import { createCommunityService } from '../server/community-service.ts';
 import type { CommunityProfileAccess } from '../server/community-profile-access.ts';
 import { acceptCommunityConvention } from './fixtures/community-convention-consent.ts';
 
+const ownerPersonalId = 'ffffffff-ffff-4fff-8fff-fffffffffff8';
+const ownerPersonalCookie = 'owner; community_browse=reader';
+
 async function fixture(t: test.TestContext) {
   const directory = await mkdtemp(resolve(tmpdir(), 'community-background-http-'));
   new DatabaseSync(resolve(directory, 'content.db')).close(); await migrateCommunity(directory); await mkdir(resolve(directory, 'uploads'));
   const store = createCommunityStore(directory);
-  const users = new Map([['10001', 'reader'], ['10002', 'other'], ['10003', 'mod']]);
+  const users = new Map([['10001', 'reader'], ['10002', 'other'], ['10003', 'mod'], ['10008', ownerPersonalId]]);
   acceptCommunityConvention(store, [{ kind: 'owner', id: 'owner' }, ...[...users.values()].map(id => ({ kind: 'reader' as const, id }))]);
   store.members.setSteward({ kind: 'reader', id: 'mod' }, true, ['qa']);
   const pendingOnly = async () => { throw Object.assign(Error('No test avatar'), { status: 404 }); };
   const state = async (req: { headers: { cookie?: string } }) => {
-    const id = String(req.headers.cookie || '').split(';')[0];
+    const cookie = String(req.headers.cookie || '');
+    const principal = cookie.split(';')[0];
+    const id = principal === 'owner' && /(?:^|;\s*)community_browse=reader(?:;|$)/.test(cookie) ? ownerPersonalId : principal;
     return { id, uid: [...users].find(([, name]) => name === id)?.[0] || null, nickname: id, signature: '已审核个签', avatar: null, pendingSignature: null, pendingAvatar: false };
   };
   const profile: CommunityProfileAccess = { state, signature: state, avatar: state, removeAvatar: state, pendingAvatar: pendingOnly, reviewImage: pendingOnly, review: pendingOnly, reviews: async () => [] };
@@ -31,6 +36,8 @@ async function fixture(t: test.TestContext) {
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   const audits: Array<{ action: string; details: Record<string, unknown> }> = [];
   service = createCommunityService({ store, directory, siteOrigin: origin, profile,
+    ownerReaderIdentity: async req => String(req.headers.cookie || '').split(';')[0] === 'owner'
+      ? { kind: 'reader', id: ownerPersonalId, name: '站长个人', vip: false } : null,
     identify: async req => { const id = String(req.headers.cookie || '').split(';')[0]; return id === 'owner' || [...users.values()].includes(id) ? { kind: id === 'owner' ? 'owner' : 'reader', id, name: id, vip: false } : null; },
     people: async authors => new Map(authors.map(member => [`${member.kind}:${member.id}`, { name: member.id, uid: member.kind === 'owner' ? 'owner' : [...users].find(([, id]) => id === member.id)?.[0] || null, avatar: null, vip: false, joinedAt: '2026-01-01T00:00:00.000Z', bio: '已审核个签' }])),
     findMember: async uid => users.has(uid) ? { kind: 'reader', id: users.get(uid)! } : null,
@@ -88,7 +95,6 @@ test('the latest expected background review wins; rejected replacement retains a
 test('profile background writes require self-reader identity and correct origin, with bounded valid raster uploads', async t => {
   const { directory, upload, png, post, get, store } = await fixture(t);
   assert.equal((await upload(await png(), 'image/png', 'owner')).status, 403);
-  assert.equal((await upload(await png(), 'image/png', 'owner; community_browse=reader')).status, 403);
   assert.equal((await post('profile/background/remove', {}, 'reader', false)).status, 403);
   assert.equal((await post('profile/background/remove', { readerId: 'other' })).status, 400);
   assert.equal((await upload(Buffer.from('<svg/>'), 'image/svg+xml')).status, 415);
@@ -97,4 +103,25 @@ test('profile background writes require self-reader identity and correct origin,
   assert.deepEqual((await (await get('profile')).json()).background, { approved: null, pending: null });
   assert.deepEqual(await readdir(resolve(directory, 'uploads')), []);
   assert.equal(store.profileBackgrounds.pending().length, 0);
+});
+
+test('the owner personal reader may submit its own background without exposing other pending backgrounds or retaining management power', async t => {
+  const { get, upload, png, post, store } = await fixture(t);
+  const otherPending = (await (await upload(await png())).json()).background.pending;
+  const response = await upload(await png(), 'image/png', ownerPersonalCookie);
+  assert.equal(response.status, 200);
+  const profile = await response.json(), pending = profile.background.pending;
+  assert.equal(profile.person.uid, '10008'); assert.equal(profile.canEditProfile, true);
+  assert.equal(profile.person.role, 'reader'); assert.equal(profile.background.approved, null);
+  assert.equal(store.profileBackgrounds.state({ kind: 'reader', id: ownerPersonalId }).pending?.id, pending.id);
+  assert.equal(store.profileBackgrounds.state({ kind: 'owner', id: 'owner' }).pending, null, 'personal changes never alter the brand background');
+  const path = pending.url.slice('/api/community/'.length);
+  assert.equal((await get(path, ownerPersonalCookie)).status, 200);
+  assert.equal((await get(otherPending.url.slice('/api/community/'.length), ownerPersonalCookie)).status, 404);
+  assert.equal((await get(path, 'reader')).status, 404);
+  assert.equal((await get(path, 'owner')).status, 200);
+  assert.equal((await post('manage/profile-background', { memberUid: '10008', imageId: pending.id, approve: true, reason: '' }, ownerPersonalCookie)).status, 403);
+  assert.equal((await post('manage/profile-background', { memberUid: '10008', imageId: pending.id, approve: true, reason: '' }, 'owner')).status, 200);
+  assert.equal((await get(path, 'reader')).status, 200);
+  assert.equal((await (await get('members/10008', 'reader')).json()).background.id, pending.id);
 });

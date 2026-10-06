@@ -7,9 +7,19 @@ import { readerPage, mountReaderUI } from '../src/reader-ui.ts';
 
 const uuid = '11111111-1111-4111-8111-111111111111';
 const image = `/api/reader/frame/${uuid}.webp`;
-const account = { uid: '10001', nickname: '读者', email: 'reader@example.test', signature: '已通过个签', avatar: null, frame: null, frameImage: null, vip: false };
+const account = { uid: '10001', nickname: '读者', email: 'reader@example.test', phone: '13800138000', signature: '已通过个签', avatar: null, frame: null, frameImage: null, vip: false };
 const state = (frame = null, extra = {}) => ({ frame, frameImage: frame === `image:${uuid}` ? image : null, available: true, items: [{ id: 'frame-gold', name: '金环', ref: 'gold', image: null }, { id: uuid, name: '自定义星光', ref: `image:${uuid}`, image }], ...extra });
 const turn = () => new Promise(resolve => setImmediate(resolve));
+
+test('an owner with a separate real reader account sees the existing editable personal account instead of the author gate', () => {
+  const doc = new JSDOM(readerPage('account', '', account, false, true, { name: '博客品牌' })).window.document;
+  assert.equal(doc.querySelector('[data-author-login]'), null);
+  assert.ok(doc.querySelector('[data-reader-form="profile"]'));
+  assert.equal(doc.querySelector('.reader-profile-person > div:last-child > strong').textContent, account.nickname);
+  assert.equal(doc.querySelector('[name="nickname"]').value, account.nickname);
+  const ownerOnly = new JSDOM(readerPage('account', '', null, false, true, { name: '博客品牌' })).window.document;
+  assert.ok(ownerOnly.querySelector('[data-author-login]'));
+});
 function setup(t, initial = account) {
   const dom = new JSDOM('<main></main>', { url: 'https://www.sansphase.com/#/account' });
   const win = dom.window, doc = win.document;
@@ -36,6 +46,147 @@ function setup(t, initial = account) {
     switchAccount(value) { identity = value; win.dispatchEvent(new win.CustomEvent('reader:identity', { detail: value })); paint(); ui.route('account', ''); },
   };
 }
+
+test('an initial owner personal account can save its nickname and signature without inventing a contact number', async t => {
+  const s = setup(t, { ...account, ownerReader: true, phone: '' });
+  const form = s.doc.querySelector('[data-reader-form="profile"]');
+  const phone = form.querySelector('[name="phone"]');
+  assert.equal(phone.required, false);
+  assert.equal(phone.checkValidity(), true);
+  form.querySelector('[name="nickname"]').value = '个人昵称';
+  form.querySelector('[name="signature"]').value = '个人签名';
+  s.respond(async (_url, init) => ({ ...s.identity(), ...JSON.parse(init.body) }));
+  form.requestSubmit(); await turn();
+  assert.equal(s.calls.length, 1);
+  assert.equal(s.calls[0].url, '/api/reader/profile');
+  assert.deepEqual(JSON.parse(s.calls[0].init.body), { nickname: '个人昵称', signature: '个人签名' });
+  assert.equal(s.identity().phone, '');
+  assert.equal(s.identity().ownerReader, true);
+  assert.equal(s.doc.querySelector('[name="phone"]').required, false);
+});
+
+test('an optional owner contact number still uses the existing mainland mobile format when provided', async t => {
+  const s = setup(t, { ...account, ownerReader: true, phone: '' });
+  const form = s.doc.querySelector('[data-reader-form="profile"]');
+  const phone = form.querySelector('[name="phone"]');
+  phone.value = '123'; phone.dispatchEvent(new s.win.Event('input', { bubbles: true }));
+  assert.equal(phone.checkValidity(), false);
+  form.requestSubmit(); await turn(); assert.equal(s.calls.length, 0);
+  phone.value = '13900139000'; phone.dispatchEvent(new s.win.Event('input', { bubbles: true }));
+  assert.equal(phone.checkValidity(), true);
+  s.respond(async (_url, init) => ({ ...s.identity(), ...JSON.parse(init.body) }));
+  form.requestSubmit(); await turn();
+  assert.equal(s.calls.length, 1);
+  assert.equal(JSON.parse(s.calls[0].init.body).phone, '13900139000');
+  assert.equal(s.doc.querySelector('[name="phone"]').required, true, 'a stored contact number cannot later be erased');
+});
+
+test('ordinary readers and owners with an existing contact number cannot clear that number', async t => {
+  for (const initial of [{ ...account, phone: '' }, { ...account, ownerReader: true }]) {
+    await t.test(initial.ownerReader ? 'existing owner contact' : 'ordinary reader', async subt => {
+      const s = setup(subt, initial);
+      const form = s.doc.querySelector('[data-reader-form="profile"]');
+      const phone = form.querySelector('[name="phone"]');
+      assert.equal(phone.required, true);
+      phone.value = '';
+      phone.dispatchEvent(new s.win.Event('input', { bubbles: true }));
+      assert.equal(phone.checkValidity(), false);
+      form.requestSubmit(); await turn();
+      assert.equal(s.calls.length, 0);
+      assert.equal(s.identity().phone, initial.phone);
+    });
+  }
+});
+
+test('the owner personal account signs out the real author session and clears both display identities only after success', async t => {
+  const s = setup(t, { ...account, ownerReader: true, phone: '' });
+  const authorEvents = [];
+  s.win.addEventListener('author:identity', event => authorEvents.push(event.detail));
+  s.respond(async () => ({ ok: true }));
+  s.doc.querySelector('[data-reader-logout]').click(); await turn();
+  assert.equal(s.calls.length, 1);
+  assert.equal(s.calls[0].url, '/api/author/logout');
+  assert.equal(s.calls[0].init.method, 'POST');
+  assert.equal(s.calls[0].init.credentials, 'same-origin');
+  assert.equal(s.calls[0].init.headers['X-Author-Request'], '1');
+  assert.equal(s.calls[0].init.headers['Content-Type'], 'application/json');
+  assert.deepEqual(JSON.parse(s.calls[0].init.body), {});
+  assert.deepEqual(authorEvents, [null]);
+  assert.equal(s.identity(), null);
+  assert.equal(s.win.location.hash, '#/notes');
+});
+
+test('a failed owner personal sign-out keeps both identities and the account route available for retry', async t => {
+  const s = setup(t, { ...account, ownerReader: true, phone: '' });
+  const authorEvents = [];
+  s.win.addEventListener('author:identity', event => authorEvents.push(event.detail));
+  s.respond(async () => { throw new Error('offline'); });
+  s.doc.querySelector('[data-reader-logout]').click(); await turn();
+  assert.equal(s.calls.length, 1);
+  assert.equal(s.calls[0].url, '/api/author/logout');
+  assert.deepEqual(authorEvents, []);
+  assert.equal(s.identity().uid, account.uid);
+  assert.equal(s.identities(), 0);
+  assert.equal(s.win.location.hash, '#/account');
+  assert.match(s.doc.querySelector('[data-reader-message]').textContent, /offline/);
+});
+
+test('an ordinary reader still uses reader sign-out and does not emit an author identity event', async t => {
+  const s = setup(t);
+  const authorEvents = [];
+  s.win.addEventListener('author:identity', event => authorEvents.push(event.detail));
+  s.respond(async () => ({ ok: true }));
+  s.doc.querySelector('[data-reader-logout]').click(); await turn();
+  assert.equal(s.calls.length, 1);
+  assert.equal(s.calls[0].url, '/api/reader/logout');
+  assert.equal(s.calls[0].init.headers['X-Reader-Request'], '1');
+  assert.deepEqual(authorEvents, []);
+  assert.equal(s.identity(), null);
+  assert.equal(s.win.location.hash, '#/notes');
+});
+
+test('late profile and avatar replies cannot replace a cleared, different, or renewed reader identity', async t => {
+  for (const action of ['profile', 'avatar', 'avatar/remove']) {
+    for (const change of ['clear', 'different', 'renewed']) {
+      await t.test(`${action}: ${change}`, async subt => {
+        const old = { ...account, avatar: '/api/reader/avatar/22222222-2222-4222-8222-222222222222.webp', frame: 'gold' };
+        const s = setup(subt, old);
+        let reply;
+        s.respond(() => new Promise(resolve => { reply = resolve; }));
+        if (action === 'profile') s.doc.querySelector('[data-reader-form="profile"]').requestSubmit();
+        else if (action === 'avatar') {
+          const input = s.doc.querySelector('[data-reader-avatar-file]');
+          Object.defineProperty(input, 'files', { value: [new s.win.File(['image'], 'avatar.webp', { type: 'image/webp' })] });
+          input.dispatchEvent(new s.win.Event('change', { bubbles: true }));
+        } else s.doc.querySelector('[data-reader-avatar-remove]').click();
+        await turn(); assert.equal(s.calls.length, 1);
+        const next = change === 'clear' ? null : { ...account, ...(change === 'different' ? { uid: '10002', email: 'other@example.test' } : {}), nickname: '当前账号', signature: '当前资料' };
+        s.switchAccount(next);
+        reply({ ...old, nickname: '迟到的旧资料', signature: '过期的签名', pendingAvatar: true }); await turn();
+        assert.deepEqual(s.identity(), next);
+        assert.equal(s.identities(), 0);
+        assert.equal(s.doc.querySelector('[data-reader-message]')?.textContent || '', '');
+        assert.equal(s.doc.querySelector('[data-reader-avatar-message]')?.textContent || '', '');
+      });
+    }
+  }
+});
+
+test('a profile save begun before owner sign-out cannot restore the revoked personal identity when its reply arrives', async t => {
+  const old = { ...account, ownerReader: true, phone: '' };
+  const s = setup(t, old);
+  let reply;
+  s.respond((url) => url === '/api/reader/profile' ? new Promise(resolve => { reply = resolve; }) : { ok: true });
+  s.doc.querySelector('[data-reader-form="profile"]').requestSubmit(); await turn();
+  s.doc.querySelector('[data-reader-logout]').click(); await turn();
+  assert.equal(s.identity(), null);
+  assert.equal(s.identities(), 1);
+  reply({ ...old, signature: '退出前的迟到资料' }); await turn();
+  assert.equal(s.identity(), null);
+  assert.equal(s.identities(), 1);
+  assert.equal(s.win.location.hash, '#/notes');
+  assert.deepEqual(s.calls.map(call => call.url), ['/api/reader/profile', '/api/author/logout']);
+});
 
 test('the session-equipped frame renders immediately at the existing 58px avatar without a frame-state request', async t => {
   for (const frame of ['gold', 'orbit', 'nebula', `image:${uuid}`]) {

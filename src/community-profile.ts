@@ -31,7 +31,7 @@ export function communityProfileHTML({ profile, ...common }: Common & { profile:
   const start = `<section class="page community-page community-profile" data-community="profile"><header class="community-page-head"><h1>${t('编辑资料', 'Edit profile')}</h1>`;
   if (profile.state !== 'ready') return start + '</header>' + communityStatusHTML(profile, common) + '</section>';
   const data = profile.data;
-  const back = `<a class="community-button is-small" data-profile-return href="${memberHref(data.person.uid || 'owner')}">${icons.left || ''}${t('返回我的主页', 'Back to my profile')}</a>`;
+  const back = `<a class="community-button is-small" data-profile-return href="${data.person.uid ? memberHref(data.person.uid) : '#/community/home'}">${icons.left || ''}${t('返回我的主页', 'Back to my profile')}</a>`;
   const head = `${start}${back}</header><div class="community-profile-person">${avatarHTML(data.person, common, 'xl', false)}<div><strong>${esc(data.person.name)}</strong><p data-profile-approved-signature>${esc(data.signature)}</p></div></div>`;
   if (!data.canEditProfile) return head + `<p class="community-muted">${t('当前身份不能修改读者资料。', 'This identity cannot edit reader details.')}</p></section>`;
   const pendingAvatar = data.pendingAvatar ? `<div class="community-profile-pending"><img src="/api/community/profile/avatar/pending.webp" alt="${t('待审核头像', 'Pending avatar')}" width="72" height="72"><span>${t('新头像待审核，当前头像保持显示。', 'New avatar pending review; your current avatar remains visible.')}</span></div>` : '';

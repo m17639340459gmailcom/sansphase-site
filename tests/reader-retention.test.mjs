@@ -138,3 +138,17 @@ test('candidate cutoff does not miss late-day registrations when the current mon
   assert.equal(readerCleanupDue({ id: 'reader', _verified: true, createdAt: anchor }, null, now), true);
   assert.ok(anchor <= readerInactiveCutoff(now));
 });
+
+test('the explicit owner personal reader survives inactivity without changing ordinary reader retention or VIP data',async()=>{
+  const directory=await mkdtemp(resolve(tmpdir(),'owner-reader-retention-')),ownerReaderId=randomUUID(),ordinaryId=randomUUID();
+  const rows=new Map([ownerReaderId,ordinaryId].map(id=>[id,{id,_verified:true,createdAt:'2025-01-01T00:00:00.000Z',vip_until:null}]));
+  const fixture=accountFixture(directory,rows);
+  const retention=createReaderRetention({payload:fixture.payload,directory,uidStore:{get:()=> '123456'},loginLedger:fixture.ledger,ownerReaderId});
+  try {
+    assert.deepEqual(await retention.sweep({now:'2027-02-01T00:00:00.000Z',dryRun:true}),{checked:2,eligible:1,deleted:0,kept:1});
+    assert.deepEqual(await retention.sweep({now:'2027-02-01T00:00:00.000Z'}),{checked:2,eligible:1,deleted:1,kept:1});
+    assert.equal(fixture.db.prepare('SELECT COUNT(*) AS n FROM readers WHERE id=?').get(ownerReaderId).n,1);
+    assert.equal(fixture.db.prepare('SELECT COUNT(*) AS n FROM readers WHERE id=?').get(ordinaryId).n,0);
+    assert.equal(fixture.db.prepare('SELECT vip_until FROM readers WHERE id=?').get(ownerReaderId).vip_until,null);
+  }finally{await retention.close();fixture.db.close();await rm(directory,{recursive:true,force:true});}
+});

@@ -11,10 +11,10 @@ import type { OwnerReaderPreview } from './community-owner-reader-preview.ts';
 import type { CommunityProfileAccess } from './community-profile-access.ts';
 
 // The signed-in member making a request.
-export type CommunityViewer = { kind: 'reader' | 'owner'; id: string; name: string; vip: boolean };
+export type CommunityViewer = { kind: 'reader' | 'owner'; id: string; name: string; vip: boolean; ownerAccountId?: string };
 // What the site knows about a member outside the community: nickname, public UID,
 // approved avatar, VIP, registration time and approved signature.
-export type PersonInfo = { name: string; uid: string | null; avatar: string | null; vip: boolean; joinedAt: string | null; bio: string };
+export type PersonInfo = { name: string; uid: string | null; avatar: string | null; vip: boolean; joinedAt: string | null; bio: string; ownerReader?: true };
 export type ServiceOptions = {
   store: CommunityStore | null;
   siteOrigin: string;
@@ -22,6 +22,8 @@ export type ServiceOptions = {
   directory?: string;
   ownerId?: string;
   identify: (req: IncomingMessage) => Promise<CommunityViewer | null>;
+  // A verified owner can act through one explicitly linked real reader.
+  ownerReaderIdentity?: (req: IncomingMessage) => Promise<CommunityViewer | null>;
   // Optional host session guard, rechecked synchronously after asynchronous
   // work and immediately before any request can recreate community data.
   assertActive?: (req: IncomingMessage) => void;
@@ -50,7 +52,7 @@ export type Ctx = {
   level: number; trustLevel: number; owner: boolean; mod: boolean; ownerMember: CommunityAuthor;
   moderationBoards: string[];
   canModerateBoard: (board: string) => boolean;
-  actualOwner: boolean; actualMod: boolean; browsingAsReader: boolean;
+  actualOwner: boolean; actualMod: boolean; browsingAsReader: boolean; readOnly: boolean;
   ownerReaderPreview: OwnerReaderPreview | null;
   canSeeBoard: (board: string) => boolean; hiddenBoard: string;
   send: (body: unknown, status?: number) => void;

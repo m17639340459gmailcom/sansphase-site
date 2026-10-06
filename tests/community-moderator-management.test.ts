@@ -16,10 +16,12 @@ import { acceptCommunityConvention } from './fixtures/community-convention-conse
 const reader: CommunityAuthor = { kind: 'reader', id: 'reader' };
 const candidate: CommunityAuthor = { kind: 'reader', id: 'candidate' };
 const steward: CommunityAuthor = { kind: 'reader', id: 'steward' };
+const ownerPersonal: CommunityAuthor = { kind: 'reader', id: 'ffffffff-ffff-4fff-8fff-fffffffffff8' };
 const accounts = new Map([
   ['reader', { name: '预览读者', uid: '10001' }],
   ['candidate', { name: '候选成员', uid: '10002' }],
   ['steward', { name: '守望', uid: '10003' }],
+  [ownerPersonal.id, { name: '站长个人', uid: '10008' }],
 ]);
 const cleanup = (directory: string) => rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 let template: string;
@@ -34,7 +36,7 @@ async function setup(t: TestContext) {
   const directory = await mkdtemp(resolve(tmpdir(), 'community-moderators-'));
   await copyFile(resolve(template, 'content.db'), resolve(directory, 'content.db'));
   const store = createCommunityStore(directory);
-  acceptCommunityConvention(store, [reader, candidate, steward, { kind: 'owner', id: 'owner' }]);
+  acceptCommunityConvention(store, [reader, candidate, steward, ownerPersonal, { kind: 'owner', id: 'owner' }]);
   for (const member of [reader, candidate, steward]) store.members.visit(member);
   store.members.setSteward(steward, true);
   const audits: Array<{ action: string; details: Record<string, unknown> }> = [];
@@ -44,6 +46,8 @@ async function setup(t: TestContext) {
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   service = createCommunityService({
     store, siteOrigin: origin,
+    ownerReaderIdentity: async req => String(req.headers.cookie || '').split(';')[0] === 'owner'
+      ? { ...ownerPersonal, name: '站长个人', vip: false } : null,
     identify: async req => {
       const id = String(req.headers.cookie || 'reader').split(';')[0];
       if (id === 'owner') return { kind: 'owner', id: 'owner', name: '無相', vip: true };
