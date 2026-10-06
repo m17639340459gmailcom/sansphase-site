@@ -887,15 +887,29 @@ test('redemption retries retain their operation key after a lost response and a 
     }
     return null;
   });
-  const submit = () => main.querySelector('form[data-community-form="redeem"]').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  const submit = async expectedAttempts => {
+    const form = main.querySelector('form[data-community-form="redeem"]');
+    assert.ok(form, 'the deliberate purchase must have a reviewable form');
+    const button = form.querySelector('button[type="submit"]');
+    form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+    // The protected write awaits WebCrypto before it reaches the request.
+    // Wait for the response's actual UI settlement before deliberately retrying.
+    const deadline = performance.now() + 5000;
+    while (attempts.length < expectedAttempts || (form.isConnected && button.disabled)) {
+      assert.ok(performance.now() < deadline, `redemption attempt ${expectedAttempts} and its form must settle`);
+      await turn();
+    }
+    assert.equal(attempts.length, expectedAttempts, 'one deliberate submit makes one request');
+  };
   main.querySelector('[data-action="community-redeem"]').click();
-  submit(); await turn(); await turn();
+  await submit(1);
   assert.ok(main.querySelector('form[data-community-form="redeem"]'), 'a failed response retains the reviewable purchase');
-  submit(); await turn(); await turn();
+  await submit(2);
   assert.ok(attempts[0], 'protected mutations carry an operation key');
   assert.equal(attempts[1], attempts[0], 'retry the same purchase rather than debit another one');
   assert.equal(main.querySelector('form[data-community-form="redeem"]'), null);
-  main.querySelector('[data-action="community-redeem"]').click(); submit(); await turn(); await turn();
+  main.querySelector('[data-action="community-redeem"]').click(); await submit(3);
+  assert.ok(attempts[2], 'the later purchase carries its own operation key');
   assert.notEqual(attempts[2], attempts[0], 'a new deliberate purchase remains possible');
 });
 
