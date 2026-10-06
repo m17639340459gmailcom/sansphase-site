@@ -98,6 +98,47 @@ test('a non-VIP assigned tea-room moderator loads the board and frame without ac
   assert.equal(main.querySelector('a[href="#/community/new/vip"]'), null);
 });
 
+test('verified owner reader preview loads the VIP board and frame while interactions remain read-only', async t => {
+  const viewer = { ...person, vip: true, management: { role: 'owner', browsingAsReader: true } };
+  const notices = [];
+  const { main, ui, ctx, requests, remount, w } = await setup(t, '#/community/boards/vip', url => {
+    if (url.endsWith('/me')) return response(viewer);
+    if (url.includes('/topics?')) return response({ ...listing(['vip-preview']), items: [{ ...topic('vip-preview'), board: 'vip' }] });
+    if (url.includes('/banners?')) return response({ scope: 'vip', version: 1, items: [] });
+    return null;
+  }, { members: false, painted() {}, notify: value => notices.push(value) });
+  assert.equal(requests.some(entry => entry.url.includes('/topics?') && entry.url.includes('board=vip') && (entry.init.method || 'GET') === 'GET'), true);
+  assert.match(main.textContent, /讨论 vip-preview/);
+  assert.equal(main.querySelector('[data-content-state="members"]'), null);
+  assert.match(ui.frameHTML(ctx), /data-frame-highlights-state="ready"/);
+  assert.match(ui.frameHTML(ctx), /讨论 vip-preview/);
+  assert.equal(requests.some(entry => /\/manage(?:\?|$)/.test(entry.url)), false);
+
+  await remount('#/post/p1');
+  main.querySelector('[data-action="community-like"]').click();
+  const reply = main.querySelector('[data-community-form="reply"]');
+  assert.ok(reply);
+  reply.querySelector('textarea').value = '预览不能提交互动';
+  reply.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  await turn();
+  assert.match(notices.at(-1), /当前预览仅供查看/);
+  assert.match(reply.querySelector('.community-form-status').textContent, /请先返回管理身份/);
+  assert.equal(requests.some(entry => entry.init.method === 'POST'), false);
+});
+
+for (const [label, managementRole, vip] of [
+  ['ordinary reader with stale owner and VIP flags', null, true],
+  ['steward with stale owner and VIP flags', 'steward', true],
+  ['owner preview without verified VIP entitlement', 'owner', false],
+]) test(`${label} cannot unlock the VIP board in reader preview`, async t => {
+  const viewer = { ...person, owner: true, mod: true, vip, moderationBoards: ['vip'], management: { role: managementRole, browsingAsReader: true } };
+  const { main, ui, ctx, requests } = await setup(t, '#/community/boards/vip', url => url.endsWith('/me') ? response(viewer) : null, { members: true });
+  assert.ok(main.querySelector('[data-content-state="members"]'));
+  assert.equal(requests.some(entry => entry.url.includes('/topics?') && entry.url.includes('board=vip')), false);
+  assert.match(ui.frameHTML(ctx), /data-frame-highlights-state="error"/);
+  assert.equal(requests.some(entry => entry.init.method === 'POST'), false);
+});
+
 test('cancelling one candidate scope form retains a different moderator edit and its draft', async t => {
   const { main, w } = await setup(t, '#/community/manage/stewards', url => {
     if (url.endsWith('/me')) return response(managementViewer);

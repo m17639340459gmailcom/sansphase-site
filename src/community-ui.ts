@@ -402,7 +402,11 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (current() && suppliesHighlights) frameHighlights.set(scope, lists.get(key)!);
   }
   async function loadThread(id: string) { await assignLoad(`topics/${enc(id)}`, threads.get(id), value => { threads.set(id, value); }); }
-  const members = (ctx = mounted?.ctx) => { const viewer = readyData(me); return !viewer?.management?.browsingAsReader && Boolean(ctx?.members || viewer?.vip || viewer?.owner || (viewer?.mod && viewer.moderationBoards?.includes('vip'))); };
+  const members = (ctx = mounted?.ctx) => {
+    const viewer = readyData(me);
+    if (viewer?.management?.browsingAsReader) return viewer.management.role === 'owner' && viewer.vip === true;
+    return Boolean(ctx?.members || viewer?.vip || viewer?.owner || (viewer?.mod && viewer.moderationBoards?.includes('vip')));
+  };
   function loadsFor(current: CommunityRoute): Array<() => Promise<void>> {
     const page = ((): Array<() => Promise<void>> => {
       switch (current.view) {
