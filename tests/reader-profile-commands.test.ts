@@ -24,6 +24,18 @@ async function fixture(t: test.TestContext) {
   return {directory,readerId,row,workflow,commands,payload};
 }
 
+test('reader avatar normalization accepts original images of any dimensions and emits one safe square avatar', async () => {
+  for (const [width, height] of [[1, 1], [32, 48], [48, 32], [1600, 900], [900, 1600]]) {
+    const png = await sharp({ create: { width, height, channels: 3, background: '#7395bc' } }).png().toBuffer();
+    const image = await normalizeReaderAvatar(png, 'image/png'), metadata = await sharp(image).metadata();
+    assert.equal(metadata.format, 'webp'); assert.equal(metadata.width, 320); assert.equal(metadata.height, 320);
+  }
+  await assert.rejects(normalizeReaderAvatar(Buffer.from('invalid image'), 'image/png'), { status: 400 });
+  const png = await sharp({ create: { width: 32, height: 48, channels: 3, background: '#7395bc' } }).png().toBuffer();
+  await assert.rejects(normalizeReaderAvatar(png, 'image/jpeg'), { status: 400 });
+  await assert.rejects(normalizeReaderAvatar(png, 'image/svg+xml'), { status: 415 });
+});
+
 test('signature submission reuses the main pending proposal and leaves approved data intact',async t=>{
   const f=await fixture(t);
   const state=await f.commands.submitSignature(f.readerId,'新的签名');

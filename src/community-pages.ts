@@ -73,6 +73,8 @@ export type CommunityRank = {
 export type CommunityMemberReply = { id: string; topicId: string; topicTitle: string; board: string; body: string; createdAt: string; likes: number; images?: { id: string; width: number; height: number }[] };
 export type CommunityMember = {
   background?: CommunityProfileImage | null;
+  coverImage?: string | null;
+  coverName?: string | null;
   badgeState?: CommunityBadgeState;
   person: CommunityPerson; bio: string; joinedAt: string | null; cover: string | null; streak: number;
   stats: { topics: number; replies: number; likes: number; accepted: number; featured: number };
@@ -290,7 +292,15 @@ function itemArtHTML(item: ShopItem, inventory: CommunityInventory | null, commo
 function redeemButtonHTML(item: CommunityShopItem, decorations: CommunityDecorations, { t, esc, icons = {} }: Common) {
   if (item.state.owned) {
     if (item.kind === "digital") return `<button type="button" class="community-button is-small" data-action="community-delivery" data-id="${esc(item.id)}">${icons.eye || ""}${t("查看", "View")}</button>`;
-    if (item.kind === "frame" || item.kind === "color" || item.kind === "cover") {
+    if (item.kind === "frame") {
+      const wearing = decorations.frame === item.ref;
+      return `<button type="button" class="community-button is-small ${wearing ? 'is-done' : 'is-line-gold'}" data-action="community-equip" data-kind="frame" data-ref="${wearing ? '' : esc(item.ref || '')}" aria-label="${esc(wearing ? t(`卸下${item.name}`, `Remove ${item.name}`) : t(`佩戴${item.name}`, `Wear ${item.name}`))}">${t(wearing ? '卸下' : '佩戴', wearing ? 'Remove' : 'Wear')}</button>`;
+    }
+    if (item.kind === 'cover') {
+      const using = decorations.cover === item.ref;
+      return `<button type="button" class="community-button is-small ${using ? 'is-done' : 'is-line-gold'}" data-action="community-equip" data-kind="cover" data-ref="${using ? '' : esc(item.ref || '')}" aria-label="${esc(using ? t('恢复默认主页背景', 'Restore default profile background') : t(`使用${item.name}`, `Use ${item.name}`))}">${using ? t('恢复默认', 'Restore default') : t('使用', 'Use')}</button>`;
+    }
+    if (item.kind === "color") {
       return decorations[item.kind] === item.ref
         ? `<button type="button" class="community-button is-small is-done" data-action="community-equip" data-kind="${item.kind}" data-ref="">${icons.check || ""}${t("使用中", "In use")}</button>`
         : `<button type="button" class="community-button is-small is-line-gold" data-action="community-equip" data-kind="${item.kind}" data-ref="${esc(item.ref || "")}">${t("换上", "Use")}</button>`;
@@ -302,12 +312,14 @@ function redeemButtonHTML(item: CommunityShopItem, decorations: CommunityDecorat
 
 function shopCardHTML(item: CommunityShopItem, shop: CommunityShop, common: Common, i: number, showPrice = true) {
   const { t, esc, icons = {} } = common;
+  const wearingFrame = item.state.owned && item.kind === 'frame' && shop.decorations.frame === item.ref;
+  const usingCover = item.state.owned && item.kind === 'cover' && shop.decorations.cover === item.ref;
   const tags = [limitText(item, t), item.minLevel ? t(`${communityLevels[item.minLevel].name}以上`, `${communityLevels[item.minLevel].en} and up`) : "", item.minDays ? t(`注册满 ${item.minDays} 天`, `${item.minDays}+ days`) : "", item.note || ""].filter(Boolean);
   const left = item.state.left ?? 0;
   const stock = item.stock ? `<div class="community-stock"><div class="community-stock-row"><span>${t("库存", "Stock")}</span><span class="is-mono">${t(`剩 ${left} / ${item.stock}`, `${left} / ${item.stock} left`)}</span></div><div class="community-meter"><i style="width:${Math.round(left / item.stock * 100)}%"></i></div></div>` : "";
   const off = item.state.code === "soldout" || item.state.code === "closed";
   return `<article class="community-sitem community-spot community-rv${off ? " is-off" : ""}${item.state.owned ? " is-owned" : ""}" style="--i:${i + 2}">`
-    + `<div class="community-sitem-art">${itemArtHTML(item, shop.inventory, common)}${item.state.owned ? `<span class="community-owned-tag">${icons.check || ""}${t("已拥有", "Owned")}</span>` : ""}</div>`
+    + `<div class="community-sitem-art">${itemArtHTML(item, shop.inventory, common)}${item.state.owned ? `<span class="community-owned-tag">${icons.check || ""}${t(wearingFrame ? '已佩戴' : usingCover ? '使用中' : '已拥有', wearingFrame ? 'Wearing' : usingCover ? 'In use' : 'Owned')}</span>` : ""}</div>`
     + `<div class="community-sitem-body"><details class="community-sitem-details" data-shop-description="${esc(item.id)}"><summary><h3>${esc(item.name)}${icons['chevron-down'] || ''}</h3></summary><p>${esc(item.desc)}</p></details>`
     + `<div class="community-sitem-meta">`
     + (tags.length ? `<div class="community-stags">${tags.map((tag) => `<span>${esc(tag)}</span>`).join("")}</div>` : "")
@@ -363,7 +375,7 @@ export function communityShopHTML({ shop, tab, redeeming = null, delivery = null
   const panelItem = redeeming ? data.items.find((item) => item.id === redeeming) : null;
   return `<section class="page community-page community-shop-page" data-community="shop" data-tab="${esc(current)}">`
     + bannerHTML({ eyebrow: "EXCHANGE", title: t("兑换所", "Exchange"), text: t("用星尘换装扮、道具卡、站长整理的资源和限量周边。兑换条件以商品为准；作者取消待发货订单时退还星尘。", "Trade stardust for looks, cards, resources and limited goods. Conditions vary by item; owner cancellation of unshipped orders refunds stardust."), esc,
-      side: statsHTML([[t("我的星尘", "My stardust"), data.balance]]) + `<a class="community-button is-small" href="${shopHref("mine")}">${icons.box || ""}${t("我的兑换", "My items")}</a>` })
+      side: statsHTML([[t("我的星尘", "My stardust"), data.balance]]) + `<a class="community-button is-small" href="${shopHref("mine")}">${icons.box || ""}${t("已拥有", "Owned")}</a>` })
     + seg
     + (panelItem ? redeemPanelHTML(panelItem, data.balance, data.inventory, common) : "")
     + (delivery ? deliveryPanelHTML(delivery, common) : "")
@@ -374,7 +386,7 @@ type MineOptions = Common & { mine: CommunityLoad<CommunityShopMine>; me?: Commu
 export function communityShopMineHTML({ mine, me = null, delivery = null, ...common }: MineOptions) {
   const { t, esc, icons = {} } = common;
   const data = readyData(mine);
-  const head = `<header class="community-page-head community-rv" style="--i:0"><div><nav class="community-crumb" aria-label="${t("位置", "Location")}"><a href="${shopHref()}">${t("兑换所", "Exchange")}</a>${icons["chevron-right"] || "›"}<span>${t("我的兑换", "My items")}</span></nav><h1>${t("我的兑换", "My items")}</h1></div>${data ? statsHTML([[t("剩余星尘", "Stardust left"), data.balance]]) : ""}</header>`;
+  const head = `<header class="community-page-head community-rv" style="--i:0"><div><nav class="community-crumb" aria-label="${t("位置", "Location")}"><a href="${shopHref()}">${t("兑换所", "Exchange")}</a>${icons["chevron-right"] || "›"}<span>${t("已拥有", "Owned")}</span></nav><h1>${t("已拥有", "Owned")}</h1></div>${data ? statsHTML([[t("剩余星尘", "Stardust left"), data.balance]]) : ""}</header>`;
   if (!data) return pageOf("shop", common, mine, head).replace('data-community="shop"', 'data-community="shop" data-tab="mine"');
   const cards = (["makeup", "pin", "highlight"] as const).map((ref) => {
     const count = data.inventory[ref];
@@ -396,7 +408,7 @@ export function communityShopMineHTML({ mine, me = null, delivery = null, ...com
   return `<section class="page community-page community-shop-page" data-community="shop" data-tab="mine">${head}`
     + (delivery ? deliveryPanelHTML(delivery, common) : "")
     + `<section class="community-rv" style="--i:1"><div class="community-sec-h"><h2>${t("道具卡", "Cards")}</h2><p class="community-muted">${t("用的时候自动扣一张。", "One is used each time.")}</p></div><div class="community-inv-grid">${cards}</div></section>`
-    + `<section class="community-rv" style="--i:2"><div class="community-sec-h"><h2>${t("装扮", "Looks")}</h2><p class="community-muted">${t("点“换上”马上生效，大家看到的你就变了。", "“Use” applies at once for everyone.")}</p></div>${looks}</section>`
+    + `<section class="community-rv" style="--i:2"><div class="community-sec-h"><h2>${t("装扮", "Looks")}</h2><p class="community-muted">${t("在这里更换头像框、昵称颜色和主页封面。头像框的佩戴状态与主站同步。", "Change frames, name colours and covers here. Your worn frame also appears on the main site.")}</p></div>${looks}</section>`
     + (files ? `<section class="community-rv" style="--i:3"><div class="community-sec-h"><h2>${t("数字资源", "Digital")}</h2></div>${files}</section>` : "")
     + `<section class="community-rv" style="--i:4"><div class="community-sec-h"><h2>${t("兑换记录", "History")}</h2></div>${orders}</section></section>`;
 }
@@ -459,7 +471,7 @@ export function communityMemberHTML({ member, me = null, muting = false, badgeSe
   else if (data.tab === "bookmarks") body = data.bookmarks.length ? communityTopicsHTML(data.bookmarks, common, { showAuthor: false }) : emptyHTML(common, t("还没有收藏", "No bookmarks yet"), t("在帖子下面点“收藏”，就会出现在这里。", "Use “Bookmark” under a post to keep it here."));
   else body = data.topics.length ? communityTopicsHTML(data.topics, common, { showAuthor: false }) : emptyHTML(common, t("还没有发过主题", "No topics yet"));
   const actions = [
-    data.self ? `<a class="community-button is-small" href="#/community/profile">${icons.pen || ""}${t("编辑资料", "Edit profile")}</a>` : "",
+    data.self ? `<button class="community-button is-small" type="button" data-action="community-profile-edit" aria-haspopup="dialog">${icons.pen || ""}${t("编辑资料", "Edit profile")}</button>` : "",
     !data.self && me && person.role === "reader" ? `<button type="button" class="community-button is-small${data.following ? "" : " is-gold"}" data-action="community-follow" data-uid="${esc(uid)}" aria-pressed="${data.following}">${data.following ? t("已关注", "Following") : t("关注", "Follow")}</button>` : "",
     data.canMute && !data.muted ? `<button type="button" class="community-button is-small" data-action="community-mute" data-uid="${esc(uid)}">${icons.ban || ""}${t("禁言", "Mute")}</button>` : "",
     data.canAppoint ? `<a class="community-button is-small is-line-gold" href="${manageHref('stewards')}">${icons.shield || ""}<span>${data.steward ? t('调整版主负责板块', 'Edit moderator boards') : t('选择版主负责板块', 'Assign moderator boards')}</span></a>${data.steward ? `<button type="button" class="community-button is-small" data-action="community-steward" data-uid="${esc(uid)}" data-on="false"><span>${t('撤销版主', 'Remove moderator')}</span></button>` : ''}` : "",
@@ -469,11 +481,11 @@ export function communityMemberHTML({ member, me = null, muting = false, badgeSe
     + (person.role === "owner" ? "" : `<a href="#/community/checkin"><span>${icons.calendar || ""}${t("签到", "Check-in")}</span><b>${data.quick.checkedIn ? t("今日已签", "Done today") : t("还没签到", "Not yet")}</b></a>`)
     + `<a href="${inboxHref()}"><span>${icons.bell || ""}${t("通知", "Notifications")}</span><b>${t(`${data.quick.unread} 未读`, `${data.quick.unread} unread`)}</b></a>`
     + `<a href="${stardustHref("levels")}"><span>${icons.trending || ""}${t("等级", "Levels")}</span><b>${person.role === "owner" ? t("站长", "Owner") : growthChipHTML(person, common) || communityLevelName(person.steward ? 4 : person.level ?? 0, t)}</b></a>`
-    + `<a href="${shopHref("mine")}"><span>${icons.box || ""}${t("我的兑换", "My items")}</span><b>${t(`${data.quick.orders} 件`, `${data.quick.orders}`)}</b></a>`
+    + `<a href="${shopHref("mine")}"><span>${icons.box || ""}${t("已拥有", "Owned")}</span><b>${t(`${data.quick.orders} 件`, `${data.quick.orders}`)}</b></a>`
     + (me?.mod ? `<a href="${manageHref()}"><span>${icons.shield || ""}${t("社区管理", "Moderation")}</span><b>${t("进入", "Open")}</b></a>` : "")
     + `</div>` : "";
   const cover = data.cover && /^[a-z]+$/.test(data.cover) ? ` is-cover-${data.cover}` : "";
-  const background = profileImageURL(data.background?.url);
+  const background = profileImageURL(data.background?.url) || profileImageURL(data.coverImage);
   const hue = [...person.name].reduce((sum, char) => sum + (char.codePointAt(0) || 0), 0) % 360;
   return `<section class="page community-page community-member" data-community="member" data-tab="${esc(data.tab)}">`
     + `<header class="community-m-hero community-rv" style="--i:0;--h:${hue}"><div class="community-m-intro"><div class="community-m-cover${background ? '' : cover}" aria-hidden="true">${background ? `<img src="${esc(background)}" alt="" decoding="async">` : '<i></i><i></i>'}</div>`

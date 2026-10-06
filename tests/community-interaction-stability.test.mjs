@@ -72,6 +72,46 @@ async function setup(t, hash, handle = () => null, ctxOptions = {}) {
 const managementViewer = { ...person, name: '無相', uid: 'owner', role: 'owner', owner: true, mod: true, management: { role: 'owner', browsingAsReader: false } };
 const managementData = { owner: true, tab: 'items', counts: { queue: 0, reports: 0, orders: 0, sanctions: 0 }, kpis: { topics24h: 1, replies24h: 2 }, queue: { topics: [], replies: [] }, reports: [], content: [topic('p1')], items: [], orders: [], sanctions: [], data: null };
 
+test('authors list a profile background through the existing product form and image upload', async t => {
+  const image = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const { main, w, requests } = await setup(t, '#/community/manage/items', (url, init) => {
+    if (url.endsWith('/me')) return response(managementViewer);
+    if (url.includes('/manage?')) return response(managementData);
+    if (url.endsWith('/manage/item-image')) return response({ id: image, frameReady: false });
+    if (url.endsWith('/manage/items')) return response({ id: 'new-cover' });
+    return null;
+  });
+  main.querySelector('[data-action="community-item-edit"]').click();
+  const form = main.querySelector('form[data-community-form="item"]');
+  const kind = form.querySelector('[name="kind"][value="cover"]');
+  assert.ok(kind, 'background is a real product type');
+  kind.checked = true;
+  kind.dispatchEvent(new w.Event('change', { bubbles: true }));
+  assert.equal(form.elements.namedItem('cat').value, 'look');
+  assert.equal(form.querySelector('[data-item-stock]').hidden, true);
+  assert.equal(form.querySelector('[data-item-effect]').hidden, true);
+  assert.equal(form.querySelector('[data-item-media]').hidden, false);
+  assert.match(form.querySelector('[data-item-wear-help]').textContent, /仅.*社区.*背景.*已拥有/);
+  form.elements.namedItem('name').value = '林间背景';
+  form.elements.namedItem('description').value = '社区主页背景';
+  form.elements.namedItem('price').value = '120';
+  form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  await turn();
+  assert.equal(requests.some(entry => entry.url.endsWith('/manage/items')), false, 'background requires an uploaded image');
+  fileDrag(w, form, 'drop', [new File(['test'], 'background.webp', { type: 'image/webp' })]);
+  await turn(); await turn();
+  assert.equal(form.elements.namedItem('image').value, image);
+  assert.equal(form.querySelector('[data-item-wear-sample] img').getAttribute('src'), `/api/community/images/${image}.webp`);
+  form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  await turn();
+  const payload = JSON.parse(requests.find(entry => entry.url.endsWith('/manage/items')).init.body);
+  assert.equal(payload.cat, 'look');
+  assert.equal(payload.kind, 'cover');
+  assert.equal(payload.image, image);
+  assert.equal(payload.stock, null);
+  assert.equal(payload.effect, null);
+});
+
 test('board filtering preserves position and batch review submits only visible pending posts', async t => {
   const data = { ...managementData, queue: { topics: ['p1', 'p2'].map((id, index) => ({ ...topic(id), board: index ? 'tools' : 'qa', pending: true, body: '待审内容' })), replies: [] } };
   const { main, w, requests } = await setup(t, '#/community/manage', url => {

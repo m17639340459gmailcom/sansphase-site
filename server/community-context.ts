@@ -39,6 +39,8 @@ export type ServiceOptions = {
   profile?: CommunityProfileAccess;
   // Mirror committed database audit events to the existing private audit log.
   audit?: (action: string, details: Record<string, unknown>) => Promise<void>;
+  // Drain the host's existing persistent cleanup queue after SQL commits.
+  drainFileQueue?: () => Promise<unknown>;
   // Words that may not appear in posts (private configuration).
   words?: readonly string[];
   // Required title, body text and inline cover. False is only for legacy API compatibility.

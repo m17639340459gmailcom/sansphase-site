@@ -90,7 +90,7 @@ export function createCommunityHostRuntime(config: CommunityHostConfig, client: 
     if (contentDb.prepare("SELECT 1 FROM sqlite_master WHERE name IN ('readers','authors')").get()) throw Error('Independent community database must not contain main-site accounts.');
   } catch (error) { contentDb.close(); throw error; }
   const hostStore = createCommunityHostStore(directory);
-  const store = createCommunityStore(directory);
+  const store = createCommunityStore(directory, { queueFile: (filename, reason) => hostStore.queueFile(filename, reason) });
   let queueRun: Promise<{ removed: number; retained: number }> | null = null;
   const drainFileQueue = () => queueRun ??= (async () => {
     let removed = 0, retained = 0;
@@ -190,7 +190,7 @@ export function createCommunityHostRuntime(config: CommunityHostConfig, client: 
     res.end(JSON.stringify({ error: '账号管理请前往主站。' }));
   };
   const communityService = createCommunityService({
-    store, directory, siteOrigin, ownerId: authorId, profile,
+    store, directory, siteOrigin, ownerId: authorId, profile, drainFileQueue,
     identify: async req => current(req).identity.viewer,
     ownerReaderIdentity: async req => { const personal = ownerReader(req); return personal ? { kind: 'reader', id: personal.id, name: personal.nickname, vip: personal.vip } : null; },
     assertActive: req => { current(req); },

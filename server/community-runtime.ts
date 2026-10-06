@@ -22,9 +22,14 @@ type Options = {
   ownerReaderIdentity?: (req: IncomingMessage) => Promise<ReaderIdentity>;
   ownerReaderId?: string;
   ownerName: () => Promise<string>;
+  // Read only the public author-brand avatar. Personal reader avatars remain
+  // in the reader account authority and never write to the blog profile.
+  ownerAvatar?: { current: () => Promise<string | null>; read: (id: string) => Promise<Buffer | null> };
   authorId: string;
   uidStore: { get: (id: string) => string; readerId: (uid: string) => string | null };
   profile?: CommunityProfileAccess;
+  queueFile?: (filename: string, reason: string) => void;
+  drainFileQueue?: () => Promise<unknown>;
 };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -36,7 +41,7 @@ function readWords(directory: string) {
 
 // Both the local service and the narrow identity bridge use this approved
 // profile directory. It does not open or mutate a community business database.
-export function createCommunityDirectory({ payload, directory, ownerName, authorId, uidStore, ownerReaderId }: Pick<Options, 'payload' | 'directory' | 'ownerName' | 'authorId' | 'uidStore' | 'ownerReaderId'>) {
+export function createCommunityDirectory({ payload, directory, ownerName, ownerAvatar, authorId, uidStore, ownerReaderId }: Pick<Options, 'payload' | 'directory' | 'ownerName' | 'ownerAvatar' | 'authorId' | 'uidStore' | 'ownerReaderId'>) {
   const owner: CommunityAuthor = { kind: 'owner', id: authorId };
   const readers = async (where: Where, limit: number) =>
     (await payload.find({ collection: 'readers', where, limit, depth: 0, pagination: false, overrideAccess: true })).docs as unknown as ReaderRow[];
@@ -54,8 +59,8 @@ export function createCommunityDirectory({ payload, directory, ownerName, author
       });
     }
     if (authors.some(author => author.kind === 'owner' && author.id === authorId)) {
-      const name = await ownerName();
-      map.set(`owner:${authorId}`, { name, uid: 'owner', avatar: null, vip: true, joinedAt: null, bio: '' });
+      const [name, avatar] = await Promise.all([ownerName(), ownerAvatar?.current() ?? null]);
+      map.set(`owner:${authorId}`, { name, uid: 'owner', avatar: uuid.test(avatar || '') ? avatar : null, vip: true, joinedAt: null, bio: '' });
     }
     return map;
   };
@@ -81,6 +86,12 @@ export function createCommunityDirectory({ payload, directory, ownerName, author
     return row && uuid.test(row.avatar || '') && !row.disabled ? resolve(directory, 'uploads', `reader-avatar-${row.avatar}.webp`) : null;
   };
   const avatar = async (uid: string) => {
+    if (uid === 'owner') {
+      const id = await ownerAvatar?.current();
+      if (!id || !uuid.test(id) || !ownerAvatar) return null;
+      const bytes = await ownerAvatar.read(id);
+      return await ownerAvatar.current() === id ? bytes : null;
+    }
     const file = await avatarFile(uid);
     if (!file) return null;
     try { return await readFile(file); }
@@ -94,7 +105,7 @@ export function createCommunityDirectory({ payload, directory, ownerName, author
 // site starts and runs as before.
 export function createCommunityRuntime(options: Options) {
   const { directory, siteOrigin, readerIdentity, ownerIdentity, authorId } = options;
-  const store = communityTablesReady(directory) ? createCommunityStore(directory) : null;
+  const store = communityTablesReady(directory) ? createCommunityStore(directory, { queueFile: options.queueFile }) : null;
   if (!store) process.stdout.write(JSON.stringify({ event: 'community-not-migrated', at: new Date().toISOString() }) + '\n');
   const profiles = createCommunityDirectory(options);
   const identify = async (req: IncomingMessage): Promise<CommunityViewer | null> => {
@@ -122,7 +133,7 @@ export function createCommunityRuntime(options: Options) {
     },
     service: createCommunityService({ store, siteOrigin, directory, ownerId: authorId, identify,
       ownerReaderIdentity: async req => { const personal = await options.ownerReaderIdentity?.(req); return personal ? { kind: 'reader', id: personal.id, name: personal.nickname, vip: personal.vip === true } : null; },
-      ...profiles, audit, words: readWords(directory), profile: options.profile }),
+      ...profiles, avatarBytes: profiles.avatar, audit, words: readWords(directory), profile: options.profile, drainFileQueue: options.drainFileQueue }),
     close() { store?.close(); },
   };
 }

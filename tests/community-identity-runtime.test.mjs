@@ -65,6 +65,33 @@ test('shared directory exposes only approved records and reads avatars through t
   await assert.rejects(source.people([{ kind: 'reader', id }]), /directory unavailable/);
 });
 
+test('owner brand avatar reads approved author media independently of the linked personal reader avatar', async t => {
+  const directory = await mkdtemp(resolve(tmpdir(), 'community-brand-avatar-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const personalId = randomUUID(), personalAvatar = randomUUID(), first = randomUUID(), second = randomUUID();
+  await mkdir(resolve(directory, 'uploads')); await writeFile(resolve(directory, 'uploads', `reader-avatar-${personalAvatar}.webp`), 'personal-avatar');
+  const personal = { id: personalId, nickname: '个人读者', avatar: personalAvatar, signature: '已审核个人签名' };
+  const payload = { find: async () => ({ docs: [personal] }) };
+  let current = first; const reads = [];
+  const source = createCommunityDirectory({ payload, directory, authorId: 'owner-a', ownerReaderId: personalId,
+    uidStore: { get: () => '10008', readerId: uid => uid === '10008' ? personalId : null }, ownerName: async () => '作者品牌',
+    ownerAvatar: { current: async () => current, read: async id => { reads.push(id); return Buffer.from('brand-' + id); } } });
+  let map = await source.people([{ kind: 'owner', id: 'owner-a' }, { kind: 'reader', id: personalId }]);
+  assert.equal(map.get('owner:owner-a').avatar, first);
+  assert.equal(map.get(`reader:${personalId}`).avatar, personalAvatar);
+  assert.equal((await source.avatar('owner')).toString(), 'brand-' + first);
+  assert.equal((await source.avatar('10008')).toString(), 'personal-avatar');
+  assert.deepEqual(reads, [first], 'personal reads do not touch brand media');
+  current = second;
+  map = await source.people([{ kind: 'owner', id: 'owner-a' }]); assert.equal(map.get('owner:owner-a').avatar, second);
+  assert.equal((await source.avatar('owner')).toString(), 'brand-' + second, 'the next request sees main-site brand avatar changes');
+  current = null;
+  assert.equal((await source.people([{ kind: 'owner', id: 'owner-a' }])).get('owner:owner-a').avatar, null);
+  assert.equal(await source.avatar('owner'), null);
+  current = '../../private'; assert.equal(await source.avatar('owner'), null);
+  assert.deepEqual(reads, [first, second]);
+});
+
 test('main bridge config requires approved destination and independent private keys', () => {
   const secret = 'payload-private-key'.repeat(3);
   const valid = { communityOrigin: 'https://community.sansphase.com', bridgeSecret: 'separate-bridge-key'.repeat(3), stateEncryptionKey: 'main-only-state-key'.repeat(3) };
@@ -89,7 +116,40 @@ test('real main runtime optionally constructs the authority and keeps a migrated
   await writeFile(resolve(data, 'migration-complete.json'), JSON.stringify({ provider: 'payload' }));
   await migrateReaderAccounts(data); await migrateCommunity(data); prepareIdentityStore(data);
   const config = resolve(directory, 'private.json'); await writeFile(config, JSON.stringify(settings), { mode: 0o600 });
-  const code = `import assert from 'node:assert/strict'; import {createPayloadRuntime} from './server/payload/runtime.ts'; const runtime=await createPayloadRuntime(process.argv[1]); try {await runtime.healthCheck(); const req={headers:{cookie:'sansphase_author_session='+process.env.COMMUNITY_IDENTITY_TEST_OWNER_TOKEN}}; assert.deepEqual(await runtime.authorService.identityStrict(req),{name:'Owner'}); const original=runtime.payload.findByID; runtime.payload.findByID=async()=>{throw Error('injected account storage failure');}; assert.equal(await runtime.authorService.identity(req),null); await assert.rejects(runtime.authorService.identityStrict(req),/injected account storage failure/); runtime.payload.findByID=original; console.log(JSON.stringify({enabled:runtime.communityEnabled,destination:runtime.communityDestination,authority:!!runtime.identityAuthority,strict:typeof runtime.readerService.identityStrict,strictOwner:typeof runtime.authorService.identityStrict}));}finally{await runtime.close();}`;
+  const code = `
+    import assert from 'node:assert/strict';
+    import {createServer} from 'node:http';
+    import sharp from 'sharp';
+    import {createPayloadRuntime} from './server/payload/runtime.ts';
+    import {createIdentityClient} from './server/community-identity-protocol.ts';
+    const runtime=await createPayloadRuntime(process.argv[1]);
+    try {
+      await runtime.healthCheck(); const cookie='sansphase_author_session='+process.env.COMMUNITY_IDENTITY_TEST_OWNER_TOKEN;
+      const req={headers:{cookie}}; assert.deepEqual(await runtime.authorService.identityStrict(req),{name:'Owner'});
+      const original=runtime.payload.findByID; runtime.payload.findByID=async()=>{throw Error('injected account storage failure');};
+      assert.equal(await runtime.authorService.identity(req),null); await assert.rejects(runtime.authorService.identityStrict(req),/injected account storage failure/); runtime.payload.findByID=original;
+      const png=await sharp({create:{width:96,height:128,channels:3,background:'#7385ab'}}).png().toBuffer();
+      const media=await runtime.payload.create({collection:'media',data:{title:'Public brand portrait',originalName:'portrait.png'},file:{data:png,name:'portrait.png',mimetype:'image/png',size:png.length}});
+      const profile=(await runtime.payload.find({collection:'site_profile',limit:1,depth:0})).docs[0];
+      await runtime.payload.update({collection:'site_profile',id:profile.id,data:{avatar:media.id}});
+      const server=createServer((request,response)=>void(request.url==='/api/community-entry'?runtime.identityAuthority.handleEntry(request,response):runtime.identityAuthority.handleBridge(request,response)));
+      await new Promise(done=>server.listen(0,'127.0.0.1',done)); const base='http://127.0.0.1:'+server.address().port;
+      try {
+        const entry=await fetch(base+'/api/community-entry',{method:'POST',headers:{Origin:runtime.settings.siteOrigin,'X-Reader-Request':'1',Cookie:cookie}});
+        assert.equal(entry.status,200); const data=await entry.json(),ticket=new URL(data.url).hash.slice('#community-entry='.length);
+        const binding=/sansphase_community_handoff=([^;]+)/.exec(entry.headers.get('set-cookie'))[1];
+        const client=createIdentityClient({origin:runtime.settings.siteOrigin,secret:runtime.settings.communityIdentity.bridgeSecret,fetch:(input,options)=>fetch(base+new URL(String(input)).pathname,options)});
+        const {sessionRef}=await client.request('exchange',{ticket,binding});
+        const people=await client.request('people',{sessionRef,authors:[{kind:'owner',id:runtime.settings.authorId}]});
+        assert.equal(people[0][1].avatar,media.id); assert.equal(people[0][1].uid,'owner');
+        const image=await client.request('avatar',{sessionRef,uid:'owner'}),metadata=await sharp(Buffer.from(image.base64,'base64')).metadata();
+        assert.equal(metadata.format,'webp');assert.equal(metadata.width,320);assert.equal(metadata.height,320);
+        await runtime.payload.update({collection:'site_profile',id:profile.id,data:{avatar:null}});
+        assert.equal(await client.request('avatar',{sessionRef,uid:'owner'}),null,'removed brand avatar is not retained as a stale copy');
+      } finally {await new Promise(done=>server.close(done));}
+      console.log(JSON.stringify({enabled:runtime.communityEnabled,destination:runtime.communityDestination,authority:!!runtime.identityAuthority,strict:typeof runtime.readerService.identityStrict,strictOwner:typeof runtime.authorService.identityStrict}));
+    } finally {await runtime.close();}
+  `;
   const { stdout } = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', code, config], { cwd: process.cwd(), env: { ...process.env, SITE_ORIGIN: settings.siteOrigin, COMMUNITY_IDENTITY_TEST_OWNER_TOKEN: ownerToken }, windowsHide: true });
   assert.deepEqual(JSON.parse(stdout.trim().split('\n').at(-1)), { enabled: false, destination: 'https://community.sansphase.com', authority: true, strict: 'function', strictOwner: 'function' });
 });

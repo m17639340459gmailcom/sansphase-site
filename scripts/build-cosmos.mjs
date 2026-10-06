@@ -38,6 +38,8 @@ const result = await build({
     "community-layout": "src/community-layout.ts",
     "community-landing": "src/community-landing.ts",
     "community-compose-editor": "src/community-compose-editor.ts",
+    "community-profile-dialog": "src/community-profile-dialog.ts",
+    "community-profile-crop": "src/community-profile-crop.ts",
   },
   bundle: true,
   format: "esm",

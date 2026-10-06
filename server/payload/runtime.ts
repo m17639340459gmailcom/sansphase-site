@@ -1,4 +1,4 @@
-import { createReaderProfileCommands } from '../reader-profile-commands.ts';
+import { createReaderProfileCommands, normalizeReaderAvatar } from '../reader-profile-commands.ts';
 import { createLocalCommunityProfileAccess } from '../community-profile-access.ts';
 import { createCommunityFrameClient } from '../community-frame-client.ts';
 import { createCommunityProfileReviewerClient } from '../community-profile-reviewer.ts';
@@ -17,6 +17,7 @@ import { createLoginLedger } from '../login-ledger.ts';
 import { createReaderUidStore } from '../reader-uids.ts';
 import { createReaderRetention } from '../reader-retention.ts';
 import { createReaderWorkflow } from '../reader-workflow.ts';
+import { cleanReaderFiles } from '../reader-file-cleanup.ts';
 import { createMediaRetention } from './media-retention.ts';
 import { createCommunityRuntime } from '../community-runtime.ts';
 import { createIdentityAuthority } from '../community-identity-authority.ts';
@@ -72,6 +73,8 @@ export async function createPayloadRuntime(
   const readerService=createReaderService({payload,siteOrigin:settings.siteOrigin,directory:settings.directory,emailReady:smtpConfigured(settings.smtp),authorService,loginLedger,uidStore,workflow,profileCommands,frames,ownerReaderId});
   const community = createCommunityRuntime({
     payload, directory: settings.directory, siteOrigin: settings.siteOrigin, authorId: settings.authorId, uidStore,
+    queueFile: workflow.queueFile,
+    drainFileQueue: () => cleanReaderFiles({ workflow, payload, directory: settings.directory, limit: 1000 }),
     readerIdentity: readerService.identity,
     ownerReaderIdentity: readerService.ownerReaderIdentity, ownerReaderId,
     profile: createLocalCommunityProfileAccess({ commands: profileCommands, readerIdentity: readerService.identityStrict, ownerReaderIdentity: readerService.ownerReaderIdentity, ownerIdentity: req => authorService.identityStrict(req), ownerId: settings.authorId }),
@@ -79,6 +82,25 @@ export async function createPayloadRuntime(
     ownerName: async () => {
       const found = await payload.find({ collection: 'site_profile', limit: 1, depth: 0, overrideAccess: true });
       return String((found.docs[0] as { name?: string } | undefined)?.name || '無相');
+    },
+    ownerAvatar: {
+      current: async () => {
+        const found = await payload.find({ collection: 'site_profile', limit: 1, depth: 0, overrideAccess: true });
+        const avatar = (found.docs[0] as { avatar?: string | null } | undefined)?.avatar;
+        return typeof avatar === 'string' ? avatar : null;
+      },
+      read: async id => {
+        // The directory checks the current published brand reference before and
+        // after this existing media reader; no caller-selected asset is exposed.
+        let media: Response;
+        try { media = await store.readMedia(id, undefined, 384, { presentation: true }); }
+        catch (error) { if (error && typeof error === 'object' && ('status' in error && error.status === 404 || 'code' in error && error.code === 'ENOENT')) return null; throw error; }
+        const type = media.headers.get('Content-Type')?.split(';')[0] || '';
+        if (!['image/jpeg', 'image/png', 'image/webp'].includes(type) || Number(media.headers.get('Content-Length')) > 25 * 1024 * 1024) {
+          await media.body?.cancel(); return null;
+        }
+        return normalizeReaderAvatar(Buffer.from(await media.arrayBuffer()), type);
+      },
     },
   });
   const purgeClient = bridgeSettings ? createIdentityClient({ origin: bridgeSettings.communityOrigin, secret: bridgeSettings.bridgeSecret, path: '/api/community-identity/purge' }) : null;

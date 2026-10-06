@@ -13,7 +13,7 @@ export type PendingCommunityBackground = { member: CommunityAuthor; imageId: str
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** Custom profile backgrounds belong only to the community. Pending artwork never becomes public by uploading it. */
-export function createCommunityProfileBackgrounds(db: DatabaseSync, tx: Transaction) {
+export function createCommunityProfileBackgrounds(db: DatabaseSync, tx: Transaction, retireImage: (id: string, reason: string) => void = () => {}) {
   const current = db.prepare('SELECT member_kind,member_id,approved_image,pending_image,pending_at FROM community_profile_backgrounds WHERE member_kind=? AND member_id=?');
   const image = db.prepare('SELECT id,uploader_kind,uploader_id,width,height,purpose,deleted_at,topic_id FROM community_images WHERE id=?');
   const save = db.prepare(`INSERT INTO community_profile_backgrounds(member_kind,member_id,pending_image,pending_at,updated_at)
@@ -45,12 +45,20 @@ export function createCommunityProfileBackgrounds(db: DatabaseSync, tx: Transact
         const row = uuid.test(imageId) ? image.get(imageId) as ImageRow | undefined : undefined;
         if (!row || row.deleted_at || row.purpose !== 'profile' || row.topic_id || !same(member, { kind: row.uploader_kind, id: row.uploader_id }))
           throw fail('背景图片已失效，请重新上传。');
+        const previous = current.get(member.kind, member.id) as BackgroundRow | undefined;
         save.run(member.kind, member.id, imageId, now, now);
+        if (previous?.pending_image) retireImage(previous.pending_image, 'profile-background-superseded');
         return state(member);
       });
     },
     remove(member: CommunityAuthor) {
-      return tx(() => { reader(member); reset.run(member.kind, member.id); return state(member); });
+      return tx(() => {
+        reader(member);
+        const previous = current.get(member.kind, member.id) as BackgroundRow | undefined;
+        reset.run(member.kind, member.id);
+        for (const id of new Set([previous?.approved_image, previous?.pending_image])) if (id) retireImage(id, 'profile-background-removed');
+        return state(member);
+      });
     },
     pending(): PendingCommunityBackground[] {
       return (pending.all() as Array<{ member_kind: 'reader'; member_id: string; pending_image: string; pending_at: string; width: number; height: number }>).map(row => ({
@@ -70,6 +78,8 @@ export function createCommunityProfileBackgrounds(db: DatabaseSync, tx: Transact
         if (!uuid.test(imageId) || row?.pending_image !== imageId || !value) throw fail('这份背景申请已被更新或处理，请刷新后再审核。', 409);
         if (decide.run(approve ? 1 : 0, now, member.kind, member.id, imageId).changes !== 1) throw fail('背景申请已更新，请刷新。', 409);
         receipt.run(randomUUID(), member.kind, member.id, imageId, approve ? 1 : 0, note, actor.kind, actor.id, now);
+        const retired = approve ? row.approved_image : row.pending_image;
+        if (retired) retireImage(retired, approve ? 'profile-background-replaced' : 'profile-background-rejected');
         return state(member);
       });
     },

@@ -36,6 +36,15 @@ export function createCommunityService(options: ServiceOptions) {
   const auditMirror = writeAudit ? (event: CommunityAuditEvent) => writeAudit(event.action, {
     ...event.details, actor: memberKey(event.actor), auditEventId: event.id, auditCreatedAt: event.createdAt,
   }) : undefined;
+  const drainFiles = async () => {
+    if (!options.drainFileQueue) return;
+    try { await options.drainFileQueue(); }
+    catch {
+      // SQL has already committed. Keep queued files for retry without turning
+      // a completed upload into an error that would remove its new picture.
+      process.stderr.write(JSON.stringify({ event: 'community-file-cleanup-retry', at: new Date().toISOString() }) + '\n');
+    }
+  };
 
   const sendTo = (res: ServerResponse, body: unknown, status = 200) => {
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'private, no-store' });
@@ -55,8 +64,12 @@ export function createCommunityService(options: ServiceOptions) {
     lastUpkeep = now;
     await store.audit.flush(auditMirror);
     store.expireBounties(now);
-    if (uploads) for (const id of store.sweepImages(now)) for (const kind of ['image', 'thumb'])
-      await unlink(resolve(uploads, `community-${kind}-${id}.webp`)).catch(() => {});
+    if (uploads) {
+      const ids = store.sweepImages(now);
+      if (options.drainFileQueue) await drainFiles();
+      else for (const id of ids) for (const kind of ['image', 'thumb'])
+        await unlink(resolve(uploads, `community-${kind}-${id}.webp`)).catch(() => {});
+    }
   }
 
   function context(req: IncomingMessage, res: ServerResponse, path: string, viewer: CommunityViewer): Ctx {
@@ -135,6 +148,7 @@ export function createCommunityService(options: ServiceOptions) {
       },
       auditMutation: async <T>(action: string, execute: () => T, details: CommunityAuditDetails<T> = {}) => {
         const result = live.audit.run(me, `community-${action}`, () => { requireConsent(); return execute(); }, details);
+        await drainFiles();
         await live.audit.flush(auditMirror);
         return result;
       },

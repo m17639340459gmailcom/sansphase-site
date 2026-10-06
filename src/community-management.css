@@ -138,6 +138,8 @@ body.community-management-open #main { z-index: auto; }
 .community-wear-preview { display: flex; align-items: center; justify-content: space-between; gap: 28px; padding: 18px 20px; background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; }
 .community-wear-preview p { margin: 6px 0 0; font-size: 13px; }
 .community-wear-preview [data-item-wear-sample] { display: flex; align-items: center; flex-shrink: 0; gap: 20px; padding: 10px 8px; }
+.community-wear-preview .community-cover-sample { display: block; max-width: none; }
+.community-wear-preview .community-cover-sample > img { width: 100%; height: 100%; object-fit: cover; }
 .community-category-manager { margin: 0 0 22px; padding: 0 0 16px; border-bottom: 1px solid var(--line); }
 .community-category-manager summary { cursor: pointer; font-size: 16px; font-weight: 600; color: var(--text); }
 .community-category-manager summary span { margin-left: 14px; font-size: 13px; font-weight: 400; color: var(--muted); }

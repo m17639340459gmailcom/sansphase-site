@@ -31,14 +31,20 @@ function itemInput(ctx: Ctx, body: Body, id?: string): CustomItemInput {
   }
   const cat = body.cat === 'goods' ? 'goods' : body.cat === 'digital' ? 'digital' : body.cat === 'look' ? 'look' : null;
   if (!cat) throw fail('请选择物品类别。');
-  const kind = cat === 'look' && (body.kind === 'frame' || body.kind === 'color') ? body.kind : undefined;
-  if (cat === 'look' && !kind) throw fail('请选择头像框或昵称特效。');
+  const kind = cat === 'look' && (body.kind === 'frame' || body.kind === 'color' || body.kind === 'cover') ? body.kind : undefined;
+  if (cat === 'look' && !kind) throw fail('请选择头像框、昵称特效或主页背景。');
   const previous = id ? ctx.live.economy.item(id) : null;
   if (kind === 'frame') {
     const assetId = image === undefined ? previous?.image : image;
     const upload = assetId ? ctx.live.image(assetId) : null;
     if (!upload || upload.deleted_at || upload.purpose !== 'shop' || !upload.frame_ready)
       throw fail('头像框需要上传正方形透明图片，并为中间的头像留出透明区域。');
+  }
+  if (kind === 'cover') {
+    const assetId = image === undefined ? previous?.image : image;
+    const upload = assetId ? ctx.live.image(assetId) : null;
+    if (!upload || upload.deleted_at || upload.purpose !== 'shop' || upload.uploader_kind !== ctx.me.kind || upload.uploader_id !== ctx.me.id || upload.topic_id)
+      throw fail('主页背景需要使用作者上传的商品图片，请重新上传。');
   }
   const effect = kind === 'color' ? communityNameEffect(body.effect === undefined ? previous?.effect : body.effect) : null;
   if (kind === 'color' && !effect) throw fail('请选择昵称特效，单色需一种颜色，渐变或流光需两种颜色（格式如 #976223）。');

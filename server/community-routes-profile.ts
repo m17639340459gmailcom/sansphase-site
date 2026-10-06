@@ -23,7 +23,7 @@ export async function communityProfileDTO(ctx: Ctx, changed?: ReaderProfileState
   }
   return { person, signature: state?.signature ?? info?.bio ?? '', pendingSignature: state?.pendingSignature ?? null,
     pendingAvatar: state?.pendingAvatar ?? false, canEditProfile: ctx.me.kind === 'reader' && Boolean(ctx.options.profile),
-    frames: communityFrameItems(ctx.live, ctx.me), background: ctx.live.profileBackgrounds.state(ctx.me) };
+    frames: communityFrameItems(ctx.live, ctx.me), background: ctx.live.profileBackgrounds.state(ctx.me), ...ctx.live.economy.coverDecoration(ctx.me) };
 }
 const image = (ctx: Ctx, bytes: Buffer) => {
   ctx.requireConsent();
@@ -72,7 +72,9 @@ export async function profileRoutes(ctx: Ctx): Promise<boolean> {
     exactKeys(body, path === 'profile' ? ['signature'] : []);
     if (path === 'profile') { const state = await access.signature(ctx.req, body.signature); ctx.send(await communityProfileDTO(ctx, state)); }
     else if (path === 'profile/avatar/remove') { const state = await access.removeAvatar(ctx.req); ctx.send(await communityProfileDTO(ctx, state)); }
-    else { await ctx.auditMutation('profile-background-remove', () => ctx.live.profileBackgrounds.remove(ctx.me)); ctx.send(await communityProfileDTO(ctx)); }
+    else { await ctx.auditMutation('profile-background-remove', () => ctx.live.transaction(() => {
+      const result = ctx.live.profileBackgrounds.remove(ctx.me); ctx.live.members.equip(ctx.me, 'cover', null); return result;
+    })); ctx.send(await communityProfileDTO(ctx)); }
     return true;
   }
   const preview = /^manage\/profiles\/([^/]+)\/avatar\.webp$/.exec(path);
@@ -101,7 +103,11 @@ export async function profileRoutes(ctx: Ctx): Promise<boolean> {
     const member = await ctx.options.findMember?.(body.memberUid);
     if (!member) throw fail('找不到这个成员。', 404);
     if (!ctx.owner) throw fail('审核权限发生变化，请刷新页面。', 403);
-    ctx.send(await ctx.auditMutation('profile-background-review', () => ctx.live.profileBackgrounds.review(member, body.imageId as string, body.approve as boolean, ctx.me, typeof body.reason === 'string' ? body.reason : ''),
+    ctx.send(await ctx.auditMutation('profile-background-review', () => ctx.live.transaction(() => {
+      const result = ctx.live.profileBackgrounds.review(member, body.imageId as string, body.approve as boolean, ctx.me, typeof body.reason === 'string' ? body.reason : '');
+      if (body.approve === true) ctx.live.members.equip(member, 'cover', null);
+      return result;
+    }),
       { targetKind: member.kind, targetId: member.id, imageId: body.imageId, approved: body.approve }));
     return true;
   }

@@ -40,8 +40,8 @@ export async function normalizeReaderAvatar(input: string | Buffer, mimetype: st
   try {
     const source = sharp(input, { limitInputPixels: 25_000_000, animated: false });
     const metadata = await source.metadata();
-    if (metadata.format !== formats[mimetype] || !metadata.width || !metadata.height || metadata.width < 64 || metadata.height < 64)
-      throw fail('请选择至少 64 × 64 像素的有效图片。');
+    if (metadata.format !== formats[mimetype] || !metadata.width || !metadata.height)
+      throw fail('请选择有效的图片文件。');
     const image = await source.rotate().resize(320, 320, { fit: 'cover', position: 'centre', withoutEnlargement: false }).webp({ quality: 82, effort: 4 }).toBuffer();
     if (image.length > readerProfileAvatarBytes) throw fail('头像处理后过大，请换一张图片。', 413);
     return image;

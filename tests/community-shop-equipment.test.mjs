@@ -37,6 +37,7 @@ async function setup(t) {
       return id === 'owner' ? { kind: 'owner', id: 'owner', name: '無相', vip: true } : { kind: 'reader', id, name: id, vip: false };
     },
     people: async authors => new Map(authors.map(author => [`${author.kind}:${author.id}`, { name: author.id, uid: author.id, vip: false, joinedAt: '2026-01-01T00:00:00.000Z' }])),
+    findMember: async uid => ['reader', 'other', 'steward'].includes(uid) ? { kind: 'reader', id: uid } : null,
     audit: async (action, details) => { audits.push({ action, ...details }); },
   });
   const db = new DatabaseSync(resolve(directory, 'content.db'));
@@ -205,4 +206,65 @@ test('animated equipment preserves timing and requires the avatar opening in eve
   const mixedImage = await (await upload(mixed, 'image/webp')).json();
   assert.equal(mixedImage.frameReady, false, 'a later opaque frame must not hide the avatar');
   assert.equal((await post('manage/items', { ...input, cat: 'look', kind: 'frame', image: mixedImage.id, delivery: '' })).status, 400);
+});
+
+test('author-published profile backgrounds are single owned equipment, with safe off-sale use and current profile presentation', async t => {
+  const { post, get, upload, store } = await setup(t);
+  const image = await (await upload(await sharp({ create: { width: 320, height: 160, channels: 3, background: '#253d62' } }).png().toBuffer())).json();
+  const coverInput = { ...input, cat: 'look', kind: 'cover', image: image.id, name: '静夜主页背景', delivery: '', stock: 2 };
+  assert.equal((await post('manage/items', coverInput, 'steward')).status, 403);
+  const created = await post('manage/items', coverInput);
+  assert.equal(created.status, 201);
+  const { id } = await created.json(), ref = `image:${image.id}`, reader = { kind: 'reader', id: 'reader' };
+  assert.equal(store.economy.item(id).kind, 'cover');
+  assert.equal(store.economy.item(id).ref, ref);
+  assert.equal((await post('shop/equip', { kind: 'cover', ref }, 'other')).status, 403);
+  const approved = randomUUID(), pending = randomUUID();
+  for (const asset of [approved, pending]) store.addImage({ id: asset, uploader: reader, width: 320, height: 160, purpose: 'profile' });
+  store.profileBackgrounds.submit(reader, approved);
+  store.profileBackgrounds.review(reader, approved, true, { kind: 'owner', id: 'owner' }, '');
+  store.profileBackgrounds.submit(reader, pending);
+  const before = store.ledger.balance(reader);
+  assert.equal((await post('shop/redeem', { item: id }, 'reader')).status, 201);
+  assert.equal(store.ledger.balance(reader), before - coverInput.price);
+  assert.equal(store.economy.item(id).left, 1);
+  assert.deepEqual(store.profileBackgrounds.state(reader), { approved: null, pending: null }, 'equipping a published cover retires the former personal backgrounds');
+  assert.equal((await post('shop/redeem', { item: id }, 'reader')).status, 409);
+  assert.equal(store.economy.item(id).left, 1, 'duplicate redemption does not consume more stock');
+  const member = await (await get('members/reader', 'other')).json();
+  assert.equal(member.cover, ref); assert.equal(member.coverImage, `/api/community/images/${image.id}.webp`); assert.equal(member.coverName, coverInput.name);
+  const profile = await (await get('profile')).json();
+  assert.equal(profile.cover, ref); assert.equal(profile.coverImage, member.coverImage); assert.equal(profile.coverName, member.coverName);
+  assert.ok((await (await get('shop/mine')).json()).looks.some(row => row.id === id && row.kind === 'cover' && row.ref === ref));
+  const replacement = await (await upload(await frameBytes(false))).json();
+  assert.equal((await post(`manage/items/${id}`, { ...coverInput, image: replacement.id })).status, 400);
+  assert.equal(store.economy.item(id).image, image.id, 'owned background artwork is stable');
+  assert.equal((await post(`manage/items/${id}`, { ...coverInput, image: undefined, active: false })).status, 200, 'older clients retain the approved asset when changing publication');
+  assert.equal((await post('shop/redeem', { item: id }, 'other')).status, 409);
+  assert.equal((await post('shop/equip', { kind: 'cover', ref: null }, 'reader')).status, 200);
+  assert.equal((await get(`images/${image.id}.webp`, 'other')).status, 404);
+  assert.equal((await get(`images/${image.id}.webp`, 'reader')).status, 200);
+  assert.equal((await post('shop/equip', { kind: 'cover', ref }, 'reader')).status, 200);
+  assert.equal((await get(`images/${image.id}.webp`, 'other')).status, 200, 'equipped off-sale backgrounds remain visible to profile visitors');
+  const custom = randomUUID(); store.addImage({ id: custom, uploader: reader, width: 320, height: 160, purpose: 'profile' }); store.profileBackgrounds.submit(reader, custom);
+  assert.equal((await post('manage/profile-background', { memberUid: 'reader', imageId: custom, approve: true, reason: '' })).status, 200);
+  assert.equal(store.members.decorations(reader).cover, null, 'approved personal replacement cancels the owned cover');
+  assert.equal((await post('shop/equip', { kind: 'cover', ref }, 'reader')).status, 200);
+  assert.deepEqual(store.profileBackgrounds.state(reader), { approved: null, pending: null });
+  assert.equal((await post('profile/background/remove', {}, 'reader')).status, 403, 'profile editing still requires the existing reader profile authority');
+  assert.equal((await post('manage/orders/' + (await (await get('shop/mine')).json()).orders[0].id + '/cancel', {})).status, 409, 'instant digital decoration orders cannot be refunded through physical shipping');
+});
+
+test('published covers require an author-owned shop image and reject external, foreign and unpublished ownership claims', async t => {
+  const { post, upload, store } = await setup(t), coverInput = { ...input, cat: 'look', kind: 'cover', delivery: '' };
+  const foreign = randomUUID(), content = randomUUID(), profile = randomUUID();
+  store.addImage({ id: foreign, uploader: { kind: 'reader', id: 'other' }, width: 320, height: 160, purpose: 'shop' });
+  store.addImage({ id: content, uploader: { kind: 'owner', id: 'owner' }, width: 320, height: 160, purpose: 'content' });
+  store.addImage({ id: profile, uploader: { kind: 'reader', id: 'reader' }, width: 320, height: 160, purpose: 'profile' });
+  for (const image of [undefined, null, foreign, content, profile, 'https://outside.invalid/background.webp'])
+    assert.equal((await post('manage/items', { ...coverInput, image })).status, 400);
+  const image = await (await upload(await frameBytes(false))).json();
+  assert.equal((await post('manage/items', { ...coverInput, image: image.id })).status, 201, 'backgrounds have no avatar frame transparency requirement');
+  assert.equal((await post('shop/equip', { kind: 'cover', ref: `image:${image.id}`, owned: true }, 'other')).status, 403);
+  assert.equal((await post('shop/equip', { kind: 'cover', ref: 'image:../../secret' }, 'reader')).status, 403);
 });

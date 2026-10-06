@@ -146,7 +146,7 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
       const muted = members.muted(member);
       ctx.send({
         person: ctx.person(member, map), bio: info.bio, joinedAt: member.kind === 'owner' ? null : info.joinedAt || members.joinedAt(member),
-        cover: members.decorations(member).cover, background: live.profileBackgrounds.state(member).approved,
+        ...economy.coverDecoration(member), background: live.profileBackgrounds.state(member).approved,
         streak: economy.currentStreak(member), stats: { ...stats, topics: topics.length, replies: replies.length },
         follows: members.followCounts(member), following: !self && members.following(me, member), self, badges: members.badges(member),
         badgeState: info.ownerReader ? createOwnerReaderPreview().badgeState : self && ctx.ownerReaderPreview ? ctx.ownerReaderPreview.badgeState : members.badgeState(member, { joinedAt: info.joinedAt }),
@@ -236,7 +236,11 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
           if (!/^1[3-9]\d{9}$/.test(phone)) throw fail('请填写正确的手机号，用于快递联系。');
           shipping = { name: shippingText(input.name, '收件人', [1, 30]), phone, address: shippingText(input.address, '收货地址', [5, 200]) };
         }
-        const redeemed = economy.redeem(me, item.id, { level: ctx.level, owner: ctx.owner, joinedAt: joined, shipping });
+        const redeemed = live.transaction(() => {
+          const result = economy.redeem(me, item.id, { level: ctx.level, owner: ctx.owner, joinedAt: joined, shipping });
+          if (item.kind === 'cover' && me.kind === 'reader') live.profileBackgrounds.remove(me);
+          return result;
+        });
         if (item.kind === 'goods') members.notify(ctx.ownerMember, { type: 'system', actor: me, text: '兑换了实物，等待发货', data: { order: 'new', item: item.name }, link: '#/community/manage/orders' });
         return redeemed;
       }, () => ctx.throttle('action'));
@@ -246,7 +250,13 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
     case 'shop/equip': {
       const kind = String(body.kind || '');
       if (!['frame', 'color', 'cover'].includes(kind)) throw fail('装扮类型无效。');
-      ctx.send(economy.equip(me, kind as 'frame' | 'color' | 'cover', typeof body.ref === 'string' && body.ref ? body.ref : null));
+      if (kind === 'cover' && body.ref !== null && typeof body.ref !== 'string') throw fail('请选择已拥有的主页背景，或恢复默认背景。');
+      const ref = typeof body.ref === 'string' && body.ref ? body.ref : null;
+      ctx.send(live.transaction(() => {
+        const result = economy.equip(me, kind as 'frame' | 'color' | 'cover', ref);
+        if (kind === 'cover' && me.kind === 'reader') live.profileBackgrounds.remove(me);
+        return result;
+      }));
       return true;
     }
   }

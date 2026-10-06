@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { randomUUID, randomBytes } from 'node:crypto';
@@ -9,6 +9,8 @@ import sharp from 'sharp';
 import type { Payload } from 'payload';
 import { createReaderWorkflow } from '../server/reader-workflow.ts';
 import { createReaderProfileCommands } from '../server/reader-profile-commands.ts';
+import { createReaderService } from '../server/reader-service.ts';
+import type { createReaderUidStore } from '../server/reader-uids.ts';
 import { prepareIdentityStore } from '../server/community-identity-store.ts';
 import { createIdentityAuthority } from '../server/community-identity-authority.ts';
 import { createIdentityClient, signIdentityRequest } from '../server/community-identity-protocol.ts';
@@ -53,9 +55,12 @@ async function fixture(t:test.TestContext,options:{ownerReader?:boolean}={}){
     people:async authors=>new Map(authors.flatMap(author=>{
       const row=rows.get(author.id);if(row)return[[`reader:${row.id}`,{name:row.nickname,uid:row.uid,avatar:row.avatar,bio:row.signature,vip:false,joinedAt:'2026-01-01T00:00:00Z'}]as const];
       return author.kind==='owner'&&author.id===ownerId?[[`owner:${ownerId}`,{name:'站长',uid:'owner',avatar:null,bio:'',vip:true,joinedAt:null}]as const]:[];
-    })),findMember:async uid=>{const row=[...rows.values()].find(row=>row.uid===uid);return row?{kind:'reader',id:row.id}:uid==='owner'?{kind:'owner',id:ownerId}:null;},findByNames:async()=>new Map(),avatar:async()=>Buffer.from('approved-avatar'),
+    })),findMember:async uid=>{const row=[...rows.values()].find(row=>row.uid===uid);return row?{kind:'reader',id:row.id}:uid==='owner'?{kind:'owner',id:ownerId}:null;},findByNames:async()=>new Map(),avatar:async uid=>{const row=[...rows.values()].find(row=>row.uid===uid);return row?.avatar?readFile(resolve(directory,'uploads',`reader-avatar-${row.avatar}.webp`)):null;},
   });
-  const server=createServer((req,res)=>void(req.url==='/api/community-entry'?authority.handleEntry(req,res):authority.handleBridge(req,res)));
+  const mainReader=createReaderService({payload,directory,siteOrigin,workflow,profileCommands:commands,ownerReaderId:options.ownerReader?personalId:undefined,
+    uidStore:{get:id=>rows.get(id)?.uid||''}as ReturnType<typeof createReaderUidStore>,
+    authorService:{identityStrict:async req=>ownerActive&&req.headers.cookie==='sansphase_author_session=owner.token'?{name:'站长'}:null,loginCredentials:async()=>{throw Error('unused test login');}}});
+  const server=createServer((req,res)=>void(req.url?.startsWith('/api/reader/')?mainReader.handle(req,res):req.url==='/api/community-entry'?authority.handleEntry(req,res):authority.handleBridge(req,res)));
   await new Promise<void>(done=>server.listen(0,'127.0.0.1',done));
   const local=`http://127.0.0.1:${(server.address()as{port:number}).port}`;
   const client=createIdentityClient({origin:siteOrigin,secret,fetch:(input,options)=>fetch(local+new URL(String(input)).pathname,options)});
@@ -89,7 +94,7 @@ async function fixture(t:test.TestContext,options:{ownerReader?:boolean}={}){
     return{directory:hkDirectory,store,base,enter,get,post};
   };
   t.after(async()=>{await closeHost?.();await new Promise<void>(done=>server.close(()=>done()));authority.close();await rm(directory,{recursive:true,force:true,maxRetries:10,retryDelay:100});});
-  return{readerId,moderatorId,ownerId,personalId,personal,commands,payload,client,bridge,session,host,onReviewForwarded:(callback:()=>void)=>{reviewForwarded=callback;},revoke:()=>{enabled=false;},revokeOwner:()=>{ownerActive=false;}};
+  return{readerId,moderatorId,ownerId,personalId,personal,commands,payload,client,bridge,session,host,main:local,onReviewForwarded:(callback:()=>void)=>{reviewForwarded=callback;},revoke:()=>{enabled=false;},revokeOwner:()=>{ownerActive=false;}};
 }
 
 test('self profile bridge keeps approved/pending separate and rejects caller-selected identities',async t=>{
@@ -231,4 +236,16 @@ test('real owner handoff supports personal profile editing in reader mode withou
   response=await hk.get('profile',personalCookie);assert.equal(response.status,200);state=await response.json();assert.equal(state.signature,'社区个人新签名');assert.equal(state.pendingSignature,null);assert.equal(state.pendingAvatar,false);assert.match(state.person.avatar,/\/avatar\/10003\.webp/);
   const sessionRef=await f.session('sansphase_author_session=owner.token'),identity=await(await f.bridge('session',{sessionRef})).json();assert.equal(identity.viewer.kind,'owner');assert.equal(identity.author.name,'站长');assert.equal(identity.ownerReader.signature,'社区个人新签名');assert.equal(identity.ownerReader.avatar,f.personal.avatar);
   assert.equal((await f.commands.state(f.readerId)).signature,'已经通过');assert.equal((await hk.get('profile',ownerCookie)).status,200);
+  const mainCookie='sansphase_author_session=owner.token';
+  const mainState=await(await fetch(f.main+'/api/reader/session',{headers:{Cookie:mainCookie}})).json();
+  assert.equal(mainState.id,f.personalId);assert.equal(mainState.signature,'社区个人新签名');assert.equal(mainState.avatar,`/api/reader/avatar/${f.personal.avatar}.webp`);
+  const mainImage=await fetch(f.main+mainState.avatar,{headers:{Cookie:mainCookie}}),hkImage=await hk.get('avatar/10003.webp',personalCookie);
+  assert.equal(mainImage.status,200);assert.equal(hkImage.status,200);assert.deepEqual(Buffer.from(await mainImage.arrayBuffer()),Buffer.from(await hkImage.arrayBuffer()),'both hosts use the same approved personal avatar');
+  const original=await sharp({create:{width:32,height:48,channels:3,background:'#cc99bb'}}).png().toBuffer(),nextForm=new FormData();nextForm.set('file',new Blob([original],{type:'image/png'}),'small-portrait.png');
+  response=await fetch(f.main+'/api/reader/avatar',{method:'POST',headers:{Origin:siteOrigin,'X-Reader-Request':'1',Cookie:mainCookie},body:nextForm});assert.equal(response.status,200);
+  const [newAvatar]=await f.commands.reviews(['avatar']);assert.equal((await hk.post(`manage/profiles/${newAvatar.id}/approve`,ownerCookie)).status,200);
+  const nextMain=await(await fetch(f.main+'/api/reader/session',{headers:{Cookie:mainCookie}})).json(),nextCommunity=await(await hk.get('profile',personalCookie)).json();
+  assert.notEqual(nextMain.avatar,mainState.avatar);assert.equal(nextCommunity.person.avatar,`/api/community/avatar/10003.webp?v=${f.personal.avatar}`);
+  assert.deepEqual(Buffer.from(await(await fetch(f.main+nextMain.avatar,{headers:{Cookie:mainCookie}})).arrayBuffer()),Buffer.from(await(await hk.get('avatar/10003.webp',personalCookie)).arrayBuffer()),'main-site uploads are approved into the same community personal portrait');
+  assert.equal((await(await hk.get('profile',ownerCookie)).json()).person.avatar,null,'personal approval leaves the separate brand portrait unchanged');
 });

@@ -10,7 +10,7 @@ import type { Members } from './community-members.ts';
 type Card = 'makeup' | 'pin' | 'highlight';
 type CustomItemRow = {
   image: string | null;
-  category: string | null; kind: 'frame' | 'color' | null; effect: string | null;
+  category: string | null; kind: 'frame' | 'color' | 'cover' | null; effect: string | null;
   id: string; cat: 'digital' | 'goods'; name: string; description: string; price: number; stock: number | null; stock_left: number | null;
   limit_per: 'month' | 'year' | 'once' | null; limit_n: number | null; min_level: number; min_days: number; delivery: string; note: string; active: number;
 };
@@ -23,7 +23,7 @@ export type Shipping = { name: string; phone: string; address: string };
 export type Tracking = { company: string; number: string };
 export type CustomItemInput = {
   image?: string | null;
-  category?: string | null; kind?: 'frame' | 'color'; effect?: NameEffect | null;
+  category?: string | null; kind?: 'frame' | 'color' | 'cover'; effect?: NameEffect | null;
   cat: 'look' | 'digital' | 'goods'; name: string; description: string; price: number; stock: number | null; limitPer: 'month' | 'year' | 'once' | null;
   limitN: number | null; minLevel: number; minDays: number; delivery: string; note: string; active: boolean;
 };
@@ -60,7 +60,7 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
   const visibleImage = db.prepare('SELECT 1 FROM community_shop_items WHERE image = ? AND active = 1 LIMIT 1');
   const redeemedImage = db.prepare(`SELECT 1 FROM community_orders o JOIN community_shop_items i ON i.id = o.item
     WHERE i.image = ? AND o.member_kind = ? AND o.member_id = ? AND o.status != 'cancelled' LIMIT 1`);
-  const equippedImage = db.prepare('SELECT 1 FROM community_members WHERE frame = ? LIMIT 1');
+  const equippedImage = db.prepare('SELECT 1 FROM community_members WHERE frame = ? OR cover = ? LIMIT 1');
   const itemOwned = db.prepare('SELECT 1 FROM community_owned WHERE item = ? LIMIT 1');
   const takeStock = db.prepare('UPDATE community_shop_items SET stock_left = stock_left - 1 WHERE id = ? AND stock_left > 0');
   const returnStock = db.prepare('UPDATE community_shop_items SET stock_left = stock_left + 1 WHERE id = ? AND stock IS NOT NULL');
@@ -149,7 +149,7 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
   /* ---------- 兑换所 ---------- */
   const customToItem = (row: CustomItemRow): ShopItem & { active: boolean; delivery: string } => ({
     image: row.image, category: row.category, effect: row.kind === 'color' ? communityNameEffect(parseJson<unknown>(row.effect, null)) : null,
-    ...(row.kind ? { ref: row.kind === 'frame' ? `image:${row.image}` : `effect:${row.id}` } : {}),
+    ...(row.kind ? { ref: row.kind === 'color' ? `effect:${row.id}` : `image:${row.image}` } : {}),
     id: row.id, cat: row.kind ? 'look' : row.cat, kind: row.kind || row.cat, name: row.name, desc: row.description, price: row.price,
     limit: row.limit_per ? { per: row.limit_per, n: row.limit_n || 1 } : null, minLevel: row.min_level, minDays: row.min_days,
     stock: row.stock, left: row.stock_left, note: row.note, builtin: false, active: Boolean(row.active), delivery: row.delivery,
@@ -331,11 +331,18 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
       const item = findItem(ref.slice(7));
       return item?.kind === 'color' ? item.effect || null : null;
     },
-    imageVisible: (id: string, member: CommunityAuthor) => Boolean(visibleImage.get(id) || redeemedImage.get(id, member.kind, member.id) || equippedImage.get(`image:${id}`)),
+    coverDecoration(member: CommunityAuthor) {
+      const ref = members.decorations(member).cover;
+      const ownedItems = owned(member);
+      const item = ref ? [...communityBuiltinItems, ...allCustom()].find(entry => entry.kind === 'cover' && entry.ref === ref && ownedItems.has(entry.id)) : null;
+      return { cover: item ? ref : null, coverName: item?.name ?? null,
+        coverImage: item?.image && ref === `image:${item.image}` && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(item.image) ? `/api/community/images/${item.image}.webp` : null };
+    },
+    imageVisible: (id: string, member: CommunityAuthor) => Boolean(visibleImage.get(id) || redeemedImage.get(id, member.kind, member.id) || equippedImage.get(`image:${id}`, `image:${id}`)),
     saveItem(id: string | null, input: CustomItemInput, now = Date.now()) {
       return tx(() => {
         const at = iso(now), kind = input.cat === 'look' ? input.kind : null;
-        if (input.cat === 'look' && kind !== 'frame' && kind !== 'color') throw fail('请选择头像框或昵称特效。');
+        if (input.cat === 'look' && kind !== 'frame' && kind !== 'color' && kind !== 'cover') throw fail('请选择头像框、昵称特效或主页背景。');
         const effect = kind === 'color' && input.effect ? JSON.stringify(input.effect) : null;
         if (!id) {
           const newId = randomUUID();
@@ -346,8 +353,8 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
         const row = customItem.get(id) as CustomItemRow | undefined;
         if (!row) throw fail('没有这个物品。', 404);
         if (input.cat !== (row.kind ? 'look' : row.cat) || (kind || null) !== row.kind) throw fail('已上架物品的用途不能修改，请另建新物品。');
-        if (row.kind === 'frame' && input.image !== undefined && input.image !== row.image && itemOwned.get(id))
-          throw fail('头像框已经有人兑换，不能更换佩戴图片；请新建头像框。');
+        if ((row.kind === 'frame' || row.kind === 'cover') && input.image !== undefined && input.image !== row.image && itemOwned.get(id))
+          throw fail(`${row.kind === 'frame' ? '头像框' : '主页背景'}已经有人兑换，不能更换使用图片；请新建物品。`);
         // Changing the stock keeps what has already been redeemed.
         const sold = row.stock != null && row.stock_left != null ? row.stock - row.stock_left : 0;
         const left = input.stock == null ? null : Math.max(0, input.stock - sold);

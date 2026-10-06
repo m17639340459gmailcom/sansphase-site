@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import type { IncomingMessage } from 'node:http';
 import type { Payload } from 'payload';
 import { createReaderWorkflow } from '../../server/reader-workflow.ts';
+import { cleanReaderFiles } from '../../server/reader-file-cleanup.ts';
 import { createReaderProfileCommands } from '../../server/reader-profile-commands.ts';
 import { createLocalCommunityProfileAccess } from '../../server/community-profile-access.ts';
 import { createReaderService } from '../../server/reader-service.ts';
@@ -58,6 +59,8 @@ export function createCommunityPreviewProfile(directory: string, samples: Record
     ownerReaderIdentity,
   });
   return { access, ownerReaderIdentity,
+    queueFile: workflow.queueFile,
+    drainFileQueue: () => cleanReaderFiles({ workflow, payload, directory, limit: 1000 }),
     readerService(siteOrigin: string, frames?: CommunityFrameAccess) {
       const service = createReaderService({ payload, directory, workflow, uidStore, profileCommands: commands, siteOrigin, frames, ownerReaderId,
         authorService: { identityStrict: async req => identity(req) === 'owner' ? { id: 'owner' } : null,

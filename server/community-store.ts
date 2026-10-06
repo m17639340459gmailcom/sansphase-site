@@ -60,8 +60,8 @@ export const displayTitle = (title: string, body: string) => title || ([...body.
 
 // Community topics, replies and everything around them in content.db.
 // Deletion is soft: rows stay for moderation and audit and stop being listed.
-export type CommunityStoreOptions = { previewCatalog?: boolean };
-export function createCommunityStore(directory: string, { previewCatalog = false }: CommunityStoreOptions = {}) {
+export type CommunityStoreOptions = { previewCatalog?: boolean; queueFile?: (filename: string, reason: string) => void };
+export function createCommunityStore(directory: string, { previewCatalog = false, queueFile }: CommunityStoreOptions = {}) {
   const db = new DatabaseSync(resolve(directory, 'content.db'));
   db.exec('PRAGMA busy_timeout = 5000');
   if (!communitySchemaReady(db)) {
@@ -75,7 +75,13 @@ export function createCommunityStore(directory: string, { previewCatalog = false
   const experience = createCommunityExperience(db, tx, convention);
   const members = createMembers(db, convention, tx);
   const banners = createCommunityBanners(db, tx, members);
-  const profileBackgrounds = createCommunityProfileBackgrounds(db, tx);
+  const profileBackgrounds = createCommunityProfileBackgrounds(db, tx, (id, reason) => {
+    // Queue both filenames durably before removing their registry. A rollback
+    // leaves the picture registered, which protects it from queued cleanup.
+    if (!queueFile || !unusedProfileImage.get(id)) return;
+    queueImageFiles(id, reason);
+    dropImage.run(id);
+  });
   const economy = createEconomy(db, tx, ledger, members, { previewCatalog });
   const requests = createCommunityRequests(db, tx);
   const rateLimits = createCommunityRateLimits(db, tx);
@@ -178,8 +184,13 @@ export function createCommunityStore(directory: string, { previewCatalog = false
   const imageUnreferenced = `NOT EXISTS (SELECT 1 FROM community_shop_items WHERE image = community_images.id)
     AND NOT EXISTS (SELECT 1 FROM community_banner_entries WHERE cover = community_images.id)
     AND NOT EXISTS (SELECT 1 FROM community_profile_backgrounds WHERE approved_image = community_images.id OR pending_image = community_images.id)`;
-  const staleImages = db.prepare(`SELECT id FROM community_images WHERE topic_id IS NULL AND deleted_at IS NULL AND created_at < ? AND ${imageUnreferenced}`);
-  const dropImage = db.prepare(`DELETE FROM community_images WHERE id = ? AND topic_id IS NULL AND ${imageUnreferenced}`);
+  const staleImages = db.prepare(`SELECT id FROM community_images WHERE topic_id IS NULL AND reply_id IS NULL AND deleted_at IS NULL AND created_at < ? AND ${imageUnreferenced}`);
+  const dropImage = db.prepare(`DELETE FROM community_images WHERE id = ? AND topic_id IS NULL AND reply_id IS NULL AND ${imageUnreferenced}`);
+  const unusedProfileImage = db.prepare(`SELECT id FROM community_images WHERE id=? AND purpose='profile' AND topic_id IS NULL AND reply_id IS NULL AND ${imageUnreferenced}`);
+  const queueImageFiles = (id: string, reason: string) => {
+    queueFile?.(`community-image-${id}.webp`, reason);
+    queueFile?.(`community-thumb-${id}.webp`, reason);
+  };
   // Reports.
   const insertReport = db.prepare(`INSERT INTO community_reports (id, target_kind, target_id, reporter_kind, reporter_id, reporter_level, reason, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const openReportBy = db.prepare(`SELECT COUNT(*) AS count FROM community_reports WHERE target_kind = ? AND target_id = ? AND reporter_kind = ? AND reporter_id = ? AND status = 'open'`);
@@ -625,8 +636,13 @@ export function createCommunityStore(directory: string, { previewCatalog = false
     },
     // Uploads never attached to a post within a day are removed; returns their ids so the files go too.
     sweepImages(now = Date.now()) {
-      const ids = (staleImages.all(iso(now - day)) as Array<{ id: string }>).map(row => row.id);
-      return ids.filter(id => dropImage.run(id).changes === 1);
+      return tx(() => {
+        const ids = (staleImages.all(iso(now - day)) as Array<{ id: string }>).map(row => row.id);
+        return ids.filter(id => {
+          queueImageFiles(id, 'unattached-community-upload');
+          return dropImage.run(id).changes === 1;
+        });
+      });
     },
 
     /* ---------- 举报 ---------- */

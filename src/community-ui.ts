@@ -23,7 +23,7 @@ import { createCommunityBadgeExplorer } from './community-badge-explorer.mjs';
 import type { CommunityConvention } from './community-convention.ts';
 import type { CommunityGrowthState, CommunityVIPGrowthState } from './community-growth.ts';
 import { createCommunityWriteRequest } from './community-write-request.mjs';
-import { communityProfileHTML } from './community-profile.mjs';
+import { createCommunityProfileDialog } from './community-profile-dialog.mjs';
 import type { CommunityProfile } from './community-profile.ts';
 import { communityFrameBannersHTML } from './community-frame-banners.mjs';
 import type { CommunityBannerConfig } from './community-banners.ts';
@@ -55,7 +55,7 @@ export type CommunityContext = {
   simpleCompose?: boolean;
   mountSelect?: (select: HTMLSelectElement, icons: Record<string, string>) => { update(): void; dispose(): void };
 };
-type Options = { request?: typeof fetch; navigate?: (hash: string) => void };
+type Options = { request?: typeof fetch; navigate?: (hash: string) => void; createProfileCrop?: typeof import('./community-profile-crop.ts').createCommunityProfileCrop };
 type ApiError = Error & { status: number };
 type Form = HTMLFormElement;
 type Field = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
@@ -91,7 +91,7 @@ function applyMarkdown(field: HTMLTextAreaElement, kind: string, tr: Translate) 
   field.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-export function createCommunityUI({ request = (...args) => fetch(...args), navigate: go = (hash) => { location.hash = hash; } }: Options = {}) {
+export function createCommunityUI({ request = (...args) => fetch(...args), navigate: go = (hash) => { location.hash = hash; }, createProfileCrop }: Options = {}) {
   let sort: CommunitySort = 'active';
   let summary: CommunityLoad<CommunitySummary> | null = null;
   const frameHighlights = new Map<string, CommunityLoad<CommunityListing>>();
@@ -105,6 +105,14 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   let me: CommunityLoad<CommunityMe> | null = null;
   let profile: CommunityLoad<CommunityProfile> | null = null;
   let profileWrite: object | null = null;
+  let profileRequest = 0;
+  let legacyProfileOpened = false;
+  const profileDialog = createCommunityProfileDialog({
+    crop: createProfileCrop,
+    busy: () => Boolean(profileWrite), click: onClick, submit: onSubmit, input: onInput,
+    retry: () => { void loadProfile().then(() => profileDialog.render(profile || loading)); },
+    returnFocus: () => mounted?.main.querySelector<HTMLElement>('[data-action="community-profile-edit"]') || null,
+  });
   let moderationContacts: CommunityLoad<CommunityModerationContacts> | null = null;
   let convention: CommunityLoad<CommunityConvention> | null = null;
   let checkin: CommunityLoad<CommunityCheckin> | null = null;
@@ -121,6 +129,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     common: () => mounted?.ctx || null,
   });
   const memberPages = new Map<string, CommunityLoad<CommunityMember>>();
+  const memberProfileEpochs = new Map<string, number>();
   const badgeExplorer = createCommunityBadgeExplorer({
     root: () => route().view === 'member' && route().tab === 'badges' ? mounted?.main.querySelector<HTMLElement>('[data-badge-explorer]') || null : null,
     data: () => { const current = route(); return readyData(memberPages.get(memberKey(current.id, current.tab)))?.badgeState || null; },
@@ -205,13 +214,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   const draftHasText = (value: SavedComposeDraft | { body: string } | null) => Boolean(value && (value.body.trim() || ('title' in value && value.title.trim()) || ('tags' in value && value.tags.length) || ('bounty' in value && value.bounty)));
   const hasUnsavedDraft = (hash = location.hash) => {
     const current = communityRoute(hash);
-    if (current.view === 'profile') {
-      const signature = mounted?.main.querySelector<HTMLInputElement>('[data-community-form="profile-signature"] [name="signature"]');
-      const frame = mounted?.main.querySelector<HTMLSelectElement>('[data-community-form="profile-frame"] select');
-      return Boolean(profileWrite || signature && signature.value !== signature.defaultValue
-        || frame && [...frame.options].some(option => option.selected !== option.defaultSelected)
-        || [...(mounted?.main.querySelectorAll<HTMLInputElement>('[data-profile-file]') || [])].some(field => field.files?.length));
-    }
+    if (profileDialog.opened()) return Boolean(profileWrite || profileDialog.dirty());
     if (current.view === 'new') return draftHasText(readDraft<SavedComposeDraft>(draftKey('compose', hash)));
     if (current.view === 'post') return draftHasText(readDraft<{ body: string }>(draftKey('reply', current.id)));
     return false;
@@ -312,8 +315,17 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const current = readyData(me);
     // The mandatory convention owns the modal lock while it is open. Restore
     // the management panel's lock first so nested dialogs do not trap each other.
-    if (current?.convention && !current.convention.agreed) restoreManagementBackground();
+    if (current?.convention && !current.convention.agreed) { profileDialog.suspend(); restoreManagementBackground(); }
     conventionConsent.sync(current, mounted.main.ownerDocument, mounted.ctx);
+    if (!current?.convention || current.convention.agreed) {
+      // Legacy bookmarks open the editor only after mandatory consent has
+      // released its modal lock, including the first visit to this route.
+      if (current && route().view === 'profile' && !legacyProfileOpened && !profileDialog.opened()) {
+        legacyProfileOpened = true;
+        profileDialog.open(mounted.main.ownerDocument, mounted.ctx, profile || loading);
+      }
+      profileDialog.resume();
+    }
   }
   // A failed background refresh keeps what is already on screen; only a
   // definite answer (signed out, gone, not open) replaces it.
@@ -347,6 +359,21 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     return `topics?${new URLSearchParams({ ...where, ...(query ? { q: query } : {}), sort, page: String(page) })}`;
   };
   const memberKey = (uid: string, tab: string) => `${uid}|${tab}`;
+  function updateCachedProfile(updated: CommunityProfile) {
+    const uid = updated.person.uid;
+    if (!uid) return;
+    memberProfileEpochs.set(uid, (memberProfileEpochs.get(uid) || 0) + 1);
+    for (const [key, value] of memberPages) if (key.startsWith(`${uid}|`) && value.state === 'ready') {
+      memberPages.set(key, { ...value, data: { ...value.data, person: updated.person, bio: updated.signature,
+        background: updated.background.approved, cover: updated.cover ?? null, coverImage: updated.coverImage ?? null, coverName: updated.coverName ?? null } });
+    }
+  }
+  function invalidateMemberProfile(uid: string | null | undefined) {
+    if (!uid) return;
+    memberProfileEpochs.set(uid, (memberProfileEpochs.get(uid) || 0) + 1);
+    for (const key of memberPages.keys()) if (key.startsWith(`${uid}|`)) memberPages.delete(key);
+    if (readyData(profile)?.person.uid === uid) { profile = null; profileRequest++; }
+  }
 
   async function assignLoad<T>(path: string, current: CommunityLoad<T> | null | undefined, assign: (value: CommunityLoad<T>) => void) {
     const identity = frameIdentity;
@@ -387,7 +414,23 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (key !== headerKey) { headerKey = key; mounted?.ctx.headerChanged?.(); }
     syncConvention();
   }
-  async function loadProfile() { await assignLoad('profile', profile, value => { profile = value; }); }
+  async function loadProfile() {
+    const requestId = ++profileRequest;
+    await assignLoad('profile', profile, value => { if (requestId === profileRequest && !profileWrite) profile = value; });
+  }
+  async function openProfile() {
+    if (!mounted || switchingBrowseMode || communityReaderReadOnly(readyData(me))) return;
+    const current = route(), viewer = readyData(me);
+    if (!viewer?.uid || !['member', 'profile'].includes(current.view)) return;
+    const uid = current.view === 'profile' ? viewer.uid : current.id;
+    const tab = current.view === 'profile' ? 'topics' : current.tab;
+    if (uid !== viewer.uid || !readyData(memberPages.get(memberKey(uid, tab)))?.self) return;
+    if (viewer.convention && !viewer.convention.agreed) { syncConvention(); return; }
+    if (current.view === 'profile') legacyProfileOpened = true;
+    profileDialog.open(mounted.main.ownerDocument, mounted.ctx, loading);
+    await loadProfile();
+    profileDialog.render(profile || loading);
+  }
   let checkinRequest = 0;
   async function loadCheckin() {
     const token = ++checkinRequest, month = checkinMonth;
@@ -408,7 +451,14 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (current) stardusts.set(selected, value);
     return current;
   }
-  async function loadMember(uid: string, tab: string) { const key = memberKey(uid, tab); await assignLoad(`members/${enc(uid)}?tab=${enc(tab)}`, memberPages.get(key), value => { memberPages.set(key, value); }); }
+  async function loadMember(uid: string, tab: string) {
+    const key = memberKey(uid, tab), epoch = memberProfileEpochs.get(uid) || 0;
+    await assignLoad(`members/${enc(uid)}?tab=${enc(tab)}`, memberPages.get(key), value => {
+      // Reads started before a confirmed profile/background change cannot put
+      // its retired appearance back into another cached tab.
+      if (epoch === (memberProfileEpochs.get(uid) || 0)) memberPages.set(key, value);
+    });
+  }
   async function loadInbox(tab: string) { await assignLoad(`inbox?tab=${enc(tab)}`, inboxes.get(tab), value => { inboxes.set(tab, value); }); }
   async function loadManage(tab: string) {
     const requestId = (manageRequests.get(tab) || 0) + 1;
@@ -479,6 +529,10 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       if (location.hash !== hash || identity !== frameIdentity) return;
     }
     await Promise.all(loadsFor(current).map(run => run()));
+    if (current.view === 'profile' && location.hash === hash && identity === frameIdentity) {
+      const uid = readyData(me)?.uid || readyData(profile)?.person.uid;
+      if (uid) await loadMember(uid, 'topics');
+    }
     if (location.hash === hash && identity === frameIdentity) await recordActiveVisit();
     if (location.hash === hash && identity === frameIdentity) paint();
   }
@@ -534,7 +588,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       case 'bookmarks': return communityBookmarksHTML({ ...common, list: bookmarks || loading });
       case 'manage': return communityManageHTML({ ...common, manage: manages.get(['contact', 'convention'].includes(current.tab) ? 'queue' : current.tab) || loading, tab: current.tab, itemEditing, shippingOrder, rejecting, deleting, me: viewer, selectedReviews: [...reviewSelection], managementBoard, stewardCandidate, stewardEditingUid, bannerEditor: bannerEditor.state(), convention });
       case 'member': return communityMemberHTML({ ...common, member: memberPages.get(memberKey(current.id, current.tab)) || loading, me: viewer, muting, badgeSelection: badgeExplorer.state() });
-      case 'profile': return communityProfileHTML({ ...common, profile: profile || loading });
+      case 'profile': return communityMemberHTML({ ...common, member: memberPages.get(memberKey(viewer?.uid || readyData(profile)?.person.uid || '', 'topics')) || loading, me: viewer });
       case 'stardust': return communityStardustHTML({ ...common, stardust: stardusts.get(flow) || loading, tab: current.tab, levelSelection: levelExplorer.state() });
       case 'inbox': return communityInboxHTML({ ...common, inbox: inboxes.get(current.tab) || loading, tab: current.tab, me: viewer });
       case 'shop': return current.tab === 'mine'
@@ -702,7 +756,6 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   function paint() {
     if (!mounted) return;
     const section = mounted.main.querySelector<HTMLElement>('[data-community]');
-    if (section?.dataset.community === 'profile' && profileWrite) return;
     const markup = html(mounted.ctx);
     if (!section || markup === null) return;
     const restoreView = mounted.ctx.beforePaint?.();
@@ -808,6 +861,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     syncForms(next);
     mountSelects();
     syncManagementDialog();
+    profileDialog.render(profile || loading);
     for (const field of next.querySelectorAll<HTMLTextAreaElement>('textarea')) autosize(field);
     const focused = focusSelector ? next.querySelector<HTMLInputElement>(focusSelector) : null;
     focused?.focus({ preventScroll: true });
@@ -940,47 +994,48 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     finally { if (button?.isConnected) { button.disabled = false; button.innerHTML = label; } }
   }
   function otherProfileImageDraft(form: Form) {
-    return [...(mounted?.main.querySelectorAll<HTMLInputElement>('.community-profile input[type="file"]') || [])].some(field => field.closest('form') !== form && Boolean(field.files?.length));
+    return [...(profileDialog.root()?.querySelectorAll<HTMLInputElement>('input[type="file"]') || [])].some(field => field.closest('form') !== form && Boolean(field.files?.length));
   }
   function lockProfileControls(disabled: boolean) {
-    mounted?.main.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('.community-profile :is(input, select, button)').forEach(field => { field.disabled = disabled; });
+    profileDialog.root()?.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLButtonElement>('input, textarea, button').forEach(field => { field.disabled = disabled; });
   }
-  async function submitProfile(form: Form, kind: 'signature' | 'avatar' | 'background' | 'frame') {
+  async function submitProfile(form: Form, kind: 'signature' | 'avatar' | 'background') {
     if (profileWrite || !readyData(profile)?.canEditProfile) return;
     if (otherProfileImageDraft(form)) return status(form, tr('请先提交另一项已选择的图片，或取消选择。', 'Submit the other selected image first, or clear that selection.'));
     if (kind === 'signature' && !checkText(form, 'signature', [0, 100], ['个签', 'Signature'])) return;
     let body: FormData | undefined;
     if (kind === 'avatar' || kind === 'background') {
-      const file = form.querySelector<HTMLInputElement>('[type="file"]')?.files?.[0];
-      if (!file) return status(form, tr('请先选择图片。', 'Choose an image first.'));
+      const file = profileDialog.file(kind);
+      if (!file) return status(form, tr('请先选择图片并确认裁剪。', 'Choose an image and confirm the crop first.'));
       if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) return status(form, tr('请选择 JPG、PNG 或 WebP 图片。', 'Choose JPG, PNG or WebP.'));
       if (file.size > 2 * 1024 * 1024) return status(form, tr('图片不能超过 2MB。', 'Image cannot exceed 2MB.'));
       body = new FormData(); body.append('file', file);
     }
     const identity = frameIdentity, token = {};
     let saved = false;
+    profileRequest++;
     profileWrite = token;
     lockProfileControls(true);
     const currentHash = location.hash;
     await busy(form, tr('正在保存…', 'Saving…'), async () => {
       let updated: CommunityProfile;
-      if (kind === 'frame') {
-        await send('shop/equip', { kind: 'frame', ref: valueOf(form, 'ref') || null });
-        updated = await api<CommunityProfile>('profile');
-      } else if (body) updated = await api<CommunityProfile>(`profile/${kind}`, { method: 'POST', headers: { 'X-Reader-Request': '1' }, body });
+      if (body) updated = await api<CommunityProfile>(`profile/${kind}`, { method: 'POST', headers: { 'X-Reader-Request': '1' }, body });
       else updated = await send<CommunityProfile>('profile', { signature: valueOf(form, 'signature') });
       if (identity !== frameIdentity || profileWrite !== token) return;
       profile = { state: 'ready', data: updated };
+      updateCachedProfile(updated);
       saved = true;
-      memberPages.clear();
       // Mark confirmed controls clean before repaint; unrelated form drafts are retained.
-      form.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input, select').forEach(field => {
-        if (field instanceof HTMLInputElement) { if (field.type === 'file') field.value = ''; else field.defaultValue = field.value; }
-        else for (const option of field.options) option.defaultSelected = option.selected;
+      form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea').forEach(field => {
+        if (field instanceof HTMLInputElement && field.type === 'file') field.value = ''; else field.defaultValue = field.value;
       });
       await loadMe();
       if (identity !== frameIdentity || currentHash !== location.hash) return;
-      notify(kind === 'frame' ? tr('头像框已更新。', 'Frame updated.') : tr('已提交，审核通过后生效。', 'Submitted; changes appear after approval.'));
+      const current = route();
+      if (current.view === 'member') await loadMember(current.id, current.tab);
+      else if (current.view === 'profile' && updated.person.uid) await loadMember(updated.person.uid, 'topics');
+      if (identity !== frameIdentity || currentHash !== location.hash) return;
+      notify(tr('已提交，审核通过后生效。', 'Submitted; changes appear after approval.'));
     });
     if (profileWrite === token) {
       profileWrite = null;
@@ -988,7 +1043,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         const feedback = form.querySelector('.community-form-status')?.textContent || '';
         lockProfileControls(false);
         if (saved) paint();
-        const next = mounted?.main.querySelector<Form>(`[data-community-form="profile-${kind}"]`);
+        else profileDialog.render(profile || loading);
+        const next = profileDialog.root()?.querySelector<Form>(`[data-community-form="profile-${kind}"]`);
         if (next && feedback) status(next, feedback);
       }
     }
@@ -1000,18 +1056,25 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (otherProfileImageDraft(form)) return status(form, tr('请先提交另一项已选择的图片，或取消选择。', 'Submit the other selected image first, or clear that selection.'));
     const identity = frameIdentity, token = {}, hash = location.hash;
     let saved = false;
+    profileRequest++;
     profileWrite = token;
     lockProfileControls(true);
     await act(target, async () => {
       const updated = await send<CommunityProfile>(`profile/${kind}/remove`);
       if (identity !== frameIdentity || profileWrite !== token) return;
       profile = { state: 'ready', data: updated }; saved = true;
+      updateCachedProfile(updated);
       const file = form.querySelector<HTMLInputElement>('[type="file"]');
       if (file) file.value = '';
-      memberPages.clear(); await loadMe();
+      await loadMe();
+      if (identity === frameIdentity && hash === location.hash) {
+        const current = route();
+        if (current.view === 'member') await loadMember(current.id, current.tab);
+        else if (current.view === 'profile' && updated.person.uid) await loadMember(updated.person.uid, 'topics');
+      }
       if (identity === frameIdentity && hash === location.hash) notify(tr('已恢复默认。', 'Default restored.'));
     });
-    if (profileWrite === token) { profileWrite = null; if (identity === frameIdentity && hash === location.hash) { lockProfileControls(false); if (saved) paint(); } }
+    if (profileWrite === token) { profileWrite = null; if (identity === frameIdentity && hash === location.hash) { lockProfileControls(false); if (saved) paint(); else profileDialog.render(profile || loading); } }
   }
   const profileReviewWrites = new Set<string>();
   async function reviewProfile(target: HTMLButtonElement) {
@@ -1213,6 +1276,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   }
   async function submitRedeem(form: Form) {
     const id = form.dataset.id || '';
+    const uid = readyData(me)?.uid, identity = frameIdentity;
     const goods = Boolean(fieldOf(form, 'address'));
     if (goods) {
       if (!length(valueOf(form, 'name'))) return invalid(form, fieldOf(form, 'name'), tr('请填写收件人。', 'Enter the recipient.'));
@@ -1221,6 +1285,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     }
     await busy(form, tr('正在兑换…', 'Redeeming…'), async () => {
       const result = await send<{ item: { name: string; kind: string } }>('shop/redeem', { item: id, ...(goods ? { shipping: { name: valueOf(form, 'name'), phone: valueOf(form, 'phone'), address: valueOf(form, 'address') } } : {}) });
+      if (result.item.kind === 'cover' && identity === frameIdentity) invalidateMemberProfile(uid);
       redeeming = null;
       notify(result.item.kind === 'goods' ? tr(`已兑换「${result.item.name}」，站长会尽快发货。`, `Redeemed “${result.item.name}”; it will ship soon.`) : tr(`已兑换「${result.item.name}」。`, `Redeemed “${result.item.name}”.`));
       await reload();
@@ -1244,11 +1309,12 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const effect = communityNameEffect({ style: valueOf(form, 'effectStyle'), colors: [valueOf(form, 'effectStart'), ...(valueOf(form, 'effectStyle') === 'solid' ? [] : [valueOf(form, 'effectEnd')])] });
     if (kind === 'frame' && !valueOf(form, 'image')) return status(form, tr('请先上传透明头像框素材。', 'Upload a transparent frame first.'));
     if (kind === 'frame' && form.dataset.frameReady === 'false') return status(form, tr('当前图片不能作为头像框：请上传正方形素材，并保持中央透明。', 'Upload a square asset with a transparent centre.'));
+    if (kind === 'cover' && !valueOf(form, 'image')) return status(form, tr('请先上传主页背景图片。', 'Upload a profile background first.'));
     if (kind === 'color' && !effect) return status(form, tr('请先拖入制作好的昵称特效文件。', 'Drop a finished nickname effect file first.'));
     const payload = {
       cat: checkedOf(form, 'cat') || valueOf(form, 'cat'), name: valueOf(form, 'name'), description: valueOf(form, 'description'),
-      kind: kind === 'frame' || kind === 'color' ? kind : undefined, category: valueOf(form, 'category') || null, effect: kind === 'color' ? effect : null,
-      price: number('price'), stock: kind === 'frame' || kind === 'color' ? null : number('stock'), limitPer: valueOf(form, 'limitPer') || null, limitN: number('limitN'),
+      kind: kind === 'frame' || kind === 'color' || kind === 'cover' ? kind : undefined, category: valueOf(form, 'category') || null, effect: kind === 'color' ? effect : null,
+      price: number('price'), stock: kind === 'frame' || kind === 'color' || kind === 'cover' ? null : number('stock'), limitPer: valueOf(form, 'limitPer') || null, limitN: number('limitN'),
       minLevel: number('minLevel') ?? 0, minDays: number('minDays') ?? 0, delivery: valueOf(form, 'delivery'), note: valueOf(form, 'note'),
       active: Boolean(fieldOf(form, 'active')?.checked),
       image: valueOf(form, 'image') || null,
@@ -1635,6 +1701,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (levelExplorer.action(target)) return;
     if (badgeExplorer.action(target)) return;
     switch (action) {
+      case 'community-profile-edit': void openProfile(); return;
       case 'community-profile-remove': void removeProfile(target, kind); return;
       case 'community-profile-review': void reviewProfile(target); return;
       case 'community-management-board': {
@@ -1797,9 +1864,16 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       }
       case 'community-redeem': redeeming = id; delivery = null; openPanel('form[data-community-form="redeem"]'); return;
       case 'community-redeem-cancel': redeeming = null; paint(); return;
-      case 'community-equip':
-        void act(target, async () => { await send('shop/equip', { kind: target.dataset.kind, ref: target.dataset.ref || null }); notify(target.dataset.ref ? tr('已换上。', 'Applied.') : tr('已取下。', 'Removed.')); await reload(); });
+      case 'community-equip': {
+        const uid = readyData(me)?.uid, identity = frameIdentity;
+        void act(target, async () => {
+          await send('shop/equip', { kind: target.dataset.kind, ref: target.dataset.ref || null });
+          if (target.dataset.kind === 'cover' && identity === frameIdentity) invalidateMemberProfile(uid);
+          notify(target.dataset.ref ? tr('已换上。', 'Applied.') : target.dataset.kind === 'cover' ? tr('已恢复默认背景。', 'Default background restored.') : tr('已取下。', 'Removed.'));
+          await reload();
+        });
         return;
+      }
       case 'community-delivery':
         void act(target, async () => {
           const data = await api<{ name: string; delivery: string }>(`shop/items/${enc(id)}/delivery`);
@@ -1942,7 +2016,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (bannerEditor.submit(form)) return;
     const handlers: Record<string, (form: Form) => unknown> = {
       'profile-signature': item => submitProfile(item, 'signature'), 'profile-avatar': item => submitProfile(item, 'avatar'),
-      'profile-background': item => submitProfile(item, 'background'), 'profile-frame': item => submitProfile(item, 'frame'),
+      'profile-background': item => submitProfile(item, 'background'),
       'profile-background-review': item => reviewBackground(item, event),
       search: item => search((item.elements.namedItem('q') as HTMLInputElement).value),
       topic: submitTopic, reply: submitReply, 'reply-edit': submitReplyEdit, report: submitReport, delete: submitDelete,
@@ -1998,21 +2072,25 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   function syncItemForm(form: Form) {
     if (!mounted) return;
     const kind = checkedOf(form, 'kind') || valueOf(form, 'kind') || 'goods';
-    const wearable = kind === 'frame' || kind === 'color';
+    const wearable = kind === 'frame' || kind === 'color' || kind === 'cover';
     const cat = fieldOf(form, 'cat'); if (cat) cat.value = wearable ? 'look' : kind;
     const show = (selector: string, visible: boolean) => { const node = form.querySelector<HTMLElement>(selector); if (node) node.hidden = !visible; };
     show('[data-item-media]', kind !== 'color'); show('[data-item-effect]', kind === 'color'); show('[data-item-wear-preview]', wearable);
     show('[data-item-delivery]', kind === 'digital'); show('[data-item-stock]', !wearable);
     const stock = fieldOf(form, 'stock'); if (stock) stock.disabled = wearable;
     const help = form.querySelector('[data-item-media-help]');
-    if (help) help.textContent = kind === 'frame' ? tr('上传正方形透明 PNG / WebP / GIF，中心留空；支持动画，最多 25MB / 120 帧。', 'Square transparent PNG / WebP / GIF with a clear centre; up to 25MB / 120 frames.') : tr('商品展示图支持 JPG、PNG、WebP、GIF，最多 25MB / 120 帧。', 'Artwork: JPG, PNG, WebP, GIF; up to 25MB / 120 frames.');
+    if (help) help.textContent = kind === 'frame' ? tr('上传正方形透明 PNG / WebP / GIF，中心留空；支持动画，最多 25MB / 120 帧。', 'Square transparent PNG / WebP / GIF with a clear centre; up to 25MB / 120 frames.') : kind === 'cover' ? tr('主页背景支持 JPG、PNG、WebP、GIF，最多 25MB / 120 帧。建议使用横向图片。', 'Profile backgrounds: JPG, PNG, WebP, GIF; up to 25MB / 120 frames. Landscape artwork is recommended.') : tr('商品展示图支持 JPG、PNG、WebP、GIF，最多 25MB / 120 帧。', 'Artwork: JPG, PNG, WebP, GIF; up to 25MB / 120 frames.');
     const hint = form.querySelector('[data-item-wear-help]');
-    if (hint) hint.textContent = kind === 'frame' ? tr('素材会叠加在用户头像上；兑换后自动换上，也可以从背包取下。', 'The asset overlays the avatar. Redemption applies it; remove it from the inventory.') : tr('兑换后会应用到社区昵称，帖子、回复和排行榜统一显示。', 'Applies to names in posts, replies and rankings.');
+    if (hint) hint.textContent = kind === 'frame' ? tr('素材会叠加在用户头像上；兑换后自动换上，也可以从已拥有取下。', 'The asset overlays the avatar. Redemption applies it; remove it from Owned items.') : kind === 'cover' ? tr('仅用于社区个人主页背景；兑换后自动使用，也可以在已拥有中更换。一次只显示一张背景。', 'Community profile background only. Redemption applies it; switch it in Owned items. One background is displayed at a time.') : tr('兑换后会应用到社区昵称，帖子、回复和排行榜统一显示。', 'Applies to names in posts, replies and rankings.');
     const effect = kind === 'color' ? communityNameEffect({ style: valueOf(form, 'effectStyle'), colors: [valueOf(form, 'effectStart'), ...(valueOf(form, 'effectStyle') === 'solid' ? [] : [valueOf(form, 'effectEnd')])] }) : null;
     const sample: CommunityPerson = { name: readyData(me)?.name || tr('無相', 'Preview'), uid: null, role: 'reader', frame: kind === 'frame' && valueOf(form, 'image') ? `image:${valueOf(form, 'image')}` : null, nameEffect: effect };
     const preview = form.querySelector('[data-item-wear-sample]');
-    const key = `${kind}|${sample.frame}|${sample.name}|${JSON.stringify(effect)}`;
-    if (preview && wearable && preview.getAttribute('data-preview-key') !== key) { preview.innerHTML = avatarHTML(sample, mounted.ctx, 'lg', false) + nameLabelHTML(sample, mounted.ctx); preview.setAttribute('data-preview-key', key); }
+    const image = valueOf(form, 'image');
+    const key = `${kind}|${image}|${sample.frame}|${sample.name}|${JSON.stringify(effect)}`;
+    if (preview && wearable && preview.getAttribute('data-preview-key') !== key) {
+      preview.innerHTML = kind === 'cover' ? /^[0-9a-f-]{36}$/.test(image) ? `<span class="community-cover-sample"><img src="/api/community/images/${mounted.ctx.esc(image)}.webp" alt="${tr('主页背景预览', 'Profile background preview')}"></span>` : '' : avatarHTML(sample, mounted.ctx, 'lg', false) + nameLabelHTML(sample, mounted.ctx);
+      preview.setAttribute('data-preview-key', key);
+    }
   }
   function equipmentStatus(form: Form, text: string, effect = false) {
     const line = form.querySelector<HTMLElement>(effect ? '[data-item-effect-status]' : '[data-item-upload-status]');
@@ -2173,6 +2251,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const link = (event.target as Element).closest?.<HTMLAnchorElement>('a[href^="#/"]');
     if (!link || link.getAttribute('href') === location.hash || link.target === '_blank' || link.hasAttribute('download')) return;
     event.preventDefault(); event.stopPropagation();
+    if (profileWrite) { notify(tr('正在提交资料，请稍候。', 'Profile submission in progress. Please wait.')); return; }
     const href = link.getAttribute('href') || '';
     if (typeof window.confirm === 'function' && !window.confirm(tr('还有未发布的内容，确定离开吗？', 'You have an unsent draft. Leave this page?'))) return;
     approvedNavigation = href;
@@ -2206,6 +2285,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     profileReviewWrites.clear();
     activeVisitDone = ''; activeVisitPending = null; activeVisitRetryAt = 0;
     conventionConsent.close();
+    profileDialog.close(); profileRequest++; legacyProfileOpened = false;
     convention = null;
     if (clearWrites) writeRequests.clear();
     releaseDocumentReading();
@@ -2221,7 +2301,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     badgeExplorer.reset();
     frameIdentity++; frameHighlightsPending.clear(); frameHighlights.clear(); listRequests.clear();
     summary = null; me = null; profile = null; profileWrite = null; moderationContacts = null; checkin = null; bookmarks = null; shop = null; shopMine = null; rank = null; headerKey = '';
-    stardusts.clear(); memberPages.clear(); inboxes.clear(); manages.clear(); manageRequests.clear(); lists.clear(); threads.clear(); lastHash = '';
+    stardusts.clear(); memberPages.clear(); memberProfileEpochs.clear(); inboxes.clear(); manages.clear(); manageRequests.clear(); lists.clear(); threads.clear(); lastHash = '';
     deleting = null; itemEditing = null; rejecting = null; shippingOrder = null; redeeming = null; delivery = null;
   }
   async function setBrowsing(reader: boolean) {
@@ -2236,7 +2316,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     }
     // Existing-content edits and product forms have no independent saved
     // draft. Do not discard them when their write permissions disappear.
-    if (route().view === 'profile' && hasUnsavedDraft() || reader && (bannerEditor.dirty() || bannerEditor.state().busy || mounted?.main.querySelector('form[data-community-form="topic"][data-edit], form[data-community-form="reply-edit"], form[data-community-form="item"]'))) {
+    if (profileDialog.opened() && hasUnsavedDraft() || reader && (bannerEditor.dirty() || bannerEditor.state().busy || mounted?.main.querySelector('form[data-community-form="topic"][data-edit], form[data-community-form="reply-edit"], form[data-community-form="item"]'))) {
       notify(tr('请先完成或取消当前编辑，再切换浏览身份。', 'Finish or cancel the current edit before switching perspectives.'));
       return;
     }
@@ -2309,6 +2389,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       window.addEventListener('hashchange', onHistoryNavigation, true);
       window.addEventListener('popstate', onHistoryNavigation, true);
       if (location.hash !== lastHash) {
+        legacyProfileOpened = false;
         stewardCandidate = null; stewardLookupUid = ''; stewardLookupRequest++;
       }
       syncForms(main);
@@ -2325,6 +2406,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       }
       return () => {
         conventionConsent.close();
+        profileDialog.close();
         releaseDocumentReading();
         restoreManagementBackground();
         for (const editor of editors.values()) editor.destroy();

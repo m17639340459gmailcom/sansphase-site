@@ -1,0 +1,22 @@
+/* Local cropping only; the existing profile dialog owns its presentation. */
+.community-profile-identity > [data-profile-crop="avatar"] { grid-column: 1 / -1; min-width: 0; }
+.community-profile-crop { display: grid; gap: 12px; min-width: 0; color: var(--text); }
+.community-profile-crop h3 { margin: 0; font-size: 16px; font-weight: 600; }
+.community-profile-crop-hint { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+.community-profile-crop-stage { overflow: hidden; min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--community-reading-surface, var(--surface)); }
+.community-profile-crop-stage:focus-visible { border-color: var(--focus-edge); outline: none; }
+.community-profile-crop-stage cropper-canvas { display: block; width: 100%; height: 320px; }
+.community-profile-crop-stage cropper-selection { --theme-color: var(--signal); }
+.community-profile-crop-controls, .community-profile-crop-zoom, .community-profile-crop-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.community-profile-crop-controls { justify-content: space-between; }
+.community-profile-crop-button { min-height: 36px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--community-reading-control, var(--surface-2)); font-size: 12px; line-height: 1.5; }
+.community-profile-crop-button:hover { border-color: var(--line-strong); background: var(--community-reading-raised, var(--surface-2)); }
+.community-profile-crop-button:focus-visible { border-color: var(--focus-edge); outline: none; }
+.community-profile-crop-button:disabled { opacity: .55; cursor: wait; }
+.community-profile-crop-use { border-color: var(--signal); background: var(--signal); color: var(--on-signal, #182434); }
+.community-profile-crop-use:hover { border-color: var(--signal); background: var(--signal); }
+.community-profile-crop-status { min-height: 18px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+@media (max-width: 600px) {
+  .community-profile-crop-stage cropper-canvas { height: 280px; }
+  .community-profile-crop-controls { align-items: flex-start; }
+}

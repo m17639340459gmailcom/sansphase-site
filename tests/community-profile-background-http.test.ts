@@ -125,3 +125,36 @@ test('the owner personal reader may submit its own background without exposing o
   assert.equal((await get(path, 'reader')).status, 200);
   assert.equal((await (await get('members/10008', 'reader')).json()).background.id, pending.id);
 });
+
+test('switching between published and personal backgrounds uses one current choice and reset clears the selected cover', async t => {
+  const { store, get, post, upload, png } = await fixture(t), member = { kind: 'reader' as const, id: 'reader' };
+  const id = 'ffffffff-ffff-4fff-8fff-fffffffffff2';
+  store.addImage({ id, uploader: { kind: 'owner', id: 'owner' }, width: 640, height: 320, purpose: 'shop' });
+  const item = store.economy.saveItem(null, { cat: 'look', kind: 'cover', name: '正式上架背景', description: '正式作者审核并上架的主页背景', price: 20, stock: null, limitPer: null, limitN: null, minLevel: 0, minDays: 0, delivery: '', image: id, note: '', active: true });
+  store.ledger.credit(member, 100, 'test', null, new Date().toISOString());
+  const ref = `image:${id}`;
+  assert.equal((await post('shop/redeem', { item })).status, 201);
+  let state = await (await get('profile')).json();
+  assert.equal(state.cover, ref); assert.equal(state.coverName, '正式上架背景'); assert.equal(state.background.approved, null);
+  const pending = (await (await upload(await png())).json()).background.pending;
+  state = await (await get('profile')).json();
+  assert.equal(state.cover, ref, 'pending replacement does not change the current owned background');
+  assert.equal((await post('manage/profile-background', { memberUid: '10001', imageId: pending.id, approve: false, reason: '请换一张合适的图片' }, 'owner')).status, 200);
+  assert.equal((await (await get('profile')).json()).cover, ref, 'rejection keeps the selected owned background');
+  const replacement = (await (await upload(await png())).json()).background.pending;
+  assert.equal((await post('manage/profile-background', { memberUid: '10001', imageId: replacement.id, approve: true, reason: '' }, 'owner')).status, 200);
+  state = await (await get('profile')).json(); assert.equal(state.cover, null); assert.equal(state.background.approved.id, replacement.id);
+  assert.equal((await post('shop/equip', { kind: 'cover', ref: 'image:../../outside' })).status, 403);
+  for (const ref of [undefined, false, 0, [], {}]) assert.equal((await post('shop/equip', { kind: 'cover', ref })).status, 400);
+  assert.equal((await (await get('profile')).json()).background.approved.id, replacement.id, 'rejected equip cannot clear the current personal background');
+  assert.equal((await post('shop/equip', { kind: 'cover', ref: null })).status, 200);
+  assert.deepEqual((await (await get('profile')).json()).background, { approved: null, pending: null }, 'restoring the default is the same single-background action from owned inventory');
+  const again = (await (await upload(await png())).json()).background.pending;
+  assert.equal((await post('manage/profile-background', { memberUid: '10001', imageId: again.id, approve: true, reason: '' }, 'owner')).status, 200);
+  assert.equal((await post('shop/equip', { kind: 'cover', ref })).status, 200);
+  state = await (await get('profile')).json(); assert.equal(state.cover, ref); assert.deepEqual(state.background, { approved: null, pending: null });
+  assert.equal((await post('profile/background/remove', {})).status, 200);
+  state = await (await get('profile')).json(); assert.equal(state.cover, null); assert.equal(state.coverImage, null); assert.equal(state.coverName, null);
+  assert.deepEqual(state.background, { approved: null, pending: null });
+  assert.ok(store.economy.owned(member).has(item), 'restoring the default retains the purchased background in owned inventory');
+});

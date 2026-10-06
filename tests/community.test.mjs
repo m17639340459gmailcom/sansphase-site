@@ -705,7 +705,7 @@ test("the exchange: categories, what each item looks like, what you can do with 
   assert.deepEqual([...html.matchAll(/<div class="community-sec-h[^>]*><h2>([^<]+)<\/h2>/g)].map((m) => m[1]), ["装扮", "道具卡", "数字资源", "实物周边"]);
   const card = (id) => html.slice(html.indexOf(`data-id="${id}"`) - 2000, html.indexOf(`data-id="${id}"`) + 200);
   assert.match(html, /<span class="community-av community-av-xl community-shop-avatar is-frame-gold" aria-hidden="true"><span>無<\/span><\/span>/, "a frame preview uses the accepted 無 glyph");
-  assert.match(html, /data-action="community-equip" data-kind="frame" data-ref="">[\s\S]*?使用中/, "the frame you wear");
+  assert.match(html, /data-action="community-equip" data-kind="frame" data-ref="" aria-label="卸下金环头像框">卸下/, "the frame you wear offers an explicit remove action");
   assert.match(html, /<button type="button" class="community-button is-small" disabled>还差 50 星尘<\/button>/);
   assert.match(card("card-makeup"), /<span>每月限 2 次<\/span>[\s\S]*data-action="community-redeem" data-id="card-makeup"/);
   assert.match(html, /<span class="community-have">背包里有 1 张<\/span>/);
@@ -732,7 +732,7 @@ test("the exchange: categories, what each item looks like, what you can do with 
   const mine = communityShopMineHTML({ mine: ready({ balance: 100, inventory: { makeup: 1, pin: 0, highlight: 2 }, decorations: shop.decorations, looks: [shopItems[0]],
     digital: [{ id: "pack", name: "<手册>", desc: "提示词手册" }],
     orders: [{ id: "o1", item: "bag", itemName: "帆布袋", price: 20, status: "pending", createdAt: "2026-09-30T04:00:00Z", resolvedAt: null }, { id: "o2", item: "card-makeup", itemName: "补签卡", price: 30, status: "done", createdAt: "2026-09-29T04:00:00Z", resolvedAt: null }] }), me: me(), ...common });
-  assert.match(mine, /data-community="shop" data-tab="mine"[\s\S]*<h1>我的兑换<\/h1>/);
+  assert.match(mine, /data-community="shop" data-tab="mine"[\s\S]*<h1>已拥有<\/h1>/);
   assert.match(mine, /补签卡<\/b><span class="community-inv-n">× 1<\/span><\/div><a class="community-button is-small is-line-gold" href="#\/community\/checkin">去签到日历用/);
   assert.match(mine, /community-inv community-spot is-empty">[\s\S]*推荐卡[\s\S]*× 0[\s\S]*href="#\/community\/shop\/card">去兑换/);
   assert.match(mine, /data-action="community-equip" data-kind="frame" data-ref=""/);
@@ -797,7 +797,7 @@ test("member pages: the hero, follows, moderation, quick links for yourself, and
   assert.match(muted, /禁言到 2026-10-01 12:00[\s\S]*原因：人身攻击[\s\S]*data-action="community-lift" data-id="s1"/);
   assert.doesNotMatch(muted, /data-action="community-mute"/, "no second mute while muted");
   const self = communityMemberHTML({ member: ready(memberPage({ person: person("林间"), self: true, canMute: false, canAppoint: false, tab: "bookmarks", counts: { topics: 1, replies: 0, bookmarks: 0 }, quick: { balance: 42, checkedIn: false, unread: 3, orders: 1 } })), me: me(), ...common });
-  assert.match(self, /href="#\/community\/profile">[\s\S]*编辑资料/);
+  assert.match(self, /data-action="community-profile-edit" aria-haspopup="dialog">编辑资料/);
   assert.doesNotMatch(self, /href="#\/account" data-reader-return/);
   assert.match(self, /class="community-me-quick[\s\S]*我的星尘<\/span><b>42<\/b>[\s\S]*还没签到[\s\S]*3 未读[\s\S]*巡天[\s\S]*1 件/);
   assert.match(self, /<a href="#\/community\/u\/u1\/bookmarks" aria-current="page">收藏 0<\/a>/);

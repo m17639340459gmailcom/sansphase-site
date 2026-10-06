@@ -50,7 +50,11 @@ export async function createCommunityDemo({ simplePosting = true, visualDemo = f
   const directory = mkdtempSync(resolve(tmpdir(), 'sansphase-community-preview-'));
   new DatabaseSync(resolve(directory, 'content.db')).close();
   await migrateCommunity(directory);
-  const store = createCommunityStore(directory, { previewCatalog: true });
+  // The local demonstration uses the same durable queue as profile edits;
+  // replaced backgrounds are removed before the next response, not after a day.
+  const profilePeople = { ...people, [previewOwnerReaderId]: { name: '無相·个人', uid: '10008', vip: true, days: 0, bio: '这是我的个人资料。', ownerReader: true } };
+  const profiles = createCommunityPreviewProfile(directory, profilePeople, { ownerReaderId: previewOwnerReaderId });
+  const store = createCommunityStore(directory, { previewCatalog: true, queueFile: profiles.queueFile });
   const now = Date.now();
   const at = (minutesAgo) => new Date(now - minutesAgo * 60000).toISOString();
   const joinedDays = id => id === previewOwnerReaderId ? 0 : visualDemo && id === 'demo' ? 180 : visualDemo && id === 'linjian' ? 500 : people[id].days;
@@ -212,12 +216,10 @@ export async function createCommunityDemo({ simplePosting = true, visualDemo = f
   // A distinct sample reader backs the owner's personal identity. Its balance,
   // inventory, visits and achievement history start empty; display privileges
   // come from the same owner-reader marker used by the production service.
-  const profilePeople = { ...people, [previewOwnerReaderId]: { name: '無相·个人', uid: '10008', vip: true, days: 0, bio: '这是我的个人资料。', ownerReader: true } };
   const byUid = new Map(Object.entries(profilePeople).map(([id, info]) => [info.uid, member(id)]));
-  const profiles = createCommunityPreviewProfile(directory, profilePeople, { ownerReaderId: previewOwnerReaderId });
   const frames = createCommunityFrameAuthority({ store, directory });
   const serviceFor = (siteOrigin) => createCommunityService({
-    store, siteOrigin, directory, ownerId: 'owner', simplePosting, profile: profiles.access,
+    store, siteOrigin, directory, ownerId: 'owner', simplePosting, profile: profiles.access, drainFileQueue: profiles.drainFileQueue,
     ownerReaderIdentity: async req => {
       const reader = await profiles.ownerReaderIdentity(req);
       return reader ? { kind: 'reader', id: reader.id, name: reader.nickname, vip: reader.vip } : null;
