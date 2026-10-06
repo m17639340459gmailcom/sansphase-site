@@ -27,7 +27,7 @@ function setup({ reduced = false, animate = true } = {}) {
     close() { transitions.dispose(); dom.window.close(); } };
 }
 
-test('route updates run immediately without a document snapshot or content wait', async () => {
+test('route updates run immediately and the fade waits for async content readiness', async () => {
   const s = setup();
   try {
     let updated = false, resolve;
@@ -36,10 +36,30 @@ test('route updates run immediately without a document snapshot or content wait'
     assert.equal(updated, true, 'controls must bind before any animation capture');
     assert.equal(result, loading, 'fetching stays independent of the visual effect');
     assert.equal(s.snapshots(), 0);
+    assert.equal(s.animations.length, 0, 'the previous page must not fade in as the new page while assets are pending');
+    resolve('loaded'); assert.equal(await result, 'loaded');
     assert.equal(s.animations.length, 1);
     assert(s.animations[0].frames.every(frame => !('transform' in frame) && !('clipPath' in frame)), 'button hit areas must not move or be clipped');
-    resolve('loaded'); assert.equal(await result, 'loaded');
   } finally { s.close(); }
+});
+
+test('a stale, rejected, disposed or input-interrupted async update never starts a late fade', async () => {
+  for (const action of ['new-route', 'rejected', 'disposed', 'pointerdown']) {
+    const s = setup();
+    let resolve, reject;
+    const loading = new Promise((done, fail) => { resolve = done; reject = fail; });
+    try {
+      const result = s.transitions.run('notes', 'community', () => loading);
+      if (action === 'new-route') s.transitions.run('community', 'works', () => {});
+      if (action === 'disposed') s.transitions.dispose();
+      if (action === 'pointerdown') s.doc.dispatchEvent(new s.win.Event('pointerdown'));
+      const count = s.animations.length;
+      if (action === 'rejected') { reject(new Error('asset unavailable')); await assert.rejects(result); }
+      else { resolve(); await result; }
+      await Promise.resolve();
+      assert.equal(s.animations.length, count, action);
+    } finally { s.close(); }
+  }
 });
 
 test('pointer, keyboard and scroll interrupt the fade without consuming input', () => {

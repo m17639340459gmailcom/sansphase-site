@@ -1,4 +1,4 @@
-import { readFile, rename } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Payload, Where } from 'payload';
@@ -8,7 +8,8 @@ import { readerAudit, removeReaderAccount } from './reader-account-removal.ts';
 import type { PurgeCommunity } from './reader-account-removal.ts';
 import { createReaderWorkflow, registrationLifetimeMs } from './reader-workflow.ts';
 import { cleanReaderFiles } from './reader-file-cleanup.ts';
-import { contactDetailReason } from './reader-profile-policy.ts';
+import { createReaderProfileCommands } from './reader-profile-commands.ts';
+import type { ReaderProfileCommands } from './reader-profile-commands.ts';
 import { createMediaRetention } from './payload/media-retention.ts';
 import type { createReaderUidStore } from './reader-uids.ts';
 
@@ -19,13 +20,13 @@ type MediaRetentionView = Pick<ReturnType<typeof createMediaRetention>, 'version
   sweep: (options: { ids: string[]; limit: number }) => Promise<unknown>;
   sweepVersions: (options: { ids: string[]; limit: number }) => Promise<unknown>;
 };
-type AdminOptions = { payload: Payload; authorService: AuthorService; siteOrigin: string; directory: string; authorId: string; loginLedger?: LoginLedger; uidStore: ReturnType<typeof createReaderUidStore>; workflow?: ReturnType<typeof createReaderWorkflow>; mediaRetention?: ReturnType<typeof createMediaRetention>; purgeCommunity?: PurgeCommunity };
+type AdminOptions = { payload: Payload; authorService: AuthorService; siteOrigin: string; directory: string; authorId: string; loginLedger?: LoginLedger; uidStore: ReturnType<typeof createReaderUidStore>; workflow?: ReturnType<typeof createReaderWorkflow>; mediaRetention?: ReturnType<typeof createMediaRetention>; purgeCommunity?: PurgeCommunity; profileCommands?: ReaderProfileCommands };
 type AdminBody = Record<string, unknown>;
 const fail = (message: string, status = 400) => Object.assign(new Error(message), { status });
 const errorStatus = (error: unknown): number | undefined => error && typeof error === 'object' && 'status' in error && typeof error.status === 'number' ? error.status : undefined;
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
 const errorCode = (error: unknown): string | undefined => error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : undefined;
-export function createReaderAdminService({ payload, authorService, siteOrigin, directory, authorId, loginLedger, uidStore, workflow = createReaderWorkflow(directory, payload.config.secret), mediaRetention = createMediaRetention({ payload, directory }), purgeCommunity }: AdminOptions) {
+export function createReaderAdminService({ payload, authorService, siteOrigin, directory, authorId, loginLedger, uidStore, workflow = createReaderWorkflow(directory, payload.config.secret), mediaRetention = createMediaRetention({ payload, directory }), purgeCommunity, profileCommands }: AdminOptions) {
   if (!payload || !authorService || !directory || !authorId || !uidStore) throw Error('Reader administration requires the owner service and private storage.');
   // The JavaScript retention service accepts selected ID arrays at runtime.
   const retention = mediaRetention as unknown as MediaRetentionView;
@@ -49,6 +50,8 @@ export function createReaderAdminService({ payload, authorService, siteOrigin, d
     try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) as AdminBody; } catch { throw fail('请求格式无效。'); }
   };
   const audit = readerAudit(directory, authorId);
+  const profiles = profileCommands || createReaderProfileCommands({ payload, directory, workflow, uidStore });
+  const assertOwner = async (req: IncomingMessage) => { if (!await authorService.identity(req)) throw fail('只有作者可以管理读者。', 403); };
   // Payload has no generated collection types here; narrow documents at its boundary.
   const findReader = async (id: string) => await payload.findByID({ collection: 'readers', id }) as ReaderAdminRow;
   return {
@@ -60,9 +63,8 @@ export function createReaderAdminService({ payload, authorService, siteOrigin, d
         const path = url.pathname.slice('/api/manage/'.length).split('/').filter(Boolean);
         if (req.method === 'GET' && path[0] === 'review' && path[1] === 'avatar' && path.length === 3) {
           const id = path[2].replace(/\.webp$/, '');
-          const row = uuidPattern.test(id) && workflow.profile(id);
-          if (!row || row.kind !== 'avatar' || !uuidPattern.test(row.proposed_value) || !path[2].endsWith('.webp')) throw fail('待审核头像不存在。', 404);
-          const image = await readFile(resolve(directory, 'uploads', `pending-reader-avatar-${row.proposed_value}.webp`));
+          if (!uuidPattern.test(id) || !path[2].endsWith('.webp')) throw fail('待审核头像不存在。', 404);
+          const image = await profiles.reviewImage(id, () => assertOwner(req));
           res.writeHead(200, { 'Content-Type': 'image/webp', 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' });
           res.end(image); return;
         }
@@ -111,31 +113,7 @@ export function createReaderAdminService({ payload, authorService, siteOrigin, d
           send(res, await retention.sweepVersions({ ids: input.ids as string[], limit: 1000 })); return;
         }
         if (req.method === 'POST' && path[0] === 'review' && path[1] === 'profile' && uuidPattern.test(path[2] || '') && ['approve', 'reject'].includes(path[3]) && path.length === 4) {
-          const review = workflow.profile(path[2]);
-          if (!review) throw fail('待审核资料不存在。', 404);
-          const user = await findReader(review.reader_id).catch(() => null);
-          if (path[3] === 'approve') {
-            if (!user || user._verified !== true) throw fail('用户不存在。', 404);
-            if (review.kind === 'signature') {
-              const reason = contactDetailReason(review.proposed_value);
-              if (reason) throw fail(reason);
-              await payload.update({ collection: 'readers', id: user.id, data: { signature: review.proposed_value } });
-            } else {
-              const from = resolve(directory, 'uploads', `pending-reader-avatar-${review.proposed_value}.webp`);
-              const to = resolve(directory, 'uploads', `reader-avatar-${review.proposed_value}.webp`);
-              await rename(from, to);
-              try { await payload.update({ collection: 'readers', id: user.id, data: { avatar: review.proposed_value } }); }
-              catch (error) { await rename(to, from); throw error; }
-              if (uuidPattern.test(user.avatar || '')) workflow.queueFile(`reader-avatar-${user.avatar}.webp`, 'avatar-replaced');
-            }
-            workflow.removeProfile(review.id);
-            await audit('profile-approved', user.id, { kind: review.kind });
-          } else {
-            workflow.removeProfile(review.id);
-            if (review.kind === 'avatar') workflow.queueFile(`pending-reader-avatar-${review.proposed_value}.webp`, 'avatar-rejected');
-            await audit('profile-rejected', review.reader_id, { kind: review.kind });
-          }
-          await cleanReaderFiles({ workflow, payload, directory });
+          await profiles.review(path[2], path[3] as 'approve'|'reject', { kind: 'owner', id: authorId, source: 'main' }, ['avatar', 'signature'], () => assertOwner(req));
           send(res, { ok: true }); return;
         }
         if (req.method === 'GET' && path[0] === 'readers' && uuidPattern.test(path[1] || '') && path[2] === 'logins' && path.length === 3) {
@@ -188,7 +166,13 @@ export function createReaderAdminService({ payload, authorService, siteOrigin, d
           if (!row || row._verified !== true) throw fail('用户不存在。', 404);
           if (path[2] === 'delete') {
             if (String(input.confirmEmail || '').trim().toLowerCase() !== row.email.toLowerCase()) throw fail('请完整输入该账号的邮箱以确认删除。');
-            const result = await removeReaderAccount({ payload, directory, uidStore, row, audit, action: 'delete', workflow, purgeCommunity });
+            const result = await profiles.accountMutation(async () => {
+              await assertOwner(req);
+              const latest = await findReader(row.id);
+              if (!latest || latest._verified !== true) throw fail('用户不存在。', 404);
+              if (String(input.confirmEmail || '').trim().toLowerCase() !== latest.email.toLowerCase()) throw fail('请完整输入该账号的邮箱以确认删除。');
+              return removeReaderAccount({ payload, directory, uidStore, row: latest, audit, action: 'delete', workflow, purgeCommunity });
+            });
             send(res, result); return;
           }
           if (path[2] === 'uid') {
@@ -204,19 +188,28 @@ export function createReaderAdminService({ payload, authorService, siteOrigin, d
             send(res, dto(row)); return;
           }
           if (path[2] === 'disable') {
-            await audit('request-disable', row.id);
-            const updated = await payload.update({ collection: 'readers', id: row.id, data: { disabled: true, sessions: [] } });
-            await audit('disable', row.id); send(res, dto(updated)); return;
+            const updated = await profiles.accountMutation(async () => {
+              await assertOwner(req); await audit('request-disable', row.id);
+              const result = await payload.update({ collection: 'readers', id: row.id, data: { disabled: true, sessions: [] } });
+              await audit('disable', row.id); return result;
+            });
+            send(res, dto(updated)); return;
           }
           if (path[2] === 'enable') {
-            await audit('request-enable', row.id);
-            const updated = await payload.update({ collection: 'readers', id: row.id, data: { disabled: false } });
-            await audit('enable', row.id); send(res, dto(updated)); return;
+            const updated = await profiles.accountMutation(async () => {
+              await assertOwner(req); await audit('request-enable', row.id);
+              const result = await payload.update({ collection: 'readers', id: row.id, data: { disabled: false } });
+              await audit('enable', row.id); return result;
+            });
+            send(res, dto(updated)); return;
           }
           if (path[2] === 'revoke') {
-            await audit('request-revoke', row.id);
-            const updated = await payload.update({ collection: 'readers', id: row.id, data: { sessions: [] } });
-            await audit('revoke', row.id); send(res, dto(updated)); return;
+            const updated = await profiles.accountMutation(async () => {
+              await assertOwner(req); await audit('request-revoke', row.id);
+              const result = await payload.update({ collection: 'readers', id: row.id, data: { sessions: [] } });
+              await audit('revoke', row.id); return result;
+            });
+            send(res, dto(updated)); return;
           }
           if (path[2] === 'vip-grant') {
             const updated = await serializeMembership(async () => {

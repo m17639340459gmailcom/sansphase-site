@@ -797,7 +797,8 @@ test("member pages: the hero, follows, moderation, quick links for yourself, and
   assert.match(muted, /禁言到 2026-10-01 12:00[\s\S]*原因：人身攻击[\s\S]*data-action="community-lift" data-id="s1"/);
   assert.doesNotMatch(muted, /data-action="community-mute"/, "no second mute while muted");
   const self = communityMemberHTML({ member: ready(memberPage({ person: person("林间"), self: true, canMute: false, canAppoint: false, tab: "bookmarks", counts: { topics: 1, replies: 0, bookmarks: 0 }, quick: { balance: 42, checkedIn: false, unread: 3, orders: 1 } })), me: me(), ...common });
-  assert.match(self, /href="#\/account" data-reader-return>[\s\S]*编辑资料/);
+  assert.match(self, /href="#\/community\/profile">[\s\S]*编辑资料/);
+  assert.doesNotMatch(self, /href="#\/account" data-reader-return/);
   assert.match(self, /class="community-me-quick[\s\S]*我的星尘<\/span><b>42<\/b>[\s\S]*还没签到[\s\S]*3 未读[\s\S]*巡天[\s\S]*1 件/);
   assert.match(self, /<a href="#\/community\/u\/u1\/bookmarks" aria-current="page">收藏 0<\/a>/);
   assert.match(self, /还没有收藏/);
@@ -893,7 +894,7 @@ test("moderation: the queue, reports, orders with shipping details, shop items, 
       [['待审', '3'], ['待处理举报', '1'], ['24 小时新主题', '4'], ['24 小时回复', '9']]);
     assert.equal(queueDom.window.document.querySelectorAll('.community-kpis dd.is-warn').length, 2);
     assert.deepEqual([...queueDom.window.document.querySelectorAll('.community-management-nav nav a')].map(link => link.getAttribute('href')),
-      ["#/community/manage", "#/community/manage/content", "#/community/manage/banners", "#/community/manage/orders", "#/community/manage/items", "#/community/manage/stewards", "#/community/manage/sanctions", "#/community/manage/data", "#/community/manage/contact", "#/community/manage/convention"]);
+      ["#/community/manage", "#/community/manage/profiles", "#/community/manage/content", "#/community/manage/banners", "#/community/manage/orders", "#/community/manage/items", "#/community/manage/stewards", "#/community/manage/sanctions", "#/community/manage/data", "#/community/manage/contact", "#/community/manage/convention"]);
   } finally { queueDom.window.close(); }
   assert.match(queue, /待审 · 初光等级，帖子带外链[\s\S]*&lt;待审&gt;[\s\S]*链接 https:\/\/a\.example[\s\S]*data-action="community-approve" data-id="p1"[\s\S]*data-action="community-reject" data-kind="topic" data-id="p1"/);
   assert.match(queue, /已自动隐藏 · 举报：其他[\s\S]*data-action="community-restore" data-kind="topic" data-id="h1"[\s\S]*data-kind="topic" data-id="h1" data-violation="true"/);

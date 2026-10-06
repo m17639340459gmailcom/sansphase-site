@@ -19,6 +19,7 @@ import { createCommunityAudit } from './community-audit.ts';
 import { purgeCommunityReaderData } from './community-reader-cleanup.ts';
 import { createCommunityConvention } from './community-convention.ts';
 import { createCommunityExperience } from './community-experience.ts';
+import { createCommunityProfileBackgrounds } from './community-profile-backgrounds.ts';
 
 export type { CommunityAuthor, Target } from './community-db.ts';
 export type ShowcaseMeta = { tools: string; model: string; usage: string; prompt: string; promptMode: PromptMode; price: number };
@@ -74,6 +75,7 @@ export function createCommunityStore(directory: string, { previewCatalog = false
   const experience = createCommunityExperience(db, tx, convention);
   const members = createMembers(db, convention, tx);
   const banners = createCommunityBanners(db, tx, members);
+  const profileBackgrounds = createCommunityProfileBackgrounds(db, tx);
   const economy = createEconomy(db, tx, ledger, members, { previewCatalog });
   const requests = createCommunityRequests(db, tx);
   const rateLimits = createCommunityRateLimits(db, tx);
@@ -173,8 +175,11 @@ export function createCommunityStore(directory: string, { previewCatalog = false
   const replyImages = db.prepare('SELECT id, width, height FROM community_images WHERE topic_id = ? AND reply_id = ? AND deleted_at IS NULL ORDER BY position');
   const attachImage = db.prepare('UPDATE community_images SET topic_id = ?, reply_id = ?, position = ? WHERE id = ?');
   const removeImage = db.prepare('UPDATE community_images SET deleted_at = ? WHERE id = ?');
-  const staleImages = db.prepare('SELECT id FROM community_images WHERE topic_id IS NULL AND deleted_at IS NULL AND created_at < ? AND NOT EXISTS (SELECT 1 FROM community_shop_items WHERE image = community_images.id) AND NOT EXISTS (SELECT 1 FROM community_banner_entries WHERE cover = community_images.id)');
-  const dropImage = db.prepare('DELETE FROM community_images WHERE id = ? AND topic_id IS NULL AND NOT EXISTS (SELECT 1 FROM community_shop_items WHERE image = community_images.id) AND NOT EXISTS (SELECT 1 FROM community_banner_entries WHERE cover = community_images.id)');
+  const imageUnreferenced = `NOT EXISTS (SELECT 1 FROM community_shop_items WHERE image = community_images.id)
+    AND NOT EXISTS (SELECT 1 FROM community_banner_entries WHERE cover = community_images.id)
+    AND NOT EXISTS (SELECT 1 FROM community_profile_backgrounds WHERE approved_image = community_images.id OR pending_image = community_images.id)`;
+  const staleImages = db.prepare(`SELECT id FROM community_images WHERE topic_id IS NULL AND deleted_at IS NULL AND created_at < ? AND ${imageUnreferenced}`);
+  const dropImage = db.prepare(`DELETE FROM community_images WHERE id = ? AND topic_id IS NULL AND ${imageUnreferenced}`);
   // Reports.
   const insertReport = db.prepare(`INSERT INTO community_reports (id, target_kind, target_id, reporter_kind, reporter_id, reporter_level, reason, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const openReportBy = db.prepare(`SELECT COUNT(*) AS count FROM community_reports WHERE target_kind = ? AND target_id = ? AND reporter_kind = ? AND reporter_id = ? AND status = 'open'`);
@@ -278,6 +283,7 @@ export function createCommunityStore(directory: string, { previewCatalog = false
     convention,
     economy,
     banners,
+    profileBackgrounds,
     requests,
     rateLimits,
     audit,
@@ -611,11 +617,11 @@ export function createCommunityStore(directory: string, { previewCatalog = false
     thanks: (target: Target) => countOf(thanksOn, target.kind, target.id),
 
     /* ---------- 图片 ---------- */
-    addImage({ id, uploader, width, height, purpose = 'content', frameReady = false, bannerScope = null, now = new Date().toISOString() }: { id: string; uploader: CommunityAuthor; width: number; height: number; purpose?: 'content' | 'shop' | 'banner'; frameReady?: boolean; bannerScope?: string | null; now?: string }) {
+    addImage({ id, uploader, width, height, purpose = 'content', frameReady = false, bannerScope = null, now = new Date().toISOString() }: { id: string; uploader: CommunityAuthor; width: number; height: number; purpose?: 'content' | 'shop' | 'banner' | 'profile'; frameReady?: boolean; bannerScope?: string | null; now?: string }) {
       insertImage.run(id, uploader.kind, uploader.id, width, height, now, purpose, frameReady ? 1 : 0, bannerScope);
     },
     image(id: string) {
-      return (oneImage.get(id) as { id: string; uploader_kind: Kind; uploader_id: string; topic_id: string | null; reply_id: string | null; width: number; height: number; created_at: string; deleted_at: string | null; purpose: 'content' | 'shop' | 'banner'; frame_ready: number; banner_scope: string | null } | undefined) || null;
+      return (oneImage.get(id) as { id: string; uploader_kind: Kind; uploader_id: string; topic_id: string | null; reply_id: string | null; width: number; height: number; created_at: string; deleted_at: string | null; purpose: 'content' | 'shop' | 'banner' | 'profile'; frame_ready: number; banner_scope: string | null } | undefined) || null;
     },
     // Uploads never attached to a post within a day are removed; returns their ids so the files go too.
     sweepImages(now = Date.now()) {

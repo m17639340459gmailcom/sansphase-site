@@ -12,6 +12,7 @@ import { memberRoutes } from './community-routes-member.ts';
 import { manageRoutes } from './community-routes-manage.ts';
 import { publicModerationContacts } from './community-moderation-contact.ts';
 import { createOwnerReaderPreview } from './community-owner-reader-preview.ts';
+import { profileRoutes } from './community-routes-profile.ts';
 
 export { communityContactReason } from './community-context.ts';
 export type { CommunityViewer, PersonInfo } from './community-context.ts';
@@ -153,6 +154,7 @@ export function createCommunityService(options: ServiceOptions) {
       options.assertActive?.(ctx.req);
       const image = ctx.live.image(id);
       if (!image || image.deleted_at) return false;
+      if (image.purpose === 'profile') return ctx.live.profileBackgrounds.imageVisible(id, ctx.me, ctx.browsingAsReader);
       if (image.purpose === 'banner') return ctx.live.banners.imageVisible(id, ctx.me, ctx.canSeeBoard);
       if (image.topic_id) {
         const topic = ctx.live.topic(image.topic_id);
@@ -209,7 +211,7 @@ export function createCommunityService(options: ServiceOptions) {
         } else if (req.headers.origin !== siteOrigin || req.headers['x-reader-request'] !== '1') throw fail('请求来源验证失败，请从本站操作。', 403);
         if (req.method === 'POST' && ctx.browsingAsReader && !consentExemptPaths.has(path)) throw fail('当前是读者浏览视角，请先返回管理身份再操作。', 403);
         ctx.requireConsent();
-        for (const routes of [manageRoutes, contentRoutes, memberRoutes]) if (await routes(ctx)) return;
+        for (const routes of [profileRoutes, manageRoutes, contentRoutes, memberRoutes]) if (await routes(ctx)) return;
         throw fail('Not found', 404);
       } catch (error) {
         const status = statusOf(error);

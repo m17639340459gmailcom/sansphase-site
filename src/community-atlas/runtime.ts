@@ -111,7 +111,13 @@ export function mountAstral(host: HTMLElement, options: { scene?: "atlas"; onErr
       measureQuietRects();
       syncClock();
       lastDraw = -Infinity;
-      wake();
+      // Canvas sizing clears its pixels. Keep the decoded plate and field in
+      // the same first paint, including later font or viewport measurements.
+      if (scene === "atlas") {
+        cancelAnimationFrame(frame);
+        frame = 0;
+        draw(performance.now());
+      } else wake();
     }
     function draw(now: number) {
       frame = 0;

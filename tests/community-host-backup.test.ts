@@ -9,6 +9,7 @@ import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createCommunityHostStore, prepareCommunityHostDirectory } from '../server/community-host-store.ts';
 import { backupCommunity, restoreCommunity, verifyCommunityBackup } from '../server/community-host-backup.ts';
+import { createCommunityStore } from '../server/community-store.ts';
 
 const execute = promisify(execFile);
 const scheduledScript = fileURLToPath(new URL('../scripts/scheduled-community-backup.mjs', import.meta.url));
@@ -31,6 +32,38 @@ async function fixture(t: test.TestContext) {
   t.after(() => rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   return { root, directory, publicRoot, configPath, target: resolve(root, 'backup') };
 }
+
+test('independent backup verifies both files of approved and pending personal backgrounds', async t => {
+  const env = await fixture(t), store = createCommunityStore(env.directory);
+  const reader = { kind: 'reader' as const, id: 'reader-background' }, owner = { kind: 'owner' as const, id: 'owner' };
+  const approved = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', pending = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  try {
+    for (const id of [approved, pending]) {
+      store.addImage({ id, uploader: reader, width: 1200, height: 400, purpose: 'profile' });
+      for (const kind of ['image', 'thumb']) await writeFile(resolve(env.directory, 'uploads', `community-${kind}-${id}.webp`), `background-${kind}`);
+    }
+    store.profileBackgrounds.submit(reader, approved);
+    store.profileBackgrounds.review(reader, approved, true, owner, '');
+    store.profileBackgrounds.submit(reader, pending);
+  } finally { store.close(); }
+  await backupCommunity(env);
+  const saved = await verifyCommunityBackup(env.target);
+  for (const id of [approved, pending]) for (const kind of ['image', 'thumb']) assert.ok(saved.manifest.files.some(file => file.path === `uploads/community-${kind}-${id}.webp`));
+  await rm(resolve(env.directory, 'uploads', `community-thumb-${pending}.webp`));
+  await assert.rejects(backupCommunity({ ...env, target: resolve(env.root, 'missing-background-backup') }), /ENOENT|absent/i);
+});
+
+test('pre-migration community data can be backed up and restored before optional profile background tables exist', async t => {
+  const env = await fixture(t);
+  const db = new DatabaseSync(resolve(env.directory, 'content.db'));
+  try { db.exec('DROP TABLE community_profile_backgrounds; DROP TABLE community_profile_background_reviews;'); } finally { db.close(); }
+  await backupCommunity(env);
+  assert.ok((await verifyCommunityBackup(env.target)).files > 0);
+  const restored = resolve(env.root, 'restored-old-data');
+  await restoreCommunity({ backupPath: env.target, target: restored, configPath: resolve(env.root, 'restored-old.json'), publicRoot: env.publicRoot });
+  const restoredDb = new DatabaseSync(resolve(restored, 'content.db'), { readOnly: true });
+  try { assert.equal(restoredDb.prepare("SELECT 1 FROM sqlite_master WHERE name='community_profile_backgrounds'").get(), undefined); } finally { restoredDb.close(); }
+});
 
 test('independent backup preserves both SQLite databases, all uploads, private config and maintenance metadata', async t => {
   const env = await fixture(t);

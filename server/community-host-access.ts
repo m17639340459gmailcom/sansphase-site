@@ -12,7 +12,7 @@ const purgePath = '/api/community-identity/purge';
 type BridgeClient = { request<T = unknown>(operation: IdentityOperation, input: unknown): Promise<T> };
 export type CommunityHostContext = { req: IncomingMessage; session: HostSession; identity: IdentityDTO; token: string };
 export type CommunityRequestMiddleware = (req: IncomingMessage, res: ServerResponse, next: () => Promise<void>) => Promise<void>;
-type Options = { store: CommunityHostStore; client: BridgeClient; siteOrigin: string; mainSiteOrigin: string; secret: string; purge: (readerId: string) => Promise<unknown> };
+type Options = { store: CommunityHostStore; client: BridgeClient; siteOrigin: string; mainSiteOrigin: string; secret: string; purge: (readerId: string) => Promise<unknown>; decorations?: (req: IncomingMessage, res: ServerResponse) => Promise<boolean> };
 const sessionCookie = (token: string) => `${communitySessionCookie}=${token}; Path=/; HttpOnly; Secure; SameSite=Strict${token ? '' : '; Max-Age=0'}`;
 const clearHandoffCookie = `${handoffCookie}=; Domain=sansphase.com; Path=/api/community-entry; HttpOnly; Secure; SameSite=Strict; Max-Age=0`;
 const statusOf = (error: unknown) => error && typeof error === 'object' && 'status' in error && typeof error.status === 'number' ? error.status : 503;
@@ -53,7 +53,7 @@ const publicAsset = (path: string) => /\.(?:mjs|js|css|png|webp|jpe?g|svg|ico|wo
   && (/^\/(?:assets|chunks)\//.test(path) || /^\/[a-z0-9][a-z0-9._-]*$/i.test(path));
 const privatePath = (path: string) => path.split('/').some(part => part.startsWith('.')) || /^\/(?:src|server|scripts|tests|docs|archive|outputs|uploads|logs|node_modules)(?:\/|$)/i.test(path) || /\.(?:db|db-wal|db-shm|sqlite|env|map|ts|tsx|pem|key|bak)$/i.test(path);
 
-export function createCommunityHostAccess({ store, client, siteOrigin, mainSiteOrigin, secret, purge }: Options) {
+export function createCommunityHostAccess({ store, client, siteOrigin, mainSiteOrigin, secret, purge, decorations }: Options) {
   if (siteOrigin !== 'https://community.sansphase.com' || mainSiteOrigin !== 'https://www.sansphase.com') throw Error('Community host origins must be fixed HTTPS production origins.');
   if (secret.length < 32) throw Error('Community bridge secret is required.');
   const context = new AsyncLocalStorage<CommunityHostContext>();
@@ -68,6 +68,7 @@ export function createCommunityHostAccess({ store, client, siteOrigin, mainSiteO
     try { path = decodeURIComponent(new URL(req.url || '/', siteOrigin).pathname).replaceAll('\\', '/'); }
     catch { json(res, { error: '请求地址无效。' }, 400); return; }
     if (privatePath(path)) { json(res, { error: 'Not found' }, 404); return; }
+    if (decorations && await decorations(req, res)) return;
     if (path === purgePath) {
       if (req.method !== 'POST') { json(res, { error: 'Not found' }, 404); return; }
       try {

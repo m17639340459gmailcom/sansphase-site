@@ -144,7 +144,8 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
       const muted = members.muted(member);
       ctx.send({
         person: ctx.person(member, map), bio: info.bio, joinedAt: member.kind === 'owner' ? null : info.joinedAt || members.joinedAt(member),
-        cover: members.decorations(member).cover, streak: economy.currentStreak(member), stats: { ...stats, topics: topics.length, replies: replies.length },
+        cover: members.decorations(member).cover, background: live.profileBackgrounds.state(member).approved,
+        streak: economy.currentStreak(member), stats: { ...stats, topics: topics.length, replies: replies.length },
         follows: members.followCounts(member), following: !self && members.following(me, member), self, badges: members.badges(member),
         badgeState: self && ctx.ownerReaderPreview ? ctx.ownerReaderPreview.badgeState : members.badgeState(member, { joinedAt: info.joinedAt }),
         muted: (self || ctx.mod) && muted ? { id: muted.id, until: muted.until, reason: muted.reason } : null,

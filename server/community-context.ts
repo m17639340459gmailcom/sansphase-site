@@ -8,6 +8,7 @@ import type { CommunityAuditDetails } from './community-audit.ts';
 import type { CommunityStore, StoredTopic, ShowcaseMeta, ResourceMeta } from './community-store.ts';
 import { imageIdFromLine } from '../src/community-body-images.ts';
 import type { OwnerReaderPreview } from './community-owner-reader-preview.ts';
+import type { CommunityProfileAccess } from './community-profile-access.ts';
 
 // The signed-in member making a request.
 export type CommunityViewer = { kind: 'reader' | 'owner'; id: string; name: string; vip: boolean };
@@ -33,6 +34,7 @@ export type ServiceOptions = {
   avatarFile?: (uid: string) => Promise<string | null>;
   // Approved bytes provided by the account authority on a separate host.
   avatarBytes?: (uid: string) => Promise<Buffer | null>;
+  profile?: CommunityProfileAccess;
   // Mirror committed database audit events to the existing private audit log.
   audit?: (action: string, details: Record<string, unknown>) => Promise<void>;
   // Words that may not appear in posts (private configuration).

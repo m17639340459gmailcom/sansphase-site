@@ -1,10 +1,26 @@
 import { mountAstral } from "./community-atlas/runtime.ts";
+import { prepareCinematicBackdrop } from "./community-atlas/cinematic-backdrop.ts";
 
 let host: HTMLElement | null = null,
   dispose: (() => void) | null = null,
   removeFailure: (() => void) | null = null;
 let scene: "atlas" | undefined;
+let prepared = false;
+let preparation: Promise<void> | null = null;
+let preparationFailed = false;
+let mountGeneration = 0;
+
+export function prepareCommunityLanding(): Promise<void> {
+  if (prepared) return Promise.resolve();
+  if (!preparation) preparation = prepareCinematicBackdrop().then(() => {
+    prepared = true;
+    preparationFailed = false;
+  }, () => { preparationFailed = true; });
+  return preparation;
+}
+
 function clearLanding() {
+  mountGeneration++;
   removeFailure?.();
   removeFailure = null;
   const release = dispose;
@@ -26,7 +42,7 @@ function showFailure(failedHost: HTMLElement) {
   alert.setAttribute("role", "alert");
   alert.dataset.communitySkyError = "true";
   const message = document.createElement("span");
-  message.textContent = "星座组件未能加载，当前保留原始背景。";
+  message.textContent = "星座背景未能加载，当前显示简洁背景。社区入口仍可使用。";
   const retry = document.createElement("button");
   retry.type = "button";
   retry.dataset.communitySkyRetry = "true";
@@ -37,6 +53,7 @@ function showFailure(failedHost: HTMLElement) {
       return;
     }
     clearLanding();
+    if (preparationFailed) { preparation = null; preparationFailed = false; }
     mountCurrent();
   };
   retry.addEventListener("click", onRetry);
@@ -52,6 +69,15 @@ function showFailure(failedHost: HTMLElement) {
 function mountCurrent() {
   if (!host) return;
   const mountedHost = host;
+  const generation = mountGeneration;
+  if (!prepared && !preparationFailed) {
+    void prepareCommunityLanding().then(() => {
+      if (generation !== mountGeneration || host !== mountedHost || !mountedHost.isConnected) return;
+      mountCurrent();
+    });
+    return;
+  }
+  if (preparationFailed) { showFailure(mountedHost); return; }
   let active = true;
   try {
     document.body.dataset.orbitExperiment = "astral";
@@ -71,7 +97,7 @@ function mountCurrent() {
     host.querySelectorAll("canvas").forEach((canvas) => canvas.remove());
     showFailure(host);
     console.warn(
-      "Community sky unavailable; original background retained.",
+      "Community sky unavailable; simple background retained.",
       error,
     );
   }

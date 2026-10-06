@@ -4,8 +4,12 @@ import type { PersonInfo } from './community-context.ts';
 import { clientAddress } from './client-ip.ts';
 import { createIdentityStore } from './community-identity-store.ts';
 import type { IdentitySourceSession } from './community-identity-store.ts';
-import { IdentityBridgeError, identityBridgePath, identityHandoffCookie, identityPeerOrigin, identityRequestBytes, verifyIdentityRequest } from './community-identity-protocol.ts';
+import { IdentityBridgeError, identityBridgePath, identityHandoffCookie, identityPeerOrigin, identityRequestBytes, identityAvatarRequestBytes, verifyIdentityRequest } from './community-identity-protocol.ts';
 import type { IdentityDTO } from './community-identity-protocol.ts';
+import { normalizeReaderAvatar, readerProfileAvatarBytes } from './reader-profile-commands.ts';
+import type { ReaderProfileCommands } from './reader-profile-commands.ts';
+import type { ProfileKind } from './reader-workflow.ts';
+import type { CommunityProfileReviewerCheck } from './community-profile-reviewer.ts';
 
 type ReaderSource = { id: string; uid?: string | null; nickname: string; signature?: string | null; avatar?: string | null; vip?: boolean; vipStartedAt?: string | null; vipUntil?: string | null };
 export type IdentityAuthorityOptions = {
@@ -17,11 +21,14 @@ export type IdentityAuthorityOptions = {
   findByNames: (names: string[]) => Promise<Map<string, CommunityAuthor>>;
   avatar: (uid: string) => Promise<Buffer | null>;
   purgeRemote?: (readerId: string) => Promise<unknown>;
+  profiles?: ReaderProfileCommands;
+  profileReviewer?: CommunityProfileReviewerCheck;
   now?: () => number;
 };
 const invalidSession = () => new IdentityBridgeError('请从主站重新进入社区。', 401);
 const invalidInput = () => new IdentityBridgeError('身份请求内容无效。', 400);
 const objectValue = (value: unknown): Record<string, unknown> => { if (!value || typeof value !== 'object' || Array.isArray(value)) throw invalidInput(); return value as Record<string, unknown>; };
+const exactKeys = (value: Record<string, unknown>, keys: readonly string[]) => { if (Object.keys(value).some(key => !keys.includes(key))) throw invalidInput(); };
 const memberValue = (value: unknown): CommunityAuthor => {
   const member = objectValue(value);
   if (!['reader', 'owner'].includes(String(member.kind)) || typeof member.id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(member.id)) throw invalidInput();
@@ -83,12 +90,14 @@ export function createIdentityAuthority(options: IdentityAuthorityOptions) {
     async handleBridge(req: IncomingMessage, res: ServerResponse) {
       try {
         if (req.method !== 'POST' || req.url !== identityBridgePath) throw new IdentityBridgeError('不存在的操作。', 404);
-        const body = await bodyOf(req);
+        const avatarEnvelope = req.headers['x-community-operation'] === 'profile-avatar';
+        const body = await bodyOf(req, avatarEnvelope ? identityAvatarRequestBytes : identityRequestBytes);
         verifyIdentityRequest({ secret: options.secret, method: req.method, path: identityBridgePath, body, headers: req.headers, now: now(), consumeNonce: store.consumeNonce });
         store.prune(now());
         let value: Record<string, unknown>;
         try { value = objectValue(JSON.parse(body.toString('utf8'))); } catch { throw invalidInput(); }
         const input = objectValue(value.input);
+        if (avatarEnvelope && value.operation !== 'profile-avatar' || !avatarEnvelope && body.length > identityRequestBytes) throw invalidInput();
         if (value.operation === 'exchange') {
           if (typeof input.ticket !== 'string' || typeof input.binding !== 'string') throw invalidSession();
           const source = store.ticket(input.ticket, input.binding, now()); if (!source) throw invalidSession();
@@ -96,8 +105,50 @@ export function createIdentityAuthority(options: IdentityAuthorityOptions) {
           if (!sessionRef) throw invalidSession();
           send(res, { sessionRef, identity: dto }); return;
         }
-        if (!['session', 'people', 'member', 'names', 'avatar'].includes(String(value.operation))) throw invalidInput();
+        const profileOperation = typeof value.operation === 'string' && ['profile', 'profile-signature', 'profile-avatar', 'profile-avatar-remove', 'profile-avatar-pending', 'profile-reviews', 'profile-review-image', 'profile-review'].includes(value.operation);
+        if (!profileOperation && !['session', 'people', 'member', 'names', 'avatar'].includes(String(value.operation))) throw invalidInput();
         const dto = await validateSession(req, input);
+        if (profileOperation) {
+          const profiles = options.profiles;
+          if (!profiles) throw new IdentityBridgeError('资料服务尚未配置。', 404);
+          const check = async () => { const current = await validateSession(req, input); if (current.viewer.kind !== dto.viewer.kind || current.viewer.id !== dto.viewer.id) throw invalidSession(); };
+          const reviewOperation = ['profile-reviews', 'profile-review-image', 'profile-review'].includes(String(value.operation));
+          if (reviewOperation) {
+            exactKeys(input, ['sessionRef', 'moderation', ...(value.operation === 'profile-reviews' ? [] : ['id']), ...(value.operation === 'profile-review' ? ['decision'] : [])]);
+            const assertion = objectValue(input.moderation); exactKeys(assertion, ['role', 'actor']);
+            const actor = memberValue(assertion.actor); exactKeys(objectValue(assertion.actor), ['kind', 'id']);
+            if (actor.kind !== dto.viewer.kind || actor.id !== dto.viewer.id
+              || dto.viewer.kind === 'owner' && assertion.role !== 'owner'
+              || dto.viewer.kind === 'reader' && assertion.role !== 'steward') throw new IdentityBridgeError('没有审核资料的权限。', 403);
+            // HK alone owns moderator appointments. The signed assertion binds
+            // the actor; a finite callback rechecks the current appointment
+            // inside the account command's queue, immediately before approval.
+            const reviewCheck = async () => {
+              await check();
+              if (!options.profileReviewer) throw new IdentityBridgeError('资料审核服务尚未配置。', 503);
+              await options.profileReviewer(actor, assertion.role as 'owner'|'steward');
+            };
+            const kinds: readonly ProfileKind[] = dto.viewer.kind === 'owner' ? ['avatar', 'signature'] : ['avatar'];
+            if (value.operation === 'profile-reviews') { await reviewCheck(); const rows = await profiles.reviews(kinds); await reviewCheck(); send(res, rows); return; }
+            if (typeof input.id !== 'string') throw invalidInput();
+            if (value.operation === 'profile-review-image') { const image = await profiles.reviewImage(input.id, reviewCheck); send(res, { base64: image.toString('base64') }); return; }
+            if (input.decision !== 'approve' && input.decision !== 'reject') throw invalidInput();
+            if (!store.limit(`profile-review:${dto.viewer.kind}:${dto.viewer.id}`, 60, 60_000, now())) throw new IdentityBridgeError('操作过于频繁，请稍后再试。', 429);
+            send(res, await profiles.review(input.id, input.decision, { ...actor, source: 'community' }, kinds, reviewCheck)); return;
+          }
+          if (dto.viewer.kind !== 'reader') throw new IdentityBridgeError('当前身份不能修改读者资料。', 403);
+          exactKeys(input, ['sessionRef', ...(value.operation === 'profile-signature' ? ['signature'] : value.operation === 'profile-avatar' ? ['base64'] : [])]);
+          if (value.operation === 'profile') { send(res, await profiles.state(dto.viewer.id)); return; }
+          if (value.operation === 'profile-avatar-pending') { const image = await profiles.pendingAvatar(dto.viewer.id, check); send(res, { base64: image.toString('base64') }); return; }
+          if (!store.limit(`profile-write:${dto.viewer.id}`, 30, 60_000, now())) throw new IdentityBridgeError('操作过于频繁，请稍后再试。', 429);
+          if (value.operation === 'profile-signature') { send(res, await profiles.submitSignature(dto.viewer.id, input.signature, check)); return; }
+          if (value.operation === 'profile-avatar-remove') { send(res, await profiles.removeAvatar(dto.viewer.id, check)); return; }
+          if (typeof input.base64 !== 'string' || input.base64.length > Math.ceil(readerProfileAvatarBytes / 3) * 4 || !/^[A-Za-z0-9+/]+={0,2}$/.test(input.base64)) throw invalidInput();
+          const bytes = Buffer.from(input.base64, 'base64');
+          if (bytes.toString('base64') !== input.base64 || bytes.length > readerProfileAvatarBytes) throw invalidInput();
+          const image = await normalizeReaderAvatar(bytes, 'image/webp');
+          send(res, await profiles.submitAvatar(dto.viewer.id, image, check)); return;
+        }
         if (value.operation === 'session') { send(res, dto); return; }
         if (value.operation === 'people') {
           if (!Array.isArray(input.authors) || input.authors.length > 100) throw invalidInput();
@@ -115,7 +166,10 @@ export function createIdentityAuthority(options: IdentityAuthorityOptions) {
         if (!Array.isArray(input.names) || input.names.length > 50 || input.names.some(name => typeof name !== 'string' || !name.trim() || [...name].length > 8)) throw invalidInput();
         const names = input.names as string[], result = await options.findByNames(names), requested = new Set(names);
         send(res, [...result].filter(([name]) => requested.has(name)).map(([name, member]) => [name, memberValue(member)]));
-      } catch (error) { errorTo(res, error); }
+      } catch (error) {
+        const status = error && typeof error === 'object' && 'status' in error && typeof error.status === 'number' ? error.status : 503;
+        errorTo(res, error instanceof IdentityBridgeError ? error : [400,401,403,404,409,413,415,429].includes(status) && error instanceof Error ? new IdentityBridgeError(error.message,status) : error);
+      }
     },
     async purgeReaderData(readerId: string) {
       if (!/^[A-Za-z0-9_-]{1,128}$/.test(readerId) || !options.purgeRemote) throw new IdentityBridgeError('社区清理服务尚未配置。');

@@ -1,5 +1,5 @@
 /* Community landing sky base and graceful fallback. */
-body.community-open[data-orbit-experiment="astral"] #blog-backdrop {
+body.community-open.community-landing-open #blog-backdrop {
   background:
     radial-gradient(ellipse at 72% 38%, rgb(17 32 56 / 28%), transparent 72%),
     linear-gradient(155deg, #010307 0%, #03070d 56%, #010305 100%);
@@ -11,19 +11,6 @@ body.community-open[data-orbit-experiment="astral"] #site-header:not(.community-
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
-body[data-orbit-experiment="astral"] .community-landing .community-orbits[data-astral-component="constellation"] {
-  position: fixed;
-  inset: 0;
-  width: auto;
-  height: auto;
-  max-width: none;
-  max-height: none;
-  transform: none;
-  overflow: hidden;
-  overflow-clip-margin: 0;
-  pointer-events: none;
-  z-index: -1;
-}
 /* Keep the layout slot so removing the eyebrow does not move the central title. */
 body[data-orbit-experiment="astral"] .community-landing > .eyebrow { visibility: hidden; }
 body[data-orbit-experiment="astral"] .community-landing > h1 {
@@ -32,7 +19,6 @@ body[data-orbit-experiment="astral"] .community-landing > h1 {
   font-synthesis: none;
   text-shadow: none;
 }
-body[data-orbit-experiment="astral"] .community-orbits > i { display: none; }
 body[data-orbit-experiment="astral"] .community-orbits canvas { display: block; width: 100%; height: 100%; }
 body[data-orbit-experiment="astral"] .community-landing > :is(h1, p, .eyebrow, .community-landing-actions) { position: relative; z-index: 3; }
 

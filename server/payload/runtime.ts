@@ -1,3 +1,7 @@
+import { createReaderProfileCommands } from '../reader-profile-commands.ts';
+import { createLocalCommunityProfileAccess } from '../community-profile-access.ts';
+import { createCommunityFrameClient } from '../community-frame-client.ts';
+import { createCommunityProfileReviewerClient } from '../community-profile-reviewer.ts';
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { getPayload } from "payload";
@@ -56,15 +60,18 @@ export async function createPayloadRuntime(
   const loginLedger = createLoginLedger(settings.directory);
   const uidStore = createReaderUidStore(settings.directory);
   const workflow = createReaderWorkflow(settings.directory, settings.secret);
+  const profileCommands = createReaderProfileCommands({ payload, directory: settings.directory, workflow, uidStore });
   const mediaRetention = createMediaRetention({ payload, directory: settings.directory });
   const store = createPayloadStore(payload, { ...settings, mediaRetention });
   const publicationRevision=createPublicationRevision(settings.directory);
   const options = { ...settings, url: settings.sourceURL, store, loginLedger };
   const authorService=createAuthorService(options);
-  const readerService=createReaderService({payload,siteOrigin:settings.siteOrigin,directory:settings.directory,emailReady:smtpConfigured(settings.smtp),authorService,loginLedger,uidStore,workflow});
+  const frames = bridgeSettings ? createCommunityFrameClient({ origin: bridgeSettings.communityOrigin, secret: bridgeSettings.bridgeSecret }) : undefined;
+  const readerService=createReaderService({payload,siteOrigin:settings.siteOrigin,directory:settings.directory,emailReady:smtpConfigured(settings.smtp),authorService,loginLedger,uidStore,workflow,profileCommands,frames});
   const community = createCommunityRuntime({
     payload, directory: settings.directory, siteOrigin: settings.siteOrigin, authorId: settings.authorId, uidStore,
     readerIdentity: readerService.identity,
+    profile: createLocalCommunityProfileAccess({ commands: profileCommands, readerIdentity: readerService.identityStrict, ownerIdentity: req => authorService.identityStrict(req), ownerId: settings.authorId }),
     ownerIdentity: req => authorService.identity(req),
     ownerName: async () => {
       const found = await payload.find({ collection: 'site_profile', limit: 1, depth: 0, overrideAccess: true });
@@ -76,6 +83,8 @@ export async function createPayloadRuntime(
     directory: settings.directory, siteOrigin: settings.siteOrigin, communityOrigin: bridgeSettings.communityOrigin,
     ownerId: settings.authorId, secret: bridgeSettings.bridgeSecret, stateEncryptionKey: bridgeSettings.stateEncryptionKey,
     readerIdentity: readerService.identityStrict, ownerIdentity: req => authorService.identityStrict(req),
+    profiles: profileCommands,
+    profileReviewer: createCommunityProfileReviewerClient({ origin: bridgeSettings.communityOrigin, secret: bridgeSettings.bridgeSecret }),
     ...community.directory,
     purgeRemote: async readerId => {
       const result = await purgeClient!.request<{ ok?: boolean }>('purge', { readerId });
@@ -99,7 +108,7 @@ export async function createPayloadRuntime(
     communityDestination: bridgeSettings?.communityOrigin,
     // Access is opt-in; the store still serves the existing account cleanup path.
     communityEnabled: !bridgeSettings && settings.communityEnabled === true && Boolean(community.store),
-    readerAdminService:createReaderAdminService({payload,authorService,siteOrigin:settings.siteOrigin,directory:settings.directory,authorId:settings.authorId,loginLedger,uidStore,workflow,mediaRetention,purgeCommunity}),
+    readerAdminService:createReaderAdminService({payload,authorService,siteOrigin:settings.siteOrigin,directory:settings.directory,authorId:settings.authorId,loginLedger,uidStore,workflow,mediaRetention,purgeCommunity,profileCommands}),
     readerRetention,
     healthCheck:async()=>{await payload.find({collection:'site_profile',limit:1,depth:0});},
     close: async () => {

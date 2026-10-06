@@ -99,23 +99,26 @@ test("navigation fade changes paint only and leaves the bottom fully clear", () 
   assert.equal(declarations.get("-webkit-backdrop-filter"), "none");
 });
 
-test("pure-space base belongs only to the mounted local landing, not other backgrounds", () => {
+test("the approved landing base and explicit fallback belong only to the landing route, not other backgrounds", () => {
   const rules: Rule[] = [];
   sheet.walkRules(rule => { if (rule.selector.includes("#blog-backdrop")) rules.push(rule); });
   assert.equal(rules.length, 1);
-  const dom = new JSDOM('<body class="community-open" data-orbit-experiment="astral"><div id="blog-backdrop"></div></body>');
+  const dom = new JSDOM('<body class="community-open community-landing-open" data-orbit-experiment="astral"><div id="blog-backdrop"></div></body>');
   const { document } = dom.window;
   const backdrop = document.getElementById("blog-backdrop")!;
   try {
     assert.ok(backdrop.matches(rules[0]!.selector));
     document.body.removeAttribute("data-orbit-experiment");
+    assert.ok(backdrop.matches(rules[0]!.selector), "image failure retains one flat fallback without restoring the forum background");
+    document.body.classList.remove("community-landing-open");
     assert.equal(backdrop.matches(rules[0]!.selector), false);
     document.body.dataset.orbitExperiment = "astral";
+    document.body.classList.add("community-landing-open");
     document.body.classList.remove("community-open");
     assert.equal(backdrop.matches(rules[0]!.selector), false);
     rules[0]!.walkDecls(declaration => {
       assert.equal(declaration.prop, "background", "Paint only: preserve backdrop geometry and input handling");
-      assert.doesNotMatch(declaration.value, /url\(/i, "The accepted picture is a reference, not a shipped bitmap");
+      assert.doesNotMatch(declaration.value, /url\(/i, "The stylesheet must not request a second copy of the decoded plate");
       assert.equal(declaration.important, undefined);
     });
   } finally { dom.window.close(); }

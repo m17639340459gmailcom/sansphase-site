@@ -2,9 +2,8 @@ import { createLocalReq, logoutOperation } from 'payload';
 import type { Payload, TypedUser } from 'payload';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, writeFile, unlink } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import sharp from 'sharp';
 import { clientAddress } from './client-ip.ts';
 import { loginIpKey } from './login-ledger.ts';
 import { membershipState } from './reader-membership.ts';
@@ -12,9 +11,11 @@ import { uuidPattern } from './content-service.ts';
 import { withStreamUpload } from './stream-upload.ts';
 import { readerImageBytes } from '../src/upload-policy.mjs';
 import { createReaderWorkflow } from './reader-workflow.ts';
-import { contactDetailReason } from './reader-profile-policy.ts';
+import { createReaderProfileCommands, normalizeReaderAvatar, readerSignature } from './reader-profile-commands.ts';
+import type { ReaderProfileCommands } from './reader-profile-commands.ts';
+import { validCommunityFrame } from './community-frame-authority.ts';
+import type { CommunityFrameAccess, CommunityFrameState } from './community-frame-authority.ts';
 import { validReaderNickname } from '../src/reader-policy.ts';
-import { cleanReaderFiles } from './reader-file-cleanup.ts';
 import type { createReaderUidStore } from './reader-uids.ts';
 import { strictPayloadIdentity } from './payload/strict-identity.ts';
 
@@ -32,6 +33,8 @@ type ReaderServiceOptions = {
   authorService?: AuthorLogin; loginLedger?: LoginLedger;
   uidStore: ReturnType<typeof createReaderUidStore>;
   workflow?: ReturnType<typeof createReaderWorkflow>;
+  profileCommands?: ReaderProfileCommands;
+  frames?: CommunityFrameAccess;
 };
 type ServiceError = Error & { status: number };
 const errorStatus = (error: unknown): number | undefined => error && typeof error === 'object' && 'status' in error && typeof error.status === 'number' ? error.status : undefined;
@@ -42,24 +45,17 @@ const fail = (message: string, status = 400): ServiceError => Object.assign(new 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const phonePattern = /^1[3-9]\d{9}$/;
 
-export function createReaderService({ payload, siteOrigin, directory, emailReady = false, authorService, loginLedger, uidStore, workflow = createReaderWorkflow(directory, payload.config.secret) }: ReaderServiceOptions) {
+export function createReaderService({ payload, siteOrigin, directory, emailReady = false, authorService, loginLedger, uidStore, workflow = createReaderWorkflow(directory, payload.config.secret), profileCommands, frames }: ReaderServiceOptions) {
   if (!payload || !siteOrigin || !directory || !uidStore) throw Error('Reader service requires Payload, site origin, private storage and UID store.');
   const attempts = new Map<string, { count: number; until: number }>();
   const avatarDir = resolve(directory, 'uploads');
   const avatarPath = (id: string) => resolve(avatarDir, `reader-avatar-${id}.webp`);
-  const pendingAvatarPath = (id: string) => resolve(avatarDir, `pending-reader-avatar-${id}.webp`);
   const avatarLimits = { maxFileBytes: readerImageBytes, maxImageBytes: readerImageBytes, maxAudioBytes: 0 };
-  const avatarFormats: Record<string, string> = { 'image/jpeg': 'jpeg', 'image/png': 'png', 'image/webp': 'webp' };
-  let avatarQueue: Promise<unknown> = Promise.resolve();
+  const profiles = profileCommands || createReaderProfileCommands({ payload, directory, workflow, uidStore });
   let verificationQueue: Promise<unknown> = Promise.resolve();
   const serializeVerification = <T>(operation: () => Promise<T>): Promise<T> => {
     const next = verificationQueue.then(operation);
     verificationQueue = next.catch(() => {});
-    return next;
-  };
-  const serializeAvatar = <T>(operation: () => Promise<T>): Promise<T> => {
-    const next = avatarQueue.then(operation);
-    avatarQueue = next.catch(() => {});
     return next;
   };
   const session = (req: IncomingMessage) => req.headers.cookie?.split(';').map(value => value.trim())
@@ -102,18 +98,18 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
     if (!phonePattern.test(number)) throw fail('请输入正确的手机号：仅支持 1 开头的 11 位中国大陆手机号。');
     return number;
   };
-  const signature = (value: unknown) => {
-    if (typeof value !== 'string') throw fail('请填写有效的个性签名。');
-    const text = value.trim();
-    if (text.length > 100 || /[\u0000-\u001f\u007f]/u.test(text)) throw fail('个性签名限 100 字，且不能换行。');
-    const contact = contactDetailReason(text);
-    if (contact) throw fail(contact);
-    return text;
-  };
   const dto = (user: ReaderUser | null) => user && ({ id: user.id, uid: uidStore.get(user.id), nickname: user.nickname, email: user.email, phone: user.phone || '', signature: user.signature || '', avatar: uuidPattern.test(user.avatar || '') ? `/api/reader/avatar/${user.avatar}.webp` : null,
     pendingSignature: workflow.profileFor(user.id, 'signature')?.proposed_value ?? null,
     pendingAvatar: Boolean(workflow.profileFor(user.id, 'avatar')),
     role: 'reader', ...membershipState(user) });
+  const noFrames = (): CommunityFrameState => ({ frame: null, frameImage: null, items: [], available: false });
+  const frameState = async (user: ReaderUser) => { try { return frames ? await frames.state(user.id) : noFrames(); } catch { return noFrames(); } };
+  const displayDTO = async (user: ReaderUser | null) => {
+    const base = dto(user);
+    if (!user || !base) return null;
+    const state = await frameState(user);
+    return { ...base, frame: state.frame, frameImage: state.frameImage };
+  };
   async function authenticated(req: IncomingMessage, strict = false): Promise<ReaderUser | null> {
     const token = session(req);
     if (!token) return null;
@@ -164,15 +160,30 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
     timer.unref();
   };
   return {
+    profiles,
     registrationEnabled: Boolean(emailReady),
     identity: async (req: IncomingMessage) => dto(await authenticated(req)),
+    displayIdentity: async (req: IncomingMessage) => displayDTO(await authenticated(req)),
     // Server-to-server checks must distinguish revoked/invalid sessions from
     // account storage failure. Ordinary page reads keep their existing behavior.
     identityStrict: async (req: IncomingMessage) => dto(await authenticated(req, true)),
     async handle(req: IncomingMessage, res: ServerResponse) {
       const path = new URL(req.url || '', siteOrigin).pathname.slice('/api/reader/'.length);
       try {
-        if (path === 'session' && req.method === 'GET') { send(res, dto(await authenticated(req))); return; }
+        if (path === 'session' && req.method === 'GET') { send(res, await displayDTO(await authenticated(req))); return; }
+        if (path === 'frame-state' && req.method === 'GET') {
+          const user = await authenticated(req); if (!user) throw fail('请先登录。', 401);
+          send(res, await frameState(user)); return;
+        }
+        if (path.startsWith('frame/') && ['GET', 'HEAD'].includes(req.method || '')) {
+          const user = await authenticated(req); if (!user) throw fail('请先登录。', 401);
+          const id = path.slice('frame/'.length).replace(/\.webp$/, '');
+          if (!frames || !uuidPattern.test(id) || !path.endsWith('.webp')) throw fail('头像框图片不存在。', 404);
+          const bytes = await frames.image(user.id, id);
+          const current = await authenticated(req); if (!current || current.id !== user.id) throw fail('请重新登录。', 401);
+          res.writeHead(200, { 'Content-Type': 'image/webp', 'Content-Length': bytes.length, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' });
+          res.end(req.method === 'HEAD' ? undefined : bytes); return;
+        }
         if (path.startsWith('avatar/') && ['GET', 'HEAD'].includes(req.method || '')) {
           const id = path.slice('avatar/'.length).replace(/\.webp$/, '');
           const user = await authenticated(req);
@@ -191,35 +202,23 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
           if (!user) throw fail('请先登录。', 401);
           if (!String(req.headers['content-type'] || '').startsWith('multipart/form-data;')) throw fail('请选择图片文件。', 415);
           const result = await withStreamUpload(req, directory, async (file: { mimetype: string; tempFilePath: string }) => {
-            if (!avatarFormats[file.mimetype]) throw fail('头像只支持 JPG、PNG 或 WebP 图片。', 415);
-            let image;
-            try {
-              const source = sharp(file.tempFilePath, { limitInputPixels: 25_000_000, animated: false });
-              const metadata = await source.metadata();
-              if (metadata.format !== avatarFormats[file.mimetype] || !metadata.width || !metadata.height || metadata.width < 64 || metadata.height < 64)
-                throw fail('请选择至少 64 × 64 像素的有效图片。');
-              image = await source.rotate().resize(320, 320, { fit: 'cover', position: 'centre', withoutEnlargement: false }).webp({ quality: 82, effort: 4 }).toBuffer();
-            } catch (error) { if (errorStatus(error)) throw error; throw fail('图片无法读取，请换一张 JPG、PNG 或 WebP 图片。'); }
-            return serializeAvatar(async () => {
+            const image = await normalizeReaderAvatar(file.tempFilePath, file.mimetype);
+            await profiles.submitAvatar(user.id, image, async () => {
               const current = await authenticated(req);
               if (!current || current.id !== user.id) throw fail('请重新登录后上传。', 401);
-              const id = randomUUID(), path = pendingAvatarPath(id);
-              await mkdir(avatarDir, { recursive: true });
-              await writeFile(path, image, { flag: 'wx', mode: 0o600 });
-              let previous;
-              try { ({ previous } = workflow.putProfile(String(current.id), 'avatar', id)); }
-              catch (error) { await unlink(path).catch(() => {}); throw error; }
-              if (previous && uuidPattern.test(previous.proposed_value)) {
-                workflow.queueFile(`pending-reader-avatar-${previous.proposed_value}.webp`, 'superseded-pending-avatar');
-                await cleanReaderFiles({ workflow, payload, directory });
-              }
-              return { ...dto(current), reviewPending: true };
             });
+            return { ...dto(await authenticated(req)), reviewPending: true };
           }, avatarLimits);
           send(res, result); return;
         }
         const body = await json(req);
         const key = client(req);
+        if (path === 'frame') {
+          const user = await authenticated(req); if (!user) throw fail('请先登录。', 401);
+          if (!frames) throw fail('头像框暂不可用，请稍后再试。', 503);
+          if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => key !== 'ref') || !Object.hasOwn(body, 'ref') || !validCommunityFrame(body.ref)) throw fail('请选择已拥有的头像框。');
+          send(res, await frames.equip(user.id, body.ref)); return;
+        }
         if (path === 'register') {
           if (!emailReady) throw fail('邮箱验证服务尚未配置，暂时不能注册。', 503);
           throttle(`register:${key}`, 30, 3600000);
@@ -342,34 +341,15 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
         if (path === 'profile') {
           const user = await authenticated(req);
           if (!user) throw fail('请先登录。', 401);
-          const proposed = Object.hasOwn(body, 'signature') ? signature(body.signature) : null;
+          const proposed = Object.hasOwn(body, 'signature') ? readerSignature(body.signature) : null;
           const updated = await payload.update({ collection: 'readers', id: user.id, data: { nickname: nickname(body.nickname), ...(Object.hasOwn(body, 'phone') ? { phone: phone(body.phone) } : {}) } });
-          if (proposed !== null && proposed !== (user.signature || '')) workflow.putProfile(user.id, 'signature', proposed);
-          else if (proposed !== null) {
-            const previous = workflow.profileFor(user.id, 'signature');
-            if (previous) workflow.removeProfile(previous.id);
-          }
+          if (proposed !== null) await profiles.submitSignature(user.id, proposed, async () => { const current = await authenticated(req); if (!current || current.id !== user.id) throw fail('请重新登录。', 401); });
           send(res, { ...dto(updated as ReaderUser), reviewPending: proposed !== null && proposed !== (user.signature || '') }); return;
         }
         if (path === 'avatar/remove') {
-          const updated = await serializeAvatar(async () => {
-            const user = await authenticated(req);
-            if (!user) throw fail('请先登录。', 401);
-            const pending = workflow.profileFor(user.id, 'avatar');
-            if (pending) {
-              workflow.removeProfile(pending.id);
-              workflow.queueFile(`pending-reader-avatar-${pending.proposed_value}.webp`, 'avatar-cancelled');
-            }
-            if (!uuidPattern.test(user.avatar || '')) {
-              if (pending) await cleanReaderFiles({ workflow, payload, directory });
-              return user;
-            }
-            const result = await payload.update({ collection: 'readers', id: user.id, data: { avatar: null } });
-            workflow.queueFile(`reader-avatar-${user.avatar}.webp`, 'avatar-removed');
-            await cleanReaderFiles({ workflow, payload, directory });
-            return result;
-          });
-          send(res, dto(updated as ReaderUser)); return;
+          const user = await authenticated(req); if (!user) throw fail('请先登录。', 401);
+          await profiles.removeAvatar(user.id, async () => { const current = await authenticated(req); if (!current || current.id !== user.id) throw fail('请重新登录。', 401); });
+          send(res, dto(await authenticated(req))); return;
         }
         throw fail('不存在的操作。', 404);
       } catch (error) {

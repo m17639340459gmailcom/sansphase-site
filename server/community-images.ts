@@ -25,7 +25,8 @@ async function usableFrame(image: Buffer, width: number, height: number) {
 
 // Product artwork uses the existing private image store. GIF and animated WebP
 // stay animated; forum attachments keep their existing static image rules.
-export async function saveCommunityImage(ctx: Ctx, shop = false, bannerScope?: string) {
+export async function saveCommunityImage(ctx: Ctx, shop = false, bannerScope?: string, profile = false) {
+  if (profile && ctx.me.kind !== 'reader') throw fail('作者品牌资料不能通过读者编辑器修改。', 403);
   const bannerAccess = { actor: ctx.me, browsingAsReader: ctx.browsingAsReader, canSeeBoard: ctx.canSeeBoard };
   if (bannerScope !== undefined) ctx.live.banners.authorize(bannerScope, bannerAccess);
   const directory = ctx.options.directory;
@@ -63,11 +64,22 @@ export async function saveCommunityImage(ctx: Ctx, shop = false, bannerScope?: s
       // recording a completed upload, and remove the files when access changed.
       if (bannerScope !== undefined) ctx.live.banners.authorize(bannerScope, bannerAccess);
       ctx.requireConsent();
-      ctx.live.addImage({ id, uploader: ctx.me, width, height, purpose: bannerScope !== undefined ? 'banner' : shop ? 'shop' : 'content', frameReady, bannerScope: bannerScope ?? null });
+      const register = () => ctx.live.addImage({ id, uploader: ctx.me, width, height, purpose: profile ? 'profile' : bannerScope !== undefined ? 'banner' : shop ? 'shop' : 'content', frameReady, bannerScope: bannerScope ?? null });
+      if (profile) await ctx.auditMutation('profile-background-submit', () => {
+        register();
+        return ctx.live.profileBackgrounds.submit(ctx.me, id);
+      }, { imageId: id });
+      else register();
     } catch (error) {
       await Promise.allSettled([unlink(imagePath), unlink(thumbPath)]);
       throw error;
     }
     return { id, width, height, frameReady };
   }, { maxFileBytes: bytes, maxImageBytes: bytes, maxAudioBytes: 0 });
+}
+
+/** The same bounded, re-encoded private image upload submits a pending profile background atomically. */
+export async function saveCommunityProfileBackground(ctx: Ctx) {
+  await saveCommunityImage(ctx, false, undefined, true);
+  return ctx.live.profileBackgrounds.state(ctx.me);
 }

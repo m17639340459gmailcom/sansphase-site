@@ -13,6 +13,7 @@ import sharp from 'sharp';
 import { migrateCommunity } from '../../server/payload/community-migration.ts';
 import { createCommunityStore } from '../../server/community-store.ts';
 import { createCommunityService } from '../../server/community-service.ts';
+import { createCommunityPreviewProfile } from './community-preview-profile.ts';
 import { communityBoards } from '../../src/community.mjs';
 
 // Sample members: nickname, public UID, VIP, days since joining, signature and level (null: computed).
@@ -207,8 +208,9 @@ export async function createCommunityDemo({ simplePosting = true, visualDemo = f
   }
 
   const byUid = new Map(Object.entries(people).map(([id, info]) => [info.uid, member(id)]));
+  const profiles = createCommunityPreviewProfile(directory, people);
   const serviceFor = (siteOrigin) => createCommunityService({
-    store, siteOrigin, directory, ownerId: 'owner', simplePosting,
+    store, siteOrigin, directory, ownerId: 'owner', simplePosting, profile: profiles.access,
     identify: async (req) => {
       const as = /(?:^|;\s*)preview_as=([a-z]+)/.exec(String(req.headers.cookie || ''))?.[1] || 'demo';
       if (as === 'owner') return { kind: 'owner', id: 'owner', name: ownerName, vip: true };
@@ -218,11 +220,12 @@ export async function createCommunityDemo({ simplePosting = true, visualDemo = f
     people: async (authors) => new Map(authors.flatMap((author) => {
       if (author.kind === 'owner') return [[`owner:${author.id}`, { name: ownerName, uid: 'owner', avatar: null, vip: true, joinedAt: null, bio: '' }]];
       const info = people[author.id];
-      return info ? [[`reader:${author.id}`, { name: info.name, uid: info.uid, avatar: null, vip: info.vip, joinedAt: at(joinedDays(author.id) * 24 * 60), bio: info.bio }]] : [];
+      const current = profiles.publicRow(author.id);
+      return info ? [[`reader:${author.id}`, { name: info.name, uid: info.uid, avatar: current?.avatar ? `/api/community/avatar/${info.uid}.webp?v=${current.avatar}` : null, vip: info.vip, joinedAt: at(joinedDays(author.id) * 24 * 60), bio: current?.signature ?? info.bio }]] : [];
     })),
     findMember: async (uid) => uid === 'owner' ? member('owner') : byUid.get(uid) || null,
     findByNames: async (names) => new Map([...Object.entries(people).map(([id, info]) => [info.name, member(id)]), [ownerName, member('owner')]].filter(([name]) => names.includes(name))),
-    avatarFile: async () => null,
+    avatarFile: profiles.avatarFile,
     audit: async () => {},
     words: ['赌博'],
   });

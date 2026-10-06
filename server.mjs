@@ -251,7 +251,7 @@ export function createPreviewServer({
           if (communityDestination) data.communityDestination = communityDestination;
           if (communityOnly) { data.communityOnly = true; data.mainSiteOrigin = mainSiteOrigin; }
           if (readerService) {
-            data.reader = await readerService.identity(req);
+            data.reader = await (readerService.displayIdentity || readerService.identity).call(readerService, req);
             data.readerRegistrationEnabled = readerService.registrationEnabled;
           }
           if(bookPreview){const {bodyHTML,...metadata}=bookPreview;data.preview={...metadata,book:bookManifest(bookPreview)};}

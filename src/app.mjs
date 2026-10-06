@@ -431,9 +431,11 @@ let cleanCommunity = () => {};
 // mounted while moving between community pages.
 let cleanCommunitySky = null;
 function syncCommunitySky(inCommunity) {
+  const view = communityRoute(location.hash).view;
   document.body.classList.toggle('community-open', inCommunity);
-  document.body.classList.toggle('community-management-open', inCommunity && communityRoute(location.hash).view === 'manage');
-  if (inCommunity) cleanCommunitySky ??= mountCommunitySky(document.querySelector('#blog-backdrop'), window, { parallax: () => !document.body.hasAttribute('data-orbit-scene'), starPainter: () => document.body.dataset.orbitScene === 'atlas' ? () => {} : undefined, meteorPainter: () => document.body.dataset.orbitScene === 'atlas' ? () => {} : undefined });
+  document.body.classList.toggle('community-management-open', inCommunity && view === 'manage');
+  document.body.classList.toggle('community-landing-open', inCommunity && view === 'landing');
+  if (inCommunity && view !== 'landing') cleanCommunitySky ??= mountCommunitySky(document.querySelector('#blog-backdrop'), window);
   else { cleanCommunitySky?.(); cleanCommunitySky = null; }
 }
 // The header reads the community's `me` (bell, balance, level); when that changes it is redrawn,
@@ -484,9 +486,11 @@ document.addEventListener('pointerdown', closeCommunityAccountOutside, true);
 document.addEventListener('click', closeCommunityAccountOutside, true);
 let communityStyleReady = false;
 let communityLandingModule = null;
-function prepareCommunityLanding() {
-  if (communityOnly() || !main.querySelector('[data-community="landing"]') || communityLandingModule) return;
-  communityLandingModule = import('./community-landing.mjs').catch(() => { communityLandingModule = null; });
+async function prepareCommunityLanding() {
+  if (communityOnly() || communityRoute(location.hash).view !== 'landing') return;
+  communityLandingModule ??= import('./community-landing.mjs').catch(error => { communityLandingModule = null; throw error; });
+  const landing = await communityLandingModule;
+  await landing.prepareCommunityLanding();
 }
 function communityPage() {
   if (communityEntryDestination(siteContent)) return communityLandingHTML(t, icons, { entryState: communityEntry.state() });
@@ -552,8 +556,15 @@ async function render(options={}) {
   if (location.hash !== '#/community') history.replaceState(history.state, '', location.pathname + location.search + '#/community');
   const authenticated = Boolean(siteContent?.reader || siteContent?.author);
   if (authenticated && communityEntry.state() === 'auth') communityEntry.cancel();
-  if (!communityStyleReady) await ensureRouteStyle(document, 'community').then(() => { communityStyleReady = true; }, () => {});
+  const landingReady = communityEntry.state() === 'auth' ? null : prepareCommunityLanding().then(() => true, () => false);
+  const stylesReady = communityStyleReady || await ensureRouteStyle(document, 'community').then(() => { communityStyleReady = true; return true; }, () => false);
   if (generation !== renderGeneration) return;
+  if (!stylesReady) { renderView({ ...options, contentStatus: 'error' }); return; }
+  if (landingReady) {
+    const ready = await landingReady;
+    if (generation !== renderGeneration) return;
+    if (!ready) { renderView({ ...options, contentStatus: 'error' }); return; }
+  }
   renderView({ ...options, ...(communityEntry.state() === 'auth' ? { contentStatus: 'auth' } : {}) });
   return;
  }
@@ -579,7 +590,9 @@ async function render(options={}) {
  // Wait for the community stylesheet only on the first visit; later renders
  // (language switch, sorting) stay synchronous. A failed load still renders.
   const communityStyle = communityEnabled() && !communityStyleReady && communityView(route.page, route.id) !== 'unknown'
-  ? ensureRouteStyle(document,'community').then(()=>{communityStyleReady=true;},()=>{}) : null;
+  ? ensureRouteStyle(document,'community').then(()=>{communityStyleReady=true;return true;},()=>false) : null;
+ const landingReady = communityEnabled() && communityView(route.page, route.id) === 'landing'
+  ? prepareCommunityLanding().then(() => true, () => false) : null;
  if(!route.id&&['notes','works','resources','software','resource-center'].includes(route.page)&&filterPage!==route.page) {
   activeCategory='all';activeQuery='';catalogPageNumber=1;filterPage=route.page;
  }
@@ -614,8 +627,14 @@ async function render(options={}) {
   if(!ready) {renderView({...options,contentStatus:'error'});return;}
  }
  if(communityStyle) {
-  await communityStyle;
+  const ready = await communityStyle;
   if(generation!==renderGeneration) return;
+  if (landingReady && !ready) { renderView({ ...options, contentStatus: 'error' }); return; }
+ }
+ if (landingReady) {
+  const ready = await landingReady;
+  if (generation !== renderGeneration) return;
+  if (!ready) { renderView({ ...options, contentStatus: 'error' }); return; }
  }
  renderView(options);
  window.sansphasePageSession?.commit();
@@ -699,7 +718,6 @@ function renderView({preserveScroll=false,contentStatus}={}) {
   cleanCommunity();
   const pageMarkup = contentStatus ? contentStatus==='auth' ? readerGate(language==='en') : contentStatus==='vip' ? vipBookGate(language==='en') : contentMessage(contentStatus==='error') : (views[page] || notFound)();
   if (!communityEnabled() || contentStatus || !communityFrame.render(main, pageMarkup, communityUI.frameHTML(communityContext()))) setContentHTML(main, pageMarkup);
-  prepareCommunityLanding();
   readerUI?.route(page,id);
   cleanCommunity=communityEnabled() && !contentStatus && (page==='community'||page==='post') ? communityUI.mount(main,communityContext()) : ()=>{};
   communityReady();
@@ -1135,7 +1153,7 @@ window.addEventListener('reader:identity',event=>{
   communityUI.clear();
   render();
 });
-readerUI=mountReaderUI({render,onIdentity(value){
+readerUI=mountReaderUI({render,readIdentity:()=>siteContent?.reader || null,onIdentity(value){
   window.dispatchEvent(new CustomEvent('reader:identity',{detail:value}));
 },english:()=>language==='en',onLogout:communityOnly() ? async () => {
   try { await exitCommunity(siteContent, (url, init) => fetch(url, init), url => location.assign(url)); }

@@ -12,6 +12,7 @@ export interface CinematicImageResource {
   readonly width: number;
   readonly height: number;
   readonly ready: boolean;
+  decode?(): Promise<void>;
   /** Return a function that detaches events and releases the pending source. */
   load(url: string, onLoad: () => void, onError: () => void): () => void;
 }
@@ -25,6 +26,10 @@ export interface CinematicBackdropOptions {
 
 const ASSET_URL = "/assets/community/atlas-space.webp";
 const SOURCE_WIDTH = 1672, SOURCE_HEIGHT = 941;
+const validImage = (resource: CinematicImageResource) => resource.ready &&
+  Number.isFinite(resource.width + resource.height) && resource.width > 0 && resource.height > 0;
+let preparedImage: CinematicImageResource | undefined;
+let preparation: Promise<void> | null = null;
 
 function browserImage(): CinematicImageResource {
   const image = new Image();
@@ -34,11 +39,12 @@ function browserImage(): CinematicImageResource {
     get width() { return image.naturalWidth; },
     get height() { return image.naturalHeight; },
     get ready() { return image.complete && image.naturalWidth > 0 && image.naturalHeight > 0; },
+    decode: () => typeof image.decode === "function" ? image.decode() : Promise.resolve(),
     load(url, onLoad, onError) {
       const detach = () => {
         image.removeEventListener("load", onLoad);
         image.removeEventListener("error", onError);
-        image.removeAttribute("src");
+        if (!image.complete || !image.naturalWidth) image.removeAttribute("src");
       };
       image.addEventListener("load", onLoad);
       image.addEventListener("error", onError);
@@ -46,6 +52,55 @@ function browserImage(): CinematicImageResource {
       return detach;
     },
   };
+}
+
+/** Prepare the real plate before the page is committed; never substitute a loading sky. */
+export function prepareCinematicImage(resource: CinematicImageResource, timeoutMs = 15_000): Promise<CinematicImageResource> {
+  return new Promise((resolve, reject) => {
+    let settled = false, decoding = false;
+    let cancelLoad: (() => void) | undefined;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      cancelLoad?.();
+      if (error) reject(error);
+      else resolve(resource);
+    };
+    const timer = setTimeout(() => finish(new Error("Community background image preparation timed out.")), timeoutMs);
+    const loaded = () => {
+      if (settled || decoding) return;
+      decoding = true;
+      void Promise.resolve().then(() => resource.decode?.()).then(() => {
+        if (!validImage(resource)) finish(new Error("Community background image is unavailable."));
+        else finish();
+      }, () => finish(new Error("Community background image could not be decoded.")));
+    };
+    try {
+      if (validImage(resource)) loaded();
+      else {
+        cancelLoad = resource.load(ASSET_URL, loaded, () => finish(new Error("Community background image is unavailable.")));
+        if (settled) cancelLoad();
+        else if (validImage(resource)) loaded();
+      }
+    } catch {
+      finish(new Error("Community background image could not be requested."));
+    }
+  });
+}
+
+/** One decoded resource is retained across route changes, language changes and BFCache. */
+export function prepareCinematicBackdrop(): Promise<void> {
+  if (preparedImage && validImage(preparedImage)) return Promise.resolve();
+  if (!preparation) {
+    preparation = Promise.resolve().then(() => prepareCinematicImage(browserImage())).then(resource => {
+      preparedImage = resource;
+    }, error => {
+      preparation = null;
+      throw error;
+    });
+  }
+  return preparation;
 }
 
 /**
@@ -66,20 +121,24 @@ export function createCinematicBackdrop(
     motion?.dispose();
     motion = null;
   };
-  const validImage = (resource: CinematicImageResource) => resource.ready &&
-    Number.isFinite(resource.width + resource.height) && resource.width > 0 && resource.height > 0;
   const ready = (value: boolean) => {
     if (disposed || value === imageReady) return;
     imageReady = value;
     if (!value) { releaseMotion(); motionAttempted = false; }
     options.onReady?.();
   };
+  if (!options.imageFactory && (!preparedImage || !validImage(preparedImage))) {
+    throw new Error("Community background must be prepared before mounting.");
+  }
   try {
-    image = (options.imageFactory ?? browserImage)();
+    image = options.imageFactory ? options.imageFactory() : preparedImage;
+    if (!image) throw new Error("Community background image is unavailable.");
     imageReady = validImage(image);
-    cancelLoad = image.load(ASSET_URL, () => {
-      if (!disposed && image) ready(validImage(image));
-    }, () => ready(false));
+    if (options.imageFactory) {
+      cancelLoad = image.load(ASSET_URL, () => {
+        if (!disposed && image) ready(validImage(image));
+      }, () => ready(false));
+    }
   } catch {
     imageReady = false;
     image = undefined;
@@ -134,12 +193,13 @@ export function createCinematicBackdrop(
               crop.width * sourceWidth, crop.height * sourceHeight, 0, 0, width, height);
             if (usedFineField) { resetDeepField(ctx); usedFineField = false; }
           } catch {
+            if (!options.imageFactory) throw new Error("Community background image could not be painted.");
             ready(false);
           }
         }
         if (!imageReady) {
-          // The loaded artwork already has fine stars. Do not double that field
-          // into white noise; the pure-code fine layer is the loading/error state.
+          // Offline adapters retain their diagnostic error field. The page uses
+          // only the decoded plate and never passes through this loading state.
           paintDeepField(ctx, width, height, seconds);
           usedFineField = true;
         }

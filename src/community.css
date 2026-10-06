@@ -114,35 +114,12 @@ body.community-open #blog-backdrop::after { display: none; }
 .community-enter:hover { background: #e9d8b4; }
 .community-enter:active { transform: translateY(1px); }
 .community-orbits {
-  position: absolute;
-  left: 50%;
-  top: 46%;
+  position: fixed;
+  inset: 0;
   z-index: -1;
-  width: 540px;
-  height: 540px;
-  max-width: 92vw;
-  max-height: 92vw;
-  /* Rotating pseudo-elements have square bounds; contain their transparent
-     corners without clipping the orbit dots just outside the ring. */
-  overflow: clip;
-  overflow-clip-margin: 6px;
-  transform: translate(-50%, -50%);
+  overflow: hidden;
   pointer-events: none;
 }
-.community-orbits i { position: absolute; inset: 0; border-radius: 50%; border: 1px solid rgb(217 196 156 / 26%); }
-.community-orbits i:nth-child(2) { inset: 70px; border-color: rgb(159 184 224 / 22%); }
-.community-orbits i:nth-child(3) { inset: 150px; border-color: rgb(238 233 224 / 14%); background: radial-gradient(circle, rgb(217 196 156 / 9%), transparent 70%); }
-.community-orbits i:first-child::after,
-.community-orbits i:nth-child(2)::after {
-  content: "";
-  position: absolute;
-  inset: -3px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 50% 0, var(--signal) 0 3px, transparent 4px);
-  animation: community-orbit 28s linear infinite;
-}
-.community-orbits i:nth-child(2)::after { background: radial-gradient(circle at 50% 0, #c9d6ff 0 2px, transparent 3px); animation-duration: 18s; animation-direction: reverse; }
-@keyframes community-orbit { to { transform: rotate(360deg); } }
 
 /* 账号菜单：主页、星尘、通知、收藏，以及对应权限的账号和管理入口 */
 .community-account { position: relative; }
@@ -337,6 +314,7 @@ body.community-open #blog-backdrop::after { display: none; }
 .community-av.is-frame-nebula { padding: 2.5px; background: conic-gradient(from 20deg, #b9a3e6, #e7a9c6, #9fb8e0, #b9a3e6); box-shadow: 0 0 14px rgb(185 163 230 / 45%); }
 .community-av.is-frame-orbit { padding: 2px; background: rgb(159 184 224 / 55%); }
 .community-av.is-frame-orbit::after { content: ""; position: absolute; inset: -5px; border-radius: 50%; background: radial-gradient(circle at 50% 0, #fff 0 2.2px, rgb(159 184 224 / 80%) 2.6px, transparent 4px); animation: community-orbit 9s linear infinite; pointer-events: none; }
+@keyframes community-orbit { to { transform: rotate(360deg); } }
 /* 名字、等级、VIP、站长 */
 .community-who, .community-name { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; min-width: 0; max-width: 100%; vertical-align: middle; }
 .community-uname { color: var(--muted); font-size: 16px; font-weight: 600; line-height: 1.4; }
@@ -1409,7 +1387,7 @@ a.community-queue-title:hover { text-decoration: underline; text-underline-offse
 .community-spot::after { content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: radial-gradient(340px circle at var(--mx, -400px) var(--my, -400px), rgb(217 196 156 / 8%), transparent 60%); opacity: 0; transition: opacity 0.35s; }
 .community-spot:hover::after { opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
-  .community-orbits i::after, .community-av.is-frame-orbit::after, .community-bh-glow, .community-holo::before,
+  .community-av.is-frame-orbit::after, .community-bh-glow, .community-holo::before,
   .community-cover-sample i, .community-m-cover i, .is-color-aurora, .community-ck-dot, body.community-open .community-uname[data-name-effect] { animation: none; }
 }
 

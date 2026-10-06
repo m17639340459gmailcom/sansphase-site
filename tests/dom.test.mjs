@@ -236,6 +236,29 @@ for (const mode of [null, false, true, 'hk', 'hk-reduced']) test(typeof mode ===
   };
   const context = dom.getInternalVMContext();
   const libraryModules = new Map();
+  const landingActivity = { imports: 0, preparations: 0, pending: null };
+  let landingModule;
+  async function loadDynamicModule(specifier) {
+    if (specifier === './community-landing.mjs') {
+      // Image loading/decoding and WebGL are covered by the atlas tests. This
+      // DOM harness models their asynchronous preparation boundary explicitly.
+      if (!landingModule) {
+        landingActivity.imports++;
+        landingModule = new vm.SyntheticModule(['prepareCommunityLanding'], function () {
+          this.setExport('prepareCommunityLanding', async () => {
+            landingActivity.preparations++;
+            if (landingActivity.pending) await landingActivity.pending;
+          });
+        }, { context });
+        await landingModule.link(() => { throw Error('The landing preparation stub has no imports.'); });
+        await landingModule.evaluate();
+      }
+      return landingModule;
+    }
+    const dependency = await loadLibrary(new URL('../dist/' + specifier.slice(2), import.meta.url));
+    if (dependency.status === 'linked') await dependency.evaluate();
+    return dependency;
+  }
   function loadLibrary(url, chain = new Set()) {
     // Register synchronously before recursive linking. Two concurrent imports
     // must share one module (especially React's hook dispatcher). A module
@@ -260,7 +283,7 @@ for (const mode of [null, false, true, 'hk', 'hk-reduced']) test(typeof mode ===
   }
   const mod = new vm.SourceTextModule(
     await readFile(new URL("../dist/app.mjs", import.meta.url), "utf8"),
-    { context },
+    { context, importModuleDynamically: loadDynamicModule },
   );
   await mod.link((specifier) => {
     if (specifier === "./ui.bundle.mjs")
@@ -688,6 +711,22 @@ for (const mode of [null, false, true, 'hk', 'hk-reduced']) test(typeof mode ===
         );
       },
     );
+    await t.test('the real app waits for the landing preparation boundary without painting an intermediate sky', async () => {
+      await navigate('notes');
+      const previous = q('main').firstElementChild;
+      const preparations = landingActivity.preparations;
+      let prepared;
+      landingActivity.pending = new Promise(resolve => { prepared = resolve; });
+      const opening = navigate('community');
+      await until(() => landingActivity.preparations > preparations, 'the lazy landing module starts actual preparation');
+      assert.equal(q('main').firstElementChild, previous, 'the existing page remains until the complete landing is ready');
+      assert.equal(d.querySelector('[data-community="landing"], .community-orbits i'), null);
+      prepared(); landingActivity.pending = null;
+      await opening;
+      await until(() => d.querySelector('[data-community="landing"] h1'), 'the prepared landing commits');
+      assert.equal(landingActivity.imports, 1, 'the lazy module is shared across landing preparations');
+      assert.equal(d.querySelector('.community-orbits i'), null, 'the old three-ring layer is absent');
+    });
     await t.test(
       "all primary routes render coherent pages and preserve active navigation",
       async () => {
@@ -888,8 +927,8 @@ for (const mode of [null, false, true, 'hk', 'hk-reduced']) test(typeof mode ===
       assert.ok(!q('#site-header').classList.contains('community-header'), 'the landing page keeps the main navigation');
       assert.equal(q('.nav [aria-current="page"]').getAttribute('href'),'#/community');
       assert.match(q('main h1').textContent,/無相社区/);
-      assert.ok(d.body.classList.contains('community-open'), 'the landing page already uses the community sky');
-      assert.ok(q('#blog-backdrop .community-sky'));
+      assert.ok(d.body.classList.contains('community-open'), 'the landing page keeps its own community presentation');
+      assert.equal(d.querySelector('#blog-backdrop .community-sky'), null, 'the introduction cannot mount the separate forum starfield');
       assert.equal(q('#blog-backdrop img').hasAttribute('src'), true, 'the blog photo loaded earlier stays for the blog');
       await clickRoute('.community-enter');
       assert.equal(d.querySelectorAll('#blog-backdrop .community-sky').length, 1, 'one sky across community pages');

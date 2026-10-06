@@ -67,9 +67,14 @@ async function copyPrivate(source: string, destination: string) {
 async function referencedImagesPresent(directory: string) {
   const db = new DatabaseSync(resolve(directory, 'content.db'), { readOnly: true });
   try {
+    // A pre-upgrade snapshot must remain usable before the new profile tables
+    // are created. Include the reference only when that optional table exists.
+    const profiles = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='community_profile_backgrounds'").get()
+      ? 'OR EXISTS(SELECT 1 FROM community_profile_backgrounds p WHERE p.approved_image=i.id OR p.pending_image=i.id)' : '';
     const images = db.prepare(`SELECT i.id FROM community_images i WHERE i.deleted_at IS NULL AND
       (i.topic_id IS NOT NULL OR EXISTS(SELECT 1 FROM community_shop_items s WHERE s.image=i.id)
-      OR EXISTS(SELECT 1 FROM community_banner_entries b WHERE b.cover=i.id))`).all() as Array<{ id: string }>;
+      OR EXISTS(SELECT 1 FROM community_banner_entries b WHERE b.cover=i.id)
+      ${profiles})`).all() as Array<{ id: string }>;
     for (const { id } of images) {
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) throw Error('Backup image registry contains an invalid identifier.');
       for (const kind of ['image', 'thumb']) {

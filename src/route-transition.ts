@@ -6,7 +6,9 @@ export function createRouteTransitions(doc: Document = document) {
   let disposed = false;
   let leaving: HTMLElement | null = null;
   let previousOpacity = '';
+  let generation = 0;
   const stop = () => {
+    generation++;
     const previous = active;
     active = null;
     previous?.cancel();
@@ -43,22 +45,29 @@ export function createRouteTransitions(doc: Document = document) {
     },
     run<T>(fromPage: string, toPage: string, update: () => T): T {
       stop();
-      // Bind the new controls immediately. Network loading is owned by the
-      // existing renderer and must not hold navigation behind a visual effect.
+      const current = generation;
+      // Start the renderer immediately. Its promise settles only after the new
+      // content and required assets are committed, so never animate an old page.
       const result = update();
-      const target = doc.getElementById('main');
-      if (disposed || !win || doc.hidden || toPage === 'home' ||
-          win.matchMedia?.('(prefers-reduced-motion: reduce)').matches ||
-          typeof target?.animate !== 'function') return result;
+      const enter = () => {
+        const target = doc.getElementById('main');
+        if (current !== generation || disposed || !win || doc.hidden || toPage === 'home' ||
+            win.matchMedia?.('(prefers-reduced-motion: reduce)').matches ||
+            typeof target?.animate !== 'function') return;
 
-      // Opacity only: the painted controls and their click targets stay aligned.
-      const animation = target.animate([{ opacity: 0.72 }, { opacity: 1 }], {
-        duration: fromPage === 'home' ? 260 : 180,
-        easing: 'ease-out',
-      });
-      active = animation;
-      const clear = () => { if (active === animation) active = null; };
-      void animation.finished.then(clear, clear);
+        // Opacity only: the painted controls and their click targets stay aligned.
+        const animation = target.animate([{ opacity: 0.72 }, { opacity: 1 }], {
+          duration: fromPage === 'home' ? 260 : 180,
+          easing: 'ease-out',
+        });
+        active = animation;
+        const clear = () => { if (active === animation) active = null; };
+        void animation.finished.then(clear, clear);
+      };
+      if (result !== null && (typeof result === 'object' || typeof result === 'function') &&
+          'then' in result && typeof result.then === 'function') {
+        void Promise.resolve(result).then(enter, () => {});
+      } else enter();
       return result;
     },
     dispose() {

@@ -5,8 +5,13 @@ import type { CommunityViewer } from './community-context.ts';
 export const identityBridgePath = '/api/community-identity/bridge';
 export const identityHandoffCookie = 'sansphase_community_handoff';
 export const identityRequestBytes = 64 * 1024;
+// Only a normalized 320px avatar may use this finite envelope. Other bridge
+// operations retain their original request cap.
+export const identityAvatarRequestBytes = 704 * 1024;
 export const identityResponseBytes = 2 * 1024 * 1024;
-export type IdentityOperation = 'exchange' | 'session' | 'people' | 'member' | 'names' | 'avatar';
+export type IdentityOperation = 'exchange' | 'session' | 'people' | 'member' | 'names' | 'avatar'
+  | 'profile' | 'profile-signature' | 'profile-avatar' | 'profile-avatar-remove' | 'profile-avatar-pending'
+  | 'profile-reviews' | 'profile-review-image' | 'profile-review';
 export type IdentityReader = { id: string; uid: string | null; nickname: string; signature: string; avatar: string | null; role: 'reader'; vip: boolean; vipStartedAt: string | null; vipUntil: string | null };
 export type IdentityDTO = { viewer: CommunityViewer; reader: IdentityReader | null; author: { name: string } | null };
 export class IdentityBridgeError extends Error {
@@ -22,7 +27,7 @@ export function identityPeerOrigin(value: string) {
   if (url.protocol !== 'https:' || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw Error('Identity peer must be a fixed HTTPS origin.');
   return url.origin;
 }
-const safePath = (path: string) => /^\/api\/community-identity\/(?:bridge|purge)$/.test(path);
+const safePath = (path: string) => /^\/api\/community-identity\/(?:bridge|purge|decorations)$/.test(path);
 const signingValue = (method: string, path: string, body: string | Buffer, timestamp: string, nonce: string) => `${timestamp}\n${nonce}\n${method.toUpperCase()}\n${path}\n${identityHash(body)}`;
 type SigningOptions = { secret: string; method: string; path: string; body: string | Buffer; timestamp?: string; nonce?: string };
 export function signIdentityRequest({ secret, method, path, body, timestamp = String(Date.now()), nonce = opaqueIdentityValue() }: SigningOptions): Record<string, string> {
@@ -46,17 +51,18 @@ export function createIdentityClient({ origin, secret, path = identityBridgePath
   if (!safePath(path) || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30_000) throw Error('Invalid identity client configuration.');
   return { async request<T = unknown>(operation: string, input: unknown): Promise<T> {
     const body = JSON.stringify({ operation, input });
-    if (Buffer.byteLength(body) > identityRequestBytes) throw new IdentityBridgeError('身份请求内容过大。', 413);
+    if (Buffer.byteLength(body) > (operation === 'profile-avatar' ? identityAvatarRequestBytes : identityRequestBytes)) throw new IdentityBridgeError('身份请求内容过大。', 413);
     try {
-      const response = await transport(peer + path, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(timeoutMs), headers: { 'Content-Type': 'application/json', ...signIdentityRequest({ secret, method: 'POST', path, body }) }, body });
+      const response = await transport(peer + path, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(timeoutMs), headers: { 'Content-Type': 'application/json', ...(operation === 'profile-avatar' ? { 'x-community-operation': operation } : {}), ...signIdentityRequest({ secret, method: 'POST', path, body }) }, body });
       if (response.redirected || !response.body) throw new IdentityBridgeError('账号服务暂不可用。');
       const reader = response.body.getReader(); let size = 0; const chunks: Uint8Array[] = [];
       try { while (true) { const part = await reader.read(); if (part.done) break; size += part.value.length; if (size > identityResponseBytes) { await reader.cancel(); throw new IdentityBridgeError('账号服务暂不可用。'); } chunks.push(part.value); } }
       finally { reader.releaseLock(); }
       const value: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       if (!response.ok) {
-        const status = [400, 401, 403, 404, 409, 413, 429].includes(response.status) ? response.status : 503;
-        throw new IdentityBridgeError(status === 401 ? '请从主站重新进入社区。' : status === 429 ? '操作过于频繁，请稍后再试。' : '账号服务暂不可用。', status);
+        const status = [400, 401, 403, 404, 409, 413, 415, 429].includes(response.status) ? response.status : 503;
+        const safeMessage = status < 500 && status !== 401 && value && typeof value === 'object' && 'error' in value && typeof value.error === 'string' && value.error.length <= 240 ? value.error : null;
+        throw new IdentityBridgeError(status === 401 ? '请从主站重新进入社区。' : status === 429 ? '操作过于频繁，请稍后再试。' : safeMessage || '账号服务暂不可用。', status);
       }
       return value as T;
     } catch (error) { if (error instanceof IdentityBridgeError) throw error; throw new IdentityBridgeError('账号服务暂不可用。'); }

@@ -23,6 +23,8 @@ import { createCommunityBadgeExplorer } from './community-badge-explorer.mjs';
 import type { CommunityConvention } from './community-convention.ts';
 import type { CommunityGrowthState, CommunityVIPGrowthState } from './community-growth.ts';
 import { createCommunityWriteRequest } from './community-write-request.mjs';
+import { communityProfileHTML } from './community-profile.mjs';
+import type { CommunityProfile } from './community-profile.ts';
 import { communityFrameBannersHTML } from './community-frame-banners.mjs';
 import type { CommunityBannerConfig } from './community-banners.ts';
 import type { CommunityComposeEditor } from './community-compose-editor.ts';
@@ -100,6 +102,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   let browseRequest = 0;
   let switchingBrowseMode = false;
   let me: CommunityLoad<CommunityMe> | null = null;
+  let profile: CommunityLoad<CommunityProfile> | null = null;
+  let profileWrite: object | null = null;
   let moderationContacts: CommunityLoad<CommunityModerationContacts> | null = null;
   let convention: CommunityLoad<CommunityConvention> | null = null;
   let checkin: CommunityLoad<CommunityCheckin> | null = null;
@@ -192,6 +196,13 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   const draftHasText = (value: SavedComposeDraft | { body: string } | null) => Boolean(value && (value.body.trim() || ('title' in value && value.title.trim()) || ('tags' in value && value.tags.length) || ('bounty' in value && value.bounty)));
   const hasUnsavedDraft = (hash = location.hash) => {
     const current = communityRoute(hash);
+    if (current.view === 'profile') {
+      const signature = mounted?.main.querySelector<HTMLInputElement>('[data-community-form="profile-signature"] [name="signature"]');
+      const frame = mounted?.main.querySelector<HTMLSelectElement>('[data-community-form="profile-frame"] select');
+      return Boolean(profileWrite || signature && signature.value !== signature.defaultValue
+        || frame && [...frame.options].some(option => option.selected !== option.defaultSelected)
+        || [...(mounted?.main.querySelectorAll<HTMLInputElement>('[data-profile-file]') || [])].some(field => field.files?.length));
+    }
     if (current.view === 'new') return draftHasText(readDraft<SavedComposeDraft>(draftKey('compose', hash)));
     if (current.view === 'post') return draftHasText(readDraft<{ body: string }>(draftKey('reply', current.id)));
     return false;
@@ -355,6 +366,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (key !== headerKey) { headerKey = key; mounted?.ctx.headerChanged?.(); }
     syncConvention();
   }
+  async function loadProfile() { await assignLoad('profile', profile, value => { profile = value; }); }
   let checkinRequest = 0;
   async function loadCheckin() {
     const token = ++checkinRequest, month = checkinMonth;
@@ -420,6 +432,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         case 'manage': return [() => loadManage(['contact', 'convention'].includes(current.tab) ? 'queue' : current.tab), ...(current.tab === 'convention' ? [loadConvention] : [])];
         case 'rules': return [loadModerationContacts, loadConvention];
         case 'member': return [() => loadMember(current.id, current.tab)];
+        case 'profile': return [loadProfile];
         case 'stardust': return [async () => { await loadStardust(); }];
         case 'inbox': return [() => loadInbox(current.tab)];
         case 'shop': return [current.tab === 'mine' ? loadShopMine : loadShop];
@@ -500,6 +513,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       case 'bookmarks': return communityBookmarksHTML({ ...common, list: bookmarks || loading });
       case 'manage': return communityManageHTML({ ...common, manage: manages.get(['contact', 'convention'].includes(current.tab) ? 'queue' : current.tab) || loading, tab: current.tab, itemEditing, shippingOrder, rejecting, deleting, me: viewer, selectedReviews: [...reviewSelection], managementBoard, stewardCandidate, stewardEditingUid, bannerEditor: bannerEditor.state(), convention });
       case 'member': return communityMemberHTML({ ...common, member: memberPages.get(memberKey(current.id, current.tab)) || loading, me: viewer, muting, badgeSelection: badgeExplorer.state() });
+      case 'profile': return communityProfileHTML({ ...common, profile: profile || loading });
       case 'stardust': return communityStardustHTML({ ...common, stardust: stardusts.get(flow) || loading, tab: current.tab, levelSelection: levelExplorer.state() });
       case 'inbox': return communityInboxHTML({ ...common, inbox: inboxes.get(current.tab) || loading, tab: current.tab, me: viewer });
       case 'shop': return current.tab === 'mine'
@@ -667,6 +681,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   function paint() {
     if (!mounted) return;
     const section = mounted.main.querySelector<HTMLElement>('[data-community]');
+    if (section?.dataset.community === 'profile' && profileWrite) return;
     const markup = html(mounted.ctx);
     if (!section || markup === null) return;
     const restoreView = mounted.ctx.beforePaint?.();
@@ -684,7 +699,13 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       const choice = field instanceof HTMLInputElement && (field.type === 'radio' || field.type === 'checkbox');
       const twin = [...next.querySelectorAll<Field>(`form[data-community-form="${form}"]${uidSelector} [name="${field.name}"]`)]
         .find(item => !choice || item.value === field.value);
-      if (!twin || (twin instanceof HTMLInputElement && twin.type === 'file')) continue;
+      if (!twin) continue;
+      if (twin instanceof HTMLInputElement && twin.type === 'file') {
+        // Browsers prohibit assigning FileList. Keep the real selected input
+        // across ordinary same-account paints instead of losing its upload.
+        if (form?.startsWith('profile-') && field instanceof HTMLInputElement && field.files?.length) twin.replaceWith(field);
+        continue;
+      }
       if (choice) (twin as HTMLInputElement).checked = (field as HTMLInputElement).checked;
       else twin.value = field.value;
     }
@@ -892,6 +913,118 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       if ((error as ApiError).status === 428) void loadMe();
     }
     finally { if (button?.isConnected) { button.disabled = false; button.innerHTML = label; } }
+  }
+  function otherProfileImageDraft(form: Form) {
+    return [...(mounted?.main.querySelectorAll<HTMLInputElement>('.community-profile input[type="file"]') || [])].some(field => field.closest('form') !== form && Boolean(field.files?.length));
+  }
+  function lockProfileControls(disabled: boolean) {
+    mounted?.main.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('.community-profile :is(input, select, button)').forEach(field => { field.disabled = disabled; });
+  }
+  async function submitProfile(form: Form, kind: 'signature' | 'avatar' | 'background' | 'frame') {
+    if (profileWrite || !readyData(profile)?.canEditProfile) return;
+    if (otherProfileImageDraft(form)) return status(form, tr('请先提交另一项已选择的图片，或取消选择。', 'Submit the other selected image first, or clear that selection.'));
+    if (kind === 'signature' && !checkText(form, 'signature', [0, 100], ['个签', 'Signature'])) return;
+    let body: FormData | undefined;
+    if (kind === 'avatar' || kind === 'background') {
+      const file = form.querySelector<HTMLInputElement>('[type="file"]')?.files?.[0];
+      if (!file) return status(form, tr('请先选择图片。', 'Choose an image first.'));
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) return status(form, tr('请选择 JPG、PNG 或 WebP 图片。', 'Choose JPG, PNG or WebP.'));
+      if (file.size > 2 * 1024 * 1024) return status(form, tr('图片不能超过 2MB。', 'Image cannot exceed 2MB.'));
+      body = new FormData(); body.append('file', file);
+    }
+    const identity = frameIdentity, token = {};
+    let saved = false;
+    profileWrite = token;
+    lockProfileControls(true);
+    const currentHash = location.hash;
+    await busy(form, tr('正在保存…', 'Saving…'), async () => {
+      let updated: CommunityProfile;
+      if (kind === 'frame') {
+        await send('shop/equip', { kind: 'frame', ref: valueOf(form, 'ref') || null });
+        updated = await api<CommunityProfile>('profile');
+      } else if (body) updated = await api<CommunityProfile>(`profile/${kind}`, { method: 'POST', headers: { 'X-Reader-Request': '1' }, body });
+      else updated = await send<CommunityProfile>('profile', { signature: valueOf(form, 'signature') });
+      if (identity !== frameIdentity || profileWrite !== token) return;
+      profile = { state: 'ready', data: updated };
+      saved = true;
+      memberPages.clear();
+      // Mark confirmed controls clean before repaint; unrelated form drafts are retained.
+      form.querySelectorAll<HTMLInputElement | HTMLSelectElement>('input, select').forEach(field => {
+        if (field instanceof HTMLInputElement) { if (field.type === 'file') field.value = ''; else field.defaultValue = field.value; }
+        else for (const option of field.options) option.defaultSelected = option.selected;
+      });
+      await loadMe();
+      if (identity !== frameIdentity || currentHash !== location.hash) return;
+      notify(kind === 'frame' ? tr('头像框已更新。', 'Frame updated.') : tr('已提交，审核通过后生效。', 'Submitted; changes appear after approval.'));
+    });
+    if (profileWrite === token) {
+      profileWrite = null;
+      if (identity === frameIdentity && currentHash === location.hash) {
+        const feedback = form.querySelector('.community-form-status')?.textContent || '';
+        lockProfileControls(false);
+        if (saved) paint();
+        const next = mounted?.main.querySelector<Form>(`[data-community-form="profile-${kind}"]`);
+        if (next && feedback) status(next, feedback);
+      }
+    }
+  }
+  async function removeProfile(target: HTMLButtonElement, kind: string | undefined) {
+    if (profileWrite || !readyData(profile)?.canEditProfile || !['avatar', 'background'].includes(kind || '')) return;
+    const form = target.closest<Form>('form');
+    if (!form) return;
+    if (otherProfileImageDraft(form)) return status(form, tr('请先提交另一项已选择的图片，或取消选择。', 'Submit the other selected image first, or clear that selection.'));
+    const identity = frameIdentity, token = {}, hash = location.hash;
+    let saved = false;
+    profileWrite = token;
+    lockProfileControls(true);
+    await act(target, async () => {
+      const updated = await send<CommunityProfile>(`profile/${kind}/remove`);
+      if (identity !== frameIdentity || profileWrite !== token) return;
+      profile = { state: 'ready', data: updated }; saved = true;
+      const file = form.querySelector<HTMLInputElement>('[type="file"]');
+      if (file) file.value = '';
+      memberPages.clear(); await loadMe();
+      if (identity === frameIdentity && hash === location.hash) notify(tr('已恢复默认。', 'Default restored.'));
+    });
+    if (profileWrite === token) { profileWrite = null; if (identity === frameIdentity && hash === location.hash) { lockProfileControls(false); if (saved) paint(); } }
+  }
+  const profileReviewWrites = new Set<string>();
+  async function reviewProfile(target: HTMLButtonElement) {
+    const { id, decision } = target.dataset;
+    if (!id || !['approve', 'reject'].includes(decision || '') || profileReviewWrites.has(id)) return;
+    profileReviewWrites.add(id);
+    const controls = [...(target.closest('[data-profile-review]')?.querySelectorAll<HTMLButtonElement>('button') || [])];
+    controls.forEach(button => { button.disabled = true; });
+    const identity = frameIdentity;
+    try {
+      await act(target, async () => {
+        try {
+          await send(`manage/profiles/${enc(id)}/${decision}`);
+          if (identity === frameIdentity) notify(tr('审核已处理。', 'Review processed.'));
+        } finally {
+          if (identity === frameIdentity) { await loadManage('profiles'); paint(); }
+        }
+      });
+    } finally { profileReviewWrites.delete(id); controls.forEach(button => { if (button.isConnected) button.disabled = false; }); }
+  }
+  async function reviewBackground(form: Form, event: Event) {
+    const submitter = (event as SubmitEvent).submitter;
+    const decision = submitter instanceof HTMLButtonElement ? submitter.value : '';
+    if (!['approve', 'reject'].includes(decision)) return;
+    const key = `background:${form.dataset.uid}:${form.dataset.image}`;
+    if (profileReviewWrites.has(key)) return;
+    const reason = valueOf(form, 'reason').trim();
+    if (decision === 'reject' && !reason) return invalid(form, fieldOf(form, 'reason'), tr('请填写驳回理由。', 'Give a rejection reason.'));
+    const identity = frameIdentity;
+    const controls = [...form.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input, button')];
+    profileReviewWrites.add(key); controls.forEach(field => { field.disabled = true; });
+    try {
+      await busy(form, tr('正在处理…', 'Processing…'), async () => {
+        try { await send('manage/profile-background', { memberUid: form.dataset.uid, imageId: form.dataset.image, approve: decision === 'approve', reason }); }
+        catch (error) { if (identity === frameIdentity) notify(message(error)); }
+        finally { if (identity === frameIdentity) { await loadManage('profiles'); paint(); } }
+      });
+    } finally { profileReviewWrites.delete(key); controls.forEach(field => { if (field.isConnected) field.disabled = false; }); }
   }
   const earned = (amount?: number) => { if (amount) notify(tr(`+${amount} 星尘`, `+${amount} stardust`)); };
   async function submitConvention(form: Form) {
@@ -1471,6 +1604,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (levelExplorer.action(target)) return;
     if (badgeExplorer.action(target)) return;
     switch (action) {
+      case 'community-profile-remove': void removeProfile(target, kind); return;
+      case 'community-profile-review': void reviewProfile(target); return;
       case 'community-management-board': {
         if (reviewBusy || route().view !== 'manage' || !['queue', 'reports'].includes(route().tab)) return;
         const board = target.dataset.board || '';
@@ -1775,6 +1910,9 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (form.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled) return;
     if (bannerEditor.submit(form)) return;
     const handlers: Record<string, (form: Form) => unknown> = {
+      'profile-signature': item => submitProfile(item, 'signature'), 'profile-avatar': item => submitProfile(item, 'avatar'),
+      'profile-background': item => submitProfile(item, 'background'), 'profile-frame': item => submitProfile(item, 'frame'),
+      'profile-background-review': item => reviewBackground(item, event),
       search: item => search((item.elements.namedItem('q') as HTMLInputElement).value),
       topic: submitTopic, reply: submitReply, 'reply-edit': submitReplyEdit, report: submitReport, delete: submitDelete,
       move: submitMove, retag: submitRetag, redeem: submitRedeem, mute: submitMute, item: submitItem, category: submitCategory, ship: submitShip, reject: submitReject, 'steward-lookup': submitStewardLookup, 'steward-scope': submitStewardScope, 'moderation-contact': submitModerationContact, convention: submitConvention,
@@ -2034,6 +2172,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   };
 
   function clearData(clearWrites = true) {
+    profileReviewWrites.clear();
     activeVisitDone = ''; activeVisitPending = null; activeVisitRetryAt = 0;
     conventionConsent.close();
     convention = null;
@@ -2050,7 +2189,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     levelExplorer.reset();
     badgeExplorer.reset();
     frameIdentity++; frameHighlightsPending.clear(); frameHighlights.clear(); listRequests.clear();
-    summary = null; me = null; moderationContacts = null; checkin = null; bookmarks = null; shop = null; shopMine = null; rank = null; headerKey = '';
+    summary = null; me = null; profile = null; profileWrite = null; moderationContacts = null; checkin = null; bookmarks = null; shop = null; shopMine = null; rank = null; headerKey = '';
     stardusts.clear(); memberPages.clear(); inboxes.clear(); manages.clear(); manageRequests.clear(); lists.clear(); threads.clear(); lastHash = '';
     deleting = null; itemEditing = null; rejecting = null; shippingOrder = null; redeeming = null; delivery = null;
   }
@@ -2062,7 +2201,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     }
     // Existing-content edits and product forms have no independent saved
     // draft. Do not discard them when their write permissions disappear.
-    if (reader && (bannerEditor.dirty() || bannerEditor.state().busy || mounted?.main.querySelector('form[data-community-form="topic"][data-edit], form[data-community-form="reply-edit"], form[data-community-form="item"]'))) {
+    if (route().view === 'profile' && hasUnsavedDraft() || reader && (bannerEditor.dirty() || bannerEditor.state().busy || mounted?.main.querySelector('form[data-community-form="topic"][data-edit], form[data-community-form="reply-edit"], form[data-community-form="item"]'))) {
       notify(tr('请先完成或取消当前编辑，再切换浏览身份。', 'Finish or cancel the current edit before switching perspectives.'));
       return;
     }

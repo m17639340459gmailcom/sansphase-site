@@ -19,13 +19,18 @@ export function purgeCommunityReaderData(db: DatabaseSync, readerId: string, { q
     WHERE id IN reader_cleanup_replies AND topic_id NOT IN reader_cleanup_topics;`);
   const topics = Number(db.prepare('SELECT COUNT(*) AS n FROM reader_cleanup_topics').get()?.n);
   const replies = Number(db.prepare('SELECT COUNT(*) AS n FROM reader_cleanup_replies').get()?.n);
+  // Clear this account's references before removing its private profile uploads.
+  // Other members' approved/pending backgrounds remain durable assets.
+  db.prepare("DELETE FROM community_profile_backgrounds WHERE member_kind='reader' AND member_id=?").run(readerId);
+  db.prepare("DELETE FROM community_profile_background_reviews WHERE member_kind='reader' AND member_id=?").run(readerId);
   // A moderator's upload can be in a surviving banner. Shared site assets stay.
   db.prepare(`INSERT INTO reader_cleanup_images SELECT i.id FROM community_images i
     WHERE ((i.uploader_kind='reader' AND i.uploader_id=? AND
       (i.topic_id IS NULL OR i.topic_id IN reader_cleanup_topics OR i.reply_id IN reader_cleanup_replies))
       OR i.topic_id IN reader_cleanup_topics OR i.reply_id IN reader_cleanup_replies)
     AND NOT EXISTS (SELECT 1 FROM community_shop_items s WHERE s.image=i.id)
-    AND NOT EXISTS (SELECT 1 FROM community_banner_entries b WHERE b.cover=i.id AND b.topic_id NOT IN reader_cleanup_topics)`).run(readerId);
+    AND NOT EXISTS (SELECT 1 FROM community_banner_entries b WHERE b.cover=i.id AND b.topic_id NOT IN reader_cleanup_topics)
+    AND NOT EXISTS (SELECT 1 FROM community_profile_backgrounds p WHERE p.approved_image=i.id OR p.pending_image=i.id)`).run(readerId);
   const images = db.prepare('SELECT id FROM reader_cleanup_images').all() as Array<{ id: string }>;
   // Persist filenames before losing their registry rows. If SQL rolls back, the
   // file cleaner sees those rows and protects the files until a successful retry.

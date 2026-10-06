@@ -8,6 +8,7 @@ import { communityTablesReady, createCommunityStore } from './community-store.ts
 import type { CommunityAuthor } from './community-store.ts';
 import { createCommunityService } from './community-service.ts';
 import type { CommunityViewer, PersonInfo } from './community-service.ts';
+import type { CommunityProfileAccess } from './community-profile-access.ts';
 import { membershipState } from './reader-membership.ts';
 
 type ReaderIdentity = { id: string; nickname: string; vip?: boolean } | null;
@@ -21,6 +22,7 @@ type Options = {
   ownerName: () => Promise<string>;
   authorId: string;
   uidStore: { get: (id: string) => string; readerId: (uid: string) => string | null };
+  profile?: CommunityProfileAccess;
 };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -115,7 +117,7 @@ export function createCommunityRuntime(options: Options) {
         return { topics: 0, replies: 0, images: 0 };
       } finally { db.close(); }
     },
-    service: createCommunityService({ store, siteOrigin, directory, ownerId: authorId, identify, ...profiles, audit, words: readWords(directory) }),
+    service: createCommunityService({ store, siteOrigin, directory, ownerId: authorId, identify, ...profiles, audit, words: readWords(directory), profile: options.profile }),
     close() { store?.close(); },
   };
 }

@@ -158,14 +158,15 @@ export function createMembers(db: DatabaseSync, convention: Pick<ReturnType<type
     if (next > current.level) notify(member, { type: 'level', text: '升到了新的等级', data: { level: next } }, iso(now));
     return next;
   }
-  function moderationBoards(member: CommunityAuthor): string[] {
-    if (member.kind === 'owner') return [...moderationBoardIds];
-    const current = row(member);
-    if (!current.steward) return [];
+  function moderationScope(current: MemberRow | undefined): string[] {
+    if (!current?.steward) return [];
     if (current.steward_boards === null) return [...moderationBoardIds];
     const stored = parseJson<unknown>(current.steward_boards, null);
     // Damaged scope data must never restore an unrestricted appointment.
     return validModerationBoards(stored) ? orderedModerationBoards(stored) : [];
+  }
+  function moderationBoards(member: CommunityAuthor): string[] {
+    return member.kind === 'owner' ? [...moderationBoardIds] : moderationScope(row(member));
   }
 
   return {
@@ -180,6 +181,9 @@ export function createMembers(db: DatabaseSync, convention: Pick<ReturnType<type
     },
     trustLevel,
     moderationBoards,
+    // Signed reviewer confirmation must not create a member or award a visit.
+    storedModerationBoards: (member: CommunityAuthor) => member.kind === 'owner' ? [...moderationBoardIds]
+      : moderationScope(memberRow.get(member.kind, member.id) as MemberRow | undefined),
     moderationContact(member: CommunityAuthor) {
       if (!moderationBoards(member).length) return null;
       const contact = contactRow.get(member.kind, member.id) as { contact_qq: string | null; contact_email: string | null } | undefined;
@@ -216,6 +220,14 @@ export function createMembers(db: DatabaseSync, convention: Pick<ReturnType<type
     decorations(member: CommunityAuthor) {
       const value = row(member);
       return { frame: value.frame, color: value.name_color, cover: value.cover };
+    },
+    // Main-site frame projections must not create a membership or award a visit.
+    storedDecorations(member: CommunityAuthor) {
+      const value = memberRow.get(member.kind, member.id) as MemberRow | undefined;
+      return value ? { frame: value.frame, color: value.name_color, cover: value.cover } : null;
+    },
+    storedLevel(member: CommunityAuthor) {
+      return (memberRow.get(member.kind, member.id) as MemberRow | undefined)?.level ?? null;
     },
     equip(member: CommunityAuthor, kind: DecorationKind, ref: string | null) {
       if (!(decorationKinds as readonly string[]).includes(kind)) return;

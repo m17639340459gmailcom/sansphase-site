@@ -52,11 +52,11 @@ export const communityTabs = [
 
 export type CommunityView =
   | "landing" | "home" | "boards" | "board" | "checkin" | "shop" | "rank" | "new" | "edit" | "tag" | "bookmarks"
-  | "manage" | "member" | "stardust" | "inbox" | "rules" | "post" | "unknown";
+  | "manage" | "member" | "profile" | "stardust" | "inbox" | "rules" | "post" | "unknown";
 // The second part of #/community/<…>; `u` is a member page.
 const subViews: Record<string, CommunityView> = {
   home: "home", boards: "boards", checkin: "checkin", shop: "shop", rank: "rank", new: "new", edit: "edit", tag: "tag",
-  bookmarks: "bookmarks", manage: "manage", u: "member", stardust: "stardust", inbox: "inbox", rules: "rules",
+  bookmarks: "bookmarks", manage: "manage", u: "member", profile: "profile", stardust: "stardust", inbox: "inbox", rules: "rules",
 };
 // Pages with their own tabs: the tab is the last part of the address; the first is the default.
 export const communityPageTabs = {
@@ -64,7 +64,7 @@ export const communityPageTabs = {
   stardust: ["ledger", "levels", "rules"],
   inbox: ["all", "reply", "thanks", "system"],
   shop: ["all", "look", "card", "digital", "goods", "mine"],
-  manage: ["queue", "reports", "content", "banners", "orders", "items", "stewards", "sanctions", "data", "contact", "convention"],
+  manage: ["queue", "reports", "profiles", "content", "banners", "orders", "items", "stewards", "sanctions", "data", "contact", "convention"],
 } as const;
 type TabbedView = keyof typeof communityPageTabs;
 const tabbed = (view: CommunityView): view is TabbedView => view in communityPageTabs;
@@ -718,7 +718,7 @@ export function communityLandingHTML(t: Translate, icons: Icons, { entryState }:
     ? `<a class="community-enter" href="${communityHomeHref}">${icons.message || ""}<span>${t("进入社区", "Enter the community")}</span></a>`
     : `<button type="button" class="community-enter" data-community-entry-enter${busy ? ' disabled aria-busy="true"' : ''}>${icons.message || ""}<span aria-live="polite">${busy ? t("正在进入…", "Opening…") : entryState === 'error' ? t("暂时无法进入，点击重试", "Could not open, try again") : t("进入社区", "Enter the community")}</span></button>`;
   return `<section class="page community-landing" data-community="landing">`
-    + `<div class="community-orbits" aria-hidden="true"><i></i><i></i><i></i></div>`
+    + `<div class="community-orbits" aria-hidden="true"></div>`
     + `<div class="eyebrow">COMMUNITY · ${t("社区交流", "Community")}</div>`
     + `<h1>${t("無相社区", "SANSPHASE Community")}</h1>`
     + `<p>${t("聊 AI 学习、AI 创作，以及好用的软件和资源。提问、晒作品、推荐工具，都在这里。", "Talk about learning AI, making things with it, and useful tools: ask, show your work, share what helps.")}</p>`

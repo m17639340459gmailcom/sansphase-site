@@ -12,6 +12,7 @@ export async function publicationFiles(root=resolve('.')) {
   result.push('CONTRIBUTING.md','docs/README.md','docs/CODE-MAP.md','.github/pull_request_template.md');
   result.push('scripts/compose-community-styles.mjs', 'docs/COMMUNITY-LOCAL-INTEGRATION.md', 'docs/COMMUNITY-APPEARANCE.md', 'docs/CHECKIN-SKY-PROMPT.md');
   result.push('scripts/fixtures/community-preview-identity.ts', 'docs/COMMUNITY-PRELAUNCH.md', 'docs/COMMUNITY-BANNERS.md');
+  result.push('scripts/fixtures/community-preview-profile.ts', 'docs/COMMUNITY-PROFILES.md');
   result.push('docs/COMMUNITY-CONVENTION.md', 'docs/COMMUNITY-EXPERIENCE-RULES.md');
   result.push('docs/COMMUNITY-BADGE-RULES.md');
   result.push('docs/COMMUNITY-EXPERIENCE-READINESS.md');

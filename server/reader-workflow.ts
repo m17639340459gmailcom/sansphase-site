@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 type RegistrationInput = { email: string; nickname: string; phone: string; password: string };
 type RegistrationRow = { id: string; email: string; nickname: string; phone: string; password_cipher: string; token_hash: string; failed_attempts: number; created_at: string; expires_at: string };
 type ExpiredRegistrationRow = { id: string; email: string; createdAt: string; expiresAt: string };
-type ProfileKind = 'avatar' | 'signature';
+export type ProfileKind = 'avatar' | 'signature';
 type ProfileRow = { id: string; reader_id: string; kind: ProfileKind; proposed_value: string; created_at: string };
 type CleanupFileRow = { id: string; filename: string; reason: string; created_at: string; last_error: string | null };
 type CleanupAccountRow = { reader_id: string; avatar: string | null; action: string; created_at: string; last_error: string | null };

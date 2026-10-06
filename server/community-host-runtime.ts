@@ -9,8 +9,13 @@ import { createCommunityService } from './community-service.ts';
 import type { PersonInfo } from './community-service.ts';
 import { createIdentityClient, IdentityBridgeError } from './community-identity-protocol.ts';
 import type { IdentityOperation } from './community-identity-protocol.ts';
+import type { ReaderProfileState, ReaderProfileReview, ReaderProfileDecision } from './reader-profile-commands.ts';
+import { readerProfileAvatarBytes } from './reader-profile-commands.ts';
+import type { CommunityProfileAccess } from './community-profile-access.ts';
 import { createCommunityHostStore } from './community-host-store.ts';
 import { createCommunityHostAccess } from './community-host-access.ts';
+import { createCommunityFrameAuthority, createCommunityFrameBridge } from './community-frame-authority.ts';
+import { createCommunityProfileReviewerAuthority } from './community-profile-reviewer.ts';
 
 type BrandProfile = { name: string; signature?: string; bio?: string; avatar?: string; background?: string; socialLinks?: Array<{ label: string; url: string }>; appearance?: Record<string, unknown> };
 export type CommunityHostConfig = { directory: string; siteOrigin: string; mainSiteOrigin: string; bridgeSecret: string; authorId: string; profile?: BrandProfile };
@@ -117,7 +122,10 @@ export function createCommunityHostRuntime(config: CommunityHostConfig, client: 
     if (files.retained) throw failure('Community image cleanup is queued for retry.');
     return { ...result, filesRemoved: files.removed };
   };
-  const access = createCommunityHostAccess({ store: hostStore, client, siteOrigin, mainSiteOrigin, secret: config.bridgeSecret, purge });
+  const frameAuthority = createCommunityFrameAuthority({ store, directory, readerDeleted: id => hostStore.readerDeleted(id) });
+  const profileReviewer = createCommunityProfileReviewerAuthority({ store, ownerId: authorId, readerDeleted: id => hostStore.readerDeleted(id) });
+  const frameBridge = createCommunityFrameBridge({ authority: frameAuthority, secret: config.bridgeSecret, consumeNonce: (nonce, expiresAt) => hostStore.consumeNonce(nonce, expiresAt), profileReviewer });
+  const access = createCommunityHostAccess({ store: hostStore, client, siteOrigin, mainSiteOrigin, secret: config.bridgeSecret, purge, decorations: frameBridge.handle });
   const current = (req?: IncomingMessage) => {
     const value = access.current(req);
     if (!value) throw new IdentityBridgeError('请从主站重新进入社区。', 401);
@@ -135,6 +143,32 @@ export function createCommunityHostRuntime(config: CommunityHostConfig, client: 
     return reader && { ...reader, avatar: reader.avatar && reader.uid ? `/api/community/avatar/${encodeURIComponent(reader.uid)}.webp` : null };
   };
   const authorIdentity = async (req: IncomingMessage) => current(req).identity.author;
+  const profileState = (value: ReaderProfileState, req: IncomingMessage) => {
+    const actor = current(req).identity.viewer;
+    if (actor.kind !== 'reader' || !value || value.id !== actor.id || typeof value.signature !== 'string'
+      || typeof value.nickname !== 'string' || typeof value.pendingAvatar !== 'boolean' || value.pendingSignature !== null && typeof value.pendingSignature !== 'string')
+      throw failure('Profile authority returned an invalid projection.');
+    return value;
+  };
+  const profileImage = (value: {base64:string}, req: IncomingMessage) => {
+    current(req);
+    if (!value || typeof value.base64 !== 'string' || value.base64.length > Math.ceil(readerProfileAvatarBytes / 3) * 4 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value.base64)) throw failure('Pending avatar data is invalid.');
+    const bytes = Buffer.from(value.base64, 'base64');
+    if (bytes.length > readerProfileAvatarBytes || bytes.toString('base64') !== value.base64) throw failure('Pending avatar data is invalid.');
+    return bytes;
+  };
+  const profile: CommunityProfileAccess = {
+    state: async req => profileState(await request<ReaderProfileState>('profile', {}), req),
+    signature: async (req, signature) => profileState(await request<ReaderProfileState>('profile-signature', { signature }), req),
+    avatar: async (req, image) => profileState(await request<ReaderProfileState>('profile-avatar', { base64: image.toString('base64') }), req),
+    removeAvatar: async req => profileState(await request<ReaderProfileState>('profile-avatar-remove', {}), req),
+    pendingAvatar: async req => profileImage(await request<{base64:string}>('profile-avatar-pending', {}), req),
+    reviews: async (req, moderation, check) => { current(req); check(); const result = await request<ReaderProfileReview[]>('profile-reviews', { moderation }); check(); return result; },
+    reviewImage: async (req, id, moderation, check) => { current(req); check(); const result = await request<{base64:string}>('profile-review-image', { id, moderation }); check(); return profileImage(result, req); },
+    // Main checks the live HK appointment at its commit boundary. Once that
+    // decision succeeds, a later role change cannot turn its receipt into 403.
+    review: async (req, id, decision, moderation, check) => { current(req); check(); return request<ReaderProfileDecision>('profile-review', { id, decision, moderation }); },
+  };
   const sessionHandler = (kind: 'reader' | 'author') => async (req: IncomingMessage, res: ServerResponse) => {
     if (req.method === 'GET' && new URL(req.url || '', siteOrigin).pathname === `/api/${kind}/session`) {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'private, no-store' });
@@ -144,7 +178,7 @@ export function createCommunityHostRuntime(config: CommunityHostConfig, client: 
     res.end(JSON.stringify({ error: '账号管理请前往主站。' }));
   };
   const communityService = createCommunityService({
-    store, directory, siteOrigin, ownerId: authorId,
+    store, directory, siteOrigin, ownerId: authorId, profile,
     identify: async req => current(req).identity.viewer,
     assertActive: req => { current(req); },
     people: async (authors: CommunityAuthor[]) => {

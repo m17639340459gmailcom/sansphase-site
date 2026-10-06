@@ -9,8 +9,9 @@ import { reviewTopics } from './community-review.ts';
 import { communityBadgeFamilies, communityBadgeTiers } from '../src/community-badge-policy.ts';
 import type { BadgeFamilyId, BadgeTier } from '../src/community-badge-policy.ts';
 import type { BadgeReview, BadgeSource } from './community-badges.ts';
+import { communityProfileReviews } from './community-routes-profile.ts';
 
-const tabs = ['queue', 'reports', 'content', 'orders', 'items', 'stewards', 'sanctions', 'data', 'banners', 'contact', 'convention'] as const;
+const tabs = ['queue', 'reports', 'content', 'orders', 'items', 'stewards', 'sanctions', 'data', 'banners', 'contact', 'convention', 'profiles'] as const;
 // The owner manages the shop, orders and steward appointments; stewards handle moderation.
 const ownerTabs = new Set(['orders', 'items', 'stewards', 'convention']);
 const whole = (value: unknown, label: string, min: number, max: number) => {
@@ -122,8 +123,11 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
       || reports.some(report => !(report.target.kind === 'reply' ? stillModeratesReply(report.target.id) : stillModeratesTopic(report.target.id)))))
       throw fail('内容所属板块发生变化，请重新打开管理页面。', 403);
     const activity = live.activity(Date.now(), ctx.owner ? undefined : ctx.moderationBoards);
+    const profileReviews = tab === 'profiles' ? await communityProfileReviews(ctx) : undefined;
+    if (!ctx.mod) throw fail('管理权限发生变化，请重新打开管理页面。', 403);
     ctx.send({
       tab, owner: ctx.owner, moderationBoards: ctx.moderationBoards,
+      ...(profileReviews || {}),
       ...(tab === 'stewards' ? { stewards: stewards.map(member => ctx.person(member, map)) } : {}),
       ...(tab === 'banners' ? { banners: live.banners.managed({ actor: ctx.me, browsingAsReader: ctx.browsingAsReader, canSeeBoard: ctx.canSeeBoard }) } : {}),
       ...(tab === 'convention' ? { convention: live.convention.current() } : {}),

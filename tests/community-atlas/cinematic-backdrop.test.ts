@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createCinematicBackdrop, type CinematicImageResource } from "../../src/community-atlas/cinematic-backdrop.ts";
+import * as cinematic from "../../src/community-atlas/cinematic-backdrop.ts";
 import { atlasSourceCrop } from "../../src/community-atlas/atlas-camera.ts";
 
 type Gradient = { stops: [number, string][]; addColorStop(at: number, color: string): void };
@@ -65,6 +66,86 @@ function imageFixture(ready = false) {
     cancelled: () => cancelled,
   };
 }
+
+test("image preparation waits for decoding, detaches its request and rejects unavailable resources", async () => {
+  assert.equal(typeof cinematic.prepareCinematicImage, "function");
+  const asset = imageFixture();
+  let decoded!: () => void;
+  let decoding = 0, complete = false;
+  asset.resource.decode = () => { decoding++; return new Promise<void>(resolve => { decoded = resolve; }); };
+  const preparing = cinematic.prepareCinematicImage(asset.resource, 1000).then(image => { complete = true; return image; });
+  assert.equal(asset.urls.length, 1);
+  asset.loaded(); await Promise.resolve();
+  assert.equal(decoding, 1); assert.equal(complete, false);
+  decoded(); assert.equal(await preparing, asset.resource);
+  assert.equal(asset.listenerCount(), 0); assert.equal(asset.cancelled(), 1);
+  const failed = imageFixture();
+  const failing = cinematic.prepareCinematicImage(failed.resource, 1000);
+  failed.failed(); await assert.rejects(failing, /background|image|sky/i);
+  assert.equal(failed.listenerCount(), 0);
+});
+
+test("image preparation times out and a stale load cannot restart decoding", async () => {
+  assert.equal(typeof cinematic.prepareCinematicImage, "function");
+  const asset = imageFixture();
+  let decodes = 0;
+  asset.resource.decode = async () => { decodes++; };
+  const preparing = cinematic.prepareCinematicImage(asset.resource, 5);
+  const late = asset.pendingLoad()!;
+  await assert.rejects(preparing, /timed out/i);
+  assert.equal(asset.cancelled(), 1); assert.equal(asset.listenerCount(), 0);
+  late(); await Promise.resolve(); assert.equal(decodes, 0);
+});
+
+test("the browser plate is decoded once and reused intact for the first paint of every mount", async (t) => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, "Image");
+  const images: BrowserImage[] = [];
+  class BrowserImage extends EventTarget {
+    decoding = "";
+    complete = false;
+    naturalWidth = 0;
+    naturalHeight = 0;
+    src = "";
+    decodes = 0;
+    released = 0;
+    decoded!: () => void;
+    constructor() { super(); images.push(this); }
+    decode() { this.decodes++; return new Promise<void>(resolve => { this.decoded = resolve; }); }
+    removeAttribute(name: string) { if (name === "src") { this.src = ""; this.released++; } }
+    loaded() { this.complete = true; this.naturalWidth = 1672; this.naturalHeight = 941; this.dispatchEvent(new Event("load")); }
+  }
+  Object.defineProperty(globalThis, "Image", { configurable: true, value: BrowserImage });
+  t.after(() => { if (original) Object.defineProperty(globalThis, "Image", original); else Reflect.deleteProperty(globalThis, "Image"); });
+  const firstRequest = cinematic.prepareCinematicBackdrop();
+  await Promise.resolve();
+  images[0]!.dispatchEvent(new Event("error"));
+  await assert.rejects(firstRequest);
+  const preparing = cinematic.prepareCinematicBackdrop();
+  assert.equal(cinematic.prepareCinematicBackdrop(), preparing, "concurrent renders share the pending request");
+  await Promise.resolve();
+  assert.equal(images.length, 2, "a failed request is retried, without duplicating the pending image");
+  const image = images[1]!;
+  image.loaded(); await Promise.resolve();
+  const drawing = recorder();
+  assert.throws(() => createCinematicBackdrop(drawing.ctx), /prepared/, "the page cannot paint a substitute while decode is pending");
+  image.decoded(); await preparing;
+  for (let mount = 0; mount < 2; mount++) {
+    await cinematic.prepareCinematicBackdrop();
+    const scene = createCinematicBackdrop(drawing.ctx, { motionFactory: () => null });
+    drawing.clear(); scene.paint(800, 600, 0);
+    assert.ok(drawing.paints.some(paint => paint.kind === "image" && paint.source === image as unknown as CanvasImageSource));
+    assert.ok(drawing.paints.filter(paint => paint.kind === "star").length < 100, "the generated fine-star loading layer never paints before the approved plate");
+    scene.dispose();
+    assert.equal(image.src, "/assets/community/atlas-space.webp");
+    assert.equal(image.released, 0, "disposal only releases each renderer, keeping the decoded shared plate");
+  }
+  assert.equal(images.length, 2); assert.equal(image.decodes, 1);
+  const failing = createCinematicBackdrop(drawing.ctx, { motionFactory: () => null });
+  drawing.failImage(image as unknown as CanvasImageSource);
+  assert.throws(() => failing.paint(800, 600, 0), /painted/);
+  assert.equal(drawing.depth(), 0, "a painting failure still restores canvas state for explicit fallback handling");
+  failing.dispose();
+});
 
 test("loading and unavailable images retain a star field without blocking existing content", () => {
   const drawing = recorder(), asset = imageFixture();

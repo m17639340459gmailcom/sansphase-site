@@ -179,6 +179,17 @@ CREATE INDEX community_bookmarks_member_idx ON community_bookmarks(member_kind, 
   deleted_at TEXT
 );
 CREATE INDEX community_images_topic_idx ON community_images(topic_id, deleted_at, position);`,
+  community_profile_backgrounds: `CREATE TABLE community_profile_backgrounds (
+  member_kind TEXT NOT NULL CHECK(member_kind='reader'), member_id TEXT NOT NULL,
+  approved_image TEXT REFERENCES community_images(id), pending_image TEXT REFERENCES community_images(id),
+  pending_at TEXT, updated_at TEXT NOT NULL,
+  PRIMARY KEY(member_kind,member_id)
+);`,
+  community_profile_background_reviews: `CREATE TABLE community_profile_background_reviews (
+  id TEXT PRIMARY KEY, member_kind TEXT NOT NULL CHECK(member_kind='reader'), member_id TEXT NOT NULL,
+  image_id TEXT NOT NULL, approved INTEGER NOT NULL CHECK(approved IN (0,1)), reason TEXT NOT NULL,
+  by_kind TEXT NOT NULL CHECK(by_kind='owner'), by_id TEXT NOT NULL, created_at TEXT NOT NULL
+);`,
   community_reports: `CREATE TABLE community_reports (
   id TEXT PRIMARY KEY,
   target_kind TEXT NOT NULL CHECK(target_kind IN ('topic','reply')),
@@ -425,7 +436,7 @@ const columns: Array<[string, string, string]> = [
   ['community_replies', 'hidden_at', 'TEXT'],
   // Reply attachments retain their parent topic for access checks and cleanup.
   ['community_images', 'reply_id', 'TEXT'],
-  ['community_images', 'purpose', "TEXT NOT NULL DEFAULT 'content' CHECK (purpose IN ('content', 'shop', 'banner'))"],
+  ['community_images', 'purpose', "TEXT NOT NULL DEFAULT 'content' CHECK (purpose IN ('content', 'shop', 'banner', 'profile'))"],
   ['community_images', 'banner_scope', 'TEXT'],
   ['community_images', 'frame_ready', 'INTEGER NOT NULL DEFAULT 0'],
   ['community_shop_items', 'image', 'TEXT'],
@@ -458,7 +469,7 @@ const missingParts = (db: DatabaseSync) => {
   const columnsMissing = columns.filter(([table, column]) => has(table)
     && !(db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).some(row => row.name === column));
   const imageSQL = (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='community_images'").get() as { sql: string } | undefined)?.sql || '';
-  const imagesPurposeUpgrade = /CHECK\s*\(\s*purpose\s+IN\s*\(\s*'content'\s*,\s*'shop'\s*\)\s*\)/i.test(imageSQL);
+  const imagesPurposeUpgrade = /CHECK\s*\(\s*purpose\s+IN\s*\(\s*'content'\s*,\s*'shop'\s*(?:,\s*'banner'\s*)?\)\s*\)/i.test(imageSQL);
   const bannerSQL = (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='community_banner_entries'").get() as { sql: string } | undefined)?.sql || '';
   const bannerCapacityUpgrade = /\bposition\s*<\s*4\b/i.test(bannerSQL);
   return { tablesMissing, columnsMissing, imagesPurposeUpgrade, bannerCapacityUpgrade };
@@ -474,12 +485,12 @@ export const communitySchemaReady = (db: DatabaseSync) => {
 function extendImagePurpose(db: DatabaseSync) {
   const source = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='community_images'").get() as { sql: string };
   const objects = db.prepare("SELECT sql FROM sqlite_master WHERE tbl_name='community_images' AND type IN ('index','trigger') AND sql IS NOT NULL").all() as Array<{ sql: string }>;
-  const sql = source.sql.replace(/CREATE TABLE\s+["`\[]?community_images["`\]]?/i, 'CREATE TABLE community_images_banner_upgrade')
-    .replace(/CHECK\s*\(\s*purpose\s+IN\s*\(\s*'content'\s*,\s*'shop'\s*\)\s*\)/i, "CHECK(purpose IN ('content','shop','banner'))");
-  if (sql === source.sql || !sql.includes('community_images_banner_upgrade')) throw Error('Image schema cannot be upgraded safely.');
+  const sql = source.sql.replace(/CREATE TABLE\s+["`\[]?community_images["`\]]?/i, 'CREATE TABLE community_images_purpose_upgrade')
+    .replace(/CHECK\s*\(\s*purpose\s+IN\s*\(\s*'content'\s*,\s*'shop'\s*(?:,\s*'banner'\s*)?\)\s*\)/i, "CHECK(purpose IN ('content','shop','banner','profile'))");
+  if (sql === source.sql || !sql.includes('community_images_purpose_upgrade')) throw Error('Image schema cannot be upgraded safely.');
   const names = (db.prepare('PRAGMA table_info(community_images)').all() as Array<{ name: string }>).map(column => `"${column.name.replaceAll('"', '""')}"`).join(',');
   db.exec(sql);
-  db.exec(`INSERT INTO community_images_banner_upgrade(${names}) SELECT ${names} FROM community_images; DROP TABLE community_images; ALTER TABLE community_images_banner_upgrade RENAME TO community_images;`);
+  db.exec(`INSERT INTO community_images_purpose_upgrade(${names}) SELECT ${names} FROM community_images; DROP TABLE community_images; ALTER TABLE community_images_purpose_upgrade RENAME TO community_images;`);
   for (const object of objects) db.exec(object.sql);
 }
 

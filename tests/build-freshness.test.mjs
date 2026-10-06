@@ -44,6 +44,8 @@ const canonicalFiles = [
   "community-growth.mjs",
   "community-pages.mjs",
   "community-ui.mjs",
+  "community-profile.mjs",
+  "reader-frames.mjs",
   "community-level-explorer.mjs",
   "community-growth-art.mjs",
 ];

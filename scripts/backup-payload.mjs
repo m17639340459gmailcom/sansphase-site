@@ -39,6 +39,8 @@ try {
       references.push('EXISTS (SELECT 1 FROM community_shop_items item WHERE item.image = i.id)');
     if (snapshot.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='community_banner_entries'").get())
       references.push('EXISTS (SELECT 1 FROM community_banner_entries banner WHERE banner.cover = i.id)');
+    if (snapshot.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='community_profile_backgrounds'").get())
+      references.push('EXISTS (SELECT 1 FROM community_profile_backgrounds profile WHERE profile.approved_image = i.id OR profile.pending_image = i.id)');
     communityImages = snapshot.prepare(`SELECT i.id, CASE WHEN ${references.join(' OR ')} THEN 1 ELSE 0 END AS referenced FROM community_images i`).all();
   }
 } finally {

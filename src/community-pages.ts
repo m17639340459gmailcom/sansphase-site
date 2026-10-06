@@ -13,6 +13,8 @@ import {
 } from './community-rules.mjs';
 import type { ShopItem, ShopCategory } from './community-rules.ts';
 import { communityManagementShellHTML } from './community-management.mjs';
+import { communityProfileReviewsHTML, profileImageURL } from './community-profile.mjs';
+import type { CommunityProfileImage, CommunityProfileReview, CommunityBackgroundReview } from './community-profile.ts';
 import { communityStewardsHTML } from './community-stewards.mjs';
 import { communityShopEditorHTML, communityCategoryEditorHTML } from './community-shop-editor.mjs';
 import { communityDeletePanelHTML } from './community-post.mjs';
@@ -70,6 +72,7 @@ export type CommunityRank = {
 };
 export type CommunityMemberReply = { id: string; topicId: string; topicTitle: string; board: string; body: string; createdAt: string; likes: number; images?: { id: string; width: number; height: number }[] };
 export type CommunityMember = {
+  background?: CommunityProfileImage | null;
   badgeState?: CommunityBadgeState;
   person: CommunityPerson; bio: string; joinedAt: string | null; cover: string | null; streak: number;
   stats: { topics: number; replies: number; likes: number; accepted: number; featured: number };
@@ -94,6 +97,8 @@ export type CommunityGoodsOrder = CommunityOrder & { member: CommunityPerson; sh
 export type CommunityManagedItem = ShopItem & { active: boolean; delivery: string };
 export type CommunitySanction = { id: string; member: CommunityPerson; days: number; reason: string; until: string; createdAt: string; state?: 'active' | 'expired' | 'lifted'; active?: boolean; liftedAt?: string | null };
 export type CommunityManage = {
+  profiles?: CommunityProfileReview[];
+  backgrounds?: CommunityBackgroundReview[];
   banners?: CommunityBannerConfig[];
   moderationBoards?: string[];
   categories?: ShopCategory[];
@@ -454,7 +459,7 @@ export function communityMemberHTML({ member, me = null, muting = false, badgeSe
   else if (data.tab === "bookmarks") body = data.bookmarks.length ? communityTopicsHTML(data.bookmarks, common, { showAuthor: false }) : emptyHTML(common, t("还没有收藏", "No bookmarks yet"), t("在帖子下面点“收藏”，就会出现在这里。", "Use “Bookmark” under a post to keep it here."));
   else body = data.topics.length ? communityTopicsHTML(data.topics, common, { showAuthor: false }) : emptyHTML(common, t("还没有发过主题", "No topics yet"));
   const actions = [
-    data.self ? `<a class="community-button is-small" href="#/account" data-reader-return>${icons.pen || ""}${t("编辑资料", "Edit profile")}</a>` : "",
+    data.self ? `<a class="community-button is-small" href="#/community/profile">${icons.pen || ""}${t("编辑资料", "Edit profile")}</a>` : "",
     !data.self && me && person.role === "reader" ? `<button type="button" class="community-button is-small${data.following ? "" : " is-gold"}" data-action="community-follow" data-uid="${esc(uid)}" aria-pressed="${data.following}">${data.following ? t("已关注", "Following") : t("关注", "Follow")}</button>` : "",
     data.canMute && !data.muted ? `<button type="button" class="community-button is-small" data-action="community-mute" data-uid="${esc(uid)}">${icons.ban || ""}${t("禁言", "Mute")}</button>` : "",
     data.canAppoint ? `<a class="community-button is-small is-line-gold" href="${manageHref('stewards')}">${icons.shield || ""}<span>${data.steward ? t('调整版主负责板块', 'Edit moderator boards') : t('选择版主负责板块', 'Assign moderator boards')}</span></a>${data.steward ? `<button type="button" class="community-button is-small" data-action="community-steward" data-uid="${esc(uid)}" data-on="false"><span>${t('撤销版主', 'Remove moderator')}</span></button>` : ''}` : "",
@@ -468,9 +473,10 @@ export function communityMemberHTML({ member, me = null, muting = false, badgeSe
     + (me?.mod ? `<a href="${manageHref()}"><span>${icons.shield || ""}${t("社区管理", "Moderation")}</span><b>${t("进入", "Open")}</b></a>` : "")
     + `</div>` : "";
   const cover = data.cover && /^[a-z]+$/.test(data.cover) ? ` is-cover-${data.cover}` : "";
+  const background = profileImageURL(data.background?.url);
   const hue = [...person.name].reduce((sum, char) => sum + (char.codePointAt(0) || 0), 0) % 360;
   return `<section class="page community-page community-member" data-community="member" data-tab="${esc(data.tab)}">`
-    + `<header class="community-m-hero community-rv" style="--i:0;--h:${hue}"><div class="community-m-intro"><div class="community-m-cover${cover}" aria-hidden="true"><i></i><i></i></div>`
+    + `<header class="community-m-hero community-rv" style="--i:0;--h:${hue}"><div class="community-m-intro"><div class="community-m-cover${background ? '' : cover}" aria-hidden="true">${background ? `<img src="${esc(background)}" alt="" decoding="async">` : '<i></i><i></i>'}</div>`
     + `<div class="community-m-id">${avatarHTML(person, common, "xl", false)}<div class="community-m-name">${levelMarksHTML(person, common, true)}<h1>${nameLabelHTML(person, common, false)}</h1><div class="community-m-tags">${roleChipHTML(person, common)}${person.uid && person.showUid ? `<span class="community-muted is-mono">UID ${esc(person.uid)}</span>` : ""}</div>`
     + (data.bio ? `<p>${esc(data.bio)}</p>` : "") + `<p class="community-muted">${days ? t(`加入 ${days} 天`, `Joined ${days} days`) : ""}${days && data.streak ? " · " : ""}${data.streak ? t(`连签 ${data.streak} 天`, `${data.streak}-day streak`) : ""}</p></div>`
     + `<div class="community-m-acts">${actions}</div></div></div>`
@@ -656,6 +662,7 @@ export function communityManageHTML({ manage, tab, itemEditing = null, shippingO
   const kpis = `<dl class="community-kpis community-rv" style="--i:1">${taskKpi('queue', t('待审', 'Queue'), data?.counts.queue)}${taskKpi('reports', t('待处理举报', 'Open reports'), data?.counts.reports)}<div><dt>${t("24 小时新主题", "Topics · 24 h")}</dt><dd>${data?.kpis.topics24h ?? '—'}</dd></div><div><dt>${t("24 小时回复", "Replies · 24 h")}</dt><dd>${data?.kpis.replies24h ?? '—'}</dd></div></dl>`;
   const all: Array<[string, string, string, number?]> = !mayManage ? [] : [
     ["review", manageHref(), t("内容审核", "Content review"), data ? data.counts.queue + data.counts.reports : undefined],
+    ["profiles", manageHref("profiles"), t("资料审核", "Profile review")],
     ["content", manageHref("content"), t("帖子管理", "Posts")],
     ["banners", manageHref("banners"), t("横幅设置", "Banners")],
     ...(owner ? [["orders", manageHref("orders"), t("兑换发货", "Orders"), data?.counts.orders], ["items", manageHref("items"), t("兑换所上架", "Shop items")], ["stewards", manageHref("stewards"), t("版主管理", "Moderators")]] as Array<[string, string, string, number?]> : []),
@@ -673,7 +680,9 @@ export function communityManageHTML({ manage, tab, itemEditing = null, shippingO
   const matchesBoard = (value: string | null | undefined) => !board || value === board;
   const boardFilter = tab === 'queue' || tab === 'reports' ? `<h2 class="community-subtitle">${tab === 'queue' ? t('待审内容', 'Review queue') : t('举报处理', 'Reports')}</h2><div class="community-management-filter" role="group" aria-label="${t('按板块筛选', 'Filter by board')}"><span>${t('板块', 'Board')}</span>${[['', data.owner ? t('全部板块', 'All boards') : t('我负责的板块', 'My boards')], ...allowedBoards.map(item => [item.id, t(item.zh, item.en)])].map(([id, label]) => `<button type="button" class="community-button is-small" data-action="community-management-board" data-board="${id}" aria-pressed="${board === id}">${label}</button>`).join('')}</div>` : '';
   let body = "";
-  if (tab === 'contact') {
+  if (tab === 'profiles') {
+    body = communityProfileReviewsHTML(data.profiles || [], data.backgrounds || [], data.owner, common);
+  } else if (tab === 'contact') {
     body = me && (me.owner || me.mod) && !me.management?.browsingAsReader ? moderationContactFormHTML(me, common) : communityStatusHTML({ state: 'loading' }, common);
   } else if (tab === 'convention') {
     body = data.owner ? conventionFormHTML(convention, common) : emptyHTML(common, t('只有作者可以修改公约。', 'Only the owner can edit the convention.'));

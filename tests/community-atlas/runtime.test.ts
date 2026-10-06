@@ -241,6 +241,25 @@ function fixture(t: TestContext, initiallyReduced = false, orbit = "astral-const
   };
 }
 
+test("the approved atlas paints its complete first frame before mount returns", (t) => {
+  const view = fixture(t, false, "astral-constellation", false, "atlas");
+  assert.equal(view.paints.length, 1, "a decoded sky must not wait for a later animation callback to appear");
+  assert.deepEqual(view.paintOrder, ["constellation", "backdrop"]);
+  assert.equal(view.backdropPaints.length, 1);
+  assert.equal(view.backdropPaints[0]!.time, 0);
+  assert.equal(view.queued(), 1, "one existing clock continues after the synchronous first frame");
+});
+
+test("font and viewport remeasurement keep an immediately painted atlas instead of clearing it until RAF", async (t) => {
+  const view = fixture(t, false, "astral-constellation", false, "atlas");
+  await Promise.resolve();
+  const before = view.paints.length;
+  view.window.dispatchEvent(new view.window.Event("resize"));
+  assert.ok(view.paints.length > before, "resizing the canvas replaces its pixels synchronously");
+  assert.equal(view.paintOrder.at(-1), "backdrop");
+  assert.equal(view.queued(), 1);
+});
+
 test("landing mounts no preview controls or status in normal and reduced-motion modes", (t) => {
   for (const reduced of [false, true]) {
     const view = fixture(t, reduced, "astral-constellation", false, "atlas");
@@ -258,7 +277,7 @@ test("asynchronous render failure notifies once and cannot restart through lifec
   view.step();
   view.failPaint();
   view.step();
-  assert.equal(view.paintAttempts(), 2);
+  assert.equal(view.paintAttempts(), 3, "the synchronous first frame precedes the successful and failed scheduled frames");
   assert.equal(view.renderErrors(), 1);
   assert.equal(view.queued(), 0);
   view.readyBackdrop();
@@ -268,7 +287,7 @@ test("asynchronous render failure notifies once and cannot restart through lifec
   view.window.dispatchEvent(new view.window.Event("resize"));
   view.pointer("pointermove", 700, 210);
   view.step(5000);
-  assert.equal(view.paintAttempts(), 2);
+  assert.equal(view.paintAttempts(), 3);
   assert.equal(view.renderErrors(), 1);
   assert.equal(view.queued(), 0);
   view.dispose(); view.dispose();
@@ -637,7 +656,7 @@ test("only atlas constructs a backdrop, after constellation clearing and behind 
   assert.equal(original.paints.at(-1)!.state.scene, undefined);
   const atlas = fixture(t, false, "original", true, "atlas"); atlas.step();
   assert.equal(atlas.backdropCreated(), 1);
-  assert.deepEqual(atlas.paintOrder, ["constellation", "backdrop"]);
+  assert.deepEqual(atlas.paintOrder, ["constellation", "backdrop", "constellation", "backdrop"]);
   const frame = atlas.backdropPaints.at(-1)!;
   assert.equal(frame.mode, "destination-over");
   assert.equal(frame.width, 800); assert.equal(frame.height, 700);
@@ -688,10 +707,12 @@ test("slow frames retain real active sky time while interaction deltas stay boun
 
 test("frame throttling retains elapsed time until the next actual paint", (t) => {
   const view = fixture(t, false, "astral-constellation", false, "atlas");
+  assert.equal(view.paints.length, 1, "the first frame already exists at mount");
   view.step(17); assert.equal(view.paints.length, 1);
-  view.step(17); assert.equal(view.paints.length, 1, "the 30fps ceiling still skips the intermediate callback");
   view.step(17); assert.equal(view.paints.length, 2);
-  assert.ok(Math.abs(view.paints.at(-1)!.state.time - .051) < 1e-9);
+  view.step(17); assert.equal(view.paints.length, 2);
+  view.step(17); assert.equal(view.paints.length, 3, "the 30fps ceiling still skips intermediate callbacks after the immediate first frame");
+  assert.ok(Math.abs(view.paints.at(-1)!.state.time - .068) < 1e-9);
   assert.equal(view.paints.at(-1)!.state.deltaSeconds, .034);
   assert.equal(view.backdropPaints.at(-1)!.time, view.paints.at(-1)!.state.time);
 });

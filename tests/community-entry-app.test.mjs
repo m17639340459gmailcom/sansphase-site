@@ -17,7 +17,7 @@ function setup(identity = true) {
   const config = { communityDestination: 'https://community.sansphase.com', communityEnabled: false, reader: identity ? { nickname: '读者' } : null, author: null };
   const calls = [], navigations = [], fades = [], rendered = [];
   let status = 200;
-  const context = { siteContent: config, parseRoute, communityHostRoute, communityEntryDestination, location: { hash: '#/community', pathname: '/', search: '', assign: url => navigations.push(url) }, communityOnly: () => config.communityOnly === true, communityEnabled: () => config.communityEnabled === true, renderGeneration: 0, contentReader: { cancel() {} }, loadedContentKey: '', remotePage: null, document: dom.window.document, communityStyleReady: false, ensureRouteStyle: async () => {}, history: { replaceState: (_state, _title, path) => { context.location.hash = path.slice(path.indexOf('#')); } },
+  const context = { siteContent: config, parseRoute, communityHostRoute, communityEntryDestination, location: { hash: '#/community', pathname: '/', search: '', assign: url => navigations.push(url) }, communityOnly: () => config.communityOnly === true, communityEnabled: () => config.communityEnabled === true, renderGeneration: 0, contentReader: { cancel() {} }, loadedContentKey: '', remotePage: null, document: dom.window.document, communityStyleReady: false, ensureRouteStyle: async () => {}, prepareCommunityLanding: async () => {}, history: { replaceState: (_state, _title, path) => { context.location.hash = path.slice(path.indexOf('#')); } },
     renderView(options) {
       rendered.push(options);
       dom.window.document.querySelector('main').innerHTML = options.contentStatus === 'auth' ? readerGate() : config.communityDestination ? communityLandingHTML(zh => zh, {}, { entryState: context.communityEntry.state() }) : '<section data-content-state="not-open">社区尚未开放</section>';
@@ -29,6 +29,86 @@ function setup(identity = true) {
   return { context, dom, calls, navigations, fades, rendered, config, status: value => { status = value; }, close: () => dom.window.close() };
 }
 const turn = () => new Promise(resolve => setTimeout(resolve, 0));
+
+test('the introduction commits once after its actual sky resource preparation, without painting an intermediate landing', async () => {
+  const s = setup();
+  let ready;
+  s.context.prepareCommunityLanding = () => new Promise(resolve => { ready = resolve; });
+  s.dom.window.document.querySelector('main').innerHTML = '<section data-previous-page>之前的页面</section>';
+  try {
+    const rendering = s.context.render(); await turn();
+    assert.equal(s.rendered.length, 0, 'CSS readiness alone must not commit a sky that is still loading');
+    assert.ok(s.dom.window.document.querySelector('[data-previous-page]'));
+    assert.equal(s.dom.window.document.querySelector('[data-community="landing"]'), null);
+    ready(); await rendering;
+    assert.equal(s.rendered.length, 1);
+    assert.ok(s.dom.window.document.querySelector('[data-community="landing"]'));
+    assert.equal(s.dom.window.document.querySelector('.community-orbits i'), null, 'the retired three-ring layer is not present in the current markup');
+    assert.equal(s.calls.length, 0);
+  } finally { s.close(); }
+});
+
+test('late sky preparation cannot commit after a newer route cancelled the introduction', async () => {
+  const s = setup();
+  let ready;
+  s.context.prepareCommunityLanding = () => new Promise(resolve => { ready = resolve; });
+  try {
+    const rendering = s.context.render(); await turn();
+    delete s.config.communityDestination;
+    await s.context.render();
+    assert.ok(s.dom.window.document.querySelector('[data-content-state="not-open"]'));
+    const count = s.rendered.length;
+    ready(); await rendering;
+    assert.equal(s.rendered.length, count);
+    assert.equal(s.dom.window.document.querySelector('[data-community="landing"]'), null);
+  } finally { s.close(); }
+});
+
+test('an unavailable landing bundle renders the existing explicit retry state instead of a substitute sky', async () => {
+  const s = setup();
+  s.context.prepareCommunityLanding = async () => { throw new Error('bundle unavailable'); };
+  try {
+    await s.context.render();
+    assert.equal(s.rendered.length, 1);
+    assert.equal(s.rendered[0].contentStatus, 'error');
+    assert.equal(s.calls.length, 0);
+  } finally { s.close(); }
+});
+
+test('a failed community stylesheet keeps readiness false and a later retry prepares the complete landing', async () => {
+  const s = setup();
+  let styles = 0;
+  s.context.ensureRouteStyle = async () => { if (++styles === 1) throw new Error('CSS unavailable'); };
+  try {
+    await s.context.render();
+    assert.equal(s.context.communityStyleReady, false);
+    assert.equal(s.rendered.at(-1).contentStatus, 'error');
+    await s.context.render();
+    assert.equal(styles, 2);
+    assert.equal(s.context.communityStyleReady, true);
+    assert.equal(s.rendered.at(-1).contentStatus, undefined);
+    assert.ok(s.dom.window.document.querySelector('[data-community="landing"] .community-enter'));
+  } finally { s.close(); }
+});
+
+test('the landing never mounts the forum sky, while regular forum routes retain its shared canvas', () => {
+  const source = app.slice(app.indexOf('let cleanCommunitySky ='), app.indexOf('function closeCommunityAccountOutside'));
+  const end = source.indexOf('\n}', source.indexOf('function syncCommunitySky')) + 2;
+  const dom = new JSDOM('<div id="blog-backdrop"></div>');
+  let mounts = 0, disposed = 0;
+  const context = { document: dom.window.document, window: dom.window, location: { hash: '#/community' }, communityRoute: hash => ({ view: hash === '#/community' ? 'landing' : 'home' }), mountCommunitySky: () => { mounts++; return () => disposed++; } };
+  vm.createContext(context);
+  vm.runInContext(source.slice(0, end) + '\nglobalThis.syncSky = syncCommunitySky;', context);
+  try {
+    context.syncSky(true); assert.equal(mounts, 0);
+    context.location.hash = '#/community/home'; context.syncSky(true);
+    assert.equal(mounts, 1); context.syncSky(true); assert.equal(mounts, 1);
+    context.location.hash = '#/community'; context.syncSky(true);
+    assert.equal(disposed, 1); assert.equal(mounts, 1);
+    context.syncSky(false); assert.equal(disposed, 1);
+    assert.equal(dom.window.document.body.classList.contains('community-open'), false);
+  } finally { dom.window.close(); }
+});
 
 test('main navigation keeps the approved introduction and waits for its content button even when signed out', async () => {
   const s = setup(false);
@@ -130,16 +210,21 @@ test('only the main introduction lazily loads its constellation enhancement', as
   assert.doesNotMatch(app, /^import ['"]\.\/community-landing\.mjs['"];$/m);
   const source = app.slice(app.indexOf('let communityLandingModule ='), app.indexOf('function communityPage()'));
   let loads = 0;
+  let preparations = 0;
   const dom = new JSDOM('<main><section data-community="home"></section></main>');
-  const context = { communityOnly: () => context.only, only: true, main: dom.window.document.querySelector('main'), loadLanding: async () => { loads++; } };
+  const context = { communityOnly: () => context.only, only: true, main: dom.window.document.querySelector('main'), location: { hash: '#/community/home' }, communityRoute: hash => ({ view: hash === '#/community' ? 'landing' : 'home' }), loadLanding: async () => { loads++; return { prepareCommunityLanding: async () => { preparations++; } }; } };
   vm.createContext(context);
   vm.runInContext(source.replace("import('./community-landing.mjs')", 'loadLanding()') + '\nglobalThis.prepare = prepareCommunityLanding;', context);
   try {
     context.prepare(); await turn(); assert.equal(loads, 0);
     context.main.innerHTML = '<section data-community="landing"></section>';
+    context.location.hash = '#/community';
     context.prepare(); await turn(); assert.equal(loads, 0, 'HK never requests the main introduction bundle');
     context.only = false;
     context.prepare(); context.prepare(); await turn(); assert.equal(loads, 1);
+    assert.equal(preparations, 2, 'every render awaits the module resource readiness, while the import itself is shared');
+    context.location.hash = '#/community/home';
+    await context.prepare(); assert.equal(preparations, 2, 'ordinary forums never enter the main landing preparation');
   } finally { dom.window.close(); }
 });
 
