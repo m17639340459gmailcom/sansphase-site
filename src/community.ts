@@ -288,7 +288,7 @@ export function growthChipHTML(person: CommunityPerson, common: Common) {
   person = currentAppearance(person, common);
   if (person.role === 'owner' || !person.growth) return '';
   const { t, esc } = common, item = communityGrowthLevel(person.growth.level);
-  const label = `G${item.level} ${t(item.name, item.en)}`;
+  const label = t(item.name, item.en);
   return `<span class="community-growth-chip" title="${esc(t(`成长等级：${label}`, `Growth level: ${label}`))}">${communityGrowthArtHTML(item.level)}<span>${esc(label)}</span></span>`;
 }
 // 昵称旁的等级图标：成长、权限、VIP 依次排列，只显示图标，名称放在 title 与无障碍标签里。
@@ -303,7 +303,7 @@ export function levelMarksHTML(person: CommunityPerson, common: Common, large = 
   let marks = '';
   if (person.growth) {
     const item = communityGrowthLevel(person.growth.level);
-    marks += mark('growth', t(`成长等级：G${item.level} ${item.name}`, `Growth level: G${item.level} ${item.en}`), communityGrowthArtHTML(item.level));
+    marks += mark('growth', t(`成长等级：${item.name}`, `Growth level: ${item.en}`), communityGrowthArtHTML(item.level));
   }
   if (!person.steward) {
     const level = Math.max(0, Math.min(3, person.level ?? 0));

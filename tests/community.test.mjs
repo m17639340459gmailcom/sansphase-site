@@ -668,7 +668,10 @@ test("the 星尘 center: the ledger, levels and the rules", () => {
   const levels = communityStardustHTML({ stardust: ready(stardust()), tab: "levels", ...common });
   assert.match(levels, /data-level-explorer data-mode="growth"/);
   assert.equal(count(levels, /data-action="community-level-step"/g), 0);
-  assert.equal(count(levels, /data-action="community-level-select"/g), 10);
+  assert.equal(count(levels, /data-level-step=/g), 2);
+  assert.equal(count(levels, /data-carousel-neighbour/g), 1);
+  assert.match(levels, /data-level-track/);
+  assert.doesNotMatch(levels, /data-level-gallery/);
   assert.equal(count(levels, /data-level-detail/g), 1);
   assert.doesNotMatch(levels, /community-ladder|community-rung|community-lv-rings/);
   const trust = (entry = stardust(), level = 2) => communityStardustHTML({ stardust: ready(entry), tab: "levels", levelSelection: { mode: "trust", growth: null, trust: level }, ...common });

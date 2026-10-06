@@ -43,7 +43,7 @@ for (const browsing of [false, true]) test(`${browsing ? 'owner reader perspecti
   for (const card of wall.querySelectorAll('button')) {
     card.click();
     for (const tier of ['gold', 'diamond', 'aurora']) {
-      main.querySelector(`[data-badge-tier="${tier}"]`).click();
+      main.querySelector(`[data-badge-track] [data-badge-tier="${tier}"]`).click();
       assert.equal(main.querySelector('[data-badge-detail]').dataset.tier, tier);
       assert.equal(main.querySelector('[data-badge-detail]').querySelector('[data-badge-art]').dataset.badgeArt, card.dataset.badgeFamilyCard);
       assert.equal(main.querySelector('[data-community="member"]'), page);
@@ -64,10 +64,33 @@ for (const browsing of [false, true]) test(`${browsing ? 'owner reader perspecti
 test('keyboard activation of a finish keeps its focus and an unearned hero static', async t => {
   const { main, w } = await setup(t);
   main.querySelector('[data-badge-family-card="appreciation"]').click();
-  const sample = main.querySelector('[data-badge-tier="aurora"]');
+  const sample = main.querySelector('[data-badge-track] [data-badge-tier="aurora"]');
   sample.focus(); sample.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
-  assert.equal(w.document.activeElement, main.querySelector('[data-badge-tier="aurora"]'));
-  assert.equal(main.querySelector('[data-badge-detail] [data-badge-art]').dataset.finish, 'locked');
-  assert.equal(main.querySelector('[data-badge-tier="aurora"] [data-badge-art]').dataset.finish, 'aurora', 'a labeled material sample previews its finish');
+  assert.equal(w.document.activeElement, main.querySelector('[data-badge-track] [data-badge-tier="aurora"]'));
+  assert.equal(main.querySelector('[data-badge-preview] [data-badge-art]').dataset.finish, 'locked');
+  assert.equal(main.querySelector('[data-carousel-neighbour] [data-finish="diamond"]').dataset.finish, 'diamond', 'the adjacent material is a sample, separate from the locked central emblem');
   assert.equal(main.querySelector('[data-badge-family-card="appreciation"] [data-badge-art]').dataset.finish, 'diamond');
+});
+
+test('badge arrow and keyboard browsing stop at bounds without losing focus or scrolling the page', async t => {
+  const { main, w, calls, scrolls, notices } = await setup(t, true);
+  const requests = calls.length, moves = scrolls.length;
+  main.scrollTop = 237;
+  const preview = main.querySelector('[data-badge-preview]');
+  preview.focus(); preview.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+  assert.equal(main.querySelector('[data-badge-detail]').dataset.tier, 'aurora');
+  assert.equal(w.document.activeElement, main.querySelector('[data-badge-preview]'));
+  assert.equal(main.querySelector('[data-badge-step="1"]').disabled, true);
+  w.document.activeElement.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+  assert.equal(main.querySelector('[data-badge-detail]').dataset.tier, 'gold');
+  assert.equal(main.querySelector('[data-badge-step="-1"]').disabled, true);
+  main.querySelector('[data-badge-step="1"]').click();
+  assert.equal(main.querySelector('[data-badge-detail]').dataset.tier, 'diamond');
+  assert.equal(w.document.activeElement, main.querySelector('[data-badge-step="1"]'));
+  w.document.activeElement.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  assert.equal(main.querySelector('[data-badge-detail]').dataset.tier, 'aurora');
+  assert.equal(w.document.activeElement, main.querySelector('[data-badge-preview]'));
+  assert.equal(main.scrollTop, 237);
+  assert.equal(calls.length, requests); assert.equal(scrolls.length, moves);
+  assert.deepEqual(notices, []);
 });

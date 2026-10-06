@@ -1655,6 +1655,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (event.defaultPrevented) return;
     levelExplorer.keydown(event);
     if (event.defaultPrevented) return;
+    badgeExplorer.keydown(event);
+    if (event.defaultPrevented) return;
     const dialog = mounted?.main.querySelector('[role="dialog"][aria-modal="true"]');
     if (dialog && event.key === 'Escape') { event.preventDefault(); if (!dialog.querySelector('button[type="submit"]:disabled')) { rejecting = null; deleting = null; shippingOrder = null; paint(); restoreManagementFocus(); } return; }
     if (dialog && event.key === 'Tab') {

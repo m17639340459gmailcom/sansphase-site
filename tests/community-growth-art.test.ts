@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {JSDOM} from 'jsdom';
 import postcss from 'postcss';
+import {communityGrowthLevel} from '../src/community-growth.ts';
 import {communityGrowthArtHTML} from '../src/community-growth-art.ts';
 import {growthChipHTML} from '../src/community.ts';
 import {communityLevelExplorerHTML} from '../src/community-level-explorer.ts';
@@ -33,7 +34,8 @@ test('shared user labels and level explorer render the same approved icon; trust
   const person={id:'reader',uid:'10001',name:'读者',role:'reader' as const,growth:{level:grade,points:0,configured:false}};
   const chip=new JSDOM(growthChipHTML(person,common));
   assert.equal(chip.window.document.querySelector('[data-growth-art]')?.getAttribute('data-growth-art'),String(grade));
-  assert.match(chip.window.document.body.textContent!,new RegExp(`G${grade}`));
+  assert.equal(chip.window.document.body.textContent!,communityGrowthLevel(grade).name);
+  assert.doesNotMatch(chip.window.document.body.textContent!,/\bG(?:10|[1-9])\b/);
   const explorer=new JSDOM(communityLevelExplorerHTML({...data,growth:person.growth},common,{mode:'growth',growth:grade,trust:null}));
   assert.equal(explorer.window.document.querySelector('[data-level-preview] [data-growth-art]')?.getAttribute('data-growth-art'),String(grade));
   assert.equal(explorer.window.document.querySelector('[data-level-preview] img')?.getAttribute('src'),chip.window.document.querySelector('img')?.getAttribute('src'));

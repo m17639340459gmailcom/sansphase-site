@@ -48,15 +48,16 @@ test('material browsing updates the existing detail only and never changes actua
   const card = root.querySelector<HTMLElement>('[data-badge-family-card="appreciation"]')!;
   const controller = createCommunityBadgeExplorer({ root: () => root, data: () => awards, common: () => common });
   controller.action(card);
-  const selected = root.querySelector<HTMLElement>('[data-badge-tier="aurora"]')!;
+  const selected = root.querySelector<HTMLElement>('[data-badge-track] [data-badge-tier="aurora"]')!;
   controller.action(selected);
   assert.equal(root.querySelector('[data-badge-detail]')!.getAttribute('data-tier'), 'aurora');
   assert.match(root.querySelector('[data-badge-detail]')!.textContent!, /未获得/);
   assert.equal(root.querySelector('[data-badge-family-card="appreciation"]'), card, 'the actual wall is never replaced by browsing');
   assert.equal(card.dataset.tier, 'diamond');
   assert.equal(awards.families.find(family => family.id === 'appreciation')!.tier, 'diamond');
-  assert.equal(doc.activeElement, root.querySelector('[data-badge-tier="aurora"]'));
-  controller.action(root.querySelector<HTMLElement>('[data-badge-tier="gold"]')!);
+  assert.equal(doc.activeElement, root.querySelector('[data-badge-track] [data-badge-tier="aurora"]'));
+  controller.action(root.querySelector<HTMLElement>('[data-badge-step="-1"]')!);
+  controller.action(root.querySelector<HTMLElement>('[data-badge-track] [data-badge-tier="gold"]')!);
   assert.match(root.querySelector('[data-badge-detail]')!.textContent!, /已获得/);
   dom.window.close();
 });
@@ -104,7 +105,7 @@ test('different requirement lengths keep the showcase height stable and let long
     return new Map(rule.nodes.filter(node => node.type === 'decl').map(node => [node.prop, node.value]));
   };
   assert.equal(declarations('.community-badge-showcase').get('height'), '434px');
-  assert.equal(declarations('.community-badge-showcase').get('grid-template-rows'), '296px 136px');
+  assert.equal(declarations('.community-badge-showcase').get('grid-template-rows'), '432px');
   assert.equal(declarations('.community-badge-detail-copy').get('min-height'), '0');
   assert.equal(declarations('.community-badge-detail-copy').get('overflow-y'), 'auto');
   const narrow = css.nodes.find(node => node.type === 'atrule' && node.name === 'container' && node.params === 'community-badges (max-width: 600px)');

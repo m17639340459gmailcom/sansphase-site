@@ -98,35 +98,29 @@ test('the experience document agrees with every displayed reward and threshold',
   assert.ok(document.includes(`${Math.ceil(thresholds.at(-1) / dailyCap).toLocaleString('en-US')} 个达标日`));
 });
 
-test('all growth levels are selectable without a request, navigation, page replacement or scroll', async t => {
+test('all growth levels are browsable by adjacent steps without requests, navigation, page replacement or scroll', async t => {
   const { main, w, calls, scrolls, notices } = await setup(t);
   const page = main.querySelector('[data-community]'), banner = main.querySelector('.community-banner');
   const initialCalls = calls.length, initialScrolls = scrolls.length;
-  const gallery = main.querySelector('[data-level-gallery]');
-  assert.ok(gallery);
-  assert.equal(gallery.querySelectorAll('[data-level]').length, 10);
-  gallery.scrollLeft = 180;
   main.scrollTop = 210;
   for (let level = 1; level <= 10; level++) {
-    main.querySelector(`[data-level="${level}"]`).click();
-    assert.equal(main.querySelector('[data-level-preview]').getAttribute('data-selected-level'), String(level));
-    assert.equal(main.querySelectorAll('.community-level-scale, [role="tablist"]').length, 0);
+    if (level > 1) main.querySelector('[data-level-step="1"]').click();
+    assert.equal(main.querySelector('[data-level-preview]').dataset.selectedLevel, String(level));
+    assert.equal(main.querySelectorAll('.community-level-scale, [role="tablist"], [data-level-gallery]').length, 0);
     assert.equal(main.querySelectorAll('[data-level-detail]').length, 1);
     assert.equal(main.querySelector('[data-level-preview] .community-growth-art').textContent, '');
     assert.equal(main.querySelector('[data-community]'), page);
     assert.equal(main.querySelector('.community-banner'), banner);
     assert.equal(main.scrollTop, 210);
-    assert.equal(main.querySelector('[data-level-gallery]'), gallery);
-    assert.equal(gallery.scrollLeft, 180);
-    assert.equal(gallery.querySelector(`[data-level="${level}"]`).getAttribute('aria-pressed'), 'true');
+    assert.equal(main.querySelector('[data-level-track] [aria-pressed="true"]').dataset.level, String(level));
+    assert.ok(main.querySelectorAll('[data-level-track] [data-level]').length <= 3);
   }
   assert.equal(calls.length, initialCalls); assert.equal(scrolls.length, initialScrolls);
   assert.deepEqual(notices, []);
   assert.equal(w.location.hash, '#/community/stardust/levels');
-  assert.equal(main.querySelector('[data-step]'), null);
-  main.querySelector('[data-level="9"]').click();
-  assert.equal(main.querySelector('[data-level-preview]').getAttribute('data-selected-level'), '9');
-  assert.equal(w.document.activeElement.getAttribute('data-level'), '9');
+  main.querySelector('[data-level-step="-1"]').click();
+  assert.equal(main.querySelector('[data-level-preview]').dataset.selectedLevel, '9');
+  assert.equal(w.document.activeElement, main.querySelector('[data-level-step="-1"]'));
 });
 
 test('keyboard selection preserves focus and roles; reader previews can browse growth and trust details', async t => {
@@ -143,48 +137,42 @@ test('keyboard selection preserves focus and roles; reader previews can browse g
   assert.match(main.querySelector('[data-level-detail]').textContent, /权限与限制/);
   assert.doesNotMatch(main.querySelector('[data-level-detail]').textContent, /累计访问天数|9 \/ 15|30 天内/);
   assert.match(main.querySelector('[data-level-detail]').textContent, /版主由作者任命/);
-  main.querySelector('[data-level="3"]').click();
+  main.querySelector('[data-level-step="1"]').click();
   assert.doesNotMatch(main.querySelector('[data-level-detail]').textContent, /近 100 天访问天数|精华 ≥|被采纳 ≥/);
   main.querySelector('[data-level-mode="growth"]').click();
   assert.equal(main.querySelector('[data-level-preview]').getAttribute('data-selected-level'), '9');
   assert.deepEqual(notices, []); assert.equal(calls.filter(url => url.includes('/stardust')).length, 1);
 });
 
-test('level navigation uses artwork thumbnails and flat mode choices without the old arrow group', async () => {
+test('level navigation uses two bare arrows and adjacent art with an arc, without a thumbnail row or framed control group', async () => {
   const page = new JSDOM(communityLevelExplorerHTML(data, common));
-  const buttons = [...page.window.document.querySelectorAll('[data-level-gallery] button')];
-  assert.equal(buttons.length, 10);
-  assert.ok(buttons.every((button, i) => button.querySelector(`img[src="/assets/community/levels/constellation-g${i + 1}.svg"]`)));
-  assert.equal(buttons.filter(button => button.getAttribute('aria-pressed') === 'true').length, 1);
-  assert.equal(page.window.document.querySelector('.community-level-controls, .community-level-neighbour, [data-step]'), null);
-  assert.equal(page.window.document.querySelector('.community-level-head .community-seg'), null);
+  const doc = page.window.document;
+  assert.equal(doc.querySelectorAll('[data-level-step]').length, 2);
+  assert.ok(doc.querySelector('[data-carousel-neighbour] img[src="/assets/community/levels/constellation-g2.svg"]'));
+  assert.equal(doc.querySelector('[data-level-step="-1"]').disabled, true);
+  assert.equal(doc.querySelectorAll('[data-level-track] [aria-pressed="true"]').length, 1);
+  assert.ok(doc.querySelector('[data-carousel-arc] path'));
+  assert.equal(doc.querySelector('.community-level-controls, [data-level-gallery]'), null);
+  assert.equal(doc.querySelector('.community-level-head .community-seg'), null);
   page.window.close();
   const css = await readFile(new URL('../src/community.css', import.meta.url), 'utf8');
-  assert.match(css, /\.community-level-choice\s*\{[^}]*min-height:\s*44px/);
-  assert.doesNotMatch(css, /\.community-level-controls\s*\{|\.community-level-nav-button\s*\{|\.community-level-neighbour\s*\{/);
+  assert.match(css, /\.community-emblem-arrow\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent/);
+  assert.doesNotMatch(css, /\.community-level-controls\s*\{|\.community-level-gallery\s*\{/);
 });
 
-test('gallery keyboard selection retains the gallery and focuses the selected thumbnail without scrolling the document', async t => {
+test('arc keyboard selection keeps the focused stop and never scrolls the page', async t => {
   const { main, w, scrolls } = await setup(t);
-  const gallery = main.querySelector('[data-level-gallery]'), before = scrolls.length;
-  gallery.getBoundingClientRect = () => ({ left: 250, right: 850, width: 600 });
-  gallery.querySelector('[data-level="10"]').getBoundingClientRect = () => ({ left: 940, right: 1012, width: 72 });
+  const before = scrolls.length;
   main.scrollTop = 210;
-  const first = gallery.querySelector('[data-level="1"]');
+  const first = main.querySelector('[data-level-track] [aria-pressed="true"]');
   first.focus();
   first.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'End', bubbles: true }));
-  assert.equal(main.querySelector('[data-level-gallery]'), gallery);
-  assert.equal(w.document.activeElement, gallery.querySelector('[data-level="10"]'));
-  assert.equal(gallery.scrollLeft, 162, 'only the gallery scrolls enough to bring the thumbnail inside its right edge');
+  assert.equal(w.document.activeElement, main.querySelector('[data-level-track] [data-level="10"]'));
   w.document.activeElement.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
-  assert.equal(w.document.activeElement, gallery.querySelector('[data-level="9"]'));
+  assert.equal(w.document.activeElement, main.querySelector('[data-level-track] [data-level="9"]'));
   assert.equal(main.scrollTop, 210);
   assert.equal(scrolls.length, before);
-  const unselected = gallery.querySelector('[data-level="4"]');
-  unselected.focus();
-  unselected.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
-  assert.equal(main.querySelector('[data-level-preview]').dataset.selectedLevel, '5', 'arrow browsing starts at the focused thumbnail');
-  assert.equal(w.document.activeElement, gallery.querySelector('[data-level="5"]'));
+  assert.equal(main.querySelector('[data-level-gallery]'), null);
 });
 
 test('VIP tiers show only the eight multipliers and no fabricated personal grade or progress', () => {
@@ -219,14 +207,14 @@ test('VIP selection, keyboard bounds and mode changes preserve page position and
   main.scrollTop = 210;
   main.querySelector('[data-level-mode="vip"]').click();
   for (let level = 1; level <= 8; level++) {
-    main.querySelector(`[data-level="${level}"]`).click();
+    if (level > 1) main.querySelector('[data-level-step="1"]').click();
     assert.equal(main.querySelector('[data-vip-multiplier]').textContent.trim(), `${communityVIPMultipliers[level - 1]}×`);
     assert.equal(main.querySelector('[data-community]'), page);
     assert.equal(main.querySelector('.community-banner'), banner);
     assert.equal(main.scrollTop, 210);
   }
-  assert.equal(main.querySelectorAll('[data-level-gallery] [data-level]').length, 8);
-  assert.equal(main.querySelector('[data-level="8"]').getAttribute('aria-pressed'), 'true');
+  assert.equal(main.querySelectorAll('[data-level-track] [data-level]').length, 2);
+  assert.equal(main.querySelector('[data-level-track] [data-level="8"]').getAttribute('aria-pressed'), 'true');
   main.querySelector('[data-level-mode="growth"]').click();
   assert.equal(main.querySelector('[data-level-preview]').dataset.selectedLevel, '1');
   main.querySelector('[data-level-mode="vip"]').click();
@@ -234,7 +222,7 @@ test('VIP selection, keyboard bounds and mode changes preserve page position and
   const preview = main.querySelector('[data-level-preview]');
   preview.focus(); preview.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
   assert.equal(main.querySelector('[data-level-preview]').dataset.selectedLevel, '1');
-  assert.equal(main.querySelector('[data-level="1"]').getAttribute('aria-pressed'), 'true');
+  assert.equal(main.querySelector('[data-level-track] [data-level="1"]').getAttribute('aria-pressed'), 'true');
   w.document.activeElement.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'End', bubbles: true }));
   assert.equal(main.querySelector('[data-level-preview]').dataset.selectedLevel, '8');
   assert.equal(calls.length, initialCalls); assert.equal(scrolls.length, initialScrolls);

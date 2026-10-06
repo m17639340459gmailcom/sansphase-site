@@ -118,8 +118,9 @@ test('the level page shows the badge for every VIP rank',async()=>{
     const images=[...art.querySelectorAll('img')];
     assert.deepEqual(images.map(image=>image.getAttribute('src')),[`/assets/community/levels/vip-${level}.svg`]);
     assert.ok(images.every(image=>image.alt===''&&image.draggable===false));
-    assert.equal(dom.window.document.querySelectorAll('[data-level-gallery] [data-vip-art]').length,8);
-    assert.equal(dom.window.document.querySelector(`[data-level-gallery] [data-level="${level}"]`)!.getAttribute('aria-pressed'),'true');
+    assert.equal(dom.window.document.querySelector('[data-level-gallery]'),null);
+    assert.equal(dom.window.document.querySelectorAll('[data-carousel-neighbour] [data-vip-art]').length,level===1||level===8?1:2);
+    assert.equal(dom.window.document.querySelector(`[data-level-track] [data-level="${level}"]`)!.getAttribute('aria-pressed'),'true');
     assert.equal(dom.window.document.querySelector('.community-level-neighbour,.community-level-controls'),null);
     assert.equal(dom.window.document.querySelector('.community-vip-emblem,[data-growth-art],[data-trust-art]'),null,'no text emblem or other level art in VIP mode');
     dom.window.close();

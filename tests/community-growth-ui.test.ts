@@ -5,6 +5,8 @@ import { communityAccountHTML, nameHTML, nameLabelHTML, whoHTML } from '../src/c
 import { communityMemberHTML, communityStardustHTML } from '../src/community-pages.ts';
 import type { Common, CommunityMe, CommunityPerson } from '../src/community.ts';
 import type { CommunityMember, CommunityStardust } from '../src/community-pages.ts';
+import { communityGrowthLevels } from '../src/community-growth.ts';
+import { communityLevelExplorerHTML } from '../src/community-level-explorer.ts';
 import type { CommunityGrowthState } from '../src/community-growth.ts';
 
 const { JSDOM } = createRequire(import.meta.url)('jsdom') as { JSDOM: new (html: string) => { window: Window & { close(): void } } };
@@ -24,7 +26,7 @@ test('shared member names show growth, permission and VIP as icon-only marks nex
     assert.equal(doc.querySelector('.community-uname')!.getAttribute('data-name-effect'), 'shimmer');
     const marks = [...doc.querySelectorAll<HTMLElement>('.community-who > .community-name > .community-level-marks > .community-level-badge')];
     assert.deepEqual(marks.map(mark => mark.className), ['community-level-badge is-growth', 'community-level-badge is-trust', 'community-level-badge is-vip'], 'growth, permission, VIP in that order');
-    assert.deepEqual(marks.map(mark => mark.getAttribute('title')), ['成长等级：G1 星芽', '权限等级：L2 观测', 'VIP 会员']);
+    assert.deepEqual(marks.map(mark => mark.getAttribute('title')), ['成长等级：星芽', '权限等级：L2 观测', 'VIP 会员']);
     assert.ok(marks.every(mark => mark.getAttribute('role') === 'img' && mark.getAttribute('aria-label') === mark.getAttribute('title')), 'the name lives in the label, not on screen');
     assert.equal(doc.querySelector('.community-level-marks')!.textContent, '', 'no level or icon names are displayed beside the nickname');
     assert.deepEqual(marks.map(mark => mark.querySelector('[data-level-icon]')!.getAttribute('data-level-icon')), ['constellation-g1', 'trust-l2', 'vip-1']);
@@ -62,50 +64,52 @@ test('owners have no marks and legacy responses without growth have no invented 
 test('cached self names use the current account growth state while other members retain their own', () => {
   const cached = { ...reader, growth: { level: 8 as const, points: 9000, configured: false } };
   const dom = documentOf(nameHTML(cached, { ...common, meForSort: me }));
-  try { assert.equal(dom.window.document.querySelector('.community-level-badge.is-growth')?.getAttribute('title'), '成长等级：G1 星芽'); }
+  try { assert.equal(dom.window.document.querySelector('.community-level-badge.is-growth')?.getAttribute('title'), '成长等级：星芽'); }
   finally { dom.window.close(); }
   const other = documentOf(nameLabelHTML({ ...cached, uid: '10002' }, { ...common, meForSort: me }));
-  try { assert.equal(other.window.document.querySelector('.community-level-badge.is-growth')?.getAttribute('title'), '成长等级：G8 引星'); }
+  try { assert.equal(other.window.document.querySelector('.community-level-badge.is-growth')?.getAttribute('title'), '成长等级：引星'); }
   finally { other.window.close(); }
   const profile = documentOf(communityMemberHTML({ ...common, meForSort: me, member: { state: 'ready', data: { ...member, person: cached } }, me }));
   try {
-    assert.equal(profile.window.document.querySelector('.community-m-name .community-level-badge.is-growth')?.getAttribute('title'), '成长等级：G1 星芽');
-    assert.match(profile.window.document.querySelector('.community-me-quick a[href="#/community/stardust/levels"]')!.textContent!, /G1 星芽/);
+    assert.equal(profile.window.document.querySelector('.community-m-name .community-level-badge.is-growth')?.getAttribute('title'), '成长等级：星芽');
+    assert.match(profile.window.document.querySelector('.community-me-quick a[href="#/community/stardust/levels"]')!.textContent!, /星芽/);
   } finally { profile.window.close(); }
 });
 
 test('account menu and member profile show the same growth while keeping role, trust, VIP and UID', () => {
   const menu = documentOf(communityAccountHTML({ ...common, icons: {}, nickname: reader.name, author: false, me }));
   try {
-    assert.equal(menu.window.document.querySelector('.community-menu-head .community-level-badge.is-growth')?.getAttribute('title'), '成长等级：G1 星芽');
+    assert.equal(menu.window.document.querySelector('.community-menu-head .community-level-badge.is-growth')?.getAttribute('title'), '成长等级：星芽');
     assert.match(menu.window.document.querySelector('.community-menu-head')!.textContent!, /观测 · UID 10001/);
   } finally { menu.window.close(); }
   const profile = documentOf(communityMemberHTML({ ...common, member: { state: 'ready', data: member }, me }));
   try {
     const doc = profile.window.document;
     const large = [...doc.querySelectorAll<HTMLElement>('.community-m-name > .community-level-marks.is-large > .community-level-badge')];
-    assert.deepEqual(large.map(mark => mark.getAttribute('title')), ['成长等级：G1 星芽', '权限等级：L2 观测', 'VIP 会员'], 'the profile shows the three icons, large, on their own row');
+    assert.deepEqual(large.map(mark => mark.getAttribute('title')), ['成长等级：星芽', '权限等级：L2 观测', 'VIP 会员'], 'the profile shows the three icons, large, on their own row');
     assert.equal(doc.querySelector('.community-m-name > .community-level-marks.is-large:first-child + h1 + .community-m-tags') !== null, true, 'the row sits above the name');
     assert.equal(doc.querySelector('.community-m-name h1 .community-level-marks'), null, 'the name line itself carries no icons');
     assert.equal(doc.querySelector('.community-m-tags .community-lv, .community-m-tags .community-vip'), null, 'the text level and VIP tags are replaced by the icons');
-    assert.match(doc.querySelector('.community-me-quick a[href="#/community/stardust/levels"]')!.textContent!, /G1 星芽/);
+    assert.match(doc.querySelector('.community-me-quick a[href="#/community/stardust/levels"]')!.textContent!, /星芽/);
   } finally { profile.window.close(); }
 });
 
-test('levels show one selected icon with artwork choices instead of the old arrow controls', () => {
+test('levels show a center icon and adjacent choices on an arc without the old strip or framed arrow group', () => {
   const dom = documentOf(communityStardustHTML({ ...common, stardust: { state: 'ready', data: stardust }, tab: 'levels' }));
   try {
     const doc = dom.window.document, panel = doc.querySelector('[data-level-explorer]');
     assert.ok(panel);
     assert.equal(panel.querySelectorAll('[data-level-preview]').length, 1);
-    assert.equal(panel.querySelector('[data-level-preview] h2')?.textContent, '星芽');
+    assert.equal(panel.querySelector('[data-level-track] .community-emblem-title')?.textContent, '星芽');
     assert.equal(panel.querySelectorAll('.community-level-scale, [role="tablist"]').length, 0);
     assert.equal(panel.querySelectorAll('[data-step]').length, 0);
-    assert.equal(panel.querySelectorAll('[data-level-gallery] [data-level]').length, 10);
+    assert.equal(panel.querySelectorAll('[data-level-track] [data-level]').length, 2);
+    assert.equal(panel.querySelector('[data-level-gallery]'), null);
     assert.match(panel.querySelector('[data-level-detail]')!.textContent!, /成长等级/);
     assert.equal(panel.querySelector('.community-level-threshold, .community-level-earn'), null);
     assert.match(panel.textContent!, /待启用/);
-    assert.doesNotMatch(panel.innerHTML, /community-meter|37|200/, 'legacy contribution totals and balance are not represented as actual experience');
+    assert.equal(panel.querySelector('.community-meter'), null);
+    assert.doesNotMatch(panel.textContent!, /37|200/, 'legacy contribution totals and balance are not represented as actual experience');
     assert.equal(doc.querySelectorAll('.community-rung, .community-lv-hero, .community-ladder').length, 0, 'old stacked sections are removed');
     assert.equal(panel.querySelectorAll('[data-level-mode]').length, 3);
   } finally { dom.window.close(); }
@@ -118,7 +122,8 @@ test('owners can see the ten titles without receiving a personal growth level', 
     assert.ok(panel);
     assert.equal(panel.querySelectorAll('[role="tab"]').length, 0);
     assert.equal(panel.querySelectorAll('[data-step]').length, 0);
-    assert.equal(panel.querySelectorAll('[data-level-gallery] [data-level]').length, 10);
+    assert.equal(panel.querySelectorAll('[data-level-track] [data-level]').length, 2);
+    assert.equal(panel.querySelector('[data-level-gallery]'), null);
     assert.equal(panel.querySelector('[data-personal-level]'), null);
     assert.match(panel.textContent!, /作者不参与成长等级/);
   } finally { dom.window.close(); }
@@ -135,4 +140,26 @@ test('stardust only invites an eligible real reader to check in, not owners or r
   const readerPage = documentOf(communityStardustHTML({ ...common, stardust: { state: 'ready', data: { ...stardust, checkedIn: false } }, tab: 'ledger' }));
   try { assert.equal(readerPage.window.document.querySelector('.community-banner a[href="#/community/checkin"]')!.textContent, '去签到'); }
   finally { readerPage.window.close(); }
+});
+
+
+test('all growth titles omit G-number prefixes from visible text, tooltip and accessible labels in both languages', () => {
+  for (const english of [false, true]) for (const growth of communityGrowthLevels) {
+    const context = { ...common, t: (zh: string, en: string) => english ? en : zh };
+    const state: CommunityGrowthState = { level: growth.level, points: 0, configured: false };
+    const person = { ...reader, growth: state };
+    const markup = whoHTML(person, context)
+      + communityAccountHTML({ ...context, nickname: person.name, author: false, me: { ...me, growth: state } })
+      + communityMemberHTML({ ...context, member: { state: 'ready', data: { ...member, person } } })
+      + communityLevelExplorerHTML({ ...stardust, growth: state }, context, { mode: 'growth', growth: growth.level, trust: null });
+    const dom = documentOf(markup), doc = dom.window.document;
+    try {
+      assert.doesNotMatch(doc.body.textContent || '', /\bG(?:10|[1-9])\b/);
+      for (const node of doc.querySelectorAll('[title], [aria-label]')) {
+        assert.doesNotMatch((node.getAttribute('title') || '') + ' ' + (node.getAttribute('aria-label') || ''), /\bG(?:10|[1-9])\b/);
+      }
+      assert.match(doc.querySelector('[data-personal-level]')!.textContent!, new RegExp(english ? growth.en : growth.name));
+      assert.equal(doc.querySelector('[data-level-preview] [data-growth-art]')!.getAttribute('data-growth-art'), String(growth.level), 'internal rank and approved asset identity remain unchanged');
+    } finally { dom.window.close(); }
+  }
 });
