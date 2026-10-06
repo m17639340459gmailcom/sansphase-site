@@ -27,6 +27,8 @@ export const typedBrowserModules = new Set([
   'community-sky.mjs',
   'community-body-images.mjs',
   'community-badge-icons.mjs',
+  'community-badge-policy.mjs',
+  'community-badge-explorer.mjs',
   'community-checkin-stars.mjs',
   'content-reader.mjs',
   'content-images.mjs',

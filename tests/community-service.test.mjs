@@ -37,7 +37,7 @@ test.before(async () => {
 test.after(() => cleanup(template));
 
 // r1, r2, v1 and s1 have agreed to the guidelines and reached 巡天 (L1); r3 is brand new.
-async function setup(t, { store: withStore = true, simplePosting = false, useDefault = false } = {}) {
+async function setup(t, { store: withStore = true, simplePosting = false, useDefault = false, identifyOverride } = {}) {
   const reservation = createServer();
   await new Promise((done) => reservation.listen(0, "127.0.0.1", done));
   const port = reservation.address().port;
@@ -62,6 +62,7 @@ async function setup(t, { store: withStore = true, simplePosting = false, useDef
   const communityService = createCommunityService({
     store, siteOrigin, directory, ownerId: "owner", ...(useDefault ? {} : { simplePosting }),
     identify: async (req) => {
+      if (identifyOverride) return identifyOverride(req);
       const cookies = new Map(String(req.headers.cookie || '').split(';').map(part => part.trim().split('=')));
       if (cookies.get('owner') === 'yes') return { kind: "owner", id: "owner", name: "無相", vip: true };
       const id = cookies.get('reader');
@@ -98,11 +99,78 @@ async function setup(t, { store: withStore = true, simplePosting = false, useDef
   return { get, post, upload, siteOrigin, store, audits, setLevel, credit, directory };
 }
 const json = async (response) => (await response).json();
+
+test('forged like amounts and identities, duplicates and unlike/re-like cannot mint stardust or experience', async t => {
+  const { get, post, store } = await setup(t);
+  const author = { kind: 'reader', id: 'r1' }, fan = { kind: 'reader', id: 'r2' };
+  const topic = store.createTopic({ author, board: 'qa', title: '防刷数值接口验证', body: '这是验证账号去重和奖励边界的有效主题正文。' });
+  const balances = [store.ledger.balance(author), store.ledger.balance(fan)];
+  const attack = { on: true, earned: 999999, amount: 999999, likes: 999999, points: 999999, member_id: 'r3', author_id: 'r3', vip: true, level: 10, now: '2099-01-01T00:00:00Z' };
+  for (let i = 0; i < 8; i++) {
+    const value = await json(post(`topics/${topic.id}/like`, attack, 'reader=r2'));
+    assert.deepEqual(value, { likes: 1, liked: true, earned: 0 });
+  }
+  assert.equal((await post(`topics/${topic.id}/like`, attack)).status, 400, 'self likes remain rejected');
+  assert.equal((await post(`topics/${topic.id}/like`, attack, '')).status, 401);
+  assert.equal((await post(`topics/${topic.id}/like`, attack, 'reader=r2', { Origin: 'https://evil.example' })).status, 403);
+  assert.deepEqual(await json(post(`topics/${topic.id}/like`, { on: false }, 'reader=r2')), { likes: 0, liked: false, earned: 0 });
+  assert.deepEqual(await json(post(`topics/${topic.id}/like`, attack, 'reader=r2')), { likes: 1, liked: true, earned: 0 });
+  assert.deepEqual([store.ledger.balance(author), store.ledger.balance(fan)], balances);
+  assert.equal((await json(get('me'))).growth.points, 0);
+  assert.equal((await json(get('me', 'reader=r2'))).growth.points, 0);
+});
+
+test('check-in and redemption use server amounts and prices despite forged client currency fields', async t => {
+  const { get, post, store, credit } = await setup(t);
+  const member = { kind: 'reader', id: 'r1' };
+  const checkin = await json(post('checkin', { reward: 999999, balance: 999999, vip: true, streak: 365 }));
+  assert.equal(checkin.reward, 1);
+  const balance = store.ledger.balance(member);
+  await post('checkin', { reward: 999999 });
+  assert.equal(store.ledger.balance(member), balance);
+  assert.equal((await json(get('me'))).growth.points, 0, 'check-in is not a login experience route');
+  credit('r1', 500);
+  const item = store.economy.item('frame-gold'), before = store.ledger.balance(member);
+  assert.ok(item);
+  const response = await post('shop/redeem', { item: item.id, price: 0, amount: -999999, balance: 999999, level: 10, owner: true });
+  assert.equal(response.status, 201);
+  assert.equal(store.ledger.balance(member), before - item.price);
+});
 const png = async () => (await import("sharp")).default({ create: { width: 1200, height: 800, channels: 3, background: "#d9c49c" } }).png().toBuffer();
 const topicBody = { board: "qa", title: "ComfyUI 人脸崩了", body: "IPAdapter 和 ControlNet 一起用就崩。" };
 const imageMarker = id => `![图片](/api/community/images/${id}.webp)`;
+const emptyGrowth = { level: 1, points: 0, configured: true, startThreshold: 0, nextLevel: 2, nextThreshold: 1200, remaining: 1200, progress: 0 };
+const emptyVIPGrowth = { active: false, level: null, days: 0, nextDays: 30, remaining: 30, multiplier: 1, progress: 0 };
 
-test('level catalogue receives the real reader membership state without fabricating VIP growth', async t => {
+test('badge family state is public but reviewed evidence and revoke/restore operations require owner and are audited', async t => {
+  const { get, post, store, audits } = await setup(t);
+  const author = { kind: 'reader', id: 'r1' };
+  const first = store.createTopic({ board: 'qa', author, title: '徽章复核测试主题', body: '检查荣誉授予、错误撤销、来源复核以及恢复过程。', now: '2025-10-01T00:00:00.000Z' });
+  store.members.setSteward({ kind: 'reader', id: 's1' }, true, ['qa']);
+  const profile = await json(get('members/u1'));
+  assert.equal(profile.badgeState.families.find(item => item.id === 'writing').tier, 'gold');
+  assert.equal(Object.hasOwn(profile.badgeState, 'evidence'), false);
+  assert.equal((await get('manage/badges/u1', 'reader=s1')).status, 403);
+  assert.equal((await get('manage/badges/u1', 'reader=r2')).status, 403);
+  const review = { action: 'revoke', family: 'writing', tier: 'gold', reason: '复核认为来源有误', sources: [{ kind: 'topic', id: first.id }] };
+  assert.equal((await post('manage/badges/u1/review', review, 'reader=s1')).status, 403);
+  assert.equal((await post('manage/badges/u1/review', review, 'owner=yes; community_browse=reader')).status, 403);
+  assert.equal((await post('manage/badges/u1/review', review, 'owner=yes')).status, 200);
+  assert.equal((await json(get('members/u1'))).badgeState.families.find(item => item.id === 'writing').tier, null);
+  assert.equal((await post('manage/badges/u1/review', { ...review, action: 'restore', sources: [] }, 'owner=yes')).status, 409, 'invalid progress cannot restore a revoked honor');
+  assert.equal((await post('manage/badges/u1/review', { ...review, action: 'restore', reason: '申诉核实原复核有误' }, 'owner=yes')).status, 200);
+  const owner = await json(get('manage/badges/u1', 'owner=yes'));
+  assert.equal(owner.badgeState.families.find(item => item.id === 'writing').tier, 'gold');
+  assert.equal(owner.reviews.length, 2);
+  assert.ok(audits.some(item => item.action === 'community-badge-revoked'));
+  assert.ok(audits.some(item => item.action === 'community-badge-restored'));
+  const sanction = store.members.mute(author, 7, '其他', { kind: 'owner', id: 'owner' });
+  assert.equal((await post(`manage/badge-violations/sanction/${sanction.id}/reverse`, { reason: '申诉复核认定处罚错误' }, 'reader=s1')).status, 403);
+  assert.equal((await post(`manage/badge-violations/sanction/${sanction.id}/reverse`, { reason: '申诉复核认定处罚错误' }, 'owner=yes')).status, 200);
+  assert.ok(audits.some(item => item.action === 'community-badge-violation-reversed'));
+});
+
+test('level catalogue receives independent experience and real current membership with new empty VIP day history', async t => {
   const { get, post } = await setup(t);
   const vip = await json(get('stardust', 'reader=v1'));
   assert.equal(vip.vip, true);
@@ -115,8 +183,59 @@ test('level catalogue receives the real reader membership state without fabricat
   for (const entry of [vip, preview]) {
     assert.equal(Object.hasOwn(entry, 'vipLevel'), false);
     assert.equal(Object.hasOwn(entry, 'vipProgress'), false);
-    assert.equal(entry.growth.configured, false);
+    assert.equal(entry.growth.configured, true);
+    assert.equal(entry.growth.points, 0, 'GET never grants experience');
+    assert.equal(entry.vipGrowth.days, 0, 'old membership duration is never converted');
+    assert.equal(entry.vipGrowth.level, 1);
+    assert.equal(entry.vipGrowth.multiplier, 2);
+    assert.equal(entry.experienceCatalogue.length, 10);
+    assert.equal(entry.vipCatalogue.length, 8);
+    assert.ok(entry.vipCatalogue.every(item => Object.keys(item).sort().join(',') === 'level,multiplier'));
   }
+});
+
+test('only protected active visit POST settles login experience; reads, previews and injected values cannot grant', async t => {
+  const { get, post, store } = await setup(t);
+  const a = { kind: 'reader', id: 'r1' };
+  for (const path of ['me', 'stardust', 'checkin', 'rank', 'me', 'stardust']) assert.equal((await get(path)).status, 200);
+  assert.equal(store.experience.state(a).points, 0);
+  assert.equal((await get('active/visit')).status, 404);
+  assert.equal((await post('active/visit', {}, '')).status, 401);
+  assert.equal((await post('active/visit', {}, 'reader=r1', { Origin: 'http://wrong-origin.test' })).status, 403);
+  assert.equal((await post('active/visit', { points: 200, vip: true, multiplier: 20 })).status, 400);
+  assert.equal((await post('active/visit', { day: '2020-01-01' })).status, 400);
+  const results = await Promise.all(Array.from({ length: 5 }, () => json(post('active/visit', {}))));
+  assert.ok(results.every(item => item.uid === 'u1'), 'the protected response is bound to the public account UID');
+  assert.equal(results.reduce((sum, item) => sum + item.awarded, 0), 10);
+  assert.equal(results.filter(item => item.visited).length, 1);
+  const me = await json(get('me'));
+  const progress = await json(get('stardust'));
+  assert.deepEqual(me.growth, progress.growth);
+  assert.deepEqual(me.vipGrowth, progress.vipGrowth);
+  assert.equal(progress.growth.points, 10);
+  assert.equal(progress.growth.remaining, 1190);
+  assert.equal(progress.growth.level, 1);
+  assert.equal(progress.vipGrowth.level, null);
+  assert.equal(progress.vipGrowth.days, 0);
+  assert.equal((await json(post('active/visit', {}, 'reader=v1'))).awarded, 20);
+  assert.equal((await json(get('stardust', 'reader=v1'))).vipGrowth.days, 1);
+  const owner = await json(post('active/visit', {}, 'owner=yes'));
+  assert.deepEqual(owner, { uid: 'owner', awarded: 0, visited: false, growth: null, vipGrowth: null });
+  await post('members/u4/steward', { on: true, boards: ['qa'] }, 'owner=yes');
+  assert.equal((await post('active/visit', {}, 'reader=v1; community_browse=reader')).status, 403);
+});
+
+test('active visits require the current convention and recheck revoked sessions before writing', async t => {
+  const { post, store } = await setup(t);
+  const a = { kind: 'reader', id: 'r1' };
+  store.convention.replace({ kind: 'owner', id: 'owner' }, store.convention.current().version, '本次新公约需要重新阅读后同意。');
+  assert.equal((await post('active/visit', {})).status, 428);
+  assert.equal(store.experience.state(a).points, 0);
+  let calls = 0;
+  const revoked = await setup(t, { identifyOverride: async () => ++calls === 1 ? { kind: 'reader', id: 'r1', name: '林间', vip: true } : null });
+  assert.equal((await revoked.post('active/visit', {})).status, 401);
+  assert.equal(revoked.store.experience.state(a).points, 0);
+  assert.equal(revoked.store.experience.vipState(a, true).days, 0);
 });
 
 test('bulk review checks the whole selection before changes and reuses approval and rejection accounting', async t => {
@@ -350,14 +469,16 @@ test('private image and approved avatar responses require current permission rat
   assert.equal((await get(`images/${vipImage.id}.webp`, '')).status, 401);
 });
 
-test('growth DTOs remain independent from earned trust and appointed moderation while upgrade thresholds await configuration', async t => {
+test('growth DTOs settle real experience independently of currency, earned trust and appointed moderation', async t => {
   const { get, post, store, credit } = await setup(t);
   const actor = { kind: 'reader', id: 'r1' };
   credit('r1', 100);
   await post('checkin', {}, 'reader=r1');
+  assert.deepEqual((await json(get('me'))).growth, emptyGrowth, 'currency and attendance never substitute for active login');
+  await post('active/visit', {});
   const topic = await json(post('topics', topicBody));
   const me = await json(get('me'));
-  assert.deepEqual(me.growth, { level: 1, points: 2, configured: false });
+  assert.deepEqual(me.growth, { ...emptyGrowth, points: 30, remaining: 1170, progress: 30 / 1200 });
   assert.equal(me.trustLevel, 1);
   const board = await json(get('stardust'));
   assert.deepEqual(board.growth, me.growth);
@@ -372,7 +493,7 @@ test('growth DTOs remain independent from earned trust and appointed moderation 
   assert.deepEqual((await json(get('me', 'owner=yes'))).growth, null, 'the real author does not display reader growth');
   assert.deepEqual((await json(get('stardust', 'owner=yes; community_browse=reader'))).growth, null);
   store.deleteTopic(topic.id);
-  assert.deepEqual((await json(get('me'))).growth, { level: 1, points: 0, configured: false }, 'reverted rewards no longer contribute');
+  assert.deepEqual((await json(get('me'))).growth, { ...emptyGrowth, points: 10, remaining: 1190, progress: 10 / 1200 }, 'content reversal retains valid login experience');
 });
 
 test('shop images are owner uploads, visible for active items and protected from orphan cleanup', async t => {
@@ -647,7 +768,7 @@ test("readers post, list, read and reply; the owner can remove anything, readers
   assert.equal(list.total, 2);
   assert.equal(list.items[0].id, id, "the replied topic is most recently active");
   assert.equal(list.items[0].title, "ComfyUI 人脸崩了", "titles are trimmed");
-  assert.deepEqual(list.items[0].author, { name: "林间", role: "reader", uid: "u1", showUid: true, avatar: `/api/community/avatar/u1.webp?v=${avatarId.slice(0, 8)}`, vip: false, level: 1, growth: { level: 1, points: 2, configured: false }, steward: false, frame: null, color: null });
+  assert.deepEqual(list.items[0].author, { name: "林间", role: "reader", uid: "u1", showUid: true, avatar: `/api/community/avatar/u1.webp?v=${avatarId.slice(0, 8)}`, vip: false, level: 1, growth: emptyGrowth, vipGrowth: emptyVIPGrowth, steward: false, frame: null, color: null });
   assert.equal(list.items[0].replies, 1);
   assert.equal(list.items[0].lastReply.author.name, "远山", "a listed topic names its latest replier");
   assert.equal(list.items[1].lastReply, null);
@@ -673,7 +794,8 @@ test("readers post, list, read and reply; the owner can remove anything, readers
   assert.equal(detail.replies[0].author.name, "远山");
   assert.equal(detail.replies[0].canDelete, false, "a reader cannot delete someone else's reply");
   assert.equal(detail.replies[0].byTopicAuthor, false);
-  assert.deepEqual([detail.author.name, detail.author.topics, detail.author.bio, detail.author.badges, detail.author.following], ["林间", 1, "喜欢画画", ["first_topic"], false]);
+  assert.deepEqual([detail.author.name, detail.author.topics, detail.author.bio, detail.author.badges, detail.author.following], ["林间", 1, "喜欢画画", [], false]);
+  assert.equal(detail.author.badgeState.families.find(item => item.id === 'writing').tier, 'gold');
   assert.deepEqual(detail.related, [], "no other topics in this board yet");
   assert.deepEqual(detail.viewer, { level: 1, muted: null });
   const replyId = detail.replies[0].id;
@@ -806,7 +928,8 @@ test("likes, bookmarks, views, thanks, check-ins and the viewer's own state", as
   const board = await json(get("checkin", "reader=r2"));
   assert.equal(board.days.length, 1);
   assert.deepEqual(board.earlyBirds.map((bird) => bird.person.name), ["远山"]);
-  assert.deepEqual(board.badges.sort(), ["early", "first_checkin"]);
+  assert.deepEqual(board.badges, []);
+  assert.deepEqual(board.badgeState.families.slice(0, 2).map(item => item.tier), ['gold', 'gold']);
   assert.equal((await json(get("stardust", "reader=r2"))).ledger[0].reason, "checkin");
   setLevel("r2", 1);
   await post("checkin", {}, "reader=v1");
@@ -1131,7 +1254,7 @@ test("public post people keep a linkable UID while display follows viewer permis
   const { get, post } = await setup(t);
   const { id } = await json(post("topics", topicBody, "reader=r1"));
   await post("members/u5/steward", { on: true, boards: allModerationBoards }, "owner=yes");
-  assert.deepEqual((await json(get(`topics/${id}`, "reader=r2"))).topic.author, { name: "林间", role: "reader", uid: "u1", showUid: false, avatar: "/api/community/avatar/u1.webp?v=aaaaaaaa", vip: false, level: 1, growth: { level: 1, points: 2, configured: false }, steward: false, frame: null, color: null });
+  assert.deepEqual((await json(get(`topics/${id}`, "reader=r2"))).topic.author, { name: "林间", role: "reader", uid: "u1", showUid: false, avatar: "/api/community/avatar/u1.webp?v=aaaaaaaa", vip: false, level: 1, growth: emptyGrowth, vipGrowth: emptyVIPGrowth, steward: false, frame: null, color: null });
   assert.equal((await json(get(`topics/${id}`, "reader=r1"))).topic.author.showUid, true);
   assert.equal((await json(get(`topics/${id}`, "reader=s1"))).topic.author.showUid, true);
   assert.equal((await json(get("me", "reader=r1"))).uid, "u1");

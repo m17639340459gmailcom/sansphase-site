@@ -17,8 +17,6 @@ export function createLedger(db: DatabaseSync) {
   const balanceOf = db.prepare('SELECT COALESCE(SUM(amount), 0) AS total FROM community_ledger WHERE member_kind = ? AND member_id = ?');
   const cappedToday = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM community_ledger WHERE member_kind = ? AND member_id = ? AND day = ? AND capped = 1 AND kind = 'earn'`);
   const gainedOn = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM community_ledger WHERE member_kind = ? AND member_id = ? AND day = ? AND amount > 0`);
-  const growthPoints = db.prepare(`SELECT COALESCE(SUM(amount), 0) AS total FROM community_ledger
-    WHERE member_kind = ? AND member_id = ? AND amount > 0 AND kind = 'earn' AND capped = 1 AND reverted_at IS NULL`);
   const reasonsOn = db.prepare(`SELECT COUNT(*) AS count FROM community_ledger WHERE member_kind = ? AND member_id = ? AND day = ? AND reason = ?`);
   const refExists = db.prepare(`SELECT COUNT(*) AS count FROM community_ledger WHERE member_kind = ? AND member_id = ? AND reason = ? AND ref_kind = ? AND ref_id = ?`);
   const featuredInMonth = db.prepare(`SELECT COUNT(*) AS count FROM community_ledger
@@ -104,8 +102,6 @@ export function createLedger(db: DatabaseSync) {
       return { gained: Number(row.gained), spent: Number(row.spent) };
     },
     gainedToday: (member: CommunityAuthor, now = Date.now()) => totalOf(gainedOn, member.kind, member.id, beijingDay(now)),
-    // Accumulated valid behaviour awards, independent of balance and spending.
-    growthPoints: (member: CommunityAuthor) => totalOf(growthPoints, member.kind, member.id),
     behaviourToday: (member: CommunityAuthor, now = Date.now()) => totalOf(cappedToday, member.kind, member.id, beijingDay(now)),
     flow(days = 7, now = Date.now()) {
       const from = beijingDay(now - (days - 1) * day);

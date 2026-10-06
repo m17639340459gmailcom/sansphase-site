@@ -9,6 +9,8 @@ import { countOf, same, memberKey, parseJson, day, iso, fail } from './community
 import type { CommunityAuthor } from './community-db.ts';
 import { storedModerationContact, validateModerationContact } from './community-moderation-contact.ts';
 import type { createCommunityConvention } from './community-convention.ts';
+import { createCommunityBadges } from './community-badges.ts';
+import type { Transaction } from './community-db.ts';
 
 type MemberRow = { level: number; level_day: string | null; steward: number; steward_boards: string | null; frame: string | null; name_color: string | null; cover: string | null; agreed_at: string | null; created_at: string };
 type NoticeRow = {
@@ -31,7 +33,7 @@ const validModerationBoards = (value: unknown): value is string[] => Array.isArr
 const orderedModerationBoards = (boards: readonly string[]) => moderationBoardIds.filter(board => boards.includes(board));
 
 // Members: trust levels, visits, stewards, decorations, follows, notifications, badges and sanctions.
-export function createMembers(db: DatabaseSync, convention: Pick<ReturnType<typeof createCommunityConvention>, 'state'>) {
+export function createMembers(db: DatabaseSync, convention: Pick<ReturnType<typeof createCommunityConvention>, 'state'>, tx: Transaction) {
   const ensureRow = db.prepare('INSERT OR IGNORE INTO community_members (member_kind, member_id, created_at) VALUES (?, ?, ?)');
   const memberRow = db.prepare('SELECT level, level_day, steward, steward_boards, frame, name_color, cover, agreed_at, created_at FROM community_members WHERE member_kind = ? AND member_id = ?');
   const saveLevel = db.prepare('UPDATE community_members SET level = ?, level_day = ? WHERE member_kind = ? AND member_id = ?');
@@ -84,7 +86,7 @@ export function createMembers(db: DatabaseSync, convention: Pick<ReturnType<type
   const readAllRows = db.prepare('UPDATE community_notifications SET read_at = ? WHERE member_kind = ? AND member_id = ? AND read_at IS NULL');
   // Badges.
   const addBadge = db.prepare('INSERT OR IGNORE INTO community_badges (member_kind, member_id, badge, created_at) VALUES (?, ?, ?, ?)');
-  const badgeRows = db.prepare('SELECT badge FROM community_badges WHERE member_kind = ? AND member_id = ? ORDER BY created_at');
+  const badgeRows = db.prepare('SELECT badge FROM community_badges WHERE member_kind = ? AND member_id = ? AND revoked_at IS NULL ORDER BY created_at');
   // Sanctions.
   const insertSanction = db.prepare(`INSERT INTO community_sanctions (id, member_kind, member_id, days, reason, until, by_kind, by_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const activeSanction = db.prepare(`SELECT id, days, reason, until FROM community_sanctions WHERE member_kind = ? AND member_id = ? AND lifted_at IS NULL AND until > ? ORDER BY until DESC LIMIT 1`);
@@ -145,6 +147,7 @@ export function createMembers(db: DatabaseSync, convention: Pick<ReturnType<type
     if (added) notify(member, { type: 'badge', text: `获得徽章「${communityBadges[badge].name}」`, data: { badge } }, now);
     return added;
   }
+  const achievements = createCommunityBadges(db, tx, (member, text, data, at) => notify(member, { type: 'badge', text, data }, at));
   function trustLevel(member: CommunityAuthor, now = Date.now()) {
     if (member.kind === 'owner') return 4;
     const current = row(member);
@@ -261,15 +264,19 @@ export function createMembers(db: DatabaseSync, convention: Pick<ReturnType<type
     /* ---------- 徽章 ---------- */
     award,
     badges: (member: CommunityAuthor) => (badgeRows.all(member.kind, member.id) as Array<{ badge: string }>).map(item => item.badge),
-    // Badges that follow from the member's record (likes, accepted answers, 精华, first topic).
+    badgeState(member: CommunityAuthor, context: { now?: number; joinedAt?: string | null } = {}) {
+      ensure(member, iso(context.now ?? Date.now()));
+      return achievements.state(member, context);
+    },
+    badgeMetrics: achievements.metrics,
+    reviewBadges: achievements.review,
+    restoreBadges: achievements.restore,
+    badgeReviewDetails: achievements.reviewDetails,
+    reverseBadgeViolation: achievements.reverseViolation,
+    // Historical badges are retained; automatic issuance now follows the shared family policy.
     checkBadges(member: CommunityAuthor, now = new Date().toISOString()) {
-      const value = stats(member, Date.parse(now));
-      if (value.approved >= 1) award(member, 'first_topic', now);
-      if (value.likesRecv >= 10) award(member, 'nice', now);
-      if (value.likesRecv >= 50) award(member, 'good', now);
-      if (value.accepted >= 1) award(member, 'accepted1', now);
-      if (value.accepted >= 10) award(member, 'accepted10', now);
-      if (value.featured >= 1) award(member, 'featured', now);
+      ensure(member, now);
+      return achievements.state(member, { now: Date.parse(now) });
     },
 
     /* ---------- 禁言 ---------- */

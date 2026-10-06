@@ -45,6 +45,41 @@ export function purgeCommunityReaderData(db: DatabaseSync, readerId: string, { q
   db.prepare(`DELETE FROM community_revisions WHERE ${target} OR (editor_kind='reader' AND editor_id=?)`).run(readerId);
   db.prepare(`DELETE FROM community_reports WHERE ${target} OR (reporter_kind='reader' AND reporter_id=?)`).run(readerId);
   db.prepare(`DELETE FROM community_reactions WHERE ${target} OR (member_kind='reader' AND member_id=?)`).run(readerId);
+  const removedTopics = new Set((db.prepare('SELECT id FROM reader_cleanup_topics').all() as Array<{ id: string }>).map(row => row.id));
+  const removedReplies = new Set((db.prepare('SELECT id FROM reader_cleanup_replies').all() as Array<{ id: string }>).map(row => row.id));
+  // Other members keep earned honors, while deleted account/content identifiers
+  // leave their evidence. Numeric achievement snapshots do not identify a person.
+  for (const table of ['community_badge_honors', 'community_badge_honor_reviews']) {
+    const receipts = db.prepare(`SELECT rowid,evidence FROM ${table} WHERE NOT(member_kind='reader' AND member_id=?)`).all(readerId) as Array<{ rowid: number; evidence: string }>;
+    const save = db.prepare(`UPDATE ${table} SET evidence=? WHERE rowid=?`);
+    for (const row of receipts) {
+      const receipt = JSON.parse(row.evidence) as { version: number; at: string; metrics: unknown; sources: Array<{ kind: string; id: string; actor?: string }>; anonymizedSources?: number };
+      const kept = receipt.sources.filter(source => {
+        if (source.actor === `reader:${readerId}` || (source.kind === 'contributor' && source.id === `reader:${readerId}`)) return false;
+        if (['topic', 'featured', 'acceptance'].includes(source.kind) && removedTopics.has(source.id)) return false;
+        if (source.kind === 'reply' && removedReplies.has(source.id)) return false;
+        return !(source.kind === 'reaction' && ((source.id.startsWith('topic:') && removedTopics.has(source.id.slice(6))) || (source.id.startsWith('reply:') && removedReplies.has(source.id.slice(6)))));
+      });
+      if (kept.length !== receipt.sources.length) save.run(JSON.stringify({ version: receipt.version, at: receipt.at, metrics: receipt.metrics, sources: kept,
+        anonymizedSources: (receipt.anonymizedSources || 0) + receipt.sources.length - kept.length }), row.rowid);
+    }
+  }
+  db.prepare(`DELETE FROM community_badge_events WHERE actor_key=? OR (kind='reaction' AND
+    ((source_id LIKE 'topic:%' AND substr(source_id,7) IN reader_cleanup_topics) OR (source_id LIKE 'reply:%' AND substr(source_id,7) IN reader_cleanup_replies)))
+    OR (kind='acceptance' AND source_id IN reader_cleanup_topics)`).run(`reader:${readerId}`);
+  db.prepare(`DELETE FROM community_badge_exclusions WHERE actor_key=? OR (kind='contributor' AND source_id=?)
+    OR (kind IN ('topic','featured','acceptance') AND source_id IN reader_cleanup_topics)
+    OR (kind='reply' AND source_id IN reader_cleanup_replies)
+    OR (kind='reaction' AND ((source_id LIKE 'topic:%' AND substr(source_id,7) IN reader_cleanup_topics)
+      OR (source_id LIKE 'reply:%' AND substr(source_id,7) IN reader_cleanup_replies)))`).run(`reader:${readerId}`, `reader:${readerId}`);
+  db.prepare(`DELETE FROM community_badge_violation_reviews WHERE (kind='penalty' AND source_id IN
+    (SELECT id FROM community_ledger WHERE member_kind='reader' AND member_id=?)) OR (kind='sanction' AND source_id IN
+    (SELECT id FROM community_sanctions WHERE member_kind='reader' AND member_id=?))`).run(readerId, readerId);
+  // Inactive-account removal preserves other members' settled experience, just
+  // like their currency. Remove references to permanently removed source content.
+  db.prepare(`UPDATE community_experience_ledger SET ref_kind=NULL,ref_id=NULL
+    WHERE NOT(member_kind='reader' AND member_id=?) AND
+      ((ref_kind='topic' AND ref_id IN reader_cleanup_topics) OR (ref_kind='reply' AND ref_id IN reader_cleanup_replies))`).run(readerId);
   for (const table of ['community_bookmarks', 'community_unlocks', 'community_votes']) {
     db.prepare(`DELETE FROM ${table} WHERE topic_id IN reader_cleanup_topics OR (member_kind='reader' AND member_id=?)`).run(readerId);
   }
@@ -52,8 +87,9 @@ export function purgeCommunityReaderData(db: DatabaseSync, readerId: string, { q
   db.prepare(`DELETE FROM community_notifications WHERE (member_kind='reader' AND member_id=?) OR (actor_kind='reader' AND actor_id=?)
     OR topic_id IN reader_cleanup_topics OR reply_id IN reader_cleanup_replies`).run(readerId, readerId);
   db.prepare("DELETE FROM community_follows WHERE (follower_kind='reader' AND follower_id=?) OR (followee_kind='reader' AND followee_id=?)").run(readerId, readerId);
-  for (const table of ['community_ledger', 'community_checkins', 'community_makeups', 'community_members', 'community_visits',
-    'community_badges', 'community_sanctions', 'community_owned', 'community_inventory', 'community_orders', 'community_requests', 'community_rate_events']) {
+  for (const table of ['community_experience_ledger', 'community_experience_visits', 'community_vip_growth_days',
+    'community_ledger', 'community_checkins', 'community_makeups', 'community_members', 'community_visits',
+    'community_badges', 'community_badge_honors', 'community_badge_honor_reviews', 'community_sanctions', 'community_owned', 'community_inventory', 'community_orders', 'community_requests', 'community_rate_events']) {
     db.prepare(`DELETE FROM ${table} WHERE member_kind='reader' AND member_id=?`).run(readerId);
   }
   db.exec(`DELETE FROM community_replies WHERE id IN reader_cleanup_replies;

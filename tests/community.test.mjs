@@ -209,7 +209,7 @@ test("the account menu keeps personal pages and moderation without duplicate sit
   // Once the community knows the member: the bell, a head with level and UID, and their pages.
   const signedIn = menu({ nickname: "林间", me: me({ balance: 42, unread: { all: 3, reply: 3, thanks: 0, system: 0 } }) });
   assert.match(signedIn, /^<a class="community-bell" href="#\/community\/inbox" aria-label="通知，3 条未读"><i-bell><\/i-bell><b>3<\/b><\/a>/);
-  assert.equal(textAt(signedIn, '.account-button.has-avatar > .community-uname'), '林间');
+  assert.equal(textAt(signedIn, '.account-button.has-avatar > .community-name > .community-uname'), '林间');
   assert.equal(textAt(signedIn, '.community-menu-head b'), '林间');
   assert.equal(textAt(signedIn, '.community-menu-head div > span'), '巡天 · UID u1');
   assert.deepEqual([...signedIn.matchAll(/role="menuitem" (?:class="[^"]+" )?href="([^"]+)"/g)].map((m) => m[1]),
@@ -259,7 +259,7 @@ test("topic rows follow the demo: avatars, level and VIP marks, decorations, fla
   assert.match(rows, /<span class="community-flag is-featured"><i-award><\/i-award>精华<\/span>/);
   assert.match(rows, /class="community-topic-board"[^>]*href="#\/community\/boards\/qa">学习问答<\/a>/);
   assert.match(rows, /<span class="community-who"><a class="community-uname" href="#\/community\/u\/owner">無相<\/a><span class="community-role">站长<\/span><\/span>/);
-  assert.match(rows, /<span class="community-uname">&lt;b&gt;x&lt;\/b&gt;<\/span><span class="community-lv is-lv1" title="L1">巡天<\/span>/);
+  assert.match(rows, /<span class="community-uname">&lt;b&gt;x&lt;\/b&gt;<\/span><span class="community-level-marks"><span class="community-level-badge is-trust" role="img" aria-label="权限等级：L1 巡天" title="权限等级：L1 巡天">/);
   assert.equal(textAt(rows, 'time[datetime="2026-09-30T11:30:00Z"]'), '远山 30 分钟前回复', 'the latest replier');
   assert.match(rows, /<time datetime="2026-09-29T08:00:00Z">1 天前<\/time>/, "otherwise when it was posted");
   assert.match(rows, /class="community-topic-replies" href="#\/post\/a" tabindex="-1" aria-label="3 条回复，0 个赞"><small>0 赞<\/small><span><i-reply><\/i-reply>3<\/span>/);
@@ -271,7 +271,7 @@ test("topic rows follow the demo: avatars, level and VIP marks, decorations, fla
   const fancy = communityTopicsHTML([topic("f", { author: person("星野", { avatar: "/api/community/avatar/u2.webp?v=ab", frame: "gold", color: "aurora", vip: true, level: 3 }), glow: true })], common);
   assert.match(fancy, /<article class="community-topic is-glow"/);
   assert.match(fancy, /<a class="community-av community-av-md is-frame-gold" href="#\/community\/u\/u2" tabindex="-1" aria-hidden="true"><img src="\/api\/community\/avatar\/u2\.webp\?v=ab" alt=""/);
-  assert.match(fancy, /<a class="community-uname is-color-aurora" href="#\/community\/u\/u2">星野<\/a><span class="community-lv is-lv3" title="L3">守夜<\/span><span class="community-vip">VIP<\/span>/);
+  assert.match(fancy, /<a class="community-uname is-color-aurora" href="#\/community\/u\/u2">星野<\/a><span class="community-level-marks"><span class="community-level-badge is-trust" role="img" aria-label="权限等级：L3 守夜"[^]*data-level-icon="trust-l3"[^]*<span class="community-level-badge is-vip" role="img" aria-label="VIP 会员"[^]*data-level-icon="vip-1"/);
   assert.doesNotMatch(communityTopicsHTML([topic("x", { author: person("甲", { frame: "gold onload=x", color: "Red" }) })], common), /is-frame|is-color/);
   assert.match(communityTopicsHTML([topic("s", { author: person("协", { steward: true }) })], common), /<span class="community-lv is-steward" title="协管"><span class="community-steward-icon" aria-hidden="true">⬟<\/span>协管<\/span>/);
   // A moment has no title: the row shows its text.
@@ -621,9 +621,11 @@ test("the check-in page: constellation, calendar with make-up days, early birds 
   assert.match(html, /每次 30 星尘，本月还剩 2 次/);
   assert.match(html, /data-month="2026-10"[^>]*disabled/, "no future months");
   assert.match(html, /今日早鸟[\s\S]*林间[\s\S]*00:05/);
-  assert.equal(count(html, /class="community-badge is-/g), 6);
-  assert.match(html, /class="community-badge is-bronze is-md" title="第一次签到/);
-  assert.match(html, /class="community-badge is-bronze is-md is-off" title="连签 7 天/);
+  assert.equal(count(html, /class="community-badge is-/g), 2);
+  assert.match(html, /data-badge-family="attendance" data-earned="false"/);
+  assert.match(html, /data-badge-family="early" data-earned="false"/);
+  assert.match(html, /data-badge-legacy="first_checkin"/);
+  assert.match(html, /状态暂未提供/);
   assert.doesNotMatch(html, /community-table/, "the ledger lives in 我的星尘");
   const noLeft = communityCheckinHTML({ checkin: ready({ ...data, makeup: { ...data.makeup, left: 0 } }), ...common });
   assert.doesNotMatch(noLeft, /is-makeup/);
@@ -665,7 +667,11 @@ test("the 星尘 center: the ledger, levels and the rules", () => {
   assert.match(ledger, /兑换 · &lt;金环头像框&gt;[\s\S]*−80/);
   const levels = communityStardustHTML({ stardust: ready(stardust()), tab: "levels", ...common });
   assert.match(levels, /data-level-explorer data-mode="growth"/);
-  assert.equal(count(levels, /data-action="community-level-step"/g), 2);
+  assert.equal(count(levels, /data-action="community-level-step"/g), 0);
+  assert.equal(count(levels, /data-level-step=/g), 2);
+  assert.equal(count(levels, /data-carousel-neighbour/g), 1);
+  assert.match(levels, /data-level-track/);
+  assert.doesNotMatch(levels, /data-level-gallery/);
   assert.equal(count(levels, /data-level-detail/g), 1);
   assert.doesNotMatch(levels, /community-ladder|community-rung|community-lv-rings/);
   const trust = (entry = stardust(), level = 2) => communityStardustHTML({ stardust: ready(entry), tab: "levels", levelSelection: { mode: "trust", growth: null, trust: level }, ...common });
@@ -772,7 +778,8 @@ test("member pages: the hero, follows, moderation, quick links for yourself, and
   assert.match(html, /data-community="member" data-tab="topics"/);
   assert.match(html, /<div class="community-m-cover is-cover-aurora" aria-hidden="true">/);
   assert.equal(textAt(html, 'h1 .community-uname.is-color-gold'), '远山');
-  assert.match(html, /<div class="community-m-tags"><span class="community-lv is-lv2" title="L2">观测<\/span><span class="community-vip">VIP<\/span><span class="community-muted is-mono">UID u2<\/span>/);
+  assert.match(html, /<div class="community-m-name"><span class="community-level-marks is-large"><span class="community-level-badge is-trust" role="img" aria-label="权限等级：L2 观测"[^]*data-level-icon="vip-1"[^]*<\/span><h1>[^]*<\/h1><div class="community-m-tags"><span class="community-muted is-mono">UID u2<\/span>/, 'the profile shows large level icons above the name instead of text tags');
+  assert.doesNotMatch(html, /<h1>(?:(?!<\/h1>)[^])*community-level-marks/, 'the name line itself carries no icons on the profile');
   assert.match(html, /<p>&lt;喜欢&gt;<\/p><p class="community-muted">加入 10 天 · 连签 4 天<\/p>/);
   assert.match(html, /data-action="community-follow" data-uid="u2" aria-pressed="false">关注/);
   assert.match(html, /data-action="community-mute" data-uid="u2"/);
@@ -796,8 +803,9 @@ test("member pages: the hero, follows, moderation, quick links for yourself, and
   assert.match(self, /还没有收藏/);
   assert.doesNotMatch(self, /community-follow/, "no following yourself");
   const badges = communityMemberHTML({ member: ready(memberPage({ tab: "badges" })), me: me(), ...common });
-  assert.equal(count(badges, /class="community-bw-item/g), 12);
-  assert.match(badges, /class="community-bw-item"><span class="community-badge is-bronze is-lg"[\s\S]*<b>第一帖<\/b>/);
+  assert.equal(count(badges, /class="community-bw-item/g), 6);
+  assert.match(badges, /data-badge-legacy="first_topic"[\s\S]*<b>第一帖<\/b>/);
+  assert.match(badges, /历史徽章[\s\S]*状态暂未提供|状态暂未提供[\s\S]*历史徽章/);
   const replies = communityMemberHTML({ member: ready(memberPage({ tab: "replies", replies: [{ id: "r1", topicId: "t1", topicTitle: "<主题>", board: "qa", body: "**好**", createdAt: "2026-09-30T11:00:00Z", likes: 2 }] })), me: me(), ...common });
   assert.match(replies, /<a class="community-rep-ref" href="#\/post\/t1">&lt;主题&gt;<\/a><div class="community-text is-small"><p><strong>好<\/strong><\/p><\/div><span class="community-muted">1 小时前 · 2 赞<\/span>/);
   assert.match(communityMemberHTML({ member: { state: "error", status: 404, message: "找不到这个成员。" }, ...common }), /data-content-state="missing"[\s\S]*找不到这个成员/);

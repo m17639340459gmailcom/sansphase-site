@@ -30,7 +30,7 @@ test('publication includes relative imports of every shipped build script and te
 
 test('publication retains growth asset generators and internal community rules for collaborators', async () => {
   const files = new Set(await publicationFiles());
-  for (const file of ['scripts/build-growth-motion.mjs', 'scripts/growth-motion-rig.ts', 'docs/COMMUNITY-STARDUST-RULES.md', 'docs/COMMUNITY-CONVENTION.md', 'docs/COMMUNITY-EXPERIENCE-RULES.md']) {
+  for (const file of ['scripts/build-growth-constellation.mjs', 'scripts/growth-constellation.ts', 'scripts/build-trust-moon.mjs', 'scripts/trust-moon.ts', 'scripts/build-vip-badge.mjs', 'scripts/vip-badge.ts', 'scripts/vip-badge-glyphs.ts', 'docs/COMMUNITY-STARDUST-RULES.md', 'docs/COMMUNITY-CONVENTION.md', 'docs/COMMUNITY-EXPERIENCE-RULES.md']) {
     assert.ok(files.has(file), `the prepared source is missing ${file}`);
   }
 });

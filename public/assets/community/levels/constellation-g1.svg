@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="G1 星芽"><style>
+.spin{transform-origin:100px 100px;animation:spin 48s linear infinite}
+.spinr{transform-origin:100px 100px;animation:spin 270s linear infinite reverse}
+.sweep{transform-origin:100px 100px;animation:spin 19.5s linear infinite}
+.gal{transform-origin:100px 100px;animation:spin 138s linear infinite}
+.orbit{transform-origin:100px 100px;animation:spin 33s linear infinite}
+.orbitr{transform-origin:100px 100px;animation:spin 45s linear infinite reverse}
+.rip{transform-origin:100px 100px;opacity:0;animation:rip 13.2s ease-out infinite}
+.wing{transform-origin:100px 100px;animation:wing 13.2s ease-in-out infinite}
+.rise{transform-box:fill-box;transform-origin:center;opacity:0;animation:rise 12.6s ease-out infinite}
+.motif{transform-origin:100px 134px;animation:motif 6.5s ease-in-out infinite}
+@keyframes motif{0%,100%{transform:rotate(-3.5deg)}50%{transform:rotate(3.5deg)}}
+.ray0{transform-origin:100px 100px;animation:spin 144s linear infinite}
+.ray1{transform-origin:100px 100px;animation:spin 210s linear infinite reverse}
+.au0{transform-origin:100px 100px;animation:spin 27s linear infinite}
+.au1{transform-origin:100px 100px;animation:spin 39s linear infinite reverse}
+.run2{stroke-dasharray:9 91;animation:run 15.6s linear infinite}
+.nova{transform-origin:100px 100px;opacity:0;animation:nova 19.5s ease-out infinite}
+.novaring{transform-origin:100px 100px;opacity:0;animation:novaring 19.5s ease-out infinite}
+@keyframes nova{0%,72%{opacity:0;transform:scale(.3)}80%{opacity:1;transform:scale(1.15)}100%{opacity:0;transform:scale(1.5)}}
+@keyframes novaring{0%,76%{opacity:0;transform:scale(.4)}82%{opacity:.9}100%{opacity:0;transform:scale(3)}}
+.gl0{animation:gl 8.4s ease-in-out infinite}
+.gl1{animation:gl 6.6s ease-in-out -.9s infinite}
+.gl2{animation:gl 10.2s ease-in-out -1.7s infinite}
+@keyframes rip{0%{transform:scale(1);opacity:.75}100%{transform:scale(1.58);opacity:0}}
+@keyframes wing{0%,100%{transform:scale(1)}50%{transform:scale(1.035)}}
+@keyframes rise{0%{transform:translateY(7px) scale(.4);opacity:0}30%{opacity:1}100%{transform:translateY(-17px) scale(1);opacity:0}}
+@keyframes gl{0%,100%{opacity:.15}50%{opacity:1}}
+.breath{transform-origin:100px 100px;animation:breath 15s ease-in-out infinite}
+.beat{animation:beat 10.2s ease-in-out infinite}
+.drift0{animation:drift0 39s ease-in-out infinite alternate}
+.drift1{animation:drift1 51s ease-in-out infinite alternate}
+.tw0{animation:tw 9.3s ease-in-out infinite}
+.tw1{animation:tw 6.9s ease-in-out -1.1s infinite}
+.tw2{animation:tw 12.6s ease-in-out -2.4s infinite}
+.run{stroke-dasharray:7 93;animation:run 16.5s linear infinite}
+.shoot{opacity:0;animation:shoot 21s ease-in infinite}
+.shoot.late{animation-delay:-9.6s;animation-name:shoot2}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes breath{0%,100%{opacity:.5;transform:scale(.95)}50%{opacity:.95;transform:scale(1.03)}}
+@keyframes beat{0%,100%{transform:scale(.9);opacity:.82}50%{transform:scale(1.08);opacity:1}}
+@keyframes drift0{from{transform:translate(-7px,4px)}to{transform:translate(9px,-6px)}}
+@keyframes drift1{from{transform:translate(8px,6px)}to{transform:translate(-9px,-5px)}}
+@keyframes tw{0%,100%{opacity:.5}50%{opacity:1}}
+@keyframes run{from{stroke-dashoffset:100}to{stroke-dashoffset:0}}
+@keyframes shoot{0%{transform:translate(150px,58px);opacity:0}3%{opacity:1}13%{transform:translate(62px,92px);opacity:0}100%{transform:translate(62px,92px);opacity:0}}
+@keyframes shoot2{0%{transform:translate(138px,104px);opacity:0}3%{opacity:1}12%{transform:translate(70px,130px);opacity:0}100%{transform:translate(70px,130px);opacity:0}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}.run,.run2,.shoot,.sweep,.nova,.novaring{display:none}}
+</style><defs><linearGradient id="g1m" x1="28" y1="20" x2="172" y2="180" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#c3ccda"/><stop offset=".22" stop-color="#6f7b8f"/><stop offset=".48" stop-color="#232b38"/><stop offset=".7" stop-color="#c3ccda"/><stop offset="1" stop-color="#6f7b8f"/></linearGradient><radialGradient id="g1d" cx=".5" cy=".36" r=".72"><stop offset="0" stop-color="#1a2848"/><stop offset=".6" stop-color="#0c1429"/><stop offset="1" stop-color="#05070f"/></radialGradient><radialGradient id="g1s"><stop offset="0" stop-color="#fff" stop-opacity=".85"/><stop offset=".28" stop-color="#cfe3dc" stop-opacity=".42"/><stop offset="1" stop-color="#3f6f72" stop-opacity="0"/></radialGradient><radialGradient id="g1v"><stop offset=".72" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".62"/></radialGradient><clipPath id="g1k"><circle cx="100" cy="100" r="50"/></clipPath><linearGradient id="g1j" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e2f7ec"/><stop offset="1" stop-color="#6fae98"/></linearGradient><radialGradient id="g1n0"><stop offset="0" stop-color="#3f6f72" stop-opacity="0.45"/><stop offset="1" stop-color="#3f6f72" stop-opacity="0"/></radialGradient></defs><g clip-path="url(#g1k)"><circle cx="100" cy="100" r="50" fill="url(#g1d)"/><ellipse cx="78" cy="80" rx="44" ry="34" transform="rotate(-24 78 80)" fill="url(#g1n0)"/><g fill="#cfe3dc"><circle cx="119.98" cy="115.23" r="0.75" opacity="0.49"/><circle cx="70.67" cy="108.47" r="0.38" opacity="0.38"/><circle cx="63.17" cy="101.61" r="0.69" opacity="0.47"/><circle cx="55.43" cy="97.26" r="0.35" opacity="0.5"/><circle cx="115.68" cy="93.94" r="0.92" opacity="0.33"/><circle cx="126.02" cy="136.47" r="0.57" opacity="0.43"/><circle cx="63.22" cy="105.06" r="0.5" opacity="0.32"/><circle cx="121.51" cy="121.03" r="0.69" opacity="0.29"/><circle cx="94.43" cy="79.73" r="0.68" opacity="0.56"/><circle cx="75.3" cy="87.31" r="0.38" opacity="0.43"/><circle cx="112.1" cy="123.98" r="0.63" opacity="0.66"/><circle cx="135.64" cy="122.94" r="0.71" opacity="0.54"/><circle cx="82.88" cy="93.87" r="0.59" opacity="0.66"/><circle cx="80.67" cy="97.23" r="0.5" opacity="0.51"/><circle cx="96.1" cy="95.57" r="0.68" opacity="0.47"/><circle cx="75.73" cy="69.06" r="0.75" opacity="0.38"/><circle cx="121.56" cy="123.99" r="0.56" opacity="0.64"/><circle cx="74.97" cy="78.54" r="0.53" opacity="0.51"/><circle cx="88.98" cy="127.63" r="0.69" opacity="0.46"/></g><g class="motif"><g fill="url(#g1j)" color="#cfe3dc" opacity="0.38"><path d="M99 109Q83 107 79 88Q96 91 99 109Z"/><path d="M99 109Q103 86 121 81Q119 102 99 109Z"/></g><path d="M100 134L99 109M99 109L79 88M99 109L121 81" fill="none" stroke="#cfe3dc" stroke-width="0.94" stroke-linecap="round" opacity=".62"/><g><circle cx="100" cy="134" r="4" fill="url(#g1s)"/><circle cx="100" cy="134" r="1.4" fill="#fff"/></g><g><circle cx="99" cy="109" r="7.5" fill="url(#g1s)"/><path d="M99 103.4Q99.64 108.36 104.6 109Q99.64 109.64 99 114.6Q98.36 109.64 93.4 109Q98.36 108.36 99 103.4Z" fill="#fff"/></g><g><circle cx="79" cy="88" r="7.5" fill="url(#g1s)"/><path d="M79 82.4Q79.64 87.36 84.6 88Q79.64 88.64 79 93.6Q78.36 88.64 73.4 88Q78.36 87.36 79 82.4Z" fill="#fff"/></g><g style="transform-origin:121px 81px"><circle cx="121" cy="81" r="19.854999999999997" fill="url(#g1s)"/><path d="M121 62.71Q121.32 80.68 139.29 81Q121.32 81.32 121 99.29Q120.68 81.32 102.71 81Q120.68 80.68 121 62.71Z" fill="#fff" opacity=".55"/><path d="M125.58 76.42Q121.9 81 125.58 85.58Q121 81.9 116.42 85.58Q120.1 81 116.42 76.42Q121 80.1 125.58 76.42Z" fill="#fff" opacity=".85"/><path d="M121 70.55Q122.13 79.87 131.45 81Q122.13 82.13 121 91.45Q119.87 82.13 110.55 81Q119.87 79.87 121 70.55Z" fill="#fff"/></g></g><circle cx="100" cy="100" r="50" fill="url(#g1v)"/><path d="M61 85A50 50 0 0 1 115 61A62.5 62.5 0 0 0 61 85Z" fill="#fff" opacity=".055"/></g><circle cx="100" cy="100" r="50" fill="none" stroke="#232b38" stroke-width="3.8"/><circle cx="100" cy="100" r="50" fill="none" stroke="url(#g1m)" stroke-width="2"/><circle cx="100" cy="100" r="50.5" fill="none" stroke="#fff" stroke-width=".5" opacity=".5"/><circle cx="100" cy="100" r="49.4" fill="none" stroke="#000" stroke-width=".8" opacity=".5"/><circle cx="65.18" cy="145.38" r="6.5" fill="url(#g1s)" opacity=".8"/><g transform="rotate(217.5 100 100)"><path d="M100 38.8L102.5 42.8L100 46.8L97.5 42.8Z" fill="url(#g1j)" stroke="#232b38" stroke-width=".8" stroke-linejoin="round"/><path d="M100 38.8L102.5 42.8L100 46.8Z" fill="#081022" opacity=".32"/><path d="M100 40.32L98.63 42.6L100 43.2Z" fill="#fff" opacity=".7" class="gl1"/></g><path transform="rotate(205 100 100)" d="M100 39.4L102.1 42.8L100 46.2L97.9 42.8Z" fill="#070b16" stroke="#232b38" stroke-width=".8" opacity=".95"/><path transform="rotate(192.5 100 100)" d="M100 39.4L102.1 42.8L100 46.2L97.9 42.8Z" fill="#070b16" stroke="#232b38" stroke-width=".8" opacity=".95"/><path transform="rotate(180 100 100)" d="M100 39.4L102.1 42.8L100 46.2L97.9 42.8Z" fill="#070b16" stroke="#232b38" stroke-width=".8" opacity=".95"/><path transform="rotate(167.5 100 100)" d="M100 39.4L102.1 42.8L100 46.2L97.9 42.8Z" fill="#070b16" stroke="#232b38" stroke-width=".8" opacity=".95"/><path transform="rotate(155 100 100)" d="M100 39.4L102.1 42.8L100 46.2L97.9 42.8Z" fill="#070b16" stroke="#232b38" stroke-width=".8" opacity=".95"/><path transform="rotate(142.5 100 100)" d="M100 39.4L102.1 42.8L100 46.2L97.9 42.8Z" fill="#070b16" stroke="#232b38" stroke-width=".8" opacity=".95"/></svg>

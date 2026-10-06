@@ -19,7 +19,9 @@ import { autosizeCommunityTextarea } from './community-editor-size.mjs';
 import { createCommunityBannerController } from './community-banner-controller.mjs';
 import { createCommunityConventionConsent } from './community-convention-consent.mjs';
 import { createCommunityLevelExplorer } from './community-level-explorer.mjs';
+import { createCommunityBadgeExplorer } from './community-badge-explorer.mjs';
 import type { CommunityConvention } from './community-convention.ts';
+import type { CommunityGrowthState, CommunityVIPGrowthState } from './community-growth.ts';
 import { createCommunityWriteRequest } from './community-write-request.mjs';
 import { communityFrameBannersHTML } from './community-frame-banners.mjs';
 import type { CommunityBannerConfig } from './community-banners.ts';
@@ -114,6 +116,11 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     common: () => mounted?.ctx || null,
   });
   const memberPages = new Map<string, CommunityLoad<CommunityMember>>();
+  const badgeExplorer = createCommunityBadgeExplorer({
+    root: () => route().view === 'member' && route().tab === 'badges' ? mounted?.main.querySelector<HTMLElement>('[data-badge-explorer]') || null : null,
+    data: () => { const current = route(); return readyData(memberPages.get(memberKey(current.id, current.tab)))?.badgeState || null; },
+    common: () => mounted?.ctx || null,
+  });
   const inboxes = new Map<string, CommunityLoad<CommunityInbox>>();
   const manages = new Map<string, CommunityLoad<CommunityManage>>();
   const manageRequests = new Map<string, number>();
@@ -217,12 +224,55 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     storage: () => window.sessionStorage,
   });
   const send = <T>(path: string, body: object = {}) => writeRequests.send<T>(path, body);
+  // Client state only avoids redundant requests. The server owns the daily
+  // account key, award, VIP status and transaction; storage cannot grant XP.
+  let activeVisitDone = '';
+  let activeVisitPending: { key: string; token: object; result: Promise<boolean> } | null = null;
+  let activeVisitRetryAt = 0;
+  async function recordActiveVisit(): Promise<boolean> {
+    const current = readyData(me), view = route().view;
+    if (!mounted || mounted.main.ownerDocument.visibilityState !== 'visible' || !current?.uid || current.role !== 'reader' || current.owner || current.management?.browsingAsReader || !current.agreed || current.convention?.agreed === false || !current.growth?.configured || view === 'unknown' || view === 'landing') return false;
+    const identity = frameIdentity;
+    const key = `${current.uid}:${new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10)}`;
+    if (key === activeVisitDone) return false;
+    if (activeVisitPending?.key === key) return activeVisitPending.result;
+    if (Date.now() < activeVisitRetryAt) return false;
+    const token = {};
+    const result = (async () => {
+      try {
+        const visit = await send<{ uid: string | null; awarded: number; visited: boolean; growth: CommunityGrowthState | null; vipGrowth: CommunityVIPGrowthState | null }>('active/visit');
+        const viewer = readyData(me);
+        if (identity !== frameIdentity || activeVisitPending?.token !== token || !mounted || viewer?.uid !== current.uid) return false;
+        if (typeof visit.uid !== 'string' || !visit.uid) throw Error('The visit response did not identify its account.');
+        // Cookies can change in another tab while this page still shows the
+        // previous account. Never attach another account's progress to it.
+        if (visit.uid !== current.uid) { clearData(); await refresh(); return false; }
+        activeVisitDone = key;
+        viewer.growth = visit.growth; viewer.vipGrowth = visit.vipGrowth;
+        for (const value of stardusts.values()) if (value.state === 'ready') {
+          value.data.growth = visit.growth; value.data.vipGrowth = visit.vipGrowth;
+        }
+        headerKey = ''; mounted.ctx.headerChanged?.();
+        return true;
+      } catch {
+        // A failed request cannot fabricate progress. A later real entrance
+        // or interaction retries the same protected write request.
+        if (identity === frameIdentity && activeVisitPending?.token === token) activeVisitRetryAt = Date.now() + 15000;
+        return false;
+      }
+    })();
+    activeVisitPending = { key, token, result };
+    try { return await result; }
+    finally { if (activeVisitPending?.result === result) activeVisitPending = null; }
+  }
+  const onActiveVisibility = () => { void recordActiveVisit().then(changed => { if (changed) paint(); }); };
+  const onActiveInteraction = (event: Event) => { if (event.isTrusted) onActiveVisibility(); };
   const conventionConsent = createCommunityConventionConsent({
     request: api, send, renderBody: (body, common) => communityConventionBodyHTML(body, common, 'community-consent-rule'),
     accepted: version => {
       const current = readyData(me);
       if (current) { current.agreed = true; current.convention = { version, agreed: true }; }
-      void reload();
+      void reload().then(recordActiveVisit).then(changed => { if (changed) paint(); });
     },
   });
   function syncConvention() {
@@ -301,7 +351,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     await assignLoad('me', me, value => { me = value; });
     if (identity !== frameIdentity) return;
     const data = readyData(me);
-    const key = data ? [data.name, data.uid, data.avatar, data.frame, data.color, JSON.stringify(data.nameEffect), data.level, JSON.stringify(data.growth), data.steward, data.mod, JSON.stringify(data.management), data.balance, data.checkedIn, data.unread.all].join('|') : '';
+    const key = data ? [data.name, data.uid, data.avatar, data.frame, data.color, JSON.stringify(data.nameEffect), data.level, JSON.stringify(data.growth), JSON.stringify(data.vipGrowth), data.steward, data.mod, JSON.stringify(data.management), data.balance, data.checkedIn, data.unread.all].join('|') : '';
     if (key !== headerKey) { headerKey = key; mounted?.ctx.headerChanged?.(); }
     syncConvention();
   }
@@ -391,6 +441,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       if (location.hash !== hash || identity !== frameIdentity) return;
     }
     await Promise.all(loadsFor(current).map(run => run()));
+    if (location.hash === hash && identity === frameIdentity) await recordActiveVisit();
     if (location.hash === hash && identity === frameIdentity) paint();
   }
   // Reloads what the current page shows, then repaints.
@@ -444,7 +495,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       case 'checkin': return communityCheckinHTML({ ...common, checkin: checkin || loading });
       case 'bookmarks': return communityBookmarksHTML({ ...common, list: bookmarks || loading });
       case 'manage': return communityManageHTML({ ...common, manage: manages.get(['contact', 'convention'].includes(current.tab) ? 'queue' : current.tab) || loading, tab: current.tab, itemEditing, shippingOrder, rejecting, deleting, me: viewer, selectedReviews: [...reviewSelection], managementBoard, stewardCandidate, stewardEditingUid, bannerEditor: bannerEditor.state(), convention });
-      case 'member': return communityMemberHTML({ ...common, member: memberPages.get(memberKey(current.id, current.tab)) || loading, me: viewer, muting });
+      case 'member': return communityMemberHTML({ ...common, member: memberPages.get(memberKey(current.id, current.tab)) || loading, me: viewer, muting, badgeSelection: badgeExplorer.state() });
       case 'stardust': return communityStardustHTML({ ...common, stardust: stardusts.get(flow) || loading, tab: current.tab, levelSelection: levelExplorer.state() });
       case 'inbox': return communityInboxHTML({ ...common, inbox: inboxes.get(current.tab) || loading, tab: current.tab, me: viewer });
       case 'shop': return current.tab === 'mine'
@@ -1404,11 +1455,12 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (switchingBrowseMode) { notify(tr('正在切换浏览身份，请稍候。', 'Switching browsing perspective; please wait.')); return; }
     const { action, id = '', kind } = target.dataset;
     if (route().view === 'manage' && ['community-ship', 'community-reject', 'community-queue-delete', 'community-batch-reject', 'community-uphold'].includes(action || '')) managementOpener = { action: action!, id };
-    if (readyData(me)?.management?.browsingAsReader && !['community-browse-mode', 'community-sort', 'community-more', 'community-search-clear', 'community-retry', 'community-reply-sort', 'community-lightbox', 'community-delivery', 'community-month', 'community-level-mode', 'community-level-select', 'community-level-step'].includes(action || '')) {
+    if (readyData(me)?.management?.browsingAsReader && !['community-browse-mode', 'community-sort', 'community-more', 'community-search-clear', 'community-retry', 'community-reply-sort', 'community-lightbox', 'community-delivery', 'community-month', 'community-level-mode', 'community-level-select', 'community-badge-family', 'community-badge-tier'].includes(action || '')) {
       notify(tr('当前预览仅供查看，请先返回管理身份。', 'This preview is read-only. Restore management first.')); return;
     }
     if (bannerEditor.action(target)) return;
     if (levelExplorer.action(target)) return;
+    if (badgeExplorer.action(target)) return;
     switch (action) {
       case 'community-management-board': {
         if (reviewBusy || route().view !== 'manage' || !['queue', 'reports'].includes(route().tab)) return;
@@ -1647,6 +1699,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   function onKeydown(event: KeyboardEvent) {
     if (event.defaultPrevented) return;
     levelExplorer.keydown(event);
+    if (event.defaultPrevented) return;
+    badgeExplorer.keydown(event);
     if (event.defaultPrevented) return;
     const dialog = mounted?.main.querySelector('[role="dialog"][aria-modal="true"]');
     if (dialog && event.key === 'Escape') { event.preventDefault(); if (!dialog.querySelector('button[type="submit"]:disabled')) { rejecting = null; deleting = null; shippingOrder = null; paint(); restoreManagementFocus(); } return; }
@@ -1969,6 +2023,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   };
 
   function clearData(clearWrites = true) {
+    activeVisitDone = ''; activeVisitPending = null; activeVisitRetryAt = 0;
     conventionConsent.close();
     convention = null;
     if (clearWrites) writeRequests.clear();
@@ -1982,6 +2037,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     managementBoard = ''; stewardCandidate = null; stewardLookupUid = ''; stewardLookupRequest++; stewardBusy = false; stewardEditingUid = null; stewardScopeDraft = null;
     checkinRequest++; stardustRequest++;
     levelExplorer.reset();
+    badgeExplorer.reset();
     frameIdentity++; frameHighlightsPending.clear(); frameHighlights.clear(); listRequests.clear();
     summary = null; me = null; moderationContacts = null; checkin = null; bookmarks = null; shop = null; shopMine = null; rank = null; headerKey = '';
     stardusts.clear(); memberPages.clear(); inboxes.clear(); manages.clear(); manageRequests.clear(); lists.clear(); threads.clear(); lastHash = '';
@@ -2052,6 +2108,10 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       main.addEventListener('change', onChange);
       main.addEventListener('keydown', onKeydown);
       main.addEventListener('pointermove', onPointer);
+      main.addEventListener('pointerdown', onActiveInteraction, { passive: true });
+      main.addEventListener('keydown', onActiveInteraction);
+      document.addEventListener('visibilitychange', onActiveVisibility);
+      window.addEventListener('focus', onActiveVisibility);
       document.addEventListener('click', onDocumentClick);
       document.addEventListener('dragenter', onEquipmentDrag);
       document.addEventListener('dragover', onEquipmentDrag);
@@ -2091,6 +2151,10 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         main.removeEventListener('change', onChange);
         main.removeEventListener('keydown', onKeydown);
         main.removeEventListener('pointermove', onPointer);
+        main.removeEventListener('pointerdown', onActiveInteraction);
+        main.removeEventListener('keydown', onActiveInteraction);
+        document.removeEventListener('visibilitychange', onActiveVisibility);
+        window.removeEventListener('focus', onActiveVisibility);
         document.removeEventListener('click', onDocumentClick);
         document.removeEventListener('dragenter', onEquipmentDrag);
         document.removeEventListener('dragover', onEquipmentDrag);

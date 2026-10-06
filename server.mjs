@@ -5,13 +5,23 @@ import {bookManifest,bookPart} from './server/book-delivery.ts';
 import {imageSources} from './src/image-sources.mjs';
 import {uploadTimeoutMs} from './src/upload-policy.mjs';
 import http from "node:http";
-import { open, readFile } from "node:fs/promises";
+import { open, readFile, realpath } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { serializeContent } from "./server/content-service.ts";
 import { pipeline } from "node:stream/promises";
 import { resolve, extname, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 const defaultRoot = fileURLToPath(new URL("./dist/", import.meta.url));
+// Public bundles remain readable by browsers. Source, private data and debug
+// artefacts are never static assets, even if copied into dist accidentally.
+const privateStaticDirectories = new Set(['src', 'server', 'scripts', 'tests', 'docs', 'archive', 'outputs', 'uploads', 'logs', 'node_modules']);
+const privateStaticPath = path => {
+  const segments = path.toLowerCase().split('/').filter(Boolean);
+  return path.includes(':') || segments.some((part, index) => part.startsWith('.') && !(index === 0 && part === '.well-known'))
+    || privateStaticDirectories.has(segments[0])
+    || /\.(?:ts|tsx|map|env|log|db|db-wal|db-shm|sqlite|sqlite3|sqlite-wal|sqlite-shm|sql|toml|pem|key|p12|pfx|bak|backup)$/i.test(path)
+    || /^(?:package(?:-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|server\.mjs|tsconfig(?:\.[\w-]+)?\.json|AGENTS\.md)$/i.test(segments.at(-1) || '');
+};
 const types = {
   ".html": "text/html; charset=utf-8",
   ".css": "text/css; charset=utf-8",
@@ -276,7 +286,11 @@ export function createPreviewServer({
         respond(403, "Forbidden");
         return;
       }
-      fileHandle = await open(file, "r");
+      if (privateStaticPath(path)) { respond(404, "Not found"); return; }
+      const [publicRoot, publicFile] = await Promise.all([realpath(rootPath), realpath(file)]);
+      const publicPrefix = publicRoot.endsWith(sep) ? publicRoot : publicRoot + sep;
+      if (!publicFile.startsWith(publicPrefix)) { respond(403, "Forbidden"); return; }
+      fileHandle = await open(publicFile, "r");
       const stats = await fileHandle.stat();
       if (!stats.isFile()) {
         await fileHandle.close();

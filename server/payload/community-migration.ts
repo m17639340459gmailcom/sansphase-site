@@ -10,6 +10,51 @@ import { communityBoards } from '../../src/community.ts';
 // this explicit, backed-up migration adds the community tables.
 const member = (prefix = 'member') => `${prefix}_kind TEXT NOT NULL CHECK(${prefix}_kind IN ('reader','owner')), ${prefix}_id TEXT NOT NULL`;
 const tables: Record<string, string> = {
+  // A new independent account starts at migration time. No historical balance,
+  // visit or membership duration is converted into experience or VIP login days.
+  community_experience_config: `CREATE TABLE community_experience_config (
+  id INTEGER PRIMARY KEY CHECK(id=1),
+  started_at TEXT NOT NULL
+);
+INSERT INTO community_experience_config(id,started_at) VALUES(1,strftime('%Y-%m-%dT%H:%M:%fZ','now'));`,
+  community_experience_visits: `CREATE TABLE community_experience_visits (
+  ${member()},
+  day TEXT NOT NULL,
+  vip INTEGER NOT NULL CHECK(vip IN (0,1)),
+  vip_level INTEGER,
+  multiplier INTEGER NOT NULL CHECK(multiplier>=1),
+  convention_version TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(member_kind,member_id,day),
+  CHECK(member_kind='reader')
+);`,
+  community_vip_growth_days: `CREATE TABLE community_vip_growth_days (
+  ${member()},
+  day TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(member_kind,member_id,day),
+  CHECK(member_kind='reader')
+);`,
+  // Positive awards keep their daily/ref slots after a separate negative reversal.
+  community_experience_ledger: `CREATE TABLE community_experience_ledger (
+  id TEXT PRIMARY KEY,
+  ${member()},
+  amount INTEGER NOT NULL,
+  kind TEXT NOT NULL CHECK(kind IN ('earn','revert')),
+  reason TEXT NOT NULL CHECK(reason IN ('login','topic','reply','accepted','revert')),
+  day TEXT NOT NULL,
+  ref_kind TEXT CHECK(ref_kind IN ('day','topic','reply')),
+  ref_id TEXT,
+  source_id TEXT UNIQUE,
+  created_at TEXT NOT NULL,
+  CHECK(member_kind='reader'),
+  CHECK((kind='earn' AND amount>0 AND source_id IS NULL AND reason<>'revert') OR
+    (kind='revert' AND amount<0 AND source_id IS NOT NULL AND reason='revert'))
+);
+CREATE INDEX community_experience_member_idx ON community_experience_ledger(member_kind,member_id,created_at);
+CREATE INDEX community_experience_ref_idx ON community_experience_ledger(ref_kind,ref_id);
+CREATE UNIQUE INDEX community_experience_daily_idx ON community_experience_ledger(member_kind,member_id,reason,day) WHERE kind='earn';
+CREATE UNIQUE INDEX community_experience_source_idx ON community_experience_ledger(member_kind,member_id,reason,ref_kind,ref_id) WHERE kind='earn';`,
   community_conventions: `CREATE TABLE community_conventions (
   version TEXT PRIMARY KEY,
   body TEXT NOT NULL,
@@ -232,6 +277,38 @@ CREATE INDEX community_notifications_group_idx ON community_notifications(group_
   created_at TEXT NOT NULL,
   PRIMARY KEY (member_kind, member_id, badge)
 );`,
+  // The twelve historical badges stay in their original table. New honors
+  // keep their immutable achievement snapshot even when progress later drops.
+  community_badge_honors: `CREATE TABLE community_badge_honors (
+  ${member()}, family TEXT NOT NULL, tier TEXT NOT NULL CHECK(tier IN ('gold','diamond','aurora')),
+  created_at TEXT NOT NULL, evidence TEXT NOT NULL, revoked_at TEXT, revoked_reason TEXT,
+  restored_at TEXT, PRIMARY KEY(member_kind,member_id,family,tier)
+);`,
+  community_badge_events: `CREATE TABLE community_badge_events (
+  kind TEXT NOT NULL, source_id TEXT NOT NULL, actor_key TEXT NOT NULL DEFAULT '',
+  first_at TEXT NOT NULL, PRIMARY KEY(kind,source_id,actor_key)
+);`,
+  // Anonymous daily sequence survives account cleanup; rankings cannot move up.
+  community_badge_checkin_ranks: `CREATE TABLE community_badge_checkin_ranks (
+  day TEXT PRIMARY KEY, count INTEGER NOT NULL CHECK(count>=0)
+);`,
+  community_badge_honor_reviews: `CREATE TABLE community_badge_honor_reviews (
+  id TEXT PRIMARY KEY, ${member()}, family TEXT NOT NULL, tier TEXT NOT NULL,
+  action TEXT NOT NULL CHECK(action IN ('revoke','restore')), reason TEXT NOT NULL, evidence TEXT NOT NULL,
+  by_kind TEXT NOT NULL, by_id TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX community_badge_reviews_member_idx ON community_badge_honor_reviews(member_kind,member_id,created_at);`,
+  // These are human review decisions, never an automatic same-IP heuristic.
+  community_badge_exclusions: `CREATE TABLE community_badge_exclusions (
+  kind TEXT NOT NULL, source_id TEXT NOT NULL, actor_key TEXT NOT NULL DEFAULT '',
+  reason TEXT NOT NULL, by_kind TEXT NOT NULL, by_id TEXT NOT NULL, created_at TEXT NOT NULL,
+  PRIMARY KEY(kind,source_id,actor_key)
+);`,
+  community_badge_violation_reviews: `CREATE TABLE community_badge_violation_reviews (
+  kind TEXT NOT NULL CHECK(kind IN ('penalty','sanction')), source_id TEXT NOT NULL,
+  reason TEXT NOT NULL, by_kind TEXT NOT NULL, by_id TEXT NOT NULL, created_at TEXT NOT NULL,
+  PRIMARY KEY(kind,source_id)
+);`,
   // 禁言：到期自动失效，也可以由站长提前解除。
   community_sanctions: `CREATE TABLE community_sanctions (
   id TEXT PRIMARY KEY,
@@ -365,6 +442,12 @@ const columns: Array<[string, string, string]> = [
   ['community_members', 'agreed_version', 'TEXT'],
   ['community_members', 'convention_read_version', 'TEXT'],
   ['community_members', 'convention_read_at', 'INTEGER'],
+  ['community_topics', 'badge_visible_since', 'TEXT'],
+  ['community_topics', 'badge_featured_since', 'TEXT'],
+  ['community_replies', 'badge_visible_since', 'TEXT'],
+  ['community_members', 'badge_account_created_at', 'TEXT'],
+  ['community_badges', 'revoked_at', 'TEXT'],
+  ['community_badges', 'revoked_reason', 'TEXT'],
 ];
 export const communityTables = Object.keys(tables);
 export const communitySchema = Object.values(tables).join('\n');
@@ -458,6 +541,24 @@ export async function migrateCommunity(directory: string) {
       if (imagesPurposeUpgrade) extendImagePurpose(db);
       if (bannerCapacityUpgrade) extendBannerCapacity(db);
       if (tablesMissing.includes('community_banners')) snapshotHighlights(db);
+      if (tablesMissing.includes('community_badge_events')) {
+        db.exec(`INSERT OR IGNORE INTO community_badge_events(kind,source_id,actor_key,first_at)
+          SELECT 'reaction',target_kind || ':' || target_id,member_kind || ':' || member_id,created_at FROM community_reactions;
+          INSERT OR IGNORE INTO community_badge_events(kind,source_id,actor_key,first_at)
+          SELECT 'acceptance',t.id,r.author_kind || ':' || r.author_id,t.accepted_at FROM community_topics t
+          JOIN community_replies r ON r.id=t.accepted_reply_id WHERE t.accepted_at IS NOT NULL;
+          INSERT OR IGNORE INTO community_badge_events(kind,source_id,actor_key,first_at)
+          SELECT 'early',day,member_kind || ':' || member_id,created_at FROM (
+            SELECT member_kind,member_id,day,created_at,ROW_NUMBER() OVER(PARTITION BY day ORDER BY created_at,rowid) AS position
+            FROM community_checkins WHERE member_kind='reader' AND reward>0) WHERE position<=10;`);
+        // Visibility history before this upgrade cannot be proved. Existing
+        // content starts its high-tier observation period at migration time.
+        const observedAt = new Date().toISOString();
+        db.prepare('UPDATE community_topics SET badge_visible_since=?,badge_featured_since=CASE WHEN featured=1 THEN ? ELSE NULL END').run(observedAt, observedAt);
+        db.prepare('UPDATE community_replies SET badge_visible_since=?').run(observedAt);
+      }
+      if (tablesMissing.includes('community_badge_checkin_ranks')) db.exec(`INSERT INTO community_badge_checkin_ranks(day,count)
+        SELECT day,COUNT(*) FROM community_checkins WHERE member_kind='reader' AND reward>0 GROUP BY day;`);
       if (rebuildTables && db.prepare('PRAGMA foreign_key_check').all().length) throw Error('Community table migration has invalid foreign-key references.');
       db.exec('COMMIT');
     } catch (error) { db.exec('ROLLBACK'); throw error; }

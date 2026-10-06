@@ -1,6 +1,6 @@
 import { communityRules, communityShopCats, beijingDay, communityReportReasons } from '../src/community-rules.mjs';
 import { communityBoards } from '../src/community.mjs';
-import { communityGrowthState } from '../src/community-growth.mjs';
+import { experienceCatalogue, vipCatalogue } from './community-experience.ts';
 import { fail, same, memberKey } from './community-db.ts';
 import type { CommunityAuthor } from './community-db.ts';
 import type { Ctx } from './community-context.ts';
@@ -54,6 +54,7 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
         unread: members.unread(me), agreed: members.agreed(me), inventory: economy.inventory(me),
         muted: muted ? { until: muted.until, reason: muted.reason } : null,
         manageTodo: ctx.mod ? queue.topics.length + queue.replies.length + reports + orders : 0,
+        badgeState: members.badgeState(me, { joinedAt: map.get(memberKey(me))?.joinedAt }),
       });
       return true;
     }
@@ -67,7 +68,7 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
         checkedIn, streak, balance: ledger.balance(me), gainedToday: ledger.gainedToday(me), behaviourToday: ledger.behaviourToday(me), vip: viewer.vip, owner: ctx.actualOwner, browsingAsReader: ctx.browsingAsReader, uid: ctx.person(me, map).uid,
         month, days: economy.checkinDays(me, `${month}-01`, `${month}-31`), monthBonus: economy.monthBonus(me, month), checkinsToday: economy.checkinsToday(),
         earlyBirds: early.map(bird => ({ person: ctx.person(bird.member, map), at: bird.at })),
-        makeup: economy.makeupState(me, { vip: viewer.vip }), badges: members.badges(me),
+        makeup: economy.makeupState(me, { vip: viewer.vip }), badges: members.badges(me), badgeState: members.badgeState(me, { joinedAt: map.get(memberKey(me))?.joinedAt }),
       });
       return true;
     }
@@ -90,7 +91,7 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
         checkedIn: economy.checked(me), month: ledger.month(me), flow,
         ledger: rows.map(({ ref, ...row }) => ({ ...row, topic: titles.get(row.id) || null, detail: detail(ref) })),
         level, owner: ctx.actualOwner, vip: me.kind === 'reader' && profile?.vip === true, browsingAsReader: ctx.browsingAsReader, steward: members.steward(me), stats: members.stats(me),
-        growth: me.kind === 'owner' ? null : communityGrowthState(ledger.growthPoints(me)),
+        growth: live.experience.state(me), vipGrowth: live.experience.vipState(me, profile?.vip === true), experienceCatalogue, vipCatalogue,
         progress: ctx.owner || level >= 3 ? null : members.levelProgress(me, level),
       });
       return true;
@@ -145,6 +146,7 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
         person: ctx.person(member, map), bio: info.bio, joinedAt: member.kind === 'owner' ? null : info.joinedAt || members.joinedAt(member),
         cover: members.decorations(member).cover, streak: economy.currentStreak(member), stats: { ...stats, topics: topics.length, replies: replies.length },
         follows: members.followCounts(member), following: !self && members.following(me, member), self, badges: members.badges(member),
+        badgeState: members.badgeState(member, { joinedAt: info.joinedAt }),
         muted: (self || ctx.mod) && muted ? { id: muted.id, until: muted.until, reason: muted.reason } : null,
         canMute: ctx.mod && !self && member.kind === 'reader', canAppoint: ctx.owner && member.kind === 'reader', steward: members.steward(member),
         reasons: ctx.mod ? communityReportReasons : undefined,
@@ -182,6 +184,17 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
     return true;
   }
   switch (path) {
+    case 'active/visit': {
+      if (Object.keys(body).length) throw fail('请从本站主动进入社区，经验由服务器结算。');
+      const map = await ctx.people([me]);
+      // Reading an asynchronous request body may outlive the original session
+      // or membership. Reuse the actual account service immediately before write.
+      const current = await ctx.options.identify(ctx.req);
+      if (!current || current.kind !== me.kind || current.id !== me.id) throw fail('请重新登录后进入社区。', 401);
+      ctx.throttle('action');
+      ctx.send({ uid: map.get(memberKey(me))?.uid ?? null, ...live.experience.visit(me, { vip: current.vip }) });
+      return true;
+    }
     case 'convention/read':
     case 'agree': {
       if (Object.keys(body).some(key => key !== 'version')) throw fail('请使用当前账号阅读并确认社区公约。');

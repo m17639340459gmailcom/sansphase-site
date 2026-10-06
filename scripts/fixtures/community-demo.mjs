@@ -50,6 +50,7 @@ export async function createCommunityDemo({ simplePosting = true, visualDemo = f
   const store = createCommunityStore(directory);
   const now = Date.now();
   const at = (minutesAgo) => new Date(now - minutesAgo * 60000).toISOString();
+  const joinedDays = id => visualDemo && id === 'demo' ? 180 : visualDemo && id === 'linjian' ? 500 : people[id].days;
   const images = async (author, count, offset) => {
     const ids = [];
     for (let i = 0; i < count; i++) {
@@ -155,6 +156,19 @@ export async function createCommunityDemo({ simplePosting = true, visualDemo = f
   // 预览读者 checked in for the last six days (today earns +1), wears the gold frame and has a make-up card.
   for (let d = 6; d >= 1; d--) store.economy.checkin(member('demo'), { now: now - d * 86400e3 });
   for (const [id, minutes] of [['linjian', 3], ['mobai', 7], ['steward', 12]]) store.economy.checkin(member(id), { vip: people[id].vip, now: now - minutes * 60000 });
+  if (visualDemo) {
+    // Simulated attendance is passed through the real policy and the existing
+    // check-in operation. No fixture writes pretend an unearned tier is earned.
+    for (const [id, days, end] of [['demo', 100, 1], ['linjian', 364, 1]]) {
+      const author = member(id);
+      store.members.badgeState(author, { now, joinedAt: at(joinedDays(id) * 24 * 60) });
+      for (let d = days; d >= end; d--) {
+        const time = now - d * 86400e3;
+        if (!store.economy.checked(author, time)) store.economy.checkin(author, { now: time });
+      }
+      store.members.badgeState(author, { now, joinedAt: at(joinedDays(id) * 24 * 60) });
+    }
+  }
   const context = (id) => ({ level: people[id].level ?? 1, owner: false, joinedAt: at(people[id].days * 24 * 60), now });
   store.economy.redeem(member('demo'), 'frame-gold', context('demo'));
   store.economy.redeem(member('demo'), 'card-makeup', context('demo'));
@@ -204,7 +218,7 @@ export async function createCommunityDemo({ simplePosting = true, visualDemo = f
     people: async (authors) => new Map(authors.flatMap((author) => {
       if (author.kind === 'owner') return [[`owner:${author.id}`, { name: ownerName, uid: 'owner', avatar: null, vip: true, joinedAt: null, bio: '' }]];
       const info = people[author.id];
-      return info ? [[`reader:${author.id}`, { name: info.name, uid: info.uid, avatar: null, vip: info.vip, joinedAt: at(info.days * 24 * 60), bio: info.bio }]] : [];
+      return info ? [[`reader:${author.id}`, { name: info.name, uid: info.uid, avatar: null, vip: info.vip, joinedAt: at(joinedDays(author.id) * 24 * 60), bio: info.bio }]] : [];
     })),
     findMember: async (uid) => uid === 'owner' ? member('owner') : byUid.get(uid) || null,
     findByNames: async (names) => new Map([...Object.entries(people).map(([id, info]) => [info.name, member(id)]), [ownerName, member('owner')]].filter(([name]) => names.includes(name))),

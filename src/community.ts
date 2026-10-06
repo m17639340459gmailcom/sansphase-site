@@ -5,11 +5,13 @@
 import { communityTags, communityLevels, communityBadges, communityNameEffect } from './community-rules.mjs';
 import type { PromptMode, NameEffect } from './community-rules.ts';
 import { bodyImageContent, imageIdFromLine } from './community-body-images.mjs';
-import { checkinBadgeIconHTML } from './community-badge-icons.mjs';
+import { checkinBadgeIconHTML, communityBadgeArtHTML, legacyBadgeArtHTML } from './community-badge-icons.mjs';
+import { communityBadgeFamilies } from './community-badge-policy.mjs';
+import type { BadgeTier, CommunityBadgeState } from './community-badge-policy.ts';
 import { nameEffectVariables } from './community-name-effects.mjs';
 import { communityGrowthLevel } from './community-growth.mjs';
-import { communityGrowthArtHTML } from './community-growth-art.mjs';
-import type { CommunityGrowthState } from './community-growth.ts';
+import { communityGrowthArtHTML, communityTrustArtHTML, communityVipArtHTML } from './community-growth-art.mjs';
+import type { CommunityGrowthState, CommunityVIPGrowthState } from './community-growth.ts';
 export * from './community-rules.mjs';
 
 export type Translate = (zh: string, en: string) => string;
@@ -127,6 +129,7 @@ export type CommunityRole = "reader" | "owner";
 export type CommunityPerson = {
   nameEffect?: NameEffect | null;
   growth?: CommunityGrowthState | null;
+  vipGrowth?: CommunityVIPGrowthState | null;
   name: string; role: CommunityRole; uid: string | null; avatar?: string | null; vip?: boolean; level?: number;
   steward?: boolean; moderationBoards?: string[]; frame?: string | null; color?: string | null; showUid?: boolean;
 };
@@ -215,6 +218,7 @@ export type CommunityModerationContact = { qq: string; email: string };
 export type CommunityModerationContactPerson = CommunityModerationContact & { uid: string; name: string; owner: boolean; boards: string[] };
 export type CommunityModerationContacts = { items: CommunityModerationContactPerson[] };
 export type CommunityMe = CommunityPerson & {
+  badgeState?: CommunityBadgeState;
   convention?: { version: string; agreed: boolean };
   management?: { role: 'owner' | 'steward'; browsingAsReader: boolean } | null;
   moderationContact?: CommunityModerationContact | null;
@@ -280,38 +284,65 @@ export function levelChipHTML(person: CommunityPerson, { t }: Common) {
   const level = Math.max(0, Math.min(3, person.level ?? 0));
   return `<span class="community-lv is-lv${level}" title="L${level}">${levelTitle(level, t)}</span>`;
 }
-export const vipChipHTML = (person: CommunityPerson) => person.vip && person.role !== "owner" ? `<span class="community-vip">VIP</span>` : "";
-// 成长与信任、VIP、任命权限分别显示；旧响应缺少成长字段时不推算等级。
+// 带文字的成长标识，只用于“我的”入口里的等级一栏；昵称旁用 levelMarksHTML。
 export function growthChipHTML(person: CommunityPerson, common: Common) {
   person = currentAppearance(person, common);
   if (person.role === 'owner' || !person.growth) return '';
   const { t, esc } = common, item = communityGrowthLevel(person.growth.level);
-  const label = `G${item.level} ${t(item.name, item.en)}`;
+  const label = t(item.name, item.en);
   return `<span class="community-growth-chip" title="${esc(t(`成长等级：${label}`, `Growth level: ${label}`))}">${communityGrowthArtHTML(item.level)}<span>${esc(label)}</span></span>`;
 }
-function nameWithGrowthHTML(label: string, person: CommunityPerson, common: Common) {
-  const growth = growthChipHTML(person, common);
-  return growth ? `<span class="community-name">${label}${growth}</span>` : label;
+// 昵称旁的等级图标：成长、权限、VIP 依次排列，只显示图标，名称放在 title 与无障碍标签里。
+// 站长没有等级；协管是任命，不显示权限图标；旧响应缺少成长字段时不推算成长等级。
+// 会员档位由服务端已记录的有效访问日确定；旧响应仅显示起始会员图标。
+// `large` 用于个人主页：图标单独成行放在昵称上方，尺寸加大。
+export function levelMarksHTML(person: CommunityPerson, common: Common, large = false) {
+  person = currentAppearance(person, common);
+  if (person.role === 'owner') return '';
+  const { t, esc } = common;
+  const mark = (kind: string, label: string, art: string) => `<span class="community-level-badge is-${kind}" role="img" aria-label="${esc(label)}" title="${esc(label)}">${art}</span>`;
+  let marks = '';
+  if (person.growth) {
+    const item = communityGrowthLevel(person.growth.level);
+    marks += mark('growth', t(`成长等级：${item.name}`, `Growth level: ${item.en}`), communityGrowthArtHTML(item.level));
+  }
+  if (!person.steward) {
+    const level = Math.max(0, Math.min(3, person.level ?? 0));
+    marks += mark('trust', t(`权限等级：L${level} ${levelTitle(level, t)}`, `Permission level: L${level} ${levelTitle(level, t)}`), communityTrustArtHTML(level));
+  }
+  if (person.vip) {
+    const rank = person.vipGrowth?.level;
+    const level = person.vipGrowth?.active && typeof rank === 'number' && Number.isInteger(rank) && rank >= 1 && rank <= 8 ? rank : null;
+    marks += mark('vip', level ? `VIP${level}` : t('VIP 会员', 'VIP member'), communityVipArtHTML(level ?? 1));
+  }
+  return marks ? `<span class="community-level-marks${large ? ' is-large' : ''}">${marks}</span>` : '';
+}
+// 站长与协管没有对应的图标，仍用文字标识。
+export const roleChipHTML = (person: CommunityPerson, common: Common) => person.role === "owner" || person.steward ? levelChipHTML(person, common) : "";
+function nameWithMarksHTML(label: string, person: CommunityPerson, common: Common, marked = true) {
+  const marks = marked ? levelMarksHTML(person, common) : '';
+  return marks ? `<span class="community-name">${label}${marks}</span>` : label;
 }
 function nameAttributes(person: CommunityPerson) {
   const color = decoration(person.color);
   const effect = communityNameEffect(person.nameEffect);
   return `class="community-uname${color ? ` is-color-${color}` : ""}"${effect ? ` data-name-effect="${effect.style}" style="${nameEffectVariables(effect)}"` : ''}`;
 }
-export function nameLabelHTML(person: CommunityPerson, common: Common) {
+// `marked` 为 false 时只输出昵称，供把等级图标另行摆放的页面使用。
+export function nameLabelHTML(person: CommunityPerson, common: Common, marked = true) {
   const { esc } = common;
   person = currentAppearance(person, common);
-  return nameWithGrowthHTML(`<span ${nameAttributes(person)}>${esc(person.name)}</span>`, person, common);
+  return nameWithMarksHTML(`<span ${nameAttributes(person)}>${esc(person.name)}</span>`, person, common, marked);
 }
 export function nameHTML(person: CommunityPerson, common: Common) {
   const { esc } = common;
   person = currentAppearance(person, common);
   const uid = person.uid;
   const label = uid ? `<a ${nameAttributes(person)} href="${memberHref(uid)}">${esc(person.name)}</a>` : `<span ${nameAttributes(person)}>${esc(person.name)}</span>`;
-  return nameWithGrowthHTML(label, person, common);
+  return nameWithMarksHTML(label, person, common);
 }
 export const whoHTML = (person: CommunityPerson, common: Common) =>
-  `<span class="community-who">${nameHTML(person, common)}${levelChipHTML(person, common)}${vipChipHTML(person)}</span>`;
+  `<span class="community-who">${nameHTML(person, common)}${roleChipHTML(person, common)}</span>`;
 export const dot = `<span class="community-dot" aria-hidden="true"></span>`;
 export const boardName = (id: string, t: Translate) => {
   const board = communityBoard(id);
@@ -344,13 +375,19 @@ export function flagsHTML(topic: Pick<CommunityTopic, "pinned" | "paidPin" | "fe
   if (topic.resource && topic.resource.dead > topic.resource.alive) flags.push(`<span class="community-flag is-warn">${icons.alert || ""}${t("可能失效", "May be dead")}</span>`);
   return flags.join("");
 }
-// 徽章：铜、银、金三档；没拿到的是暗的。
-export function badgeHTML(id: string, has: boolean, { t, esc, icons = {} }: Common, size: "sm" | "md" | "lg" = "md", withName = false) {
+// Legacy badges retain their names and grades. Supplying a material explicitly
+// selects a new family; callers must use the actual server award for `has`.
+export function badgeHTML(id: string, has: boolean, { t, esc, icons = {} }: Common, size: "sm" | "md" | "lg" = "md", withName = false, material?: BadgeTier) {
+  const family = material ? communityBadgeFamilies.find(item => item.id === id) : null;
+  if (family && material) {
+    const name = t(family.name, family.en), desc = t(family.criteria[material], family.criteriaEn[material]);
+    return `<span class="community-badge is-${material} is-${size} is-family${has ? '' : ' is-off'}" title="${esc(`${name}：${desc}${has ? '' : t('（未获得）', ' (not earned)')}`)}"><span class="community-badge-ic">${communityBadgeArtHTML(family.id, material, has)}</span>${withName ? `<span class="community-badge-n">${esc(name)}</span>` : `<span class="sr-only">${esc(name)}</span>`}</span>`;
+  }
   const badge = communityBadges[id];
   if (!badge) return "";
   const name = t(badge.name, badge.en), desc = t(badge.desc, badge.descEn);
   return `<span class="community-badge is-${badge.tier} is-${size}${has ? "" : " is-off"}" title="${esc(`${name}：${desc}${has ? "" : t("（未获得）", " (not yet)")}`)}">`
-    + `<span class="community-badge-ic">${checkinBadgeIconHTML(id) || icons[badge.icon] || ""}</span>${withName ? `<span class="community-badge-n">${esc(name)}</span>` : `<span class="sr-only">${esc(name)}</span>`}</span>`;
+    + `<span class="community-badge-ic">${(size === 'sm' ? checkinBadgeIconHTML(id) || icons[badge.icon] : legacyBadgeArtHTML(id, has)) || icons[badge.icon] || ""}</span>${withName ? `<span class="community-badge-n">${esc(name)}</span>` : `<span class="sr-only">${esc(name)}</span>`}</span>`;
 }
 export const cardHead = (title: string, icon = "", link = "") => `<div class="community-card-h"><h2>${icon}${title}</h2>${link}</div>`;
 export const moreLink = (href: string, label: string, icons: Icons) => `<a class="community-link-sm" href="${href}">${label}${icons["chevron-right"] || ""}</a>`;
