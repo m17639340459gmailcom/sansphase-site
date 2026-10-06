@@ -12,8 +12,8 @@ const data = {
   makeup: { used: 0, allowed: 2, left: 2, free: false, cards: 0, cost: 30, days: [] },
 };
 const common = { t: (zh) => zh, esc: (s) => String(s), now: Date.parse('2026-09-07T12:00:00Z') };
-function render(overrides = {}, english = false, now = common.now) {
-  return new JSDOM(communityCheckinHTML({ ...common, now, ...(english ? { t: (_, en) => en } : {}), checkin: { state: 'ready', data: { ...data, ...overrides } } }));
+function render(overrides = {}, english = false, now = common.now, me = null) {
+  return new JSDOM(communityCheckinHTML({ ...common, now, me, ...(english ? { t: (_, en) => en } : {}), checkin: { state: 'ready', data: { ...data, ...overrides } } }));
 }
 
 test('every check-in day is a star; day and reward labels live outside the star field', () => {
@@ -118,7 +118,8 @@ test('owner remains read only, and English status and milestone labels stay avai
 
 test('a moderator reader preview shows attendance read-only while allowing calendar navigation', () => {
   const recorded = data.days.filter(day => day !== '2026-09-02');
-  const dom = render({ browsingAsReader: true, owner: false, days: recorded, makeup: { ...data.makeup, days: ['2026-09-02'] } });
+  const dom = render({ browsingAsReader: true, owner: false, days: recorded, makeup: { ...data.makeup, days: ['2026-09-02'] } }, false, common.now,
+    { management: { role: 'steward', browsingAsReader: true } });
   const doc = dom.window.document;
   assert.equal(doc.querySelector('[data-action="community-makeup"]'), null);
   assert.match(doc.querySelector('.community-page-head').textContent, /只读|仅供查看/);
