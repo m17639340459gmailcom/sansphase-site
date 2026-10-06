@@ -12,6 +12,7 @@ import { isPublished, uuidPattern } from "../content-service.ts";
 import { createMediaRetention } from './media-retention.ts';
 import type { Payload } from 'payload';
 import type { IncomingMessage } from 'node:http';
+import { strictPayloadIdentity } from './strict-identity.ts';
 
 // Payload's runtime collections share this adapter. Schema-specific fields are
 // validated by Payload; the adapter keeps the dynamic field boundary here.
@@ -38,6 +39,11 @@ export function createPayloadStore(payload: Payload, { directory, authorId, medi
       user.role !== "owner"
     )
       throw fail("请重新登录作者账号。", 401);
+    return user;
+  }
+  async function identityStrict(token: string | undefined) {
+    const user = await strictPayloadIdentity(payload, token);
+    if (!user || user.id !== authorId || user.collection !== 'authors' || user.role !== 'owner') throw fail('请重新登录作者账号。', 401);
     return user;
   }
   const authorized = async (token: string | undefined) => ({
@@ -161,6 +167,7 @@ export function createPayloadStore(payload: Payload, { directory, authorId, medi
       }); } finally {activeUploads--;}
     },
     identity,
+    identityStrict,
     async login(data: {email: string; password: string}) {
       try {
         const result = await payload.login({ collection: "authors", data });

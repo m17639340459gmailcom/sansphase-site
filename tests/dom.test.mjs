@@ -21,7 +21,9 @@ import {
   mountUniverse as mountActualUniverse,
 } from "../dist/universe.mjs";
 
-for (const communityEnabled of [null, false, true]) test(communityEnabled ? "local prototype DOM flows" : communityEnabled === null ? "static pages without bootstrap keep the community closed" : "closed community routes keep the main site available", async (t) => {
+for (const mode of [null, false, true, 'hk', 'hk-reduced']) test(typeof mode === 'string' ? `HK community startup skips the main homepage (${mode})` : mode ? "local prototype DOM flows" : mode === null ? "static pages without bootstrap keep the community closed" : "closed community routes keep the main site available", async (t) => {
+  const communityOnly = typeof mode === 'string';
+  const communityEnabled = communityOnly ? true : mode;
   const html = await readFile(
     new URL("../dist/index.html", import.meta.url),
     "utf8",
@@ -31,7 +33,7 @@ for (const communityEnabled of [null, false, true]) test(communityEnabled ? "loc
   virtualConsole.on("jsdomError", (error) => runtimeErrors.push(error.message));
   virtualConsole.on("error", (...messages) => runtimeErrors.push(messages.map(String).join(" ")));
   const dom = new JSDOM(html, {
-    url: `http://127.0.0.1:4173/?view=universe#/${communityEnabled ? 'notes' : 'community/home'}`,
+    url: communityOnly ? 'https://community.sansphase.com/#/home' : `http://127.0.0.1:4173/?view=universe#/${communityEnabled ? 'notes' : 'community/home'}`,
     runScripts: "outside-only",
     pretendToBeVisual: true,
     virtualConsole,
@@ -39,7 +41,7 @@ for (const communityEnabled of [null, false, true]) test(communityEnabled ? "loc
   const { window: w } = dom;
   const d = w.document;
   const published=d.createElement('script');published.id='site-content';published.type='application/json';
-  published.textContent=JSON.stringify({communityEnabled,...(!communityEnabled ? {reader:null} : {}),notes:data.notes,resources:data.resources.map(item=>({...item,downloadUrl:'./assets/'+item.file})),works:[],software:[],announcements:[1,2,3].map(i=>({title:"测试公告 "+i,summary:"公告内容"})),profile:null,author:null});
+  published.textContent=JSON.stringify({communityEnabled,...(communityOnly ? {communityOnly:true,mainSiteOrigin:'https://www.sansphase.com',delivery:'paged-v1',reader:{nickname:'林间',role:'reader'}} : !communityEnabled ? {reader:null} : {}),notes:data.notes,resources:data.resources.map(item=>({...item,downloadUrl:'./assets/'+item.file})),works:[],software:[],announcements:[1,2,3].map(i=>({title:"测试公告 "+i,summary:"公告内容"})),profile:null,author:null});
   if (communityEnabled !== null) d.head.append(published);
   w.structuredClone = structuredClone;
   // jsdom provides randomUUID but not SubtleCrypto. Use the real browser
@@ -188,11 +190,16 @@ for (const communityEnabled of [null, false, true]) test(communityEnabled ? "loc
       return respond(200, { contributions: [{ person: person("远山"), score: 12, likes: 7, accepted: 1, featured: 0 }], streaks: [{ person: person("林间"), streak: 7 }], early: [] });
     return respond(404, { error: "Not found" });
   };
+  const homeActivity = { mounts: 0, warmups: 0, navigationPrefetch: 0, animations: [] };
+  if (communityOnly) d.body.animate = (frames, options) => {
+    homeActivity.animations.push({frames,options});
+    return {finished:Promise.resolve(),cancel() {}};
+  };
   const menuMedia = Object.assign(new w.EventTarget(), { matches: true });
   w.matchMedia = (query) =>
     query === "(max-width: 1200px)"
       ? menuMedia
-      : Object.assign(new w.EventTarget(), { matches: false });
+      : Object.assign(new w.EventTarget(), { matches: mode === 'hk-reduced' && query === '(prefers-reduced-motion: reduce)' });
   const scrollRequests = [];
   w.scrollTo = (options) => scrollRequests.push({
     ...options,
@@ -260,7 +267,7 @@ for (const communityEnabled of [null, false, true]) test(communityEnabled ? "loc
       return loadLibrary(new URL("../dist/ui.bundle.mjs", import.meta.url));
     if (specifier === './book-shell.mjs' || specifier === './vip-book-prompt.mjs')
       return loadLibrary(new URL('../dist/' + specifier.slice(2), import.meta.url));
-    if (['./community.mjs', './community-ui.mjs', './community-sky.mjs', './community-layout.mjs', './community-landing.mjs'].includes(specifier))
+    if (['./community.mjs', './community-ui.mjs', './community-sky.mjs', './community-layout.mjs', './community-landing.mjs', './community-entry.mjs'].includes(specifier))
       return loadLibrary(new URL('../dist/' + specifier.slice(2), import.meta.url));
     if (specifier === './catalog.mjs')
       return loadLibrary(new URL('../dist/catalog.mjs', import.meta.url));
@@ -272,13 +279,13 @@ for (const communityEnabled of [null, false, true]) test(communityEnabled ? "loc
     if (['./reader-ui.mjs','./admin-readers.mjs','./access-policy.mjs'].includes(specifier))
       return loadLibrary(new URL('../dist/' + specifier.slice(2), import.meta.url));
     const exports =
-      specifier === './navigation-prefetch.mjs' ? navigationPrefetch :
+      specifier === './navigation-prefetch.mjs' ? {...navigationPrefetch,mountNavigationPrefetch:(...args)=>{homeActivity.navigationPrefetch++;return navigationPrefetch.mountNavigationPrefetch(...args);}} :
       specifier === './content-reader.mjs' ? contentReader :
       specifier === './site-copy.mjs' ? siteCopy :
       specifier === './route-assets.mjs' ? {mountRouteAssets:win=>mountRouteAssets(win,{loadAuthor:async()=>{},loadBackground:async()=>{}})} :
       specifier === './route-styles.mjs' ? {ensureRouteStyle:async()=>{}} :
       specifier === './admin-route.mjs' ? {loadAdminReaders:async()=>({adminReadersPage:()=>'<section class="page"><h1>用户管理</h1></section>',mountReaderAdmin:()=>()=>{}})} :
-      specifier === './home-preload.mjs' ? homePreload :
+      specifier === './home-preload.mjs' ? {...homePreload,preparePageImages:(...args)=>{homeActivity.warmups++;return homePreload.preparePageImages(...args);}} :
       specifier === './image-sources.mjs' ? imageSources :
       specifier.includes("visitor-location") ? visitorLocation :
       specifier === "./core.mjs"
@@ -286,8 +293,9 @@ for (const communityEnabled of [null, false, true]) test(communityEnabled ? "loc
         : specifier === "./universe.mjs"
           ? {
               universeMarkup,
-              mountUniverse: (root, options) =>
-                mountActualUniverse(root, {
+              mountUniverse: (root, options) => {
+                homeActivity.mounts++;
+                return mountActualUniverse(root, {
                   ...options,
                   prepareContent: async () => {},
                   loadRenderer: async () => ({
@@ -307,7 +315,8 @@ for (const communityEnabled of [null, false, true]) test(communityEnabled ? "loc
                       };
                     },
                   }),
-                }),
+                });
+              },
             }
           : data;
     return new vm.SyntheticModule(
@@ -342,6 +351,7 @@ for (const communityEnabled of [null, false, true]) test(communityEnabled ? "loc
     );
   const tick = async () => {
     await new Promise((resolve) => setTimeout(resolve, 15));
+    if (communityOnly) return;
     const deadline = Date.now() + 2000;
     while (
       d.querySelector(".universe-home")?.dataset.returning !== "idle" &&
@@ -371,7 +381,32 @@ for (const communityEnabled of [null, false, true]) test(communityEnabled ? "loc
     await navigation;
     await tick();
   };
+  const until = async (check, label) => {
+    const deadline = Date.now() + 2000;
+    while (!check() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.ok(check(), label);
+  };
   try {
+    if (communityOnly) {
+      await t.test('real app boots its community, reveals it once and mounts no main-site scene or preload', async () => {
+        await until(()=>d.querySelector('.community-topics, .community-empty'),'the HK community finishes loading');
+        assert.equal(w.location.hash,'#/community/home');
+        assert.equal(homeActivity.mounts,0,'HK must never call mountUniverse');
+        assert.equal(d.querySelector('#home-stage,.universe-home,.universe-canvas,#site-startup'),null,'no main homepage layer exists');
+        assert.equal(d.documentElement.classList.contains('is-home-boot'),false);
+        assert.equal(homeActivity.warmups,0,'no main content image warmup');
+        assert.equal(homeActivity.navigationPrefetch,0,'no main-site navigation preload');
+        assert.equal(d.body.dataset.communityBoot,undefined,'ready community is revealed');
+        assert.equal(homeActivity.animations.length,mode==='hk-reduced'?0:1,'reduced motion skips the initial fade');
+        if (homeActivity.animations.length) assert.deepEqual(Array.from(homeActivity.animations[0].frames,frame=>frame.opacity),[0,1]);
+        assert.ok(community.apiRequests.includes('GET summary'));
+        await navigate('community/boards');
+        await navigate('community/checkin');
+        assert.equal(homeActivity.mounts,0);
+        assert.equal(homeActivity.animations.length,mode==='hk-reduced'?0:1,'community route switches do not replay arrival');
+      });
+      return;
+    }
     if (!communityEnabled) {
       await t.test('landing, deep links and legacy posts are closed before authentication or community mounting', async () => {
         assert.ok(d.querySelector('[data-content-state="not-open"]'), 'the cold initial render is already closed');
@@ -847,11 +882,6 @@ for (const communityEnabled of [null, false, true]) test(communityEnabled ? "loc
         }
       },
     );
-    const until = async (check, label) => {
-      const deadline = Date.now() + 2000;
-      while (!check() && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
-      assert.ok(check(), label);
-    };
     await t.test('the community is its own area: landing, header and account menu', async()=>{
       await navigate('notes');
       await clickRoute('.nav a[href="#/community"]');

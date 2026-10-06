@@ -1,0 +1,199 @@
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { appendFile, lstat, readFile, realpath, unlink } from 'node:fs/promises';
+import { existsSync, readFileSync } from 'node:fs';
+import { isAbsolute, resolve, sep } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { createCommunityStore, communityTablesReady } from './community-store.ts';
+import type { CommunityAuthor } from './community-store.ts';
+import { createCommunityService } from './community-service.ts';
+import type { PersonInfo } from './community-service.ts';
+import { createIdentityClient, IdentityBridgeError } from './community-identity-protocol.ts';
+import type { IdentityOperation } from './community-identity-protocol.ts';
+import { createCommunityHostStore } from './community-host-store.ts';
+import { createCommunityHostAccess } from './community-host-access.ts';
+
+type BrandProfile = { name: string; signature?: string; bio?: string; avatar?: string; background?: string; socialLinks?: Array<{ label: string; url: string }>; appearance?: Record<string, unknown> };
+export type CommunityHostConfig = { directory: string; siteOrigin: string; mainSiteOrigin: string; bridgeSecret: string; authorId: string; profile?: BrandProfile };
+type BridgeClient = { request<T = unknown>(operation: IdentityOperation, input: unknown): Promise<T> };
+type ServiceError = Error & { status: number };
+const failure = (message: string, status = 503): ServiceError => Object.assign(Error(message), { status });
+const words = (directory: string) => {
+  try { return readFileSync(resolve(directory, 'community-words.txt'), 'utf8').split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#')); }
+  catch { return []; }
+};
+
+export function communityHostProductionOptions(env: Record<string, string | undefined>, nodeVersion = process.versions.node) {
+  if (env.NODE_ENV !== 'production') throw Error('NODE_ENV must be production.');
+  const version = /^(\d+)\.(\d+)\.(\d+)$/.exec(nodeVersion);
+  if (!version || Number(version[1]) !== 24 || Number(version[2]) < 21) throw Error('Production requires Node.js >=24.21.0 <25.');
+  if (env.SITE_ORIGIN !== 'https://community.sansphase.com') throw Error('SITE_ORIGIN must be the fixed HTTPS community origin.');
+  const configPath = env.COMMUNITY_CONFIG_FILE;
+  if (!configPath || !isAbsolute(configPath)) throw Error('COMMUNITY_CONFIG_FILE must be an absolute private path.');
+  const host = env.HOST || '127.0.0.1';
+  if (!['127.0.0.1', '::1'].includes(host)) throw Error('Community app must listen on loopback behind HTTPS.');
+  const port = Number(env.PORT || 4176);
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) throw Error('PORT must be between 1024 and 65535.');
+  return { configPath, host, port, origin: env.SITE_ORIGIN };
+}
+
+export async function readCommunityHostConfig(configPath: string, publicRoot: string): Promise<CommunityHostConfig> {
+  if (!isAbsolute(configPath)) throw Error('Community config path must be absolute.');
+  const configStat = await lstat(configPath);
+  if (!configStat.isFile() || configStat.isSymbolicLink() || process.platform !== 'win32' && (configStat.mode & 0o077) !== 0) throw Error('Community config must be a private regular file.');
+  const root = await realpath(publicRoot);
+  const configReal = await realpath(configPath);
+  if (configReal === root || configReal.startsWith(root + sep)) throw Error('Community config must not be publicly served.');
+  const settings: unknown = JSON.parse(await readFile(configPath, 'utf8'));
+  if (!settings || typeof settings !== 'object' || !('directory' in settings) || typeof settings.directory !== 'string' || !isAbsolute(settings.directory)
+    || !('siteOrigin' in settings) || settings.siteOrigin !== 'https://community.sansphase.com'
+    || !('mainSiteOrigin' in settings) || settings.mainSiteOrigin !== 'https://www.sansphase.com'
+    || !('bridgeSecret' in settings) || typeof settings.bridgeSecret !== 'string' || Buffer.byteLength(settings.bridgeSecret) < 32
+    || !('authorId' in settings) || typeof settings.authorId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(settings.authorId)) throw Error('Independent community configuration is incomplete.');
+  if ('secret' in settings || 'push' in settings || 'payload' in settings) throw Error('Main-site Payload settings must not be copied to community.');
+  const dataStat = await lstat(settings.directory);
+  if (!dataStat.isDirectory() || dataStat.isSymbolicLink()) throw Error('Community directory must be a real private directory.');
+  const directory = await realpath(settings.directory);
+  if (directory === root || directory.startsWith(root + sep)) throw Error('Community data must not be publicly served.');
+  for (const filename of ['content.db', 'community-host.db', 'uploads']) {
+    const stat = await lstat(resolve(directory, filename));
+    if (stat.isSymbolicLink() || filename === 'uploads' && !stat.isDirectory() || filename !== 'uploads' && !stat.isFile()) throw Error('Community data must not contain symlinks or unexpected files.');
+  }
+  let profile: BrandProfile | undefined;
+  if ('profile' in settings && settings.profile !== undefined) {
+    const value = settings.profile;
+    if (!value || typeof value !== 'object' || !('name' in value) || typeof value.name !== 'string' || [...value.name].length > 80) throw Error('Community brand profile is invalid.');
+    // Config holds only an approved public profile. Unknown fields are never
+    // copied to the browser or loaded as main-site account configuration.
+    profile = { name: value.name };
+    for (const field of ['signature', 'bio', 'avatar', 'background'] as const) {
+      if (field in value) { const text = (value as Record<string, unknown>)[field]; if (typeof text === 'string') profile[field] = text; }
+    }
+    if ('socialLinks' in value && Array.isArray(value.socialLinks)) profile.socialLinks = value.socialLinks.filter((link): link is { label: string; url: string } => link && typeof link === 'object' && typeof link.label === 'string' && typeof link.url === 'string');
+    if ('appearance' in value && value.appearance && typeof value.appearance === 'object' && !Array.isArray(value.appearance)) profile.appearance = value.appearance as Record<string, unknown>;
+  }
+  return { directory, siteOrigin: settings.siteOrigin, mainSiteOrigin: settings.mainSiteOrigin, bridgeSecret: settings.bridgeSecret, authorId: settings.authorId, ...(profile ? { profile } : {}) };
+}
+
+// No Payload, reader collection, password service or main-site account cleanup
+// is constructed here. Community business uses its existing local modules.
+export function createCommunityHostRuntime(config: CommunityHostConfig, client: BridgeClient = createIdentityClient({ origin: config.mainSiteOrigin, secret: config.bridgeSecret })) {
+  const { directory, siteOrigin, mainSiteOrigin, authorId } = config;
+  if (!isAbsolute(directory) || siteOrigin !== 'https://community.sansphase.com' || mainSiteOrigin !== 'https://www.sansphase.com' || !authorId) throw Error('Invalid independent community runtime configuration.');
+  if (!existsSync(resolve(directory, 'content.db')) || !communityTablesReady(directory)) throw Error('Explicit community migration is required before startup.');
+  const contentDb = new DatabaseSync(resolve(directory, 'content.db'), { readOnly: true });
+  try {
+    if (contentDb.prepare("SELECT 1 FROM sqlite_master WHERE name IN ('readers','authors')").get()) throw Error('Independent community database must not contain main-site accounts.');
+  } catch (error) { contentDb.close(); throw error; }
+  const hostStore = createCommunityHostStore(directory);
+  const store = createCommunityStore(directory);
+  let queueRun: Promise<{ removed: number; retained: number }> | null = null;
+  const drainFileQueue = () => queueRun ??= (async () => {
+    let removed = 0, retained = 0;
+    for (const entry of hostStore.fileQueue()) {
+      const id = hostStore.imageId(entry.filename);
+      if (!id || contentDb.prepare('SELECT 1 FROM community_images WHERE id=?').get(id)) { retained++; continue; }
+      const path = resolve(directory, 'uploads', entry.filename);
+      try {
+        const stat = await lstat(path);
+        if (!stat.isFile() || stat.isSymbolicLink()) { retained++; hostStore.retryFile(entry.filename); continue; }
+        // The registry is checked again immediately before unlink. A queued
+        // rolled-back purge can therefore never remove a still-used picture.
+        if (contentDb.prepare('SELECT 1 FROM community_images WHERE id=?').get(id)) { retained++; continue; }
+        await unlink(path); hostStore.completeFile(entry.filename); removed++;
+      } catch (error) {
+        if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') { hostStore.completeFile(entry.filename); removed++; }
+        else { hostStore.retryFile(entry.filename); retained++; }
+      }
+    }
+    return { removed, retained };
+  })().finally(() => { queueRun = null; });
+  const purge = async (readerId: string) => {
+    // This is called only by the HMAC-authenticated notification surface.
+    // Commit a durable tombstone before SQL/file cleanup: already-running
+    // identity/profile responses cannot recreate this reader during retries.
+    hostStore.markReaderDeleted(readerId);
+    const result = store.purgeReaderData(readerId, (filename, reason) => hostStore.queueFile(filename, reason));
+    const files = await drainFileQueue();
+    if (files.retained) throw failure('Community image cleanup is queued for retry.');
+    return { ...result, filesRemoved: files.removed };
+  };
+  const access = createCommunityHostAccess({ store: hostStore, client, siteOrigin, mainSiteOrigin, secret: config.bridgeSecret, purge });
+  const current = (req?: IncomingMessage) => {
+    const value = access.current(req);
+    if (!value) throw new IdentityBridgeError('请从主站重新进入社区。', 401);
+    return value;
+  };
+  const memberAlive = (member: CommunityAuthor) => member.kind !== 'reader' || !hostStore.readerDeleted(member.id);
+  const request = async <T>(operation: IdentityOperation, input: Record<string, unknown>): Promise<T> => {
+    const sessionRef = current().session.sessionRef;
+    const result = await client.request<T>(operation, { ...input, sessionRef });
+    current();
+    return result;
+  };
+  const readerIdentity = async (req: IncomingMessage) => {
+    const reader = current(req).identity.reader;
+    return reader && { ...reader, avatar: reader.avatar && reader.uid ? `/api/community/avatar/${encodeURIComponent(reader.uid)}.webp` : null };
+  };
+  const authorIdentity = async (req: IncomingMessage) => current(req).identity.author;
+  const sessionHandler = (kind: 'reader' | 'author') => async (req: IncomingMessage, res: ServerResponse) => {
+    if (req.method === 'GET' && new URL(req.url || '', siteOrigin).pathname === `/api/${kind}/session`) {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'private, no-store' });
+      res.end(JSON.stringify(await (kind === 'reader' ? readerIdentity(req) : authorIdentity(req)))); return;
+    }
+    res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'private, no-store' });
+    res.end(JSON.stringify({ error: '账号管理请前往主站。' }));
+  };
+  const communityService = createCommunityService({
+    store, directory, siteOrigin, ownerId: authorId,
+    identify: async req => current(req).identity.viewer,
+    assertActive: req => { current(req); },
+    people: async (authors: CommunityAuthor[]) => {
+      const unique = [...new Map(authors.filter(memberAlive).map(author => [`${author.kind}:${author.id}`, author])).values()];
+      const map = new Map<string, PersonInfo>();
+      for (let start = 0; start < unique.length; start += 100) for (const [key, info] of await request<Array<[string, PersonInfo]>>('people', { authors: unique.slice(start, start + 100) })) {
+        // A different member may be deleted while this caller remains active.
+        // Discard an older remote projection before member DTO helpers can
+        // ensure that deleted member's local row again.
+        if (!key.startsWith('reader:') || !hostStore.readerDeleted(key.slice('reader:'.length))) map.set(key, info);
+      }
+      // Earlier batches may have completed before a later batch awaited purge.
+      return new Map([...map].filter(([key]) => !key.startsWith('reader:') || !hostStore.readerDeleted(key.slice('reader:'.length))));
+    },
+    findMember: async uid => {
+      const member = await request<CommunityAuthor | null>('member', { uid });
+      return member && memberAlive(member) ? member : null;
+    },
+    findByNames: async names => new Map((await request<Array<[string, CommunityAuthor]>>('names', { names })).filter(([, member]) => memberAlive(member))),
+    avatarBytes: async (uid: string) => {
+      const image = await request<{ base64: string } | null>('avatar', { uid });
+      if (!image) return null;
+      if (typeof image.base64 !== 'string' || image.base64.length > 2 * 1024 * 1024 || !/^[A-Za-z0-9+/]*={0,2}$/.test(image.base64)) throw failure('Approved avatar data is invalid.');
+      return Buffer.from(image.base64, 'base64');
+    },
+    words: words(directory),
+    audit: async (action, details) => { await appendFile(resolve(directory, 'community-admin-audit.jsonl'), JSON.stringify({ action, ...details, at: new Date().toISOString() }) + '\n', { mode: 0o600 }); },
+  });
+  const snapshot = { source: 'community-host', profile: config.profile || { name: '無相', signature: '交流学习，分享创作。', bio: '' }, announcements: [], notes: [], works: [], resources: [], software: [], 'resource-center': [] };
+  const retryTimer = setInterval(() => { void drainFileQueue().catch(() => { process.stderr.write(JSON.stringify({ event: 'community-file-cleanup-retry', at: new Date().toISOString() }) + '\n'); }); }, 60_000);
+  retryTimer.unref();
+  let closed = false;
+  return {
+    communityService, communityEnabled: true, communityOnly: true, mainSiteOrigin,
+    contentService: { snapshot: async () => ({ data: snapshot }), preview: async () => { throw failure('Not found', 404); }, media: async () => { throw failure('Not found', 404); } },
+    readerService: { identity: readerIdentity, handle: sessionHandler('reader'), registrationEnabled: false },
+    authorService: { identity: authorIdentity, handle: sessionHandler('author') },
+    requestMiddleware: access.requestMiddleware,
+    drainFileQueue,
+    healthCheck: async () => {
+      hostStore.healthCheck();
+      if (contentDb.prepare('PRAGMA quick_check').get()?.quick_check !== 'ok') throw Error('Community database check failed.');
+      if (!communityTablesReady(directory)) throw Error('Community schema is incomplete.');
+    },
+    async close() {
+      if (closed) return;
+      closed = true; clearInterval(retryTimer);
+      if (queueRun) await queueRun;
+      store.close(); hostStore.close(); contentDb.close();
+    },
+  };
+}

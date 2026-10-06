@@ -2,7 +2,9 @@ import { sceneAssetUrl, staticAssetUrl } from "./scene-delivery.mjs";
 
 // This module is built as a tiny classic script so downloads begin while HTML
 // is parsed, before the renderer's larger module graph has finished loading.
-if (!location.hash || /^#\/?(?:home)?\/?$/.test(location.hash)) {
+// The dedicated community host has no main-site homepage, including its empty
+// initial hash. This runs before the later bootstrap JSON has been parsed.
+if (location.origin !== 'https://community.sansphase.com' && (!location.hash || /^#\/?(?:home)?\/?$/.test(location.hash))) {
   const urls = __SANSPHASE_SCENE_IMAGES__.map((path) => sceneAssetUrl(path));
   for (const [index, href] of urls.entries()) {
     const link = document.createElement("link");

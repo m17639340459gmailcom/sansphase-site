@@ -16,6 +16,7 @@ import { contactDetailReason } from './reader-profile-policy.ts';
 import { validReaderNickname } from '../src/reader-policy.ts';
 import { cleanReaderFiles } from './reader-file-cleanup.ts';
 import type { createReaderUidStore } from './reader-uids.ts';
+import { strictPayloadIdentity } from './payload/strict-identity.ts';
 
 type ReaderUser = {
   id: string; collection?: string; email: string; nickname: string; phone?: string | null;
@@ -113,13 +114,13 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
     pendingSignature: workflow.profileFor(user.id, 'signature')?.proposed_value ?? null,
     pendingAvatar: Boolean(workflow.profileFor(user.id, 'avatar')),
     role: 'reader', ...membershipState(user) });
-  async function authenticated(req: IncomingMessage): Promise<ReaderUser | null> {
+  async function authenticated(req: IncomingMessage, strict = false): Promise<ReaderUser | null> {
     const token = session(req);
     if (!token) return null;
     try {
-      const { user } = await payload.auth({ headers: new Headers({ Authorization: `JWT ${token}` }) });
+      const user = strict ? await strictPayloadIdentity(payload, token) : (await payload.auth({ headers: new Headers({ Authorization: `JWT ${token}` }) })).user;
       return user?.collection === 'readers' && user._verified === true && !user.disabled ? user as ReaderUser : null;
-    } catch { return null; }
+    } catch (error) { if (strict && ![401, 403].includes(errorStatus(error) || 0)) throw error; return null; }
   }
   async function findEmail(email: string, showHiddenFields = false): Promise<ReaderUser | null> {
     const result = await payload.find({ collection: 'readers', where: { email: { equals: email } }, limit: 1, depth: 0, showHiddenFields });
@@ -165,6 +166,9 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
   return {
     registrationEnabled: Boolean(emailReady),
     identity: async (req: IncomingMessage) => dto(await authenticated(req)),
+    // Server-to-server checks must distinguish revoked/invalid sessions from
+    // account storage failure. Ordinary page reads keep their existing behavior.
+    identityStrict: async (req: IncomingMessage) => dto(await authenticated(req, true)),
     async handle(req: IncomingMessage, res: ServerResponse) {
       const path = new URL(req.url || '', siteOrigin).pathname.slice('/api/reader/'.length);
       try {

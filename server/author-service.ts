@@ -152,9 +152,9 @@ export function createAuthorService({
     orderQueue=operation.catch(()=>{});
     return operation;
   }
-  async function authorize(token: string) {
+  async function authorize(token: string, strict = false) {
     if (!token || !authorId) throw fail("请先登录作者账号。", 401);
-    const user = await store.identity(token);
+    const user = await (strict ? store.identityStrict(token) : store.identity(token));
     if (user.id !== authorId)
       throw fail("这个账号没有个人网站的作者权限。", 403);
     return { name: user.first_name || "作者" };
@@ -280,6 +280,10 @@ export function createAuthorService({
         if ([401, 403].includes(errorStatus(error) || 0)) return null;
         throw error;
       }
+    },
+    async identityStrict(req: IncomingMessage) {
+      try { return await authorize(session(req), true); }
+      catch (error) { if ([401, 403].includes(errorStatus(error) || 0)) return null; throw error; }
     },
     async handle(req: IncomingMessage, res: ServerResponse) {
       const parsed = new URL(req.url || '', siteOrigin),

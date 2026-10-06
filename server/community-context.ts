@@ -20,6 +20,9 @@ export type ServiceOptions = {
   directory?: string;
   ownerId?: string;
   identify: (req: IncomingMessage) => Promise<CommunityViewer | null>;
+  // Optional host session guard, rechecked synchronously after asynchronous
+  // work and immediately before any request can recreate community data.
+  assertActive?: (req: IncomingMessage) => void;
   // Members' profiles, keyed `${kind}:${id}`; missing means the account is gone.
   people: (authors: CommunityAuthor[]) => Promise<Map<string, PersonInfo>>;
   // A member by public UID ('owner' is the site owner), and by exact nickname (for @mentions).
@@ -27,6 +30,8 @@ export type ServiceOptions = {
   findByNames?: (names: string[]) => Promise<Map<string, CommunityAuthor>>;
   // The approved avatar file of a reader, for other members.
   avatarFile?: (uid: string) => Promise<string | null>;
+  // Approved bytes provided by the account authority on a separate host.
+  avatarBytes?: (uid: string) => Promise<Buffer | null>;
   // Mirror committed database audit events to the existing private audit log.
   audit?: (action: string, details: Record<string, unknown>) => Promise<void>;
   // Words that may not appear in posts (private configuration).

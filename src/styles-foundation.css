@@ -64,6 +64,15 @@
   --manage-edge: rgb(196 211 236 / 16%);
   --manage-muted: #aebed2;
 }
+/* The community host reveals the current document once its own route is ready. */
+body[data-community-only="true"][data-community-boot="pending"] { opacity: 0; }
+.community-entry-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); margin-top: var(--space-4); }
+.community-entry-actions .button { min-height: 44px; }
+.community-entry-actions .button:disabled { cursor: wait; opacity: .7; }
+@media (max-width: 640px) {
+  .community-entry-actions { align-items: stretch; flex-direction: column; }
+  .community-entry-actions .button { width: 100%; justify-content: center; }
+}
 * {
   box-sizing: border-box;
 }

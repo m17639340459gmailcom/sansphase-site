@@ -108,3 +108,29 @@ test('community entrance uses live content and remains immediately interruptible
     assert.equal(s.animations[0].cancelled, 1);
   } finally { s.close(); }
 });
+
+test('external community leave fades live content and failure restores its original opacity', async () => {
+  const s = setup();
+  try {
+    s.doc.querySelector('main').style.opacity = '.9';
+    const leaving = s.transitions.leave();
+    assert.equal(s.animations.length, 1);
+    assert.deepEqual(s.animations[0].frames, [{ opacity: 1 }, { opacity: 0 }]);
+    s.animations[0].finish(); await leaving;
+    assert.equal(s.doc.querySelector('main').style.opacity, '0');
+    s.transitions.restore();
+    assert.equal(s.doc.querySelector('main').style.opacity, '0.9');
+    assert.equal(s.snapshots(), 0);
+  } finally { s.close(); }
+});
+
+test('HK ready reveals the existing body, and reduced motion skips both external fades', async () => {
+  const s = setup({ reduced: true });
+  try {
+    s.doc.body.dataset.communityBoot = 'pending';
+    await s.transitions.leave(); s.transitions.arrive();
+    assert.equal(s.animations.length, 0);
+    assert.equal(s.doc.body.hasAttribute('data-community-boot'), false);
+    assert.equal(s.doc.querySelector('main').style.opacity, '');
+  } finally { s.close(); }
+});

@@ -5,6 +5,7 @@ import {siteCopy,createContentProjection} from './site-copy.mjs';
 import {preparePageImages} from './home-preload.mjs';
 import {mountNavigationPrefetch} from './navigation-prefetch.mjs';
 import {createRouteTransitions} from './route-transition.mjs';
+import {communityEntryDestination,createCommunityEntry,communityEntryPageHTML,communityHostRoute,rewriteCommunityMainSiteLinks,exitCommunity} from './community-entry.mjs';
 import {mountNavSlider} from './nav-slider.mjs';
 import {DEPART_MS} from './journey.mjs';
 import {createContentReader,contentQuery} from './content-reader.mjs';
@@ -54,6 +55,16 @@ let siteContent = (() => {
   return payload ? JSON.parse(payload.textContent) : null;
 })();
 const communityEnabled = () => siteContent?.communityEnabled === true;
+const communityOnly = () => siteContent?.communityOnly === true;
+if (communityOnly()) {
+  document.body.dataset.communityOnly = 'true';
+  document.body.dataset.communityBoot = 'pending';
+  document.querySelector('#site-startup')?.remove();
+  document.documentElement.classList.remove('is-home-boot', 'is-site-preparing');
+  const initialRoute = communityHostRoute(siteContent, location.hash, true);
+  if (initialRoute.kind === 'main') location.replace(initialRoute.url);
+  else if (initialRoute.hash !== location.hash) history.replaceState(history.state, '', location.pathname + location.search + initialRoute.hash);
+}
 if (communityEnabled()) startCommunityLayout(document, window);
 const readerAccessEnabled = Boolean(siteContent && Object.hasOwn(siteContent, 'reader'));
 let notes = siteContent?.notes ?? [];
@@ -263,7 +274,7 @@ function homeChapterDetails(id, english) {
   return null;
 }
 function loadHomeLatest() {
-  if (homeLatest || navigator.connection?.saveData) return;
+  if (communityOnly() || homeLatest || navigator.connection?.saveData) return;
   if (siteContent?.delivery !== "paged-v1") {
     homeLatest = notes.slice(0, 3);
     cleanStage.refreshDetails?.();
@@ -276,7 +287,7 @@ function loadHomeLatest() {
   }).catch(() => {});
 }
 function setupStage() {
-  if (homeRoot) return;
+  if (communityOnly() || homeRoot) return;
   const holder = document.createElement("div");
   holder.innerHTML = universeMarkup(language === "en");
   homeRoot = holder.firstElementChild;
@@ -389,6 +400,33 @@ function closedPage(section, title, message) {
 }
 // Every community page after the landing page comes from the community UI.
 const communityUI = createCommunityUI();
+const communityEntry = createCommunityEntry({
+  config: () => siteContent,
+  request: (url, init) => fetch(url, init),
+  navigate: url => location.assign(url),
+  fadeOut: () => routeTransitions.leave(),
+  restore: () => routeTransitions.restore(),
+  changed: state => {
+    if (state === 'auth' && siteContent) { siteContent.reader = null; siteContent.author = null; }
+    if (['community', 'post'].includes(parseRoute(location.hash).page)) void render({ preserveScroll: true });
+  },
+});
+let communityArrived = false;
+function communityReady() {
+  if (!communityOnly()) return;
+  rewriteCommunityMainSiteLinks(document, siteContent);
+  const menu = document.querySelector('#community-account-menu');
+  if (menu && !menu.querySelector('[data-reader-logout]')) {
+    const button = document.createElement('button');
+    button.type = 'button'; button.setAttribute('role', 'menuitem'); button.setAttribute('data-reader-logout', '');
+    button.innerHTML = `${icons['log-out'] || ''}<span>${t('退出社区', 'Leave community')}</span>`;
+    menu.append(button);
+  }
+  if (!communityArrived && main.querySelector('[data-community]') && !main.querySelector('[data-content-state="loading"]')) {
+    communityArrived = true;
+    routeTransitions.arrive();
+  }
+}
 let cleanCommunity = () => {};
 // Community pages use the demo's starfield instead of the blog photo. It stays
 // mounted while moving between community pages.
@@ -405,6 +443,7 @@ function refreshCommunityHeader() {
   const bar = document.querySelector('#site-header');
   if (!bar?.classList.contains('community-header') || bar.contains(document.activeElement)) return;
   header(parseRoute(location.hash).page);
+  communityReady();
 }
 const communityContext = () => ({t, esc, icons, notify: (message) => toast(message), members: Boolean(siteContent?.reader?.vip || siteContent?.author),
   mountSelect: mountCommunitySelect,
@@ -413,7 +452,7 @@ const communityContext = () => ({t, esc, icons, notify: (message) => toast(messa
   showActiveMembers: !communityFrame.enabled(),
   showHomeCompose: !communityFrame.enabled(),
   simpleCompose: communityFrame.enabled(),
-  painted: communityFrame.enabled() ? () => communityFrame.sync(communityUI.frameHTML(communityContext())) : undefined,
+  painted: () => { if (communityFrame.enabled()) communityFrame.sync(communityUI.frameHTML(communityContext())); communityReady(); },
   beforePaint: communityFrame.enabled() ? communityFrame.preserveReadingPosition : undefined});
 // The header is rebuilt on every route, so a route change also closes the menu.
 function setCommunityAccountMenu(open) {
@@ -433,6 +472,7 @@ document.addEventListener('pointerdown', closeCommunityAccountOutside, true);
 document.addEventListener('click', closeCommunityAccountOutside, true);
 let communityStyleReady = false;
 function communityPage() {
+  if (communityEntryDestination(siteContent)) return communityEntryPageHTML(communityEntry.state(), { t, esc, arrow });
   if (!communityEnabled()) return closedPage('community',t('社区','Community'),t('社区尚未开放，正在准备中。','The community is not open yet. We are getting it ready.'));
   const {view} = communityRoute(location.hash);
   if (view === 'landing') return communityLandingHTML(t, icons);
@@ -485,7 +525,19 @@ function acceptContent(query,value) {
 }
 async function render(options={}) {
  const generation=++renderGeneration;
+ const hostRoute = communityHostRoute(siteContent, location.hash);
+ if (hostRoute.kind === 'main') { location.assign(hostRoute.url); return; }
+ if (communityOnly() && hostRoute.hash !== location.hash) history.replaceState(history.state, '', location.pathname + location.search + hostRoute.hash);
  const route=parseRoute(location.hash);
+ const externalCommunity = ['community', 'post'].includes(route.page) && communityEntryDestination(siteContent);
+ if (externalCommunity) {
+  contentReader.cancel(); loadedContentKey=''; remotePage=null;
+  const authenticated = Boolean(siteContent?.reader || siteContent?.author);
+  renderView({ ...options, ...(!authenticated || communityEntry.state() === 'auth' ? { contentStatus: 'auth' } : {}) });
+  if (authenticated && communityEntry.state() === 'idle') void communityEntry.enter(true);
+  return;
+ }
+ communityEntry.cancel();
   if ((route.page === 'community' || route.page === 'post') && !communityEnabled()) {
    contentReader.cancel();loadedContentKey='';remotePage=null;
    renderView(options);
@@ -591,10 +643,10 @@ function renderView({preserveScroll=false,contentStatus}={}) {
   syncBlogBackdrop(page);
   document.body.classList.toggle("theme-light", page !== "home" && blogTheme === "light");
   main.hidden = page === "home";
-  if (page === "home") homeRoot.setAttribute("role", "main");
-  else homeRoot.removeAttribute("role");
-  cleanStage.setCovered(page !== "home");
-  cleanStage.setLanguage(language === "en");
+  if (page === "home") homeRoot?.setAttribute("role", "main");
+  else homeRoot?.removeAttribute("role");
+  cleanStage.setCovered?.(page !== "home");
+  cleanStage.setLanguage?.(language === "en");
   if (!communityEnabled() || !communityFrame.enabled() || contentStatus) communityFrame.dispose();
   header(page);
   const views = {
@@ -629,6 +681,7 @@ function renderView({preserveScroll=false,contentStatus}={}) {
   if (!communityEnabled() || contentStatus || !communityFrame.render(main, pageMarkup, communityUI.frameHTML(communityContext()))) setContentHTML(main, pageMarkup);
   readerUI?.route(page,id);
   cleanCommunity=communityEnabled() && !contentStatus && (page==='community'||page==='post') ? communityUI.mount(main,communityContext()) : ()=>{};
+  communityReady();
   cleanReaderAdmin=page==='admin' && adminReadersModule ? adminReadersModule.mountReaderAdmin(main,{english:language==='en'}) : ()=>{};
   const bookRoot=main.querySelector('.book-reader'),bookGeneration=++bookRenderGeneration;
   cleanBookReading=()=>{};
@@ -647,7 +700,7 @@ function renderView({preserveScroll=false,contentStatus}={}) {
   const mountMusic=module=>{
     if(musicGeneration!==musicRenderGeneration) return;
     musicModule=module;
-    module.mountSiteMusic(musicHost,siteContent?.profile?.music,musicState,{language,preparePlayback:page==='home',autoplayReady:page==='home'&&homeRoot.classList.contains('is-ready')});
+    module.mountSiteMusic(musicHost,siteContent?.profile?.music,musicState,{language,preparePlayback:page==='home',autoplayReady:page==='home'&&Boolean(homeRoot?.classList.contains('is-ready'))});
     musicState(musicIsPlaying);
   };
   if(musicModule) mountMusic(musicModule);
@@ -786,7 +839,7 @@ document.addEventListener("click", (e) => {
     cleanStage.returnToOpening?.();
     if (parseRoute(location.hash).page === "home") {
       e.preventDefault();
-      homeRoot.querySelector(".universe-stage")?.focus({ preventScroll: true });
+      homeRoot?.querySelector(".universe-stage")?.focus({ preventScroll: true });
     }
     return;
   }
@@ -803,7 +856,7 @@ document.addEventListener("click", (e) => {
   if (e.target.closest(".skip-link")) {
     e.preventDefault();
     (parseRoute(location.hash).page === "home"
-      ? homeRoot.querySelector(".universe-stage")
+      ? homeRoot?.querySelector(".universe-stage") || main
       : main
     ).focus();
     window.scrollTo({ top: 0, behavior: "instant" });
@@ -966,6 +1019,7 @@ document.addEventListener("click", (event) => {
   const link = event.target.closest?.('a[href^="#/"]');
   if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   const target = parseRoute(link.getAttribute("href"));
+  if (communityOnly() || communityEntryDestination(siteContent) && ['community', 'post'].includes(target.page)) return;
   if (parseRoute(location.hash).page !== "home" || target.page === "home") return;
   const rect = link.getBoundingClientRect();
   const x = event.detail ? event.clientX : rect.left + rect.width / 2,
@@ -980,6 +1034,12 @@ document.addEventListener("click", (event) => {
     departing = false;
     location.hash = link.getAttribute("href");
   }, DEPART_MS);
+});
+document.addEventListener('click', event => {
+  const button = event.target.closest?.('[data-community-entry-retry]');
+  if (!button || button.disabled) return;
+  event.preventDefault();
+  void communityEntry.enter(Boolean(siteContent?.reader || siteContent?.author));
 });
 // Content queue switches retain the reading position; the management sidebar
 // remains page navigation and continues to start at the top.
@@ -1012,7 +1072,7 @@ window.addEventListener("hashchange", (event) => {
     // The community frame resets its active desktop/mobile scroll host itself.
     if ((!communityEnabled() || !communityFrame.enabled()) && !preserveManagementScroll) window.scrollTo({ top: 0, behavior: "instant" });
     ((communityEnabled() && communityFrame.center()) || (to === "home"
-      ? homeRoot.querySelector(".universe-stage")
+      ? homeRoot?.querySelector(".universe-stage") || main
       : main
     )).focus({ preventScroll: true });
     return rendering;
@@ -1051,7 +1111,10 @@ window.addEventListener('reader:identity',event=>{
 });
 readerUI=mountReaderUI({render,onIdentity(value){
   window.dispatchEvent(new CustomEvent('reader:identity',{detail:value}));
-},english:()=>language==='en'});
+},english:()=>language==='en',onLogout:communityOnly() ? async () => {
+  try { await exitCommunity(siteContent, (url, init) => fetch(url, init), url => location.assign(url)); }
+  catch { toast(t('暂时无法退出社区，请重试。', 'Could not leave the community. Please try again.')); }
+} : undefined});
 vipBookPrompt=mountVipBookPrompt({english:language==='en'});
 window.addEventListener('author:content',async event=>{
   contentReader.clear();
@@ -1064,7 +1127,7 @@ window.addEventListener('author:content',async event=>{
 });
 
 blogWeather.bind();
-mountNavigationPrefetch(document,contentReader,{enabled:()=>siteContent?.delivery==='paged-v1'&&!siteContent?.preview&&(parseRoute(location.hash).page!=='home'||Boolean(homeRoot?.classList.contains('is-ready')))});
+if (!communityOnly()) mountNavigationPrefetch(document,contentReader,{enabled:()=>siteContent?.delivery==='paged-v1'&&!siteContent?.preview&&(parseRoute(location.hash).page!=='home'||Boolean(homeRoot?.classList.contains('is-ready')))});
 render();
 // All synchronous wrappers, filters and expanded regions are in place now.
 // Restore before yielding a frame, without an entrance animation or scroll tween.

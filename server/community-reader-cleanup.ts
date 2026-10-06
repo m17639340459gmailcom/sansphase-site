@@ -2,10 +2,11 @@ import type { DatabaseSync } from 'node:sqlite';
 
 type CleanupOptions = { queueFile: (filename: string, reason: string) => void; cancelOrder: (id: string) => unknown };
 
-// Called inside the store transaction, after Payload has removed the account.
+// Called inside the store transaction, after the account authority has removed it.
 // Inactivity is not a moderation penalty: other members' settled ledger stays.
 export function purgeCommunityReaderData(db: DatabaseSync, readerId: string, { queueFile, cancelOrder }: CleanupOptions) {
-  if (db.prepare('SELECT 1 FROM readers WHERE id=?').get(readerId)) throw Error('Reader account still exists; cannot purge its data.');
+  const hasLocalReaders = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='readers'").get());
+  if (hasLocalReaders && db.prepare('SELECT 1 FROM readers WHERE id=?').get(readerId)) throw Error('Reader account still exists; cannot purge its data.');
   db.exec(`CREATE TEMP TABLE IF NOT EXISTS reader_cleanup_topics (id TEXT PRIMARY KEY);
     CREATE TEMP TABLE IF NOT EXISTS reader_cleanup_replies (id TEXT PRIMARY KEY);
     CREATE TEMP TABLE IF NOT EXISTS reader_cleanup_parents (id TEXT PRIMARY KEY);

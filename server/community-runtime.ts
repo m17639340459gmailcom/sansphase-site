@@ -1,6 +1,6 @@
 import type { IncomingMessage } from 'node:http';
 import { readFileSync } from 'node:fs';
-import { appendFile } from 'node:fs/promises';
+import { appendFile, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { Payload, Where } from 'payload';
@@ -30,22 +30,13 @@ function readWords(directory: string) {
   catch { return []; }
 }
 
-// The community store opens only after `node scripts/migrate-community.mjs`.
-// Until then the community API answers "not open yet" and the rest of the
-// site starts and runs as before.
-export function createCommunityRuntime({ payload, directory, siteOrigin, readerIdentity, ownerIdentity, ownerName, authorId, uidStore }: Options) {
-  const store = communityTablesReady(directory) ? createCommunityStore(directory) : null;
-  if (!store) process.stdout.write(JSON.stringify({ event: 'community-not-migrated', at: new Date().toISOString() }) + '\n');
+// Both the local service and the narrow identity bridge use this approved
+// profile directory. It does not open or mutate a community business database.
+export function createCommunityDirectory({ payload, directory, ownerName, authorId, uidStore }: Pick<Options, 'payload' | 'directory' | 'ownerName' | 'authorId' | 'uidStore'>) {
   const owner: CommunityAuthor = { kind: 'owner', id: authorId };
-  const identify = async (req: IncomingMessage): Promise<CommunityViewer | null> => {
-    const reader = await readerIdentity(req);
-    if (reader) return { kind: 'reader', id: String(reader.id), name: reader.nickname, vip: Boolean(reader.vip) };
-    const signedIn = await ownerIdentity(req);
-    return signedIn ? { kind: 'owner', id: authorId, name: signedIn.name, vip: true } : null;
-  };
   const readers = async (where: Where, limit: number) =>
     (await payload.find({ collection: 'readers', where, limit, depth: 0, pagination: false, overrideAccess: true })).docs as unknown as ReaderRow[];
-  const uidOf = (id: string) => { try { return uidStore.get(id); } catch { return null; } };
+  const uidOf = (id: string) => uidStore.get(id);
   // Only approved values leave the reader account: the approved avatar and signature.
   const people = async (authors: CommunityAuthor[]) => {
     const map = new Map<string, PersonInfo>();
@@ -57,9 +48,9 @@ export function createCommunityRuntime({ payload, directory, siteOrigin, readerI
         vip: membershipState(row).vip, joinedAt: row.createdAt || null, bio: row.signature || '',
       });
     }
-    if (authors.some(author => author.kind === 'owner')) {
+    if (authors.some(author => author.kind === 'owner' && author.id === authorId)) {
       const name = await ownerName();
-      for (const author of authors) if (author.kind === 'owner') map.set(`owner:${author.id}`, { name, uid: 'owner', avatar: null, vip: true, joinedAt: null, bio: '' });
+      map.set(`owner:${authorId}`, { name, uid: 'owner', avatar: null, vip: true, joinedAt: null, bio: '' });
     }
     return map;
   };
@@ -84,6 +75,29 @@ export function createCommunityRuntime({ payload, directory, siteOrigin, readerI
     const [row] = await readers({ id: { equals: id } }, 1);
     return row && uuid.test(row.avatar || '') && !row.disabled ? resolve(directory, 'uploads', `reader-avatar-${row.avatar}.webp`) : null;
   };
+  const avatar = async (uid: string) => {
+    const file = await avatarFile(uid);
+    if (!file) return null;
+    try { return await readFile(file); }
+    catch (error) { if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null; throw error; }
+  };
+  return { people, findMember, findByNames, avatarFile, avatar };
+}
+
+// The community store opens only after `node scripts/migrate-community.mjs`.
+// Until then the community API answers "not open yet" and the rest of the
+// site starts and runs as before.
+export function createCommunityRuntime(options: Options) {
+  const { directory, siteOrigin, readerIdentity, ownerIdentity, authorId } = options;
+  const store = communityTablesReady(directory) ? createCommunityStore(directory) : null;
+  if (!store) process.stdout.write(JSON.stringify({ event: 'community-not-migrated', at: new Date().toISOString() }) + '\n');
+  const profiles = createCommunityDirectory(options);
+  const identify = async (req: IncomingMessage): Promise<CommunityViewer | null> => {
+    const reader = await readerIdentity(req);
+    if (reader) return { kind: 'reader', id: String(reader.id), name: reader.nickname, vip: Boolean(reader.vip) };
+    const signedIn = await ownerIdentity(req);
+    return signedIn ? { kind: 'owner', id: authorId, name: signedIn.name, vip: true } : null;
+  };
   // Moderation goes to the same private audit log as reader administration.
   const audit = async (action: string, details: Record<string, unknown>) => {
     const at = typeof details.auditCreatedAt === 'string' ? details.auditCreatedAt : new Date().toISOString();
@@ -91,6 +105,7 @@ export function createCommunityRuntime({ payload, directory, siteOrigin, readerI
   };
   return {
     store,
+    directory: profiles,
     purgeReaderData(readerId: string, queueFile: (filename: string, reason: string) => void) {
       if (store) return store.purgeReaderData(readerId, queueFile);
       const db = new DatabaseSync(resolve(directory, 'content.db'), { readOnly: true });
@@ -100,7 +115,7 @@ export function createCommunityRuntime({ payload, directory, siteOrigin, readerI
         return { topics: 0, replies: 0, images: 0 };
       } finally { db.close(); }
     },
-    service: createCommunityService({ store, siteOrigin, directory, ownerId: authorId, identify, people, findMember, findByNames, avatarFile, audit, words: readWords(directory) }),
+    service: createCommunityService({ store, siteOrigin, directory, ownerId: authorId, identify, ...profiles, audit, words: readWords(directory) }),
     close() { store?.close(); },
   };
 }

@@ -104,6 +104,7 @@ for (const file of [
   "blog-background.css",
   "author.css",
   "community.mjs",
+  "community-entry.mjs",
   "community-ui.mjs",
   "community-write-request.mjs",
   "community-editor-size.mjs",

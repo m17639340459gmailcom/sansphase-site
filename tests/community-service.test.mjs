@@ -37,7 +37,7 @@ test.before(async () => {
 test.after(() => cleanup(template));
 
 // r1, r2, v1 and s1 have agreed to the guidelines and reached 巡天 (L1); r3 is brand new.
-async function setup(t, { store: withStore = true, simplePosting = false, useDefault = false, identifyOverride } = {}) {
+async function setup(t, { store: withStore = true, simplePosting = false, useDefault = false, identifyOverride, avatarBytes } = {}) {
   const reservation = createServer();
   await new Promise((done) => reservation.listen(0, "127.0.0.1", done));
   const port = reservation.address().port;
@@ -74,7 +74,7 @@ async function setup(t, { store: withStore = true, simplePosting = false, useDef
     })),
     findMember: async (uid) => authorOf(uid),
     findByNames: async (names) => new Map([...Object.entries(members).map(([id, m]) => [m.name, { kind: "reader", id }]), ["無相", { kind: "owner", id: "owner" }]].filter(([name]) => names.includes(name))),
-    avatarFile: async (uid) => uid === "u1" ? resolve(directory, "uploads", `reader-avatar-${avatarId}.webp`) : null,
+    ...(avatarBytes ? { avatarBytes } : { avatarFile: async (uid) => uid === "u1" ? resolve(directory, "uploads", `reader-avatar-${avatarId}.webp`) : null }),
     audit: async (action, details) => { audits.push({ action, ...details }); },
   });
   const server = createPreviewServer({ contentService: { snapshot: async () => ({ data: { notes: [] } }) }, communityService, communityEnabled: true });
@@ -99,6 +99,21 @@ async function setup(t, { store: withStore = true, simplePosting = false, useDef
   return { get, post, upload, siteOrigin, store, audits, setLevel, credit, directory };
 }
 const json = async (response) => (await response).json();
+
+test('remote approved avatar bytes stay private and authority outages remain unavailable', async t => {
+  let offline = false;
+  const { get } = await setup(t, { avatarBytes: async uid => {
+    if (offline) throw Object.assign(Error('Identity authority unavailable.'), { status: 503 });
+    return uid === 'u1' ? Buffer.from('approved-remote-avatar') : null;
+  } });
+  const response = await get('avatar/u1.webp');
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('cache-control'), 'private, no-store');
+  assert.equal(await response.text(), 'approved-remote-avatar');
+  assert.equal((await get('avatar/u2.webp')).status, 404);
+  offline = true;
+  assert.equal((await get('avatar/u1.webp')).status, 503);
+});
 
 test('forged like amounts and identities, duplicates and unlike/re-like cannot mint stardust or experience', async t => {
   const { get, post, store } = await setup(t);

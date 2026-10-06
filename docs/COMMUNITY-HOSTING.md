@@ -1,0 +1,51 @@
+# 香港社区部署边界
+
+2026-10-06 用户确认：社区使用 `https://community.sansphase.com`，复用主站现有账号和 VIP。帖子、回复、社区图片、星尘、经验、徽章、兑换和社区管理全部在香港运行。主站保持账号、密码、验证码、VIP 和 UID 的唯一数据来源，主站的论坛 API 继续关闭。不得导入本地预览账号或复制两份账号数据库分别写入。
+
+## 进入方式
+
+必须先在主站点击社区入口。主站验证现有读者或作者会话后，签发 60 秒内有效、仅能使用一次的衔接码。目标固定为 `/community-enter#community-entry=<code>`。此独立入口无论浏览器是否留有旧社区 Cookie 都先交换新凭证，防止切换主站账号时沿用旧身份。衔接码只放在跳转 URL 的 fragment 中，不放主站 JWT、账号 ID、邮箱或手机号。
+
+主站同时设置仅用于衔接验证的短期 `HttpOnly; Secure; SameSite=Strict` Cookie，限定父域 `sansphase.com` 与 `/api/community-entry` 路径。香港交换衔接码时必须携带对应验证值；交换后立即清除。主站原有读者和作者登录 Cookie 保持只对主站有效。
+
+香港成功交换后设置自己的仅当前主机可用、无 Max-Age 的会话 Cookie。用户确认本次会话内可刷新和打开帖子链接；会话结束后重新从主站进入。服务器另外限制会话连续闲置 30 分钟、绝对最长 12 小时，避免浏览器恢复会话导致无限保留授权。社区退出会清除此进入会话。
+
+直接访问社区网址且没有有效进入会话时只显示从主站进入的提示。受保护 API、社区 HTML 和个人资料同时受服务器校验；不得仅依赖 Referer、前端动画或隐藏按钮。浏览器可读取的公开脚本不是身份或数值结算的安全边界。
+
+## 服务模块
+
+新增内部身份桥接是本次明确设计，不是原有接口。使用独立的随机桥接密钥、固定 HTTPS 对端、请求摘要、时间戳、随机数及持久防重放校验。主站只开放衔接码交换、当前会话校验、已审核的社区资料／UID／昵称查找和头像读取。拒绝任意 Payload 查询、任意文件路径、任意远程 URL、密码获取及客户端提交的角色／VIP 数值。
+
+香港不启动主站 Payload、注册服务、主站读者清理器或作者内容管理。注册、账号资料和 VIP 管理仍通过主站完成。香港依照现有 `createCommunityService` 的身份和资料钩子复用社区权限及结算模块；资料请求仅返回社区确实需要的字段。
+
+主站注销、禁用、删除或 VIP 变更后，香港下一次受保护操作重新向主站确认，身份服务失败时拒绝操作并说明服务暂不可用，不能悄悄使用旧 VIP 快照或把用户显示成已注销。单个请求内允许复用同一次核验，不能跨用户复用上下文。
+
+## 删除和恢复
+
+主站删除账号后通过已存在的持久清理任务通知香港。必须等待香港完成幂等删除，失败和重启后继续重试，不能先标记主站清理完成。香港图片删除写入本机持久队列，并在删除前检查仍有效的社区图片登记；未知文件保留。
+
+两台服务器分别保管代码和私有配置。发布从正式源码清单生成全新目录。开放前完成数据库和上传备份、异地副本校验、恢复演练、登录撤销／VIP 变更／删号重试、入口过期／重放、真实客户端 IP、社区结算限速、库存并发和移动端验收。
+
+## 运维入口
+
+主站私有配置增加 `communityIdentity`，其中 `communityOrigin` 固定为 `https://community.sansphase.com`，`bridgeSecret` 为两台服务器独立共用的随机密钥，`stateEncryptionKey` 为仅主站持有的另一随机密钥。两者均不少于 32 字节、互不相同且不等于 Payload 主密钥。主站首次配置后显式运行 `PAYLOAD_CONFIG_FILE=<private-config> node scripts/prepare-community-identity.mjs`；正常启动不会初始化桥接库。
+
+香港只配置 `directory`、固定的两个 origin、桥接密钥、正式作者 ID 和已公开的品牌资料，不配置 Payload 密钥、SMTP、账号数据库或自动建表参数。`deploy/community.env.example` 指向私有配置，首次使用 `node scripts/start-community.mjs --prepare` 明确创建纯社区库；正常运行 `node scripts/start-community.mjs`，仅监听回环接口。采用独立的 `sansphase-community.service`，不启动主站读者闲置清理器。
+
+初次 TLS 签发用 `deploy/nginx-community-bootstrap.conf`，获得证书后替换为 `deploy/nginx-community.conf`，不能同时启用。腾讯云防火墙必须放行 TCP 80、443；应用端口 4176 不对公网开放。Nginx 覆写客户端 IP 代理头，访问日志仅记 pathname，不记录 query、Cookie、请求正文或衔接凭证。证书续期成功后验证 Nginx 配置并 reload。
+
+香港备份：`COMMUNITY_CONFIG_FILE=<private-config> node scripts/backup-community.mjs <new-private-backup-directory>`。检查：`node scripts/backup-community.mjs --verify <backup-directory>`。恢复：`node scripts/restore-community.mjs <backup-directory> <new-data-directory> <new-private-config-file>`。备份包含两份独立 SQLite 库、完整上传目录（未知文件保留）、屏蔽词、审计、迁移快照及私有配置；逐文件 SHA-256、数据库完整性和引用图片校验通过后才记成功。恢复只写新目录和配置，不切换在线服务；保留待清理图片队列，并使旧进入会话失效。
+
+`sansphase-community-backup.timer` 每日建立新备份目录，空间不足时失败并保留已有备份。初次开放前另下载到私有异地位置并校验，再在隔离目录恢复演练。异地持续备份和容量告警需另配，不能把同机副本当成抗服务器丢失的备份。清理候选、保留周期与回滚遵守 `MAINTENANCE.md`，不能每日盲删未知目录。
+
+主站常规恢复不应重新激活历史进入凭证。隔离恢复业务数据后，明确准备一份空的 `community-identity.db`，两端进入会话清空，用户从主站重新进入；主站账号会话与 VIP 的恢复另遵守主站备份规范。密钥配置及任何含密钥的备份只存私有位置，不推送 GitHub。
+
+## 实施状态
+
+- 香港服务器 SSH 指纹已与用户腾讯云终端核对，连接成功。
+- 新机为 Ubuntu 26.04 LTS，2 核、4GB、60GB；运行环境已安装，TLS 初始化完成，应用开放仍须完成部署验收。
+- 主站与香港身份衔接、进入校验、前端渐隐渐入以及独立备份模块已实现，生产切换须以私有验收回执为准。
+- `community.sansphase.com` A 记录已核对，证书已签发；公网 443 仍需云防火墙连通性确认。
+- 本次实际浏览器自动化未执行，不能将源码、HTTP 与 jsdom 通过宣称为手机和桌面视觉验收。
+
+服务器私钥、桥接密钥、真实账号、备份和维护回执只存私有目录，不进入 Git。

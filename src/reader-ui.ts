@@ -84,7 +84,7 @@ export function readerPage(page: string, id: string, reader: ReaderIdentity | nu
   return shell(`<div class="reader-heading"><span class="reader-kicker">${mode === 'register' || mode === 'verify' ? 'CREATE ACCOUNT' : 'ACCOUNT ACCESS'}</span><h1>${heading}</h1><p>${description}</p></div><div class="reader-tabs"><button type="button" data-reader-mode="login" ${mode === 'login' ? 'aria-current="page"' : ''}>${tr('登录', 'Sign in')}</button><button type="button" data-reader-mode="register" ${mode === 'register' || mode === 'verify' ? 'aria-current="page"' : ''}>${tr('注册', 'Register')}</button></div>${mode === 'register' && !registrationEnabled ? `<div class="reader-unavailable" role="status"><span aria-hidden="true">✦</span><p>${tr('目前可以继续阅读首页与博客。注册开放后，再来探索作品、资料和书籍。', 'You can keep reading the homepage and blog. Return when registration opens to explore works and the library.')}</p><a href="#/notes">${tr('继续看博客', 'Continue to the blog')} →</a></div>` : `<form data-reader-form="${mode}" autocomplete="on">${form}</form>`}<p data-reader-message role="status"></p><p class="reader-mail-note">${tr('为保护账号及配合依法调查，登录时会记录账号、时间、来源 IP 和浏览器信息，并仅向有权限的管理者提供。', 'For account security and lawful investigations, sign-ins record the account, time, source IP and browser information. Only authorized administrators can access these records.')}</p>${help}`, english);
 }
 
-export function mountReaderUI({ render, onIdentity, english = () => false }: { render: ReaderRender; onIdentity: (reader: ReaderIdentity | null) => void; english?: () => boolean }) {
+export function mountReaderUI({ render, onIdentity, english = () => false, onLogout }: { render: ReaderRender; onIdentity: (reader: ReaderIdentity | null) => void; english?: () => boolean; onLogout?: () => Promise<void> }) {
   const tr = (zh: string, en: string) => english() ? en : zh;
   const membershipClock = mountMembershipClock(document, english);
   const checkPhone = (input: HTMLInputElement) => input.setCustomValidity(input.value && !/^1[3-9]\d{9}$/.test(input.value) ? tr('请输入正确的手机号', 'Enter a valid mainland China mobile number') : '');
@@ -157,6 +157,7 @@ export function mountReaderUI({ render, onIdentity, english = () => false }: { r
       return;
     }
     if (target.closest('[data-reader-logout]')) {
+      if (onLogout) { await onLogout(); return; }
       try { await api('logout', {}); onIdentity(null); location.hash = '#/notes'; }
       catch (error) { message(errorMessage(error)); }
     }
@@ -224,7 +225,7 @@ export function mountReaderUI({ render, onIdentity, english = () => false }: { r
           window.history.replaceState(window.history.state, '', location.pathname + location.search + destination);
           window.dispatchEvent(new CustomEvent('author:identity', { detail: value }));
           await render({ silent: true });
-          document.querySelector<HTMLButtonElement>('[data-author-login]')?.click();
+          if (!/^#\/community(?:\/|$)|^#\/post\//.test(destination)) document.querySelector<HTMLButtonElement>('[data-author-login]')?.click();
         } else {
           onIdentity(value);
           const alreadyThere = location.hash === returnTo;

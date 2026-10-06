@@ -59,6 +59,7 @@ export function createCommunityService(options: ServiceOptions) {
 
   function context(req: IncomingMessage, res: ServerResponse, path: string, viewer: CommunityViewer): Ctx {
     const live = store!;
+    options.assertActive?.(req);
     const me: CommunityAuthor = { kind: viewer.kind, id: viewer.id };
     const actualOwner = viewer.kind === 'owner';
     live.members.visit(me);
@@ -108,6 +109,7 @@ export function createCommunityService(options: ServiceOptions) {
     // The request body can be read once; every route group shares the parsed value.
     let body: Promise<Body> | null = null;
     const requireConsent = () => {
+      options.assertActive?.(req);
       if (req.method === 'POST' && !consentExemptPaths.has(path)) live.convention.assertAgreed(me);
     };
     return {
@@ -116,11 +118,11 @@ export function createCommunityService(options: ServiceOptions) {
       get mod() { return mod(); },
       get moderationBoards() { return moderationBoards(); },
       canSeeBoard, hiddenBoard: canSeeBoard(membersBoard) ? '' : membersBoard,
-      send: (value, status) => sendTo(res, value, status),
+      send: (value, status) => { options.assertActive?.(req); sendTo(res, value, status); },
       json: async () => { const value = await (body ||= readJson(req)); requireConsent(); return value; },
       people: async authors => { const map = await people(authors); requireConsent(); return map; }, person, topicDTO,
       requireConsent,
-      topicsDTO: async topics => { const map = await people(peopleIn(topics)); return topics.map(topic => topicDTO(topic, map)); },
+      topicsDTO: async topics => { const map = await people(peopleIn(topics)); options.assertActive?.(req); return topics.map(topic => topicDTO(topic, map)); },
       throttle(kind) {
         requireConsent();
         live.rateLimits.consume(me, kind, level);
@@ -144,6 +146,7 @@ export function createCommunityService(options: ServiceOptions) {
 
   async function serveImage(ctx: Ctx, id: string, thumb: boolean) {
     const allowed = () => {
+      options.assertActive?.(ctx.req);
       const image = ctx.live.image(id);
       if (!image || image.deleted_at) return false;
       if (image.purpose === 'banner') return ctx.live.banners.imageVisible(id, ctx.me, ctx.canSeeBoard);
@@ -164,10 +167,15 @@ export function createCommunityService(options: ServiceOptions) {
   }
   // Approved avatars are shown to other signed-in members; pending ones stay private.
   async function serveAvatar(ctx: Ctx, uid: string) {
-    const file = await options.avatarFile?.(uid);
-    if (!file) throw fail('头像不存在。', 404);
-    let data: Buffer;
-    try { data = await readFile(file); } catch { throw fail('头像不存在。', 404); }
+    let data: Buffer | null;
+    if (options.avatarBytes) data = await options.avatarBytes(uid);
+    else {
+      const file = await options.avatarFile?.(uid);
+      if (!file) throw fail('头像不存在。', 404);
+      try { data = await readFile(file); } catch { throw fail('头像不存在。', 404); }
+    }
+    if (!data) throw fail('头像不存在。', 404);
+    options.assertActive?.(ctx.req);
     ctx.res.writeHead(200, { 'Content-Type': 'image/webp', 'Content-Length': data.length, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' });
     ctx.res.end(data);
   }
@@ -179,6 +187,7 @@ export function createCommunityService(options: ServiceOptions) {
         if (!['GET', 'POST'].includes(req.method || '')) throw fail('不支持这个请求。', 405);
         if (!store) throw fail('社区尚未开放。', 503);
         const viewer = await identify(req);
+        options.assertActive?.(req);
         if (!viewer) throw fail('请先登录。', 401);
         if (req.method === 'GET' && path === 'moderation-contacts') {
           const url = new URL(req.url || '', siteOrigin);
@@ -186,6 +195,7 @@ export function createCommunityService(options: ServiceOptions) {
           return;
         }
         await upkeep();
+        options.assertActive?.(req);
         const ctx = context(req, res, path, viewer);
         if (req.method === 'GET') {
           const image = /^images\/([0-9a-f-]{36})(\.thumb)?\.webp$/.exec(path);

@@ -45,6 +45,11 @@ export function createPreviewServer({
   readerAdminService,
   communityService,
   communityEnabled = false,
+  identityAuthority,
+  communityDestination,
+  communityOnly = false,
+  mainSiteOrigin,
+  requestMiddleware,
   healthCheck = async () => {},
   release = 'development',
   requestLogger,
@@ -52,7 +57,7 @@ export function createPreviewServer({
   const rootPath = resolve(root);
   const communityOpen = communityEnabled === true && Boolean(communityService);
   const rootPrefix = rootPath.endsWith(sep) ? rootPath : rootPath + sep;
-  return http.createServer({requestTimeout:uploadTimeoutMs}, async (req, res) => {
+  const handle = async (req, res) => {
     let fileHandle;
     const started=performance.now();
     res.once('finish',()=>requestLogger?.({event:'http',method:req.method,path:(req.url||'/').split('?')[0],status:res.statusCode,durationMs:Math.round(performance.now()-started)}));
@@ -72,6 +77,15 @@ export function createPreviewServer({
         try {await healthCheck();} catch {healthy=false;}
         res.writeHead(healthy?200:503,{'Content-Type':'application/json; charset=utf-8'});
         res.end(req.method==='HEAD'?undefined:JSON.stringify({status:healthy?'ok':'unavailable',release}));
+        return;
+      }
+      const endpoint = req.url.split('?')[0];
+      if (identityAuthority && endpoint === '/api/community-entry') {
+        await identityAuthority.handleEntry(req, res);
+        return;
+      }
+      if (identityAuthority && endpoint === '/api/community-identity/bridge') {
+        await identityAuthority.handleBridge(req, res);
         return;
       }
       if (req.url.startsWith("/api/author/") && authorService) {
@@ -233,6 +247,8 @@ export function createPreviewServer({
             : publicBootstrap(visible);
           if (authorService) data.author = await authorService.identity(req);
           data.communityEnabled = communityOpen;
+          if (communityDestination) data.communityDestination = communityDestination;
+          if (communityOnly) { data.communityOnly = true; data.mainSiteOrigin = mainSiteOrigin; }
           if (readerService) {
             data.reader = await readerService.identity(req);
             data.readerRegistrationEnabled = readerService.registrationEnabled;
@@ -251,6 +267,7 @@ export function createPreviewServer({
             return;
           }
           let html = await readFile(resolve(rootPath, "index.html"), "utf8");
+          if (communityOnly) html = html.replace(/<body\b/, '<body data-community-only="true" data-community-boot="pending"');
           if (data.profile?.background) {
             html = html.replaceAll(
               "./assets/materials/blog-space.png",
@@ -365,6 +382,14 @@ export function createPreviewServer({
         "Not found",
       );
     }
+  };
+  return http.createServer({requestTimeout:uploadTimeoutMs}, (req, res) => {
+    const dispatch = requestMiddleware ? () => requestMiddleware(req, res, () => handle(req, res)) : () => handle(req, res);
+    Promise.resolve().then(dispatch).catch(() => {
+      if (res.headersSent) { res.destroy(); return; }
+      res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'private, no-store' });
+      res.end('服务暂时不可用，请稍后重试。');
+    });
   });
 }
 

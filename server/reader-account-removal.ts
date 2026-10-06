@@ -15,7 +15,7 @@ type CleanupReaderPayload = CleanupPayload & {
   findByID?: (options: { collection: string; id: string }) => Promise<unknown>;
   config?: Pick<Payload['config'], 'collections'>;
 };
-export type PurgeCommunity = (readerId: string) => unknown;
+export type PurgeCommunity = (readerId: string) => unknown | Promise<unknown>;
 type CleanupCondition = { now: number; unverifiedOnly?: boolean };
 type RemovalOptions = { payload: CleanupReaderPayload & { delete: (options: { collection: string; id: string }) => Promise<unknown> }; directory: string; uidStore: { get: (id: string) => string | null }; row: ReaderAccount; audit: Audit; action: string; workflow?: ReturnType<typeof createReaderWorkflow>; purgeCommunity?: PurgeCommunity; cleanupCondition?: CleanupCondition };
 type FollowUpOptions = { payload: CleanupReaderPayload; directory: string; workflow: ReturnType<typeof createReaderWorkflow>; purgeCommunity?: PurgeCommunity };
@@ -29,7 +29,7 @@ async function readerStillExists(payload: CleanupReaderPayload, id: string) {
 }
 async function finishReaderCleanup({ payload, directory, workflow, purgeCommunity }: FollowUpOptions, row: { reader_id: string; avatar: string | null }) {
   if (await readerStillExists(payload, row.reader_id)) return false;
-  purgeCommunity?.(row.reader_id);
+  await purgeCommunity?.(row.reader_id);
   workflow.removeProfilesFor(row.reader_id);
   if (uuidPattern.test(row.avatar || '')) workflow.queueFile(`reader-avatar-${row.avatar}.webp`, 'reader-deleted');
   workflow.accountCleaned(row.reader_id);

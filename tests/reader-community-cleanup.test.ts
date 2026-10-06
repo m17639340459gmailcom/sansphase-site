@@ -32,6 +32,45 @@ async function fixture(t: test.TestContext) {
   return { directory, db, store, workflow, old, live, at, topic };
 }
 
+test('remote cleanup waits for confirmation before marking the durable account job complete', async t => {
+  const { directory, db, store, workflow, old, topic } = await fixture(t);
+  const target = topic(); db.prepare('INSERT INTO readers VALUES (?)').run(old.id);
+  let release: () => void = () => {};
+  const confirmation = new Promise<void>(resolve => { release = resolve; });
+  let entered = false, finished = false;
+  const payload = {
+    findByID: async () => db.prepare('SELECT id FROM readers WHERE id=?').get(old.id) ? { id: old.id } : null,
+    delete: async () => { db.prepare('DELETE FROM readers WHERE id=?').run(old.id); },
+  };
+  const purgeCommunity = async (id: string) => {
+    entered = true;
+    await confirmation;
+    return store.purgeReaderData(id, workflow.queueFile);
+  };
+  const pending = removeReaderAccount({ directory, payload, workflow, uidStore: { get: () => '123456' },
+    row: { id: old.id }, audit: async () => {}, action: 'delete', purgeCommunity }).then(() => { finished = true; });
+  try {
+    for (let attempt = 0; attempt < 10 && !entered; attempt++) await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(entered, true);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(finished, false, 'remote acknowledgement must precede successful completion');
+    assert.equal(workflow.cleanupAccounts().length, 1);
+    assert.ok(store.topic(target.id));
+  } finally { release(); await pending; }
+  assert.equal(workflow.cleanupAccounts().length, 0);
+  assert.equal(store.topic(target.id), null);
+});
+
+test('standalone community cleanup has no local reader database and remains idempotent', async t => {
+  const { db, store, workflow, old, topic } = await fixture(t);
+  const target = topic();
+  db.exec('DROP TABLE readers');
+  const result = store.purgeReaderData(old.id, workflow.queueFile);
+  assert.equal(result.topics, 1);
+  assert.equal(store.topic(target.id), null);
+  assert.equal(store.purgeReaderData(old.id, workflow.queueFile).topics, 0);
+});
+
 test('permanent cleanup removes content, old balance, private orders and references while preserving other accounts', async t => {
   const { db, store, workflow, old, live, at, topic } = await fixture(t);
   db.prepare('INSERT INTO readers VALUES (?)').run(live.id);

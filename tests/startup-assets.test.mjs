@@ -4,6 +4,20 @@ import { readFile, stat } from "node:fs/promises";
 import { JSDOM } from "jsdom";
 import { build } from "esbuild";
 
+test('HK HTML startup never preloads main homepage textures or WebGL even before bootstrap is parsed', async () => {
+  const result = await build({
+    entryPoints: ['src/startup-assets.mjs'], bundle: true, format: 'iife', write: false,
+    define: {__SANSPHASE_SCENE_CDN_ORIGIN__: JSON.stringify('https://static.sansphase.com'),__SANSPHASE_SCENE_IMAGES__: JSON.stringify(['./assets/scene/panorama.jpg'])},
+  });
+  for (const suffix of ['', '#/home', '#/community/home', 'community-enter#community-entry=' + 'a'.repeat(43)]) {
+    const dom = new JSDOM('', {url: 'https://community.sansphase.com/' + suffix, runScripts: 'outside-only'});
+    try {
+      dom.window.eval(result.outputFiles[0].text);
+      assert.equal(dom.window.document.querySelector('link[rel=preload],link[rel=modulepreload]'),null,suffix);
+    } finally {dom.window.close();}
+  }
+});
+
 test("startup build can enable CDN delivery or roll back to same-origin without moving scripts", async () => {
   const paths = ["./assets/scene/panorama.jpg", "./assets/scene/chapter.jpg"];
   for (const origin of ["", "https://static.sansphase.com"]) {
