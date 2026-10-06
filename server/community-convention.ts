@@ -85,3 +85,4 @@ export function createCommunityConvention(db: DatabaseSync, tx: Transaction) {
     },
   };
 }
+export type CommunityConvention = ReturnType<typeof createCommunityConvention>;

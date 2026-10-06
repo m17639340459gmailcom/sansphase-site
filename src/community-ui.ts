@@ -21,6 +21,7 @@ import { createCommunityConventionConsent } from './community-convention-consent
 import { createCommunityLevelExplorer } from './community-level-explorer.mjs';
 import { createCommunityBadgeExplorer } from './community-badge-explorer.mjs';
 import type { CommunityConvention } from './community-convention.ts';
+import type { CommunityGrowthState, CommunityVIPGrowthState } from './community-growth.ts';
 import { createCommunityWriteRequest } from './community-write-request.mjs';
 import { communityFrameBannersHTML } from './community-frame-banners.mjs';
 import type { CommunityBannerConfig } from './community-banners.ts';
@@ -223,12 +224,55 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     storage: () => window.sessionStorage,
   });
   const send = <T>(path: string, body: object = {}) => writeRequests.send<T>(path, body);
+  // Client state only avoids redundant requests. The server owns the daily
+  // account key, award, VIP status and transaction; storage cannot grant XP.
+  let activeVisitDone = '';
+  let activeVisitPending: { key: string; token: object; result: Promise<boolean> } | null = null;
+  let activeVisitRetryAt = 0;
+  async function recordActiveVisit(): Promise<boolean> {
+    const current = readyData(me), view = route().view;
+    if (!mounted || mounted.main.ownerDocument.visibilityState !== 'visible' || !current?.uid || current.role !== 'reader' || current.owner || current.management?.browsingAsReader || !current.agreed || current.convention?.agreed === false || !current.growth?.configured || view === 'unknown' || view === 'landing') return false;
+    const identity = frameIdentity;
+    const key = `${current.uid}:${new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10)}`;
+    if (key === activeVisitDone) return false;
+    if (activeVisitPending?.key === key) return activeVisitPending.result;
+    if (Date.now() < activeVisitRetryAt) return false;
+    const token = {};
+    const result = (async () => {
+      try {
+        const visit = await send<{ uid: string | null; awarded: number; visited: boolean; growth: CommunityGrowthState | null; vipGrowth: CommunityVIPGrowthState | null }>('active/visit');
+        const viewer = readyData(me);
+        if (identity !== frameIdentity || activeVisitPending?.token !== token || !mounted || viewer?.uid !== current.uid) return false;
+        if (typeof visit.uid !== 'string' || !visit.uid) throw Error('The visit response did not identify its account.');
+        // Cookies can change in another tab while this page still shows the
+        // previous account. Never attach another account's progress to it.
+        if (visit.uid !== current.uid) { clearData(); await refresh(); return false; }
+        activeVisitDone = key;
+        viewer.growth = visit.growth; viewer.vipGrowth = visit.vipGrowth;
+        for (const value of stardusts.values()) if (value.state === 'ready') {
+          value.data.growth = visit.growth; value.data.vipGrowth = visit.vipGrowth;
+        }
+        headerKey = ''; mounted.ctx.headerChanged?.();
+        return true;
+      } catch {
+        // A failed request cannot fabricate progress. A later real entrance
+        // or interaction retries the same protected write request.
+        if (identity === frameIdentity && activeVisitPending?.token === token) activeVisitRetryAt = Date.now() + 15000;
+        return false;
+      }
+    })();
+    activeVisitPending = { key, token, result };
+    try { return await result; }
+    finally { if (activeVisitPending?.result === result) activeVisitPending = null; }
+  }
+  const onActiveVisibility = () => { void recordActiveVisit().then(changed => { if (changed) paint(); }); };
+  const onActiveInteraction = (event: Event) => { if (event.isTrusted) onActiveVisibility(); };
   const conventionConsent = createCommunityConventionConsent({
     request: api, send, renderBody: (body, common) => communityConventionBodyHTML(body, common, 'community-consent-rule'),
     accepted: version => {
       const current = readyData(me);
       if (current) { current.agreed = true; current.convention = { version, agreed: true }; }
-      void reload();
+      void reload().then(recordActiveVisit).then(changed => { if (changed) paint(); });
     },
   });
   function syncConvention() {
@@ -307,7 +351,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     await assignLoad('me', me, value => { me = value; });
     if (identity !== frameIdentity) return;
     const data = readyData(me);
-    const key = data ? [data.name, data.uid, data.avatar, data.frame, data.color, JSON.stringify(data.nameEffect), data.level, JSON.stringify(data.growth), data.steward, data.mod, JSON.stringify(data.management), data.balance, data.checkedIn, data.unread.all].join('|') : '';
+    const key = data ? [data.name, data.uid, data.avatar, data.frame, data.color, JSON.stringify(data.nameEffect), data.level, JSON.stringify(data.growth), JSON.stringify(data.vipGrowth), data.steward, data.mod, JSON.stringify(data.management), data.balance, data.checkedIn, data.unread.all].join('|') : '';
     if (key !== headerKey) { headerKey = key; mounted?.ctx.headerChanged?.(); }
     syncConvention();
   }
@@ -397,6 +441,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       if (location.hash !== hash || identity !== frameIdentity) return;
     }
     await Promise.all(loadsFor(current).map(run => run()));
+    if (location.hash === hash && identity === frameIdentity) await recordActiveVisit();
     if (location.hash === hash && identity === frameIdentity) paint();
   }
   // Reloads what the current page shows, then repaints.
@@ -1978,6 +2023,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   };
 
   function clearData(clearWrites = true) {
+    activeVisitDone = ''; activeVisitPending = null; activeVisitRetryAt = 0;
     conventionConsent.close();
     convention = null;
     if (clearWrites) writeRequests.clear();
@@ -2062,6 +2108,10 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       main.addEventListener('change', onChange);
       main.addEventListener('keydown', onKeydown);
       main.addEventListener('pointermove', onPointer);
+      main.addEventListener('pointerdown', onActiveInteraction, { passive: true });
+      main.addEventListener('keydown', onActiveInteraction);
+      document.addEventListener('visibilitychange', onActiveVisibility);
+      window.addEventListener('focus', onActiveVisibility);
       document.addEventListener('click', onDocumentClick);
       document.addEventListener('dragenter', onEquipmentDrag);
       document.addEventListener('dragover', onEquipmentDrag);
@@ -2101,6 +2151,10 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         main.removeEventListener('change', onChange);
         main.removeEventListener('keydown', onKeydown);
         main.removeEventListener('pointermove', onPointer);
+        main.removeEventListener('pointerdown', onActiveInteraction);
+        main.removeEventListener('keydown', onActiveInteraction);
+        document.removeEventListener('visibilitychange', onActiveVisibility);
+        window.removeEventListener('focus', onActiveVisibility);
         document.removeEventListener('click', onDocumentClick);
         document.removeEventListener('dragenter', onEquipmentDrag);
         document.removeEventListener('dragover', onEquipmentDrag);

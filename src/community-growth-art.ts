@@ -16,5 +16,5 @@ export function communityVipArtHTML(level: number): string {
 export function communityGrowthArtHTML(level = 1): string {
   const grade = communityGrowthLevel(level).level;
   const slug = `constellation-g${grade}`;
-  return `<span class="community-growth-art community-level-mark" data-growth-art="${grade}" data-tier="${grade}" data-level-icon="${slug}" aria-hidden="true"><img class="community-growth-art-image" src="/assets/community/levels/${slug}.svg" width="512" height="512" alt="" decoding="async" draggable="false"></span>`;
+  return `<span class="community-growth-art" data-growth-art="${grade}" data-level-icon="${slug}" aria-hidden="true"><img class="community-growth-art-image" src="/assets/community/levels/${slug}.svg" width="512" height="512" alt="" decoding="async" draggable="false"></span>`;
 }

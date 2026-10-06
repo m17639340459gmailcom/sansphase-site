@@ -75,6 +75,11 @@ export function purgeCommunityReaderData(db: DatabaseSync, readerId: string, { q
   db.prepare(`DELETE FROM community_badge_violation_reviews WHERE (kind='penalty' AND source_id IN
     (SELECT id FROM community_ledger WHERE member_kind='reader' AND member_id=?)) OR (kind='sanction' AND source_id IN
     (SELECT id FROM community_sanctions WHERE member_kind='reader' AND member_id=?))`).run(readerId, readerId);
+  // Inactive-account removal preserves other members' settled experience, just
+  // like their currency. Remove references to permanently removed source content.
+  db.prepare(`UPDATE community_experience_ledger SET ref_kind=NULL,ref_id=NULL
+    WHERE NOT(member_kind='reader' AND member_id=?) AND
+      ((ref_kind='topic' AND ref_id IN reader_cleanup_topics) OR (ref_kind='reply' AND ref_id IN reader_cleanup_replies))`).run(readerId);
   for (const table of ['community_bookmarks', 'community_unlocks', 'community_votes']) {
     db.prepare(`DELETE FROM ${table} WHERE topic_id IN reader_cleanup_topics OR (member_kind='reader' AND member_id=?)`).run(readerId);
   }
@@ -82,7 +87,8 @@ export function purgeCommunityReaderData(db: DatabaseSync, readerId: string, { q
   db.prepare(`DELETE FROM community_notifications WHERE (member_kind='reader' AND member_id=?) OR (actor_kind='reader' AND actor_id=?)
     OR topic_id IN reader_cleanup_topics OR reply_id IN reader_cleanup_replies`).run(readerId, readerId);
   db.prepare("DELETE FROM community_follows WHERE (follower_kind='reader' AND follower_id=?) OR (followee_kind='reader' AND followee_id=?)").run(readerId, readerId);
-  for (const table of ['community_ledger', 'community_checkins', 'community_makeups', 'community_members', 'community_visits',
+  for (const table of ['community_experience_ledger', 'community_experience_visits', 'community_vip_growth_days',
+    'community_ledger', 'community_checkins', 'community_makeups', 'community_members', 'community_visits',
     'community_badges', 'community_badge_honors', 'community_badge_honor_reviews', 'community_sanctions', 'community_owned', 'community_inventory', 'community_orders', 'community_requests', 'community_rate_events']) {
     db.prepare(`DELETE FROM ${table} WHERE member_kind='reader' AND member_id=?`).run(readerId);
   }

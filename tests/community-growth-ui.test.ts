@@ -107,7 +107,7 @@ test('levels show a center icon and adjacent choices on an arc without the old s
     assert.equal(panel.querySelector('[data-level-gallery]'), null);
     assert.match(panel.querySelector('[data-level-detail]')!.textContent!, /成长等级/);
     assert.equal(panel.querySelector('.community-level-threshold, .community-level-earn'), null);
-    assert.match(panel.textContent!, /待启用/);
+    assert.match(panel.textContent!, /经验记录暂未提供/);
     assert.equal(panel.querySelector('.community-meter'), null);
     assert.doesNotMatch(panel.textContent!, /37|200/, 'legacy contribution totals and balance are not represented as actual experience');
     assert.equal(doc.querySelectorAll('.community-rung, .community-lv-hero, .community-ladder').length, 0, 'old stacked sections are removed');
@@ -146,7 +146,7 @@ test('stardust only invites an eligible real reader to check in, not owners or r
 test('all growth titles omit G-number prefixes from visible text, tooltip and accessible labels in both languages', () => {
   for (const english of [false, true]) for (const growth of communityGrowthLevels) {
     const context = { ...common, t: (zh: string, en: string) => english ? en : zh };
-    const state: CommunityGrowthState = { level: growth.level, points: 0, configured: false };
+    const state: CommunityGrowthState = { level: growth.level, points: 0, configured: true };
     const person = { ...reader, growth: state };
     const markup = whoHTML(person, context)
       + communityAccountHTML({ ...context, nickname: person.name, author: false, me: { ...me, growth: state } })

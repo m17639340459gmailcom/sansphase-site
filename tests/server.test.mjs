@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createPreviewServer } from "../server.mjs";
 
-async function fixture(t) {
+async function fixture(t, privateFiles = false) {
   const directory = await mkdtemp(join(tmpdir(), "sansphase-http-"));
   const root = join(directory, "public");
   await mkdir(root);
@@ -20,6 +20,16 @@ async function fixture(t) {
     writeFile(join(directory, "secret.txt"), "outside root"),
     writeFile(join(root, 'assets', 'scene', 'sky-ABCDEFG2.jpg'), 'original image bytes'),
   ]);
+  if (privateFiles) {
+    for (const path of ['server/private.mjs', 'src/private.ts', '.git/config', 'assets/.private/key.txt', 'uploads/account.db', 'logs/receipt.txt', 'outputs/prototype.html']) {
+      await mkdir(join(root, path, '..'), { recursive: true });
+      await writeFile(join(root, path), 'private data must not be delivered');
+    }
+    for (const path of ['.env', 'app.mjs.map', 'backup.sqlite', 'secret.key', 'private.toml']) await writeFile(join(root, path), 'private data must not be delivered');
+    await mkdir(join(directory, 'outside'));
+    await writeFile(join(directory, 'outside', 'secret.txt'), 'private data must not be delivered');
+    await symlink(join(directory, 'outside'), join(root, 'assets', 'outside-link'), process.platform === 'win32' ? 'junction' : 'dir');
+  }
   const server = createPreviewServer({ root });
   await new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -57,6 +67,25 @@ async function fixture(t) {
       req.end();
     });
 }
+
+test('static delivery blocks accidentally copied source, credentials, databases, maps and private directories', async t => {
+  const request = await fixture(t, true);
+  for (const path of ['/.env', '/%2eenv', '/server/private.mjs', '/src/private.ts', '/.git/config', '/assets/.private/key.txt', '/uploads/account.db', '/logs/receipt.txt', '/outputs/prototype.html', '/app.mjs.map', '/backup.sqlite', '/secret.key', '/private.toml']) {
+    for (const method of ['GET', 'HEAD']) {
+      const response = await request(path, { method });
+      assert.equal(response.status, 404, `${method} ${path}`);
+      assert.doesNotMatch(response.body.toString(), /private data/);
+    }
+  }
+  if (process.platform === 'win32') assert.equal((await request('/backup.sqlite::$DATA')).status, 404, 'NTFS alternate streams cannot bypass private extension checks');
+});
+
+test('a public static symlink cannot expose a file outside the real public root', async t => {
+  const request = await fixture(t, true);
+  const response = await request('/assets/outside-link/secret.txt');
+  assert.equal(response.status, 403);
+  assert.doesNotMatch(response.body.toString(), /private data/);
+});
 
 test('favicon ICO is returned with an image content type', async t => {
   const request = await fixture(t);

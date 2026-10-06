@@ -1110,17 +1110,6 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-level-modes button:focus-visible { outline: 1px solid var(--focus-edge); outline-offset: 4px; }
 .community-level-body { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 24px; height: 360px; align-items: stretch; }
 .community-level-visual { display: grid; grid-template-rows: 260px 88px; align-content: center; gap: 8px; min-width: 0; padding-right: 20px; border-right: 1px solid var(--line); }
-.community-level-mark { --level-accent: #bdcddd; --level-ink: var(--level-accent); }
-.community-level-mark[data-tier="1"] { --level-accent: #aebdd0; }
-.community-level-mark[data-tier="2"] { --level-accent: #78d4c6; }
-.community-level-mark[data-tier="3"] { --level-accent: #79caff; }
-.community-level-mark[data-tier="4"] { --level-accent: #91adff; }
-.community-level-mark[data-tier="5"] { --level-accent: #bba1ff; }
-.community-level-mark[data-tier="6"] { --level-accent: #e6c990; }
-.community-level-mark[data-tier="7"] { --level-accent: #97cdf3; }
-.community-level-mark[data-tier="8"] { --level-accent: #c5befa; }
-.community-level-mark[data-tier="9"] { --level-accent: #94cfdb; }
-.community-level-mark[data-tier="10"] { --level-accent: #e6c990; }
 .community-level-preview { min-width: 0; border-radius: 12px; text-align: center; }
 .community-level-preview:focus-visible { outline: 1px solid var(--focus-edge); outline-offset: 5px; }
 .community-level-emblem { display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; min-width: 0; width: 100%; max-width: 248px; aspect-ratio: 1; margin-inline: auto; }
@@ -1143,7 +1132,6 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 /* Growth medallions and permission icons own their colour, motion and reduced-motion rule inside each SVG asset. */
 /* The VIP hexagon fills 82% of its canvas so the high ranks have room outside the frame; its box is larger to match. */
 .community-level-emblem .community-vip-art { width: 100%; }
-body.community-open[data-community-theme="light"] .community-level-mark { --level-ink: color-mix(in srgb, var(--level-accent) 32%, #273a54); }
 
 .community-level-detail { display: grid; align-content: start; gap: 12px; min-width: 0; min-height: 0; padding-block: 12px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
 .community-level-detail:focus-visible { outline: 1px solid var(--focus-edge); outline-offset: 4px; border-radius: 8px; }
@@ -1152,15 +1140,22 @@ body.community-open[data-community-theme="light"] .community-level-mark { --leve
 .community-level-detail h4 { margin: 0; color: var(--text); font-size: 13px; font-weight: 600; line-height: 1.5; }
 .community-level-perks { display: grid; gap: 7px; margin: 0; padding: 0 0 0 16px; color: var(--muted); font-size: 13px; line-height: 1.65; list-style: disc; }
 .community-level-note { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
-.community-vip-benefit { display: grid; gap: 10px; padding: 16px 0 20px; border-bottom: 1px solid var(--line); }
+.community-experience-progress { display: grid; gap: 12px; min-width: 0; padding-block: 8px; }
+.community-level-numbers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 0; }
+.community-level-numbers > div { display: grid; gap: 6px; min-width: 0; }
+.community-level-numbers dt { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.community-level-numbers dd { margin: 0; color: var(--text); font: 500 22px/1.3 var(--font-mono); overflow-wrap: anywhere; }
+.community-level-progress-track { height: 6px; overflow: hidden; border-radius: 3px; background: var(--cm-signal-soft); }
+.community-level-progress-track > span { display: block; height: 100%; background: var(--signal); border-radius: inherit; }
+.community-level-target { padding-top: 12px; border-top: 1px solid var(--line); }
+.community-vip-benefit { display: grid; gap: 8px; padding: 6px 0 12px; border-bottom: 1px solid var(--line); }
 .community-vip-benefit > span { color: var(--muted); font-size: 13px; line-height: 1.5; }
-.community-vip-benefit > strong { color: var(--signal); font: 500 52px/1.05 var(--font-mono); }
+.community-vip-benefit > strong { color: var(--signal); font: 500 38px/1.05 var(--font-mono); }
 .community-vip-benefit small { margin-left: 6px; font-size: 24px; }
-.community-vip-progress { display: grid; gap: 12px; padding-top: 12px; min-width: 0; }
+.community-vip-progress { display: grid; gap: 10px; min-width: 0; }
 .community-vip-progress-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px 12px; font-size: 12px; line-height: 1.6; }
 .community-vip-progress-head > span { color: var(--muted); }
 .community-vip-progress-head > b { color: var(--text); font-weight: 500; }
-.community-vip-progress-track { height: 6px; overflow: hidden; border-radius: 3px; background: var(--cm-signal-soft); border: 1px solid var(--line-strong); }
 .community-vip-progress > p { margin: 0; color: var(--dim); font-size: 12px; line-height: 1.6; }
 @container community-level-panel (max-width: 600px) {
   .community-level-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: 368px 290px; gap: 18px; height: 676px; }

@@ -11,7 +11,7 @@ import type { BadgeTier, CommunityBadgeState } from './community-badge-policy.ts
 import { nameEffectVariables } from './community-name-effects.mjs';
 import { communityGrowthLevel } from './community-growth.mjs';
 import { communityGrowthArtHTML, communityTrustArtHTML, communityVipArtHTML } from './community-growth-art.mjs';
-import type { CommunityGrowthState } from './community-growth.ts';
+import type { CommunityGrowthState, CommunityVIPGrowthState } from './community-growth.ts';
 export * from './community-rules.mjs';
 
 export type Translate = (zh: string, en: string) => string;
@@ -129,6 +129,7 @@ export type CommunityRole = "reader" | "owner";
 export type CommunityPerson = {
   nameEffect?: NameEffect | null;
   growth?: CommunityGrowthState | null;
+  vipGrowth?: CommunityVIPGrowthState | null;
   name: string; role: CommunityRole; uid: string | null; avatar?: string | null; vip?: boolean; level?: number;
   steward?: boolean; moderationBoards?: string[]; frame?: string | null; color?: string | null; showUid?: boolean;
 };
@@ -293,7 +294,7 @@ export function growthChipHTML(person: CommunityPerson, common: Common) {
 }
 // 昵称旁的等级图标：成长、权限、VIP 依次排列，只显示图标，名称放在 title 与无障碍标签里。
 // 站长没有等级；协管是任命，不显示权限图标；旧响应缺少成长字段时不推算成长等级。
-// 账号目前只有“是否会员”，还没有档位：会员一律显示会员起始的 VIP1，非会员不显示。
+// 会员档位由服务端已记录的有效访问日确定；旧响应仅显示起始会员图标。
 // `large` 用于个人主页：图标单独成行放在昵称上方，尺寸加大。
 export function levelMarksHTML(person: CommunityPerson, common: Common, large = false) {
   person = currentAppearance(person, common);
@@ -309,7 +310,11 @@ export function levelMarksHTML(person: CommunityPerson, common: Common, large = 
     const level = Math.max(0, Math.min(3, person.level ?? 0));
     marks += mark('trust', t(`权限等级：L${level} ${levelTitle(level, t)}`, `Permission level: L${level} ${levelTitle(level, t)}`), communityTrustArtHTML(level));
   }
-  if (person.vip) marks += mark('vip', t('VIP 会员', 'VIP member'), communityVipArtHTML(1));
+  if (person.vip) {
+    const rank = person.vipGrowth?.level;
+    const level = person.vipGrowth?.active && typeof rank === 'number' && Number.isInteger(rank) && rank >= 1 && rank <= 8 ? rank : null;
+    marks += mark('vip', level ? `VIP${level}` : t('VIP 会员', 'VIP member'), communityVipArtHTML(level ?? 1));
+  }
   return marks ? `<span class="community-level-marks${large ? ' is-large' : ''}">${marks}</span>` : '';
 }
 // 站长与协管没有对应的图标，仍用文字标识。

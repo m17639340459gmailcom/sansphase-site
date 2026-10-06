@@ -23,7 +23,7 @@ import type { CommunityBannerEditorState } from './community-banner-editor.ts';
 import type { CommunityBannerConfig } from './community-banners.ts';
 import { communityLevelExplorerHTML } from './community-level-explorer.mjs';
 import type { CommunityLevelSelection } from './community-level-explorer.ts';
-import type { CommunityGrowthState } from './community-growth.ts';
+import type { CommunityGrowthState, CommunityVIPGrowthState, CommunityExperienceCatalogueItem, CommunityVIPCatalogueItem } from './community-growth.ts';
 import { vipContactURL as authorContactURL } from './vip-book-prompt.mjs';
 import { communityConventionText } from './community-convention.mjs';
 import type { CommunityConvention } from './community-convention.ts';
@@ -52,6 +52,7 @@ export type CommunityStardust = {
   balance: number; gainedToday: number; behaviourToday: number; dailyCap: number; checkedIn: boolean;
   month: { gained: number; spent: number }; flow: CommunityFlow; ledger: CommunityLedgerRow[];
   level: number; owner: boolean; steward: boolean; vip?: boolean; browsingAsReader?: boolean; growth?: CommunityGrowthState | null; stats: Record<string, number>; progress: CommunityLevelProgress | null;
+  experienceCatalogue?: CommunityExperienceCatalogueItem[]; vipCatalogue?: CommunityVIPCatalogueItem[]; vipGrowth?: CommunityVIPGrowthState | null;
 };
 export type CommunityRedeemState = { owned: boolean; left: number | null; ok: boolean; code: string; why: string };
 export type CommunityShopItem = ShopItem & { active: boolean; state: CommunityRedeemState };

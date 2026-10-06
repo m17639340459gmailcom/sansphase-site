@@ -10,6 +10,51 @@ import { communityBoards } from '../../src/community.ts';
 // this explicit, backed-up migration adds the community tables.
 const member = (prefix = 'member') => `${prefix}_kind TEXT NOT NULL CHECK(${prefix}_kind IN ('reader','owner')), ${prefix}_id TEXT NOT NULL`;
 const tables: Record<string, string> = {
+  // A new independent account starts at migration time. No historical balance,
+  // visit or membership duration is converted into experience or VIP login days.
+  community_experience_config: `CREATE TABLE community_experience_config (
+  id INTEGER PRIMARY KEY CHECK(id=1),
+  started_at TEXT NOT NULL
+);
+INSERT INTO community_experience_config(id,started_at) VALUES(1,strftime('%Y-%m-%dT%H:%M:%fZ','now'));`,
+  community_experience_visits: `CREATE TABLE community_experience_visits (
+  ${member()},
+  day TEXT NOT NULL,
+  vip INTEGER NOT NULL CHECK(vip IN (0,1)),
+  vip_level INTEGER,
+  multiplier INTEGER NOT NULL CHECK(multiplier>=1),
+  convention_version TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(member_kind,member_id,day),
+  CHECK(member_kind='reader')
+);`,
+  community_vip_growth_days: `CREATE TABLE community_vip_growth_days (
+  ${member()},
+  day TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY(member_kind,member_id,day),
+  CHECK(member_kind='reader')
+);`,
+  // Positive awards keep their daily/ref slots after a separate negative reversal.
+  community_experience_ledger: `CREATE TABLE community_experience_ledger (
+  id TEXT PRIMARY KEY,
+  ${member()},
+  amount INTEGER NOT NULL,
+  kind TEXT NOT NULL CHECK(kind IN ('earn','revert')),
+  reason TEXT NOT NULL CHECK(reason IN ('login','topic','reply','accepted','revert')),
+  day TEXT NOT NULL,
+  ref_kind TEXT CHECK(ref_kind IN ('day','topic','reply')),
+  ref_id TEXT,
+  source_id TEXT UNIQUE,
+  created_at TEXT NOT NULL,
+  CHECK(member_kind='reader'),
+  CHECK((kind='earn' AND amount>0 AND source_id IS NULL AND reason<>'revert') OR
+    (kind='revert' AND amount<0 AND source_id IS NOT NULL AND reason='revert'))
+);
+CREATE INDEX community_experience_member_idx ON community_experience_ledger(member_kind,member_id,created_at);
+CREATE INDEX community_experience_ref_idx ON community_experience_ledger(ref_kind,ref_id);
+CREATE UNIQUE INDEX community_experience_daily_idx ON community_experience_ledger(member_kind,member_id,reason,day) WHERE kind='earn';
+CREATE UNIQUE INDEX community_experience_source_idx ON community_experience_ledger(member_kind,member_id,reason,ref_kind,ref_id) WHERE kind='earn';`,
   community_conventions: `CREATE TABLE community_conventions (
   version TEXT PRIMARY KEY,
   body TEXT NOT NULL,

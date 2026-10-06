@@ -201,8 +201,9 @@ test('separate connections enforce optimistic version conflicts and renewed ten-
     assert.deepEqual(otherStore.convention.current(), saved);
     assert.equal(otherStore.convention.state(owner).agreed, false);
     assert.throws(() => otherStore.convention.agree(owner, saved.version), { status: 428 });
-    const read = otherStore.convention.read(owner, saved.version);
-    assert.equal(Date.parse(read.eligibleAt) >= Date.now() + 9900, true, 'old-version elapsed reading never carries into the new version');
-    assert.throws(() => otherStore.convention.agree(owner, saved.version), { status: 428 });
+    const readAt = Date.now();
+    const read = otherStore.convention.read(owner, saved.version, readAt);
+    assert.equal(Date.parse(read.eligibleAt), readAt + 10000, 'old-version elapsed reading never carries into the new version');
+    assert.throws(() => otherStore.convention.agree(owner, saved.version, readAt + 9999), { status: 428 });
   } finally { otherStore.close(); }
 });

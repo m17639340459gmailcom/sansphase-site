@@ -4,20 +4,6 @@ import { communityLevels, communityLevelPerks } from './community-rules.mjs';
 import type { Common } from './community.ts';
 import type { CommunityStardust } from './community-pages.ts';
 
-// Display-only proposal. Live growth configuration and accounting remain unchanged.
-export const communityExperienceDraft = {
-  status: 'draft',
-  thresholds: [0, 1200, 3600, 7200, 13200, 21600, 31200, 43200, 56400, 72000],
-  actions: [
-    { label: '每日首次访问', en: 'First daily visit', points: 10 },
-    { label: '首个通过审核的主题', en: 'First approved topic', points: 20 },
-    { label: '首条有效回复', en: 'First eligible reply', points: 10 },
-    { label: '首次回答被采纳', en: 'First accepted answer', points: 20 },
-  ],
-} as const;
-// The catalogue shows proposed multipliers, never inferred personal VIP growth.
-export const communityVIPMultipliers = [2, 3, 4, 6, 8, 11, 15, 20] as const;
-
 type Mode = 'growth' | 'trust' | 'vip';
 export type CommunityLevelSelection = { mode: Mode; growth: number | null; trust: number | null; vip?: number | null };
 const initial = (): CommunityLevelSelection => ({ mode: 'growth', growth: null, trust: null, vip: null });
@@ -27,8 +13,27 @@ const clamp = (value: number, mode: Mode) => {
   return Number.isFinite(value) ? Math.max(min, Math.min(max, Math.trunc(value))) : min;
 };
 const selectedLevel = (data: CommunityStardust, selection: CommunityLevelSelection) => clamp(
-  selection[selection.mode] ?? (selection.mode === 'growth' ? data.owner ? 1 : data.growth?.level ?? 1 : selection.mode === 'vip' ? 1 : data.owner ? 0 : data.level), selection.mode,
+  selection[selection.mode] ?? (selection.mode === 'growth' ? data.owner ? 1 : data.growth?.level ?? 1 : selection.mode === 'vip' ? data.vipGrowth?.active ? data.vipGrowth.level ?? 1 : 1 : data.owner ? 0 : data.level), selection.mode,
 );
+
+const finiteCount = (value: number | null | undefined) => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.trunc(value).toLocaleString('en-US') : '—';
+const percentage = (value: number | undefined) => typeof value === 'number' && Number.isFinite(value) ? Math.round(Math.max(0, Math.min(1, value)) * 1000) / 10 : null;
+const validRank = (level: number | null | undefined, min: number, max: number) => typeof level === 'number' && Number.isInteger(level) && level >= min && level <= max;
+function progressHTML(attribute: string, label: string, progress: number | undefined) {
+  const percent = percentage(progress);
+  return `<div class="community-level-progress-track" ${attribute} data-available="${percent !== null}" role="progressbar" aria-label="${label}"${percent === null ? '' : ` aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}"`}><span style="width:${percent ?? 0}%"></span></div>`;
+}
+
+function growthProgressHTML(data: CommunityStardust, common: Common, selected: number) {
+  const { esc, t } = common, text = (zh: string, en: string) => esc(t(zh, en));
+  if (data.owner) return `<p class="community-level-note">${text('作者账号不参与成长等级。', 'The owner account does not participate in growth levels.')}</p>`;
+  const growth = data.growth;
+  if (!growth?.configured || !validRank(growth.level, 1, 10)) return `<p class="community-level-note">${text('经验记录暂未提供。', 'Experience records are not available.')}</p>`;
+  const next = growth.nextLevel ? communityGrowthLevel(growth.nextLevel) : null;
+  const completed = growth.nextLevel === null && growth.nextThreshold === null;
+  const target = data.experienceCatalogue?.find(item => item.level === selected);
+  return `<div class="community-experience-progress"><dl class="community-level-numbers"><div><dt>${text('当前经验', 'Current experience')}</dt><dd data-experience-current>${finiteCount(growth.points)}</dd></div>${next ? `<div><dt>${text('下一等级所需经验', 'Experience for the next level')}</dt><dd data-experience-next>${finiteCount(growth.nextThreshold)}</dd></div>` : ''}</dl>${progressHTML('data-experience-progress', text('当前成长升级进度', 'Current growth progress'), growth.progress)}<p class="community-level-note">${next ? `${text('距离', 'To')} ${text(next.name, next.en)} ${text('还差', 'remaining')} <b data-experience-remaining>${finiteCount(growth.remaining)}</b> ${text('经验', 'EXP')}` : completed ? text('已达到最高成长等级。', 'The highest growth level has been reached.') : text('升级进度暂未提供。', 'Upgrade progress is not available.')}</p>${target ? `<p class="community-level-note community-level-target">${text('查看等级所需经验', 'Experience for the selected level')} <b data-experience-target>${finiteCount(target.threshold)}</b></p>` : ''}</div>`;
+}
 
 const levelIconHTML = (level: number, mode: Mode) => {
   if (mode === 'growth') return communityGrowthArtHTML(level);
@@ -40,9 +45,11 @@ function vipProgressHTML(data: CommunityStardust, { esc, t }: Common) {
   const text = (zh: string, en: string) => esc(t(zh, en));
   if (data.owner) return `<p class="community-level-note">${text('作者账号不参与会员成长。', 'The owner account does not participate in membership growth.')}</p>`;
   const title = data.vip === true ? text('会员有效', 'Active member') : data.vip === false ? text('未开通会员', 'No active membership') : text('会员状态暂未提供', 'Membership status unavailable');
-  const unavailable = text('会员成长待启用', 'Membership growth is not active');
-  // No login-day ledger exists yet. Unknown progress must not masquerade as 0%.
-  return `<div class="community-vip-progress"><div class="community-vip-progress-head"><span>${text('我的会员', 'My membership')}</span><b>${title}</b></div><div class="community-vip-progress-track" data-vip-progress data-available="false" role="progressbar" aria-label="${text('VIP 升级进度', 'VIP upgrade progress')}" aria-valuetext="${unavailable}"></div><p>${unavailable}</p></div>`;
+  const vip = data.vipGrowth;
+  const unavailable = text('会员成长记录暂未提供', 'Membership growth records are not available');
+  if (!vip || typeof vip.active !== 'boolean' || vip.active && !validRank(vip.level, 1, 8)) return `<div class="community-vip-progress"><div class="community-vip-progress-head"><span>${text('我的会员', 'My membership')}</span><b>${title}</b></div><div class="community-level-progress-track" data-vip-progress data-available="false" role="progressbar" aria-label="${text('VIP 升级进度', 'VIP upgrade progress')}" aria-valuetext="${unavailable}"></div><p>${unavailable}</p></div>`;
+  const status = vip.active && vip.level ? `VIP${vip.level}` : text('会员成长已暂停', 'Membership growth is paused');
+  return `<div class="community-vip-progress"><div class="community-vip-progress-head"><span>${text('我的会员', 'My membership')}</span><b>${status}</b></div><dl class="community-level-numbers"><div><dt>${text('已累计成长日', 'Recorded growth days')}</dt><dd data-vip-days>${finiteCount(vip.days)}</dd></div>${vip.active && vip.nextDays !== null ? `<div><dt>${text('下一档所需成长日', 'Days for the next tier')}</dt><dd data-vip-next-days>${finiteCount(vip.nextDays)}</dd></div>` : ''}</dl>${progressHTML('data-vip-progress', text('VIP 升级进度', 'VIP upgrade progress'), vip.active ? vip.progress : undefined)}<p>${!vip.active ? text('开通会员后继续累计，已记录进度保留。', 'Renew membership to continue with the recorded progress.') : vip.nextDays === null ? text('已达到最高会员等级。', 'The highest VIP tier has been reached.') : `${text('距离下一档还差', 'Days remaining to the next tier')} <b data-vip-remaining>${finiteCount(vip.remaining)}</b> ${text('成长日', 'growth days')}`}</p></div>`;
 }
 
 function levelBodyHTML(data: CommunityStardust, common: Common, selection: CommunityLevelSelection) {
@@ -63,13 +70,14 @@ function levelBodyHTML(data: CommunityStardust, common: Common, selection: Commu
     const n = level + step, position = step < 0 ? 'previous' : step > 0 ? 'next' : 'current';
     return `<div class="community-emblem-stop" data-position="${position}">${n < min || n > max ? '' : `<button type="button" data-action="community-level-select" data-level="${n}" aria-pressed="${step === 0}" aria-controls="community-level-detail" aria-keyshortcuts="ArrowLeft ArrowRight Home End"><span class="community-emblem-dot" aria-hidden="true"></span>${step === 0 ? `<span id="community-level-title" class="community-emblem-title">${label(n)}</span>` : `<span>${label(n)}</span>`}</button>`}</div>`;
   }).join('')}</div>`;
-  const preview = `<div class="community-level-visual" data-level-carousel><div class="community-emblem-stage">${arrow(-1)}${neighbour(-1)}<div data-level-preview data-selected-level="${level}" data-tier="${growth || mode === 'vip' ? level : level + 1}" class="community-level-preview community-level-mark" tabindex="0" role="group" aria-label="${esc(t(`等级展示：${rankLabel(level)}`, `Level preview: ${rankLabel(level, true)}`))}" aria-controls="community-level-detail" aria-keyshortcuts="ArrowLeft ArrowRight Home End"><div class="community-level-emblem">${levelIconHTML(level, mode)}</div></div>${neighbour(1)}${arrow(1)}</div>${track}</div>`;
+  const preview = `<div class="community-level-visual" data-level-carousel><div class="community-emblem-stage">${arrow(-1)}${neighbour(-1)}<div data-level-preview data-selected-level="${level}" class="community-level-preview" tabindex="0" role="group" aria-label="${esc(t(`等级展示：${rankLabel(level)}`, `Level preview: ${rankLabel(level, true)}`))}" aria-controls="community-level-detail" aria-keyshortcuts="ArrowLeft ArrowRight Home End"><div class="community-level-emblem">${levelIconHTML(level, mode)}</div></div>${neighbour(1)}${arrow(1)}</div>${track}</div>`;
 
   let details: string;
   if (growth) {
-    details = `<span class="community-level-caption">${text('成长等级 · 待启用', 'Growth levels · not active')}</span><h3>${text(definition.name, definition.en)}</h3><p class="community-level-note">${text('记录你在社区的成长。', 'A reflection of your community journey.')}</p><p class="community-level-note">${text('兑换星尘不影响成长等级。', 'Spending stardust does not affect your growth level.')}</p>`;
+    details = `<span class="community-level-caption">${text('成长等级', 'Growth levels')}</span><h3>${text(definition.name, definition.en)}</h3>${growthProgressHTML(data, common, level)}<p class="community-level-note">${text('兑换星尘不影响成长等级。', 'Spending stardust does not affect your growth level.')}</p>`;
   } else if (mode === 'vip') {
-    details = `<span class="community-level-caption">${text('会员等级 · 经验加速待启用', 'VIP levels · experience boost not active')}</span><h3>${code(level)}</h3><div class="community-vip-benefit"><span>${text('登录经验加速', 'Login experience multiplier')}</span><strong data-vip-multiplier>${communityVIPMultipliers[level - 1]}<small>×</small></strong></div>${vipProgressHTML(data, common)}`;
+    const multiplier = data.vipCatalogue?.find(item => item.level === level)?.multiplier;
+    details = `<span class="community-level-caption">${text('会员等级', 'VIP levels')}</span><h3>${code(level)}</h3><div class="community-vip-benefit"><span>${text('登录经验加速', 'Login experience multiplier')}</span><strong data-vip-multiplier>${finiteCount(multiplier)}<small>×</small></strong></div>${vipProgressHTML(data, common)}`;
   } else {
     details = `<span class="community-level-caption">${text('社区等级', 'Community levels')}</span><h3>${text(`${code(level)} ${definition.name}`, `${code(level)} ${definition.en}`)}</h3><h4>${text('权限与限制', 'Permissions and limits')}</h4><ul class="community-level-perks">${(communityLevelPerks[level] || []).map(([zh, en]) => `<li>${text(zh, en)}</li>`).join('')}</ul><p class="community-level-note">${text('版主由作者任命，管理指定板块并可执行全社区禁言；VIP 不改变信任等级或管理权。', 'Moderators are appointed by the owner, manage assigned boards and can mute community-wide. VIP does not change trust or management rights.')}</p>`;
   }
@@ -77,9 +85,9 @@ function levelBodyHTML(data: CommunityStardust, common: Common, selection: Commu
 }
 
 function personalStatus(data: CommunityStardust, { esc, t }: Common, mode: Mode) {
-  if (mode === 'vip') return esc(data.owner ? t('作者账号', 'Owner account') : data.vip === true ? t('当前为 VIP 会员', 'Active VIP member') : data.vip === false ? t('当前为普通读者', 'Regular reader') : t('会员状态暂未提供', 'Membership status unavailable'));
+  if (mode === 'vip') return esc(data.owner ? t('作者账号', 'Owner account') : data.vipGrowth?.active && validRank(data.vipGrowth.level, 1, 8) ? t(`当前 VIP${data.vipGrowth.level}`, `Current VIP${data.vipGrowth.level}`) : data.vip === true ? t('当前为 VIP 会员', 'Active VIP member') : data.vip === false ? t('当前为普通读者', 'Regular reader') : t('会员状态暂未提供', 'Membership status unavailable'));
   if (data.owner) return esc(t('作者不参与成长等级，拥有全部管理权限。', 'The owner has no growth level and has all management permissions.'));
-  if (mode === 'growth') return data.growth ? `<span data-personal-level>${esc(t(`当前 ${communityGrowthLevel(data.growth.level).name}`, `Current ${communityGrowthLevel(data.growth.level).en}`))}</span>` : esc(t('成长等级暂未提供', 'Growth level is not available'));
+  if (mode === 'growth') return data.growth?.configured && validRank(data.growth.level, 1, 10) ? `<span data-personal-level>${esc(t(`当前 ${communityGrowthLevel(data.growth.level).name}`, `Current ${communityGrowthLevel(data.growth.level).en}`))}</span>` : esc(t('成长等级暂未提供', 'Growth level is not available'));
   return esc(t(`当前权限：${data.steward ? '版主' : communityLevels[clamp(data.level, 'trust')].name}`, `Current role: ${data.steward ? 'moderator' : communityLevels[clamp(data.level, 'trust')].en}`));
 }
 

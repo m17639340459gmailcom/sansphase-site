@@ -18,6 +18,7 @@ import { createCommunityRateLimits } from './community-rate-limits.ts';
 import { createCommunityAudit } from './community-audit.ts';
 import { purgeCommunityReaderData } from './community-reader-cleanup.ts';
 import { createCommunityConvention } from './community-convention.ts';
+import { createCommunityExperience } from './community-experience.ts';
 
 export type { CommunityAuthor, Target } from './community-db.ts';
 export type ShowcaseMeta = { tools: string; model: string; usage: string; prompt: string; promptMode: PromptMode; price: number };
@@ -69,6 +70,7 @@ export function createCommunityStore(directory: string) {
   const tx = createTransaction(db);
   const ledger = createLedger(db);
   const convention = createCommunityConvention(db, tx);
+  const experience = createCommunityExperience(db, tx, convention);
   const members = createMembers(db, convention, tx);
   const banners = createCommunityBanners(db, tx, members);
   const economy = createEconomy(db, tx, ledger, members);
@@ -225,6 +227,7 @@ export function createCommunityStore(directory: string) {
   // Publishing earns the configured daily topic award and the first-topic badge.
   function published(topicId: string, author: CommunityAuthor, now: string) {
     const earned = ledger.reward(author, rules.topicReward, 'topic', { kind: 'topic', id: topicId }, now, rules.topicDaily);
+    experience.reward(author, 'topic', { kind: 'topic', id: topicId }, now);
     members.checkBadges(author, now);
     return earned;
   }
@@ -232,6 +235,7 @@ export function createCommunityStore(directory: string) {
   function deleteTopicIn(id: string, { moderated = false, reason = '', note = '', now }: { moderated?: boolean; reason?: string; note?: string; now: string }) {
     const row = topicRow(id);
     if (!row || !Number(removeTopic.run(now, reason || null, id).changes)) return false;
+    experience.revert({ kind: 'topic', id }, now);
     ledger.revert({ kind: 'topic', id }, now);
     ledger.revert({ kind: 'topic', id: `featured:${id}` }, now);
     const author = authorOf(row);
@@ -251,6 +255,7 @@ export function createCommunityStore(directory: string) {
   function deleteReplyIn(id: string, { moderated = false, reason = '', now }: { moderated?: boolean; reason?: string; now: string }) {
     const row = replyRow(id);
     if (!row || !Number(removeReply.run(now, reason || null, id).changes)) return false;
+    experience.revert({ kind: 'reply', id }, now);
     dropReplyCount.run(row.topic_id);
     ledger.revert({ kind: 'reply', id }, now);
     const topic = topicRow(row.topic_id);
@@ -267,6 +272,7 @@ export function createCommunityStore(directory: string) {
 
   return {
     ledger,
+    experience,
     members,
     convention,
     economy,
@@ -350,6 +356,7 @@ export function createCommunityStore(directory: string) {
         const own = same(authorOf(topic), author);
         const earned = !own && [...bodyImageContent(body).text.trim()].length >= rules.replyMinLength
           ? ledger.reward(author, rules.replyReward, 'reply', { kind: 'reply', id }, now, rules.replyDaily) : 0;
+        experience.reward(author, 'reply', { kind: 'reply', id }, now);
         const told: CommunityAuthor[] = [author];
         const tell = (member: CommunityAuthor, notice: Notice) => { if (told.some(item => same(item, member))) return; told.push(member); notify(member, notice, now); };
         tell(authorOf(topic), { type: 'reply', actor: author, topicId, replyId: id, text: '回复了你的主题', data: { kind: 'topic' } });
@@ -363,6 +370,7 @@ export function createCommunityStore(directory: string) {
         if (!row) throw fail('回复不存在，或已被删除。', 404);
         insertRevision.run(randomUUID(), 'reply', id, null, row.body, null, editor.kind, editor.id, now);
         updateReply.run(body, now, id);
+        if ([...bodyImageContent(body).text.trim()].length < rules.replyMinLength) experience.revert({ kind: 'reply', id }, now);
         saveImages(row.topic_id, editor, images ?? bodyImageContent(body).images, now, id);
         return true;
       });
@@ -511,6 +519,7 @@ export function createCommunityStore(directory: string) {
         if (topic.accepted_reply_id) throw fail('这个问题已经采纳过回答了。', 409);
         if (same(authorOf(topic), authorOf(reply))) throw fail('不能采纳自己的回答。');
         setAccepted.run(replyId, now, topic.id);
+        experience.reward(authorOf(reply), 'accepted', { kind: 'reply', id: replyId }, now);
         const answerer = authorOf(reply);
         rememberBadgeEvent.run('acceptance', topic.id, `${answerer.kind}:${answerer.id}`, now);
         const bounty = economy.payBounty(topic.id, answerer, now);
@@ -554,15 +563,22 @@ export function createCommunityStore(directory: string) {
     },
     setLocked(id: string, on: boolean) { return Number(setLocked.run(on ? 1 : 0, id).changes) > 0; },
     move(id: string, board: string, now = new Date().toISOString()) {
-      const row = topicRow(id);
-      if (!row) throw fail('帖子不存在，或已被删除。', 404);
-      if (row.board === board) return false;
-      setBoard.run(board, board, now, id);
-      notify(authorOf(row), { type: 'system', topicId: id, text: '你的帖子被移动到了其他版块', data: { moved: board } }, now);
-      return true;
+      return tx(() => {
+        const row = topicRow(id);
+        if (!row) throw fail('帖子不存在，或已被删除。', 404);
+        if (row.board === board) return false;
+        setBoard.run(board, board, now, id);
+        if (board === 'vip') experience.revert({ kind: 'topic', id }, now);
+        notify(authorOf(row), { type: 'system', topicId: id, text: '你的帖子被移动到了其他版块', data: { moved: board } }, now);
+        return true;
+      });
     },
     hide(target: Target, reason: string, now = new Date().toISOString()) {
-      return target.kind === 'topic' ? Number(hideTopic.run(now, reason, target.id).changes) > 0 : Number(hideReply.run(now, target.id).changes) > 0;
+      return tx(() => {
+        const changed = target.kind === 'topic' ? Number(hideTopic.run(now, reason, target.id).changes) > 0 : Number(hideReply.run(now, target.id).changes) > 0;
+        if (changed) experience.revert(target, now);
+        return changed;
+      });
     },
     restore(target: Target, now = new Date().toISOString()) {
       if (target.kind === 'topic') showTopic.run(now, target.id); else showReply.run(now, target.id);

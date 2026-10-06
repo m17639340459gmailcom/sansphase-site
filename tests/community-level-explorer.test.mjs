@@ -4,11 +4,12 @@ import { JSDOM } from 'jsdom';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { createCommunityUI } from '../src/community-ui.ts';
-import { communityLevelExplorerHTML, communityExperienceDraft, communityVIPMultipliers } from '../src/community-level-explorer.ts';
-import { communityGrowthConfigured, communityGrowthState } from '../src/community-growth.ts';
+import { communityLevelExplorerHTML } from '../src/community-level-explorer.ts';
 
 const common = { t: zh => zh, esc: value => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;'), icons: {}, members: true };
-const data = { balance: 200, gainedToday: 0, behaviourToday: 0, dailyCap: 6, checkedIn: true, month: { gained: 37, spent: 0 }, flow: 'all', ledger: [], level: 1, owner: false, steward: false, stats: { visitDays: 9, likesRecv: 12, distinctReplies: 5 }, progress: { next: 2, rows: [{ key: 'visitDays', label: '累计访问天数', labelEn: 'Days visited', need: 15, have: 9 }], clean: false }, growth: { level: 1, points: 37, configured: false } };
+const communityVIPMultipliers = [2, 3, 4, 6, 8, 11, 15, 20];
+const thresholds = [0, 1200, 3600, 7200, 13200, 21600, 31200, 43200, 56400, 72000];
+const data = { vipCatalogue: communityVIPMultipliers.map((multiplier, index) => ({ level: index + 1, multiplier })), balance: 200, gainedToday: 0, behaviourToday: 0, dailyCap: 6, checkedIn: true, month: { gained: 37, spent: 0 }, flow: 'all', ledger: [], level: 1, owner: false, steward: false, stats: { visitDays: 9, likesRecv: 12, distinctReplies: 5 }, progress: { next: 2, rows: [{ key: 'visitDays', label: '累计访问天数', labelEn: 'Days visited', need: 15, have: 9 }], clean: false }, growth: { level: 1, points: 37, configured: false } };
 const ok = data => ({ ok: true, json: async () => structuredClone(data) });
 const turn = () => new Promise(resolve => setTimeout(resolve, 0));
 
@@ -34,36 +35,6 @@ async function setup(t, browsing = false) {
   return { main, w, calls, scrolls, notices };
 }
 
-test('experience draft remains independent of live growth and has increasing thresholds and bounded daily rewards', () => {
-  assert.equal(communityExperienceDraft.status, 'draft');
-  assert.equal(communityGrowthConfigured, false);
-  assert.equal(communityGrowthState(9000).level, 1);
-  assert.equal(communityExperienceDraft.thresholds.length, 10);
-  assert.equal(communityExperienceDraft.thresholds[0], 0);
-  assert.ok(communityExperienceDraft.thresholds.every((value, i, values) => i === 0 || value > values[i - 1]));
-  const dailyCap = communityExperienceDraft.actions.reduce((total, action) => total + action.points, 0);
-  assert.equal(dailyCap, 60);
-  assert.ok(communityExperienceDraft.actions.every(action => Number.isInteger(action.points) && action.points > 0));
-  assert.ok(communityExperienceDraft.actions[0].points < dailyCap / 2, 'visiting alone must not be the main source of experience');
-  assert.ok(Math.ceil(communityExperienceDraft.thresholds[1] / dailyCap) >= 20, 'the second level must not be reachable in a few days');
-  assert.ok(Math.ceil(communityExperienceDraft.thresholds.at(-1) / dailyCap) >= 365 * 3, 'even earning every daily award cannot reach G10 in less than three years');
-  const gaps = communityExperienceDraft.thresholds.slice(1).map((value, i) => value - communityExperienceDraft.thresholds[i]);
-  assert.ok(gaps.every((value, i) => i === 0 || value > gaps[i - 1]), 'each subsequent upgrade needs more effort');
-});
-
-test('larger experience awards and thresholds retain the established upgrade pace', () => {
-  const formerThresholds = [0, 120, 360, 720, 1320, 2160, 3120, 4320, 5640, 7200];
-  const formerAwards = [1, 2, 1, 2];
-  const dailyCap = communityExperienceDraft.actions.reduce((total, action) => total + action.points, 0);
-  assert.deepEqual(communityExperienceDraft.actions.map(action => action.points), formerAwards.map(points => points * 10));
-  for (const [index, threshold] of communityExperienceDraft.thresholds.entries()) {
-    assert.equal(threshold, formerThresholds[index] * 10);
-    assert.equal(threshold / dailyCap, formerThresholds[index] / 6, 'higher visible rewards must not shorten the approved upgrade time');
-  }
-  assert.equal(dailyCap * 30, 1800);
-  assert.equal(dailyCap * 31, 1860);
-});
-
 test('level details hide upgrade formulas and reward schedules in both languages', () => {
   for (const english of [false, true]) {
     for (let level = 1; level <= 10; level++) {
@@ -83,19 +54,6 @@ test('level details hide upgrade formulas and reward schedules in both languages
       dom.window.close();
     }
   }
-});
-
-test('the experience document agrees with every displayed reward and threshold', async () => {
-  const document = await readFile(new URL('../docs/COMMUNITY-EXPERIENCE-RULES.md', import.meta.url), 'utf8');
-  const thresholds = [...document.matchAll(/^\| G\d+ \| [^|]+ \| ([\d,]+) \|/gm)].map(match => Number(match[1].replaceAll(',', '')));
-  assert.deepEqual(thresholds, [...communityExperienceDraft.thresholds]);
-  const awards = [...document.matchAll(/^\| [^|]+ \| \+(\d+) \|/gm)].map(match => Number(match[1]));
-  assert.deepEqual(awards, communityExperienceDraft.actions.map(action => action.points));
-  const dailyCap = awards.reduce((total, points) => total + points, 0);
-  assert.ok(document.includes(`每天最多 **${dailyCap} 经验**`));
-  assert.ok(document.includes(`30 天最多 ${30 * dailyCap}`));
-  assert.ok(document.includes(`31 天最多 ${31 * dailyCap}`));
-  assert.ok(document.includes(`${Math.ceil(thresholds.at(-1) / dailyCap).toLocaleString('en-US')} 个达标日`));
 });
 
 test('all growth levels are browsable by adjacent steps without requests, navigation, page replacement or scroll', async t => {
@@ -193,7 +151,7 @@ test('VIP tiers show only the eight multipliers and no fabricated personal grade
         assert.ok(progress.getAttribute('aria-valuetext'));
         assert.doesNotMatch(doc.querySelector('[data-level-status]').textContent, /VIP[1-8]/, 'membership boolean must not invent a settled tier');
         assert.doesNotMatch(doc.querySelector('[data-level-detail]').textContent, /累计.*登录|1,095|1095|72,000|360 天|成长日|\d+\s*\/\s*\d+|登录.*\+\d/);
-        assert.match(doc.querySelector('[data-level-detail]').textContent, english ? /not active/i : /待启用/);
+        assert.match(doc.querySelector('[data-level-detail]').textContent, english ? /not available/i : /暂未提供/);
         dom.window.close();
       }
     }

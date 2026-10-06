@@ -10,7 +10,6 @@ import type { Body, Ctx, CommunityViewer, PersonInfo, ServiceOptions } from './c
 import { contentRoutes } from './community-routes-content.ts';
 import { memberRoutes } from './community-routes-member.ts';
 import { manageRoutes } from './community-routes-manage.ts';
-import { communityGrowthState } from '../src/community-growth.mjs';
 import { publicModerationContacts } from './community-moderation-contact.ts';
 
 export { communityContactReason } from './community-context.ts';
@@ -78,7 +77,7 @@ export function createCommunityService(options: ServiceOptions) {
     const canSeeBoard = (board: string) => board !== membersBoard || viewer.vip || owner || canModerateBoard(board);
     const person = (author: CommunityAuthor, map: Map<string, PersonInfo>) => {
       const info = map.get(memberKey(author));
-      if (!info) return { name: '已注销用户', role: author.kind, uid: null, avatar: null, vip: false, level: 0, growth: null, frame: null, color: null };
+      if (!info) return { name: '已注销用户', role: author.kind, uid: null, avatar: null, vip: false, level: 0, growth: null, vipGrowth: null, frame: null, color: null };
       const decorations = live.members.decorations(author);
       const steward = live.members.steward(author);
       const nameEffect = live.economy.nameEffect(decorations.color);
@@ -87,7 +86,7 @@ export function createCommunityService(options: ServiceOptions) {
         name: info.name, role: author.kind,
         uid: info.uid,
         showUid: canSeeUid,
-        growth: author.kind === 'owner' ? null : communityGrowthState(live.ledger.growthPoints(author)),
+        growth: live.experience.state(author), vipGrowth: live.experience.vipState(author, info.vip),
         avatar: info.avatar && info.uid ? `/api/community/avatar/${encodeURIComponent(info.uid)}.webp?v=${encodeURIComponent(info.avatar.slice(0, 8))}` : null,
         vip: info.vip, level: live.members.level(author), steward, ...(steward ? { moderationBoards: live.members.moderationBoards(author) } : {}), frame: decorations.frame, color: decorations.color, ...(nameEffect ? { nameEffect } : {}),
       };
