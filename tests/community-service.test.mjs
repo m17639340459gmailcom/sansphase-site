@@ -7,6 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { createServer } from "node:net";
 import { migrateCommunity } from "../server/payload/community-migration.ts";
 import { createCommunityStore } from "../server/community-store.ts";
+import { createCommunityPreviewStore } from './fixtures/community-preview-store.ts';
 import { createCommunityService, communityContactReason } from "../server/community-service.ts";
 import { createPreviewServer } from "../server.mjs";
 import { beijingDay } from "../src/community-rules.mjs";
@@ -56,7 +57,7 @@ async function setup(t, { store: withStore = true, simplePosting = false, useDef
     sql("UPDATE community_members SET level = ?, level_day = ?, agreed_at = COALESCE(agreed_at, ?) WHERE member_kind = 'reader' AND member_id = ?", level, beijingDay(Date.now()), new Date().toISOString(), id);
   };
   for (const id of ["r1", "r2", "v1", "s1"]) setLevel(id, 1);
-  const store = withStore ? createCommunityStore(directory) : null;
+  const store = withStore ? createCommunityPreviewStore(directory) : null;
   if (store) acceptCommunityConvention(store, [{ kind: 'owner', id: 'owner' }, ...Object.keys(members).map(id => ({ kind: 'reader', id }))]);
   const audits = [];
   const communityService = createCommunityService({
@@ -346,11 +347,11 @@ test('check-in reads distinguish manager preview from a reader and preserve real
     assert.equal(normal.browsingAsReader, false);
     const cookie = `${identity}; community_browse=reader`;
     const preview = await json(get('checkin?month=2026-08', cookie));
-    assert.equal(preview.owner, owner, 'the author remains ineligible for check-in while previewing');
+    assert.equal(preview.owner, false, 'the preview uses the ordinary reader layout while writes remain blocked');
     assert.equal(preview.browsingAsReader, true);
     assert.equal(preview.month, '2026-08', 'month browsing remains read-only');
     const stardust = await json(get('stardust', cookie));
-    assert.equal(stardust.owner, owner, 'stardust retains the real author eligibility in reader perspective');
+    assert.equal(stardust.owner, false, 'the preview shows reader progression without adding earned account state');
     assert.equal(stardust.browsingAsReader, true, 'stardust identifies a read-only moderator perspective');
     assert.deepEqual([(await json(get('stardust', identity))).owner, (await json(get('stardust', identity))).browsingAsReader], [owner, false]);
     assert.equal((await post('checkin', {}, cookie)).status, 403);
@@ -506,7 +507,7 @@ test('growth DTOs settle real experience independently of currency, earned trust
   assert.equal(moderator.trustLevel, 1);
   assert.equal(moderator.mod, true);
   assert.deepEqual((await json(get('me', 'owner=yes'))).growth, null, 'the real author does not display reader growth');
-  assert.deepEqual((await json(get('stardust', 'owner=yes; community_browse=reader'))).growth, null);
+  assert.equal((await json(get('stardust', 'owner=yes; community_browse=reader'))).growth.level, 10, 'the read-only owner perspective displays the highest growth title');
   store.deleteTopic(topic.id);
   assert.deepEqual((await json(get('me'))).growth, { ...emptyGrowth, points: 10, remaining: 1190, progress: 10 / 1200 }, 'content reversal retains valid login experience');
 });

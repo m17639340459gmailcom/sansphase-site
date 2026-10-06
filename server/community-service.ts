@@ -11,6 +11,7 @@ import { contentRoutes } from './community-routes-content.ts';
 import { memberRoutes } from './community-routes-member.ts';
 import { manageRoutes } from './community-routes-manage.ts';
 import { publicModerationContacts } from './community-moderation-contact.ts';
+import { createOwnerReaderPreview } from './community-owner-reader-preview.ts';
 
 export { communityContactReason } from './community-context.ts';
 export type { CommunityViewer, PersonInfo } from './community-context.ts';
@@ -66,30 +67,33 @@ export function createCommunityService(options: ServiceOptions) {
     const actualModerationBoards = live.members.moderationBoards(me);
     const actualMod = actualOwner || live.members.steward(me) && actualModerationBoards.length > 0;
     const browsingAsReader = actualMod && /(?:^|;\s*)community_browse=reader(?:;|$)/.test(String(req.headers.cookie || ''));
+    const ownerReaderPreview = actualOwner && browsingAsReader ? createOwnerReaderPreview() : null;
     const owner = actualOwner && !browsingAsReader;
-    const trustLevel = browsingAsReader ? 1 : live.members.trustLevel(me);
+    const trustLevel = ownerReaderPreview?.trustLevel ?? (browsingAsReader ? 1 : live.members.trustLevel(me));
     // Appointments grant board moderation, not automatic trust, posting or reward benefits.
     const level = trustLevel;
     // A request body may arrive after an appointment changes; check live authorization at use.
     const moderationBoards = () => browsingAsReader ? [] : live.members.moderationBoards(me);
     const mod = () => owner || moderationBoards().length > 0;
     const canModerateBoard = (board: string) => moderationBoards().includes(board);
-    viewer = { ...viewer, vip: viewer.vip && !browsingAsReader };
+    viewer = { ...viewer, vip: ownerReaderPreview !== null || viewer.vip && !browsingAsReader };
     const canSeeBoard = (board: string) => board !== membersBoard || viewer.vip || owner || canModerateBoard(board);
     const person = (author: CommunityAuthor, map: Map<string, PersonInfo>) => {
       const info = map.get(memberKey(author));
       if (!info) return { name: '已注销用户', role: author.kind, uid: null, avatar: null, vip: false, level: 0, growth: null, vipGrowth: null, frame: null, color: null };
       const decorations = live.members.decorations(author);
       const steward = live.members.steward(author);
+      const preview = same(author, me) ? ownerReaderPreview : null;
       const nameEffect = live.economy.nameEffect(decorations.color);
       const canSeeUid = author.kind === 'owner' || same(author, me) || mod();
       return {
-        name: info.name, role: author.kind,
+        name: info.name, role: preview ? 'reader' : author.kind,
         uid: info.uid,
         showUid: canSeeUid,
-        growth: live.experience.state(author), vipGrowth: live.experience.vipState(author, info.vip),
+        growth: preview?.growth ?? live.experience.state(author), vipGrowth: preview?.vipGrowth ?? live.experience.vipState(author, info.vip),
         avatar: info.avatar && info.uid ? `/api/community/avatar/${encodeURIComponent(info.uid)}.webp?v=${encodeURIComponent(info.avatar.slice(0, 8))}` : null,
-        vip: info.vip, level: live.members.level(author), steward, ...(steward ? { moderationBoards: live.members.moderationBoards(author) } : {}), frame: decorations.frame, color: decorations.color, ...(nameEffect ? { nameEffect } : {}),
+        vip: preview ? true : info.vip, level: preview?.trustLevel ?? live.members.level(author), steward: preview ? false : steward,
+        ...(steward ? { moderationBoards: live.members.moderationBoards(author) } : {}), frame: decorations.frame, color: decorations.color, ...(nameEffect ? { nameEffect } : {}),
       };
     };
     const peopleIn = (topics: StoredTopic[]) => topics.flatMap(topic => topic.lastReply ? [topic.author, topic.lastReply.author] : [topic.author]);
@@ -114,7 +118,7 @@ export function createCommunityService(options: ServiceOptions) {
     };
     return {
       req, res, url: new URL(req.url || '', siteOrigin), path, method: req.method || 'GET',
-      viewer, me, live, options, level, trustLevel, owner, canModerateBoard, ownerMember, actualOwner, actualMod, browsingAsReader,
+      viewer, me, live, options, level, trustLevel, owner, canModerateBoard, ownerMember, actualOwner, actualMod, browsingAsReader, ownerReaderPreview,
       get mod() { return mod(); },
       get moderationBoards() { return moderationBoards(); },
       canSeeBoard, hiddenBoard: canSeeBoard(membersBoard) ? '' : membersBoard,

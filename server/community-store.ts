@@ -59,7 +59,8 @@ export const displayTitle = (title: string, body: string) => title || ([...body.
 
 // Community topics, replies and everything around them in content.db.
 // Deletion is soft: rows stay for moderation and audit and stop being listed.
-export function createCommunityStore(directory: string) {
+export type CommunityStoreOptions = { previewCatalog?: boolean };
+export function createCommunityStore(directory: string, { previewCatalog = false }: CommunityStoreOptions = {}) {
   const db = new DatabaseSync(resolve(directory, 'content.db'));
   db.exec('PRAGMA busy_timeout = 5000');
   if (!communitySchemaReady(db)) {
@@ -73,7 +74,7 @@ export function createCommunityStore(directory: string) {
   const experience = createCommunityExperience(db, tx, convention);
   const members = createMembers(db, convention, tx);
   const banners = createCommunityBanners(db, tx, members);
-  const economy = createEconomy(db, tx, ledger, members);
+  const economy = createEconomy(db, tx, ledger, members, { previewCatalog });
   const requests = createCommunityRequests(db, tx);
   const rateLimits = createCommunityRateLimits(db, tx);
   const audit = createCommunityAudit(db, tx);

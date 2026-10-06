@@ -25,6 +25,9 @@ test('static ETags revalidate, hashed chunks cache and personalized HTML never c
   await writeFile(resolve(root,'index.html'),'<html><head></head><body></body></html>');
   await writeFile(resolve(root,'app.mjs'),'export const version=1;');
   await writeFile(resolve(root,'chunks/chunk-ABCDEFGH.mjs'),'export const chunk=1;');
+  const versioned='assets/site/0123456789abcdef01234567';
+  await mkdir(resolve(root,versioned),{recursive:true});
+  await writeFile(resolve(root,versioned,'app.mjs'),'export const version=1;');
   const logs=[];
   const server=createPreviewServer({root,requestLogger:event=>logs.push(event),contentService:{snapshot:async()=>({data:{notes:[]}})},authorService:{identity:async()=>({name:'private-author'})}});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
@@ -39,6 +42,8 @@ test('static ETags revalidate, hashed chunks cache and personalized HTML never c
   response=await fetch(base+'/app.mjs',{headers:{'If-None-Match':etag}});
   assert.equal(response.status,200);assert.match(await response.text(),/2222/);
   response=await fetch(base+'/chunks/chunk-ABCDEFGH.mjs');
+  assert.match(response.headers.get('cache-control'),/immutable/);await response.text();
+  response=await fetch(base+`/${versioned}/app.mjs`);
   assert.match(response.headers.get('cache-control'),/immutable/);await response.text();
   for(const path of ['/','/api/content']) {
     response=await fetch(base+path,{headers:{'If-None-Match':'*'}});

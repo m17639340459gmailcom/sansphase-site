@@ -7,6 +7,7 @@ import type { CommunityAuthor } from './community-db.ts';
 import type { CommunityAuditDetails } from './community-audit.ts';
 import type { CommunityStore, StoredTopic, ShowcaseMeta, ResourceMeta } from './community-store.ts';
 import { imageIdFromLine } from '../src/community-body-images.ts';
+import type { OwnerReaderPreview } from './community-owner-reader-preview.ts';
 
 // The signed-in member making a request.
 export type CommunityViewer = { kind: 'reader' | 'owner'; id: string; name: string; vip: boolean };
@@ -48,6 +49,7 @@ export type Ctx = {
   moderationBoards: string[];
   canModerateBoard: (board: string) => boolean;
   actualOwner: boolean; actualMod: boolean; browsingAsReader: boolean;
+  ownerReaderPreview: OwnerReaderPreview | null;
   canSeeBoard: (board: string) => boolean; hiddenBoard: string;
   send: (body: unknown, status?: number) => void;
   json: () => Promise<Body>;

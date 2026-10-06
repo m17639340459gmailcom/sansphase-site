@@ -136,6 +136,8 @@ export const communityShopCats = [
   { id: "digital", name: "数字资源", en: "Digital", desc: "站长整理的提示词、工作流和素材", descEn: "Prompts, workflows and assets from the owner" },
   { id: "goods", name: "实物周边", en: "Goods", desc: "限量，包邮到中国大陆", descEn: "Limited, shipped within mainland China" },
 ] as const;
+// Local preview samples and identifiers for previously-owned decorations.
+// Formal shop publication is controlled by stored author-created products.
 export const communityBuiltinItems: readonly ShopItem[] = [
   { id: "frame-gold", cat: "look", kind: "frame", ref: "gold", name: "金环头像框", desc: "一圈细金边，低调。", price: 80, builtin: true },
   { id: "frame-orbit", cat: "look", kind: "frame", ref: "orbit", name: "轨道头像框", desc: "外圈有一颗小星一直在绕。", price: 150, builtin: true },

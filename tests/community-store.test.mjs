@@ -6,6 +6,7 @@ import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { migrateCommunity } from "../server/payload/community-migration.ts";
 import { createCommunityStore } from "../server/community-store.ts";
+import { createCommunityPreviewStore } from './fixtures/community-preview-store.ts';
 import { beijingDay } from "../src/community-rules.mjs";
 
 const cleanup = (directory) => rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
@@ -30,7 +31,7 @@ test.after(() => cleanup(template));
 async function open(t) {
   const directory = await mkdtemp(resolve(tmpdir(), "sansphase-community-"));
   await copyFile(resolve(template, "content.db"), resolve(directory, "content.db"));
-  const store = createCommunityStore(directory);
+  const store = createCommunityPreviewStore(directory);
   t.after(async () => { store.close(); await cleanup(directory); });
   return store;
 }

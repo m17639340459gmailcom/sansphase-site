@@ -12,6 +12,7 @@ import { nameEffectVariables } from './community-name-effects.mjs';
 import { communityGrowthLevel } from './community-growth.mjs';
 import { communityGrowthArtHTML, communityTrustArtHTML, communityVipArtHTML } from './community-growth-art.mjs';
 import type { CommunityGrowthState, CommunityVIPGrowthState } from './community-growth.ts';
+import type { CommunityEntryState } from './community-entry.ts';
 export * from './community-rules.mjs';
 
 export type Translate = (zh: string, en: string) => string;
@@ -497,7 +498,7 @@ export function communityHeaderHTML({ view, t, actionsHTML, unchecked = false }:
     + `<div class="header-actions">${actionsHTML}</div>`;
 }
 
-type AccountOptions = { t: Translate; esc: Escape; icons: Icons; nickname?: string | null; author?: boolean; me?: CommunityMe | null; ownerAvatar?: string | null };
+type AccountOptions = { t: Translate; esc: Escape; icons: Icons; nickname?: string | null; author?: boolean; me?: CommunityMe | null; ownerAvatar?: string | null; communityOnly?: boolean };
 
 // Only the verified account response supplies management authority. Older
 // responses may omit management; their active mod flag remains compatible.
@@ -507,10 +508,10 @@ export function communityManagementRole(me: CommunityMe | null | undefined) {
 }
 
 // 右上角：通知铃铛和个人入口。兑换和返回主站沿用左侧导航入口。
-export function communityAccountHTML({ t, esc, icons, nickname, author, me = null, ownerAvatar = null }: AccountOptions) {
+export function communityAccountHTML({ t, esc, icons, nickname, author, me = null, ownerAvatar = null, communityOnly = false }: AccountOptions) {
   const common: Common = { t, esc, icons, ownerAvatar };
   const signedIn = Boolean(author || nickname || me);
-  const label = author ? t("作者台", "Author studio") : nickname ? esc(nickname) : t("登录 / 注册", "Sign in / Register");
+  const label = author ? communityOnly ? t("作者", "Owner") : t("作者台", "Author studio") : nickname ? esc(nickname) : t("登录 / 注册", "Sign in / Register");
   const unread = me?.unread.all || 0;
   const bell = me ? `<a class="community-bell" href="${inboxHref()}" aria-label="${unread ? t(`通知，${unread} 条未读`, `Notifications, ${unread} unread`) : t("通知", "Notifications")}">${icons.bell || ""}${unread ? `<b>${unread > 99 ? "99+" : unread}</b>` : ""}</a>` : "";
   const item = (href: string, icon: string, text: string, extra = "") => `<a role="menuitem" href="${href}">${icons[icon] || ""}<span>${text}</span>${extra}</a>`;
@@ -526,7 +527,7 @@ export function communityAccountHTML({ t, esc, icons, nickname, author, me = nul
       + (managementRole ? `<button type="button" role="menuitem" data-action="community-browse-mode" data-reader="${!browsingAsReader}">${icons.eye || ''}<span>${browsingAsReader ? managementRole === 'owner' ? t('返回作者身份', 'Restore owner perspective') : t('返回版主身份', 'Restore moderator perspective') : t('以读者身份浏览', 'Browse as a reader')}</span></button>` : '')
     : signedIn ? item("#/community/bookmarks", "bookmark", t("我的收藏", "Bookmarks")) : "";
   const account = author
-    ? `<button type="button" role="menuitem" data-author-login>${icons.user || ""}<span>${t("打开作者台", "Open author studio")}</span></button>`
+    ? communityOnly ? "" : `<button type="button" role="menuitem" data-author-login>${icons.user || ""}<span>${t("打开作者台", "Open author studio")}</span></button>`
     : `<a role="menuitem" href="#/account" data-reader-return>${icons.user || ""}<span>${signedIn ? t("我的账号", "My account") : t("登录 / 注册", "Sign in / Register")}</span></a>`;
   const button = me
     ? `${avatarHTML(me, common, "xs", false)}${nameLabelHTML(me, common)}`
@@ -711,12 +712,16 @@ export function communityBookmarksHTML({ list, ...common }: Common & { list: Com
 }
 
 // 主站导航“社区交流”进来的落地页：一句话介绍，一个按钮进入社区区域。
-export function communityLandingHTML(t: Translate, icons: Icons) {
+export function communityLandingHTML(t: Translate, icons: Icons, { entryState }: { entryState?: CommunityEntryState } = {}) {
+  const busy = entryState === 'pending' || entryState === 'leaving';
+  const entry = entryState === undefined
+    ? `<a class="community-enter" href="${communityHomeHref}">${icons.message || ""}<span>${t("进入社区", "Enter the community")}</span></a>`
+    : `<button type="button" class="community-enter" data-community-entry-enter${busy ? ' disabled aria-busy="true"' : ''}>${icons.message || ""}<span aria-live="polite">${busy ? t("正在进入…", "Opening…") : entryState === 'error' ? t("暂时无法进入，点击重试", "Could not open, try again") : t("进入社区", "Enter the community")}</span></button>`;
   return `<section class="page community-landing" data-community="landing">`
     + `<div class="community-orbits" aria-hidden="true"><i></i><i></i><i></i></div>`
     + `<div class="eyebrow">COMMUNITY · ${t("社区交流", "Community")}</div>`
     + `<h1>${t("無相社区", "SANSPHASE Community")}</h1>`
     + `<p>${t("聊 AI 学习、AI 创作，以及好用的软件和资源。提问、晒作品、推荐工具，都在这里。", "Talk about learning AI, making things with it, and useful tools: ask, show your work, share what helps.")}</p>`
-    + `<div class="community-landing-actions"><a class="community-enter" href="${communityHomeHref}">${icons.message || ""}<span>${t("进入社区", "Enter the community")}</span></a></div>`
+    + `<div class="community-landing-actions">${entry}</div>`
     + `</section>`;
 }

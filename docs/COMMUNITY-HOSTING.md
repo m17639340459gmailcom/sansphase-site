@@ -4,7 +4,7 @@
 
 ## 进入方式
 
-必须先在主站点击社区入口。主站验证现有读者或作者会话后，签发 60 秒内有效、仅能使用一次的衔接码。目标固定为 `/community-enter#community-entry=<code>`。此独立入口无论浏览器是否留有旧社区 Cookie 都先交换新凭证，防止切换主站账号时沿用旧身份。衔接码只放在跳转 URL 的 fragment 中，不放主站 JWT、账号 ID、邮箱或手机号。
+必须先在主站社区介绍页点击内容中的“进入社区”按钮。主站导航只打开介绍页，不自动跨站。主站验证现有读者或作者会话后，签发 60 秒内有效、仅能使用一次的衔接码。目标固定为 `/community-enter#community-entry=<code>`。此独立入口无论浏览器是否留有旧社区 Cookie 都先交换新凭证，防止切换主站账号时沿用旧身份。衔接码只放在跳转 URL 的 fragment 中，不放主站 JWT、账号 ID、邮箱或手机号。
 
 主站同时设置仅用于衔接验证的短期 `HttpOnly; Secure; SameSite=Strict` Cookie，限定父域 `sansphase.com` 与 `/api/community-entry` 路径。香港交换衔接码时必须携带对应验证值；交换后立即清除。主站原有读者和作者登录 Cookie 保持只对主站有效。
 
@@ -32,6 +32,8 @@
 
 香港只配置 `directory`、固定的两个 origin、桥接密钥、正式作者 ID 和已公开的品牌资料，不配置 Payload 密钥、SMTP、账号数据库或自动建表参数。`deploy/community.env.example` 指向私有配置，首次使用 `node scripts/start-community.mjs --prepare` 明确创建纯社区库；正常运行 `node scripts/start-community.mjs`，仅监听回环接口。采用独立的 `sansphase-community.service`，不启动主站读者闲置清理器。
 
+正式兑换所仅展示作者在管理台明确上架的持久商品。内置金环、轨道、星云头像框及昵称、封面、道具卡样品只在本地预览 fixture 显式使用 `previewCatalog: true` 时出售，正常主站与香港启动没有该选项。旧样品定义保留用于已有订单、流水名称和已拥有权益，停止出售不删除这些持久记录，也不影响作者主动上架的商品；此修复不需要商品数据迁移或删库。
+
 初次 TLS 签发用 `deploy/nginx-community-bootstrap.conf`，获得证书后替换为 `deploy/nginx-community.conf`，不能同时启用。腾讯云防火墙必须放行 TCP 80、443；应用端口 4176 不对公网开放。Nginx 覆写客户端 IP 代理头，访问日志仅记 pathname，不记录 query、Cookie、请求正文或衔接凭证。证书续期成功后验证 Nginx 配置并 reload。
 
 香港备份：`COMMUNITY_CONFIG_FILE=<private-config> node scripts/backup-community.mjs <new-private-backup-directory>`。检查：`node scripts/backup-community.mjs --verify <backup-directory>`。恢复：`node scripts/restore-community.mjs <backup-directory> <new-data-directory> <new-private-config-file>`。备份包含两份独立 SQLite 库、完整上传目录（未知文件保留）、屏蔽词、审计、迁移快照及私有配置；逐文件 SHA-256、数据库完整性和引用图片校验通过后才记成功。恢复只写新目录和配置，不切换在线服务；保留待清理图片队列，并使旧进入会话失效。
@@ -45,7 +47,7 @@
 - 香港服务器 SSH 指纹已与用户腾讯云终端核对，连接成功。
 - 新机为 Ubuntu 26.04 LTS，2 核、4GB、60GB；运行环境已安装，TLS 初始化完成，应用开放仍须完成部署验收。
 - 主站与香港身份衔接、进入校验、前端渐隐渐入以及独立备份模块已实现，生产切换须以私有验收回执为准。
-- `community.sansphase.com` A 记录已核对，证书已签发；公网 443 仍需云防火墙连通性确认。
+- `community.sansphase.com` A 记录已核对，证书已签发；公网 443 已完成云防火墙连通性确认。
 - 本次实际浏览器自动化未执行，不能将源码、HTTP 与 jsdom 通过宣称为手机和桌面视觉验收。
 
 服务器私钥、桥接密钥、真实账号、备份和维护回执只存私有目录，不进入 Git。

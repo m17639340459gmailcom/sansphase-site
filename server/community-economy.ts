@@ -30,7 +30,7 @@ export type CustomItemInput = {
 const previousDay = (key: string) => new Date(Date.parse(`${key}T00:00:00Z`) - day).toISOString().slice(0, 10);
 
 // 签到、补签、兑换所、道具卡、提示词解锁、悬赏、付费置顶和标题高亮。
-export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger, members: Members) {
+export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger, members: Members, { previewCatalog = false }: { previewCatalog?: boolean } = {}) {
   const rules = communityRules;
   // Check-ins.
   const insertCheckin = db.prepare(`INSERT INTO community_checkins (member_kind, member_id, day, streak, reward, created_at) VALUES (?, ?, ?, ?, ?, ?)`);
@@ -155,9 +155,13 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
     stock: row.stock, left: row.stock_left, note: row.note, builtin: false, active: Boolean(row.active), delivery: row.delivery,
   });
   const allCustom = () => (customItems.all() as CustomItemRow[]).map(customToItem);
+  // Sample definitions remain available for historical orders and owned
+  // decorations. Only an explicitly constructed local preview sells them;
+  // formal publication comes from the author's persisted active products.
+  const builtinItem = (item: ShopItem) => ({ ...item, active: previewCatalog, delivery: '' });
   function findItem(id: string) {
     const builtin = communityBuiltinItems.find(item => item.id === id);
-    if (builtin) return { ...builtin, active: true, delivery: '' };
+    if (builtin) return builtinItem(builtin);
     const row = customItem.get(id) as CustomItemRow | undefined;
     return row ? customToItem(row) : null;
   }
@@ -252,7 +256,7 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
     /* ---------- 兑换所 ---------- */
     inventory,
     owned,
-    items: () => [...communityBuiltinItems.map(item => ({ ...item, active: true, delivery: '' })), ...allCustom()],
+    items: () => [...communityBuiltinItems.map(builtinItem), ...allCustom()],
     item: findItem,
     redeemState,
     redeem(member: CommunityAuthor, id: string, context: RedeemContext & { shipping?: Shipping | null }) {

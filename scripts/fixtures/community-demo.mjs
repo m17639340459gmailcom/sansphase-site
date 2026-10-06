@@ -47,7 +47,7 @@ export async function createCommunityDemo({ simplePosting = true, visualDemo = f
   const directory = mkdtempSync(resolve(tmpdir(), 'sansphase-community-preview-'));
   new DatabaseSync(resolve(directory, 'content.db')).close();
   await migrateCommunity(directory);
-  const store = createCommunityStore(directory);
+  const store = createCommunityStore(directory, { previewCatalog: true });
   const now = Date.now();
   const at = (minutesAgo) => new Date(now - minutesAgo * 60000).toISOString();
   const joinedDays = id => visualDemo && id === 'demo' ? 180 : visualDemo && id === 'linjian' ? 500 : people[id].days;

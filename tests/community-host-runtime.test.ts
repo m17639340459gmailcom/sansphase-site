@@ -110,6 +110,32 @@ test('standalone host exchanges real protocol tickets, boots only community and 
   assert.equal((await fetch(env.local + '/api/community/me', { headers: { cookie } })).status, 401);
 });
 
+test('standalone formal host publishes only author-listed products and refuses local preview sample sales', async t => {
+  const env = await fixture(t);
+  const store = createCommunityStore(env.directory), member = { kind: 'reader' as const, id: readerId };
+  const product = { cat: 'digital' as const, name: '作者上架的正式资源', description: '已确认发布', price: 40, stock: null,
+    limitPer: null, limitN: null, minLevel: 0, minDays: 0, delivery: '资源内容', note: '', active: true };
+  let item: string;
+  try {
+    acceptCommunityConvention(store, [member]);
+    store.ledger.credit(member, 1000, 'test', null, new Date().toISOString());
+    item = store.economy.saveItem(null, product);
+    store.economy.saveItem(null, { ...product, name: '未上架草稿', active: false });
+  } finally { store.close(); }
+  const { cookie } = await env.entry();
+  const shop = await fetch(env.local + '/api/community/shop', { headers: { cookie } });
+  assert.equal(shop.status, 200);
+  assert.deepEqual((await shop.json()).items.map((entry: { id: string }) => entry.id), [item]);
+  const redeem = await fetch(env.local + '/api/community/shop/redeem', { method: 'POST',
+    headers: { cookie, Origin: community, 'X-Reader-Request': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ item: 'frame-gold' }) });
+  assert.equal(redeem.status, 409);
+  assert.match((await redeem.json()).error, /下架/);
+  const mine = await (await fetch(env.local + '/api/community/shop/mine', { headers: { cookie } })).json();
+  assert.equal(mine.balance, 1000);
+  assert.deepEqual(mine.orders, []);
+  assert.deepEqual(mine.looks, []);
+});
+
 test('persistent image queue protects registered files and signed purge removes only designated reader data', async t => {
   const env = await fixture(t), { cookie } = await env.entry();
   const store = createCommunityStore(env.directory);

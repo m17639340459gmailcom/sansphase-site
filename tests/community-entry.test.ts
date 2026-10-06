@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { communityEntryDestination, communityEntryTarget, createCommunityEntry, communityHostRoute, rewriteCommunityMainSiteLinks, communityEntryPageHTML, exitCommunity } from '../src/community-entry.ts';
+import { communityEntryDestination, communityEntryTarget, createCommunityEntry, communityHostRoute, rewriteCommunityMainSiteLinks, exitCommunity } from '../src/community-entry.ts';
+import { communityLandingHTML, communityAccountHTML } from '../src/community.ts';
 
 const destination = 'https://community.sansphase.com';
 const ticket = 'a'.repeat(43);
@@ -69,25 +70,45 @@ test('HK logout clears the local session before returning to main and never leav
   await assert.rejects(() => exitCommunity({ communityOnly: true }, async () => response({}, 503), () => assert.fail('failed logout must stay visible')));
 });
 
-test('HK profile, author and blog links point to main while ordinary community links retain target behavior', () => {
-  const dom = new JSDOM('<a id="account" href="#/account" data-reader-return>账号</a><button data-author-login><svg></svg>作者台</button><a id="blog" href="#/notes">博客</a><a id="post" href="#/post/t1" target="_blank" rel="noopener">帖子</a>');
+test('HK profile and blog links point to main while ordinary community links retain target behavior', () => {
+  const dom = new JSDOM('<a id="account" href="#/account" data-reader-return>账号</a><a id="blog" href="#/notes">博客</a><a id="post" href="#/post/t1" target="_blank" rel="noopener">帖子</a>');
   rewriteCommunityMainSiteLinks(dom.window.document, { communityOnly: true, mainSiteOrigin: 'https://www.sansphase.com' });
   assert.equal(dom.window.document.querySelector('#account')!.getAttribute('href'), 'https://www.sansphase.com/#/account');
   assert.equal(dom.window.document.querySelector('#blog')!.getAttribute('href'), 'https://www.sansphase.com/#/notes');
-  assert.equal(dom.window.document.querySelector('[data-author-login]'), null);
-  assert.ok(dom.window.document.querySelector('a[href="https://www.sansphase.com/#/account"] svg'));
   assert.equal(dom.window.document.querySelector('#post')!.getAttribute('href'), '#/post/t1');
   assert.equal(dom.window.document.querySelector('#post')!.getAttribute('target'), '_blank');
   dom.window.close();
 });
 
-test('entry states use existing page and button vocabulary with a keyboard-usable retry', () => {
-  const dom = new JSDOM(communityEntryPageHTML('error', { t: zh => zh, esc: value => String(value ?? ''), arrow: '<svg></svg>' }));
-  const retry = dom.window.document.querySelector('button[data-community-entry-retry]');
-  assert.ok(retry); assert.equal(retry!.getAttribute('type'), 'button');
-  assert.equal(dom.window.document.querySelector('[role="dialog"]'), null);
-  assert.match(dom.window.document.body.textContent!, /重试/);
-  dom.window.close();
+test('the approved introduction retains its heading, sky and keyboard-usable content button in every entry state', () => {
+  for (const state of ['idle', 'pending', 'leaving', 'error'] as const) {
+    const dom = new JSDOM(communityLandingHTML(zh => zh, {}, { entryState: state }));
+    try {
+      const doc = dom.window.document, button = doc.querySelector<HTMLButtonElement>('button[data-community-entry-enter]');
+      assert.ok(button); assert.equal(button.type, 'button');
+      assert.equal(button.disabled, ['pending', 'leaving'].includes(state));
+      assert.equal(doc.querySelector('h1')!.textContent, '無相社区');
+      assert.ok(doc.querySelector('[data-community="landing"] .community-orbits'));
+      assert.equal(doc.querySelector('[role="dialog"]'), null);
+      if (state === 'error') assert.match(button.textContent!, /重试/);
+    } finally { dom.window.close(); }
+  }
+});
+
+test('HK owners use the verified community management link without a main-site author-studio control', () => {
+  const common = { t: (zh: string) => zh, esc: (value: unknown) => String(value ?? ''), icons: {}, author: true, communityOnly: true };
+  const person = { name: '作者', uid: 'owner', role: 'owner' as const, owner: true, mod: true, steward: false, level: 4, avatar: null, balance: 0, unread: { all: 0, reply: 0, thanks: 0, system: 0 }, checkedIn: false, management: { role: 'owner' as const, browsingAsReader: false } };
+  for (const me of [null, person]) {
+    const dom = new JSDOM(communityAccountHTML({ ...common, me }));
+    try {
+      const doc = dom.window.document;
+      rewriteCommunityMainSiteLinks(doc, { communityOnly: true });
+      assert.equal(doc.querySelector('[data-author-login]'), null);
+      assert.doesNotMatch(doc.body.textContent!, /作者台/);
+      assert.equal(Boolean(doc.querySelector('a[href="#/community/manage"]')), Boolean(me));
+      assert.equal(doc.querySelector('a[href="https://www.sansphase.com/#/account"]'), null);
+    } finally { dom.window.close(); }
+  }
 });
 
 test('leaving the entrance invalidates a pending mint and never navigates after a late response', async () => {

@@ -5,7 +5,7 @@ import {siteCopy,createContentProjection} from './site-copy.mjs';
 import {preparePageImages} from './home-preload.mjs';
 import {mountNavigationPrefetch} from './navigation-prefetch.mjs';
 import {createRouteTransitions} from './route-transition.mjs';
-import {communityEntryDestination,createCommunityEntry,communityEntryPageHTML,communityHostRoute,rewriteCommunityMainSiteLinks,exitCommunity} from './community-entry.mjs';
+import {communityEntryDestination,createCommunityEntry,communityHostRoute,rewriteCommunityMainSiteLinks,exitCommunity} from './community-entry.mjs';
 import {mountNavSlider} from './nav-slider.mjs';
 import {DEPART_MS} from './journey.mjs';
 import {createContentReader,contentQuery} from './content-reader.mjs';
@@ -17,7 +17,6 @@ import {vipBookGate,mountVipBookPrompt} from './vip-book-prompt.mjs';
 import {mountRouteAssets} from './route-assets.mjs';
 import {ensureRouteStyle} from './route-styles.mjs';
 import {createStableCommunityFrame, createCommunityAppearance, startCommunityLayout} from './community-layout.mjs';
-import './community-landing.mjs';
 const communityFrame = createStableCommunityFrame(document, window, fetch.bind(window));
 const communityAppearance = createCommunityAppearance(document, window);
 import {communityView,communityRoute,inCommunityArea,communityHeaderHTML,communityAccountHTML,communityLandingHTML} from './community.mjs';
@@ -218,7 +217,7 @@ function header(page) {
   if (communityArea) {
     // The community is its own area: its own navigation, notifications, and a way back to the main site.
     const me = communityUI.me();
-    const account = siteContent ? communityAccountHTML({t, esc, icons, nickname: siteContent.reader?.nickname, author: Boolean(siteContent.author), me, ownerAvatar: siteContent.profile?.avatar || null}) : '';
+    const account = siteContent ? communityAccountHTML({t, esc, icons, nickname: siteContent.reader?.nickname, author: Boolean(siteContent.author), me, ownerAvatar: siteContent.profile?.avatar || null, communityOnly: communityOnly()}) : '';
     const markup = communityHeaderHTML({view, t, icons, unchecked: Boolean(me && !me.owner && me.role !== 'owner' && !me.management?.browsingAsReader && !me.checkedIn), actionsHTML: `${communityAppearance.buttonHTML(t, icons)}${languageButton}${account}${menuButton}`});
     if (communityFrame.header(markup)) return;
     document.querySelector("#site-header").innerHTML = markup;
@@ -439,12 +438,18 @@ function syncCommunitySky(inCommunity) {
 }
 // The header reads the community's `me` (bell, balance, level); when that changes it is redrawn,
 // unless the visitor is using the header at that moment.
+let communityHeaderPending = false;
 function refreshCommunityHeader() {
   const bar = document.querySelector('#site-header');
-  if (!bar?.classList.contains('community-header') || bar.contains(document.activeElement)) return;
+  if (!bar?.classList.contains('community-header')) { communityHeaderPending = false; return; }
+  if (bar.contains(document.activeElement)) { communityHeaderPending = true; return; }
+  communityHeaderPending = false;
   header(parseRoute(location.hash).page);
   communityReady();
 }
+document.addEventListener('focusout', event => {
+  if (communityHeaderPending && event.target.closest?.('#site-header')) queueMicrotask(refreshCommunityHeader);
+});
 const communityContext = () => ({t, esc, icons, notify: (message) => toast(message), members: Boolean(siteContent?.reader?.vip || siteContent?.author),
   mountSelect: mountCommunitySelect,
   ownerAvatar: siteContent?.profile?.avatar || null, headerChanged: refreshCommunityHeader,
@@ -462,6 +467,13 @@ function setCommunityAccountMenu(open) {
   const wasOpen = !menu.hidden;
   button.setAttribute('aria-expanded', String(open));
   menu.hidden = !open;
+  if (!open && wasOpen && communityHeaderPending) {
+    const hadFocus = document.querySelector('#site-header')?.contains(document.activeElement);
+    communityHeaderPending = false;
+    header(parseRoute(location.hash).page);
+    communityReady();
+    if (hadFocus) document.querySelector('[data-action="community-account"]')?.focus({ preventScroll: true });
+  }
   return wasOpen;
 }
 function closeCommunityAccountOutside(event) {
@@ -471,8 +483,13 @@ function closeCommunityAccountOutside(event) {
 document.addEventListener('pointerdown', closeCommunityAccountOutside, true);
 document.addEventListener('click', closeCommunityAccountOutside, true);
 let communityStyleReady = false;
+let communityLandingModule = null;
+function prepareCommunityLanding() {
+  if (communityOnly() || !main.querySelector('[data-community="landing"]') || communityLandingModule) return;
+  communityLandingModule = import('./community-landing.mjs').catch(() => { communityLandingModule = null; });
+}
 function communityPage() {
-  if (communityEntryDestination(siteContent)) return communityEntryPageHTML(communityEntry.state(), { t, esc, arrow });
+  if (communityEntryDestination(siteContent)) return communityLandingHTML(t, icons, { entryState: communityEntry.state() });
   if (!communityEnabled()) return closedPage('community',t('社区','Community'),t('社区尚未开放，正在准备中。','The community is not open yet. We are getting it ready.'));
   const {view} = communityRoute(location.hash);
   if (view === 'landing') return communityLandingHTML(t, icons);
@@ -532,9 +549,12 @@ async function render(options={}) {
  const externalCommunity = ['community', 'post'].includes(route.page) && communityEntryDestination(siteContent);
  if (externalCommunity) {
   contentReader.cancel(); loadedContentKey=''; remotePage=null;
+  if (location.hash !== '#/community') history.replaceState(history.state, '', location.pathname + location.search + '#/community');
   const authenticated = Boolean(siteContent?.reader || siteContent?.author);
-  renderView({ ...options, ...(!authenticated || communityEntry.state() === 'auth' ? { contentStatus: 'auth' } : {}) });
-  if (authenticated && communityEntry.state() === 'idle') void communityEntry.enter(true);
+  if (authenticated && communityEntry.state() === 'auth') communityEntry.cancel();
+  if (!communityStyleReady) await ensureRouteStyle(document, 'community').then(() => { communityStyleReady = true; }, () => {});
+  if (generation !== renderGeneration) return;
+  renderView({ ...options, ...(communityEntry.state() === 'auth' ? { contentStatus: 'auth' } : {}) });
   return;
  }
  communityEntry.cancel();
@@ -633,7 +653,7 @@ function renderView({preserveScroll=false,contentStatus}={}) {
   document.body.classList.toggle("content-open", page !== "home");
   document.body.classList.toggle("blog-open", personalPage(page));
   document.body.classList.toggle("admin-open", page === "admin");
-  const inCommunity = communityEnabled() && communityRoute(location.hash).view !== 'unknown';
+  const inCommunity = (communityEnabled() || communityEntryDestination(siteContent)) && communityRoute(location.hash).view !== 'unknown';
   syncCommunitySky(inCommunity);
   if(personalPage(page) && !inCommunity && blogPhoto && !blogPhoto.hasAttribute('src')) {
     blogPhoto.sizes=blogPhoto.dataset.backgroundSizes || '100vw';
@@ -679,6 +699,7 @@ function renderView({preserveScroll=false,contentStatus}={}) {
   cleanCommunity();
   const pageMarkup = contentStatus ? contentStatus==='auth' ? readerGate(language==='en') : contentStatus==='vip' ? vipBookGate(language==='en') : contentMessage(contentStatus==='error') : (views[page] || notFound)();
   if (!communityEnabled() || contentStatus || !communityFrame.render(main, pageMarkup, communityUI.frameHTML(communityContext()))) setContentHTML(main, pageMarkup);
+  prepareCommunityLanding();
   readerUI?.route(page,id);
   cleanCommunity=communityEnabled() && !contentStatus && (page==='community'||page==='post') ? communityUI.mount(main,communityContext()) : ()=>{};
   communityReady();
@@ -1019,7 +1040,7 @@ document.addEventListener("click", (event) => {
   const link = event.target.closest?.('a[href^="#/"]');
   if (!link || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
   const target = parseRoute(link.getAttribute("href"));
-  if (communityOnly() || communityEntryDestination(siteContent) && ['community', 'post'].includes(target.page)) return;
+  if (communityOnly()) return;
   if (parseRoute(location.hash).page !== "home" || target.page === "home") return;
   const rect = link.getBoundingClientRect();
   const x = event.detail ? event.clientX : rect.left + rect.width / 2,
@@ -1036,8 +1057,8 @@ document.addEventListener("click", (event) => {
   }, DEPART_MS);
 });
 document.addEventListener('click', event => {
-  const button = event.target.closest?.('[data-community-entry-retry]');
-  if (!button || button.disabled) return;
+  const button = event.target.closest?.('[data-community-entry-enter]');
+  if (!button || button.disabled || event.defaultPrevented || event.button !== 0) return;
   event.preventDefault();
   void communityEntry.enter(Boolean(siteContent?.reader || siteContent?.author));
 });
@@ -1094,6 +1115,11 @@ window.addEventListener("pagehide", (e) => {
     // position the browser saves for reload. Keep the last frame intact.
     // In-document route changes still dispose their own roots in render().
   }
+});
+window.addEventListener('pageshow', event => {
+  if (!event.persisted || !communityEntryDestination(siteContent)) return;
+  communityEntry.cancel();
+  void render({ preserveScroll: true });
 });
 window.addEventListener('author:identity',event=>{
   if(!siteContent)return;

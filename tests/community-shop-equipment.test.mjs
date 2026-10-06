@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import sharp from 'sharp';
 import { migrateCommunity } from '../server/payload/community-migration.ts';
-import { createCommunityStore } from '../server/community-store.ts';
+import { createCommunityPreviewStore } from './fixtures/community-preview-store.ts';
 import { createCommunityService } from '../server/community-service.ts';
 import { beijingDay } from '../src/community-rules.mjs';
 import { acceptCommunityConvention } from './fixtures/community-convention-consent.ts';
@@ -25,7 +25,7 @@ test.after(() => cleanup(template));
 async function setup(t) {
   const directory = await mkdtemp(resolve(tmpdir(), 'community-equipment-'));
   await copyFile(resolve(template, 'content.db'), resolve(directory, 'content.db'));
-  const store = createCommunityStore(directory), audits = [];
+  const store = createCommunityPreviewStore(directory), audits = [];
   let siteOrigin;
   const server = createServer((request, response) => service.handle(request, response));
   await new Promise(done => server.listen(0, '127.0.0.1', done));

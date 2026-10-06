@@ -251,9 +251,12 @@ test('appointed role labels do not grant automatic trust or minimum-level redemp
   assert.equal(me.trustLevel, 0, 'ordinary business receives earned trust independently of that role');
   const shop = await (await get('shop', 'moderator')).json();
   assert.equal(shop.level, 0);
-  const item = store.economy.items().find(item => item.minLevel > 0);
-  assert.ok(item, 'the existing catalog contains minimum-level items');
-  assert.equal(shop.items.find((entry: { id: string }) => entry.id === item.id).state.code, 'level');
+  const itemId = store.economy.saveItem(null, { cat: 'digital', name: '需要信任等级的正式资源', description: '权限回归测试', price: 20,
+    stock: null, limitPer: null, limitN: null, minLevel: 1, minDays: 0, delivery: '资源内容', note: '', active: true });
+  const item = store.economy.item(itemId);
+  assert.ok(item);
+  const publishedShop = await (await get('shop', 'moderator')).json();
+  assert.equal(publishedShop.items.find((entry: { id: string }) => entry.id === item.id).state.code, 'level');
   const balance = store.ledger.balance(moderator);
   assert.equal((await post('shop/redeem', { item: item.id }, 'moderator')).status, 409);
   assert.equal(store.ledger.balance(moderator), balance);

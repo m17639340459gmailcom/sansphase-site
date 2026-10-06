@@ -6,13 +6,13 @@ import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { Worker } from 'node:worker_threads';
 import { migrateCommunity } from '../server/payload/community-migration.ts';
-import { createCommunityStore } from '../server/community-store.ts';
+import { createCommunityPreviewStore } from './fixtures/community-preview-store.ts';
 
-const storeURL = new URL('../server/community-store.ts', import.meta.url).href;
+const storeURL = new URL('./fixtures/community-preview-store.ts', import.meta.url).href;
 const workerSource = `
   import { parentPort, workerData } from 'node:worker_threads';
-  import { createCommunityStore } from ${JSON.stringify(storeURL)};
-  const store = createCommunityStore(workerData.directory);
+  import { createCommunityPreviewStore } from ${JSON.stringify(storeURL)};
+  const store = createCommunityPreviewStore(workerData.directory);
   const signal = new Int32Array(workerData.signal);
   parentPort.postMessage({ ready: true });
   Atomics.wait(signal, 0, 0);
@@ -61,7 +61,7 @@ async function open(t) {
   const directory = await mkdtemp(resolve(tmpdir(), 'sansphase-community-race-'));
   new DatabaseSync(resolve(directory, 'content.db')).close();
   await migrateCommunity(directory);
-  const store = createCommunityStore(directory);
+  const store = createCommunityPreviewStore(directory);
   t.after(async () => { store.close(); await rm(directory, { recursive: true, force: true }); });
   return { directory, store };
 }

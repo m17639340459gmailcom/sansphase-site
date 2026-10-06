@@ -22,6 +22,18 @@ const fraction = (current: number, start: number, next: number | null) => next =
 export const experienceCatalogue: readonly CommunityExperienceCatalogueItem[] = thresholds.map((threshold, index) => ({ level: (index + 1) as CommunityGrowthNumber, threshold }));
 export const vipCatalogue: readonly CommunityVIPCatalogueItem[] = multipliers.map((multiplier, index) => ({ level: index + 1, multiplier }));
 
+// Presentation for the owner's read-only reader perspective. This deliberately
+// shares settlement thresholds without crediting either persistent ledger.
+export function maximumCommunityExperienceProjection(): { growth: CommunityGrowthState; vipGrowth: CommunityVIPGrowthState } {
+  const points = thresholds[thresholds.length - 1];
+  return {
+    growth: { level: thresholds.length as CommunityGrowthNumber, points, configured: true, startThreshold: points,
+      nextLevel: null, nextThreshold: null, remaining: 0, progress: 1 },
+    vipGrowth: { active: true, level: multipliers.length, days: vipDays[vipDays.length - 1], nextDays: null,
+      remaining: 0, multiplier: multipliers[multipliers.length - 1], progress: 1 },
+  };
+}
+
 export function createCommunityExperience(db: DatabaseSync, tx: Transaction, convention: CommunityConvention) {
   // Production shares Payload's readers table. Store-only fixtures have no
   // account table, or just an id placeholder; HTTP still uses identify().

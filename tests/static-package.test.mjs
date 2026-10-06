@@ -30,3 +30,21 @@ test("static package preserves bytes, excludes HTML and private files, and creat
     assert.equal(await readFile(join(root,first.prefix,"app.mjs"),"utf8"),'export const value=1;');
   } finally {await rm(root,{recursive:true,force:true});}
 });
+
+test('preloads only the transitive static app graph, including shared chunks and re-exports', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sansphase-preload-'));
+  try {
+    await mkdir(join(root, 'chunks'));
+    await writeFile(join(root, 'index.html'), '<html><head><script type="module" src="./app.mjs"></script></head></html>');
+    await writeFile(join(root, 'app.mjs'), 'import "./a.mjs"; import {b} from "./b.mjs"; const later=()=>import("./author.mjs");');
+    await writeFile(join(root, 'a.mjs'), 'export {c} from "./chunks/c.mjs";');
+    await writeFile(join(root, 'b.mjs'), 'import "./a.mjs"; export const b=1;');
+    await writeFile(join(root, 'chunks/c.mjs'), 'import "../a.mjs"; export const c=1;');
+    await writeFile(join(root, 'author.mjs'), 'export const privateEditor=1;');
+    const delivery = await packageStaticFiles(root, 'https://static.example');
+    assert.deepEqual(delivery.modulepreloads, ['a.mjs', 'b.mjs', 'chunks/c.mjs']);
+    const html = await readFile(join(root, 'index.html'), 'utf8');
+    for (const path of delivery.modulepreloads) assert.ok(html.includes(`rel="modulepreload" href="https://static.example/${delivery.prefix}/${path}" crossorigin="anonymous"`));
+    assert.ok(!html.includes('/author.mjs'));
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

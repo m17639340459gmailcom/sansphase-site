@@ -1,6 +1,29 @@
 import { readdir, readFile, writeFile, mkdir, copyFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { resolve, dirname } from "node:path";
+import { resolve, dirname, posix } from "node:path";
+import ts from 'typescript';
+
+// Standard modulepreload lets the browser fetch the already required static
+// graph together, without discovering each dependency after another round trip.
+// Dynamic imports (the author editor and the landing sky) stay on demand.
+async function staticModuleGraph(root, files) {
+  const available = new Set(files.map(file => file.path).filter(path => /\.m?js$/.test(path)));
+  const visited = new Set();
+  async function visit(path) {
+    if (!available.has(path) || visited.has(path)) return;
+    visited.add(path);
+    const source = ts.createSourceFile(path, await readFile(resolve(root, path), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+    for (const statement of source.statements) {
+      if (!(ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement))) continue;
+      const specifier = statement.moduleSpecifier;
+      if (!specifier || !ts.isStringLiteral(specifier) || !specifier.text.startsWith('.')) continue;
+      const target = posix.normalize(posix.join(posix.dirname(path), specifier.text));
+      await visit(target);
+    }
+  }
+  await visit('app.mjs');
+  return [...visited].filter(path => path !== 'app.mjs').sort();
+}
 
 export function rewriteStaticHtml(html, delivery) {
   if (!delivery) return html;
@@ -11,6 +34,8 @@ export function rewriteStaticHtml(html, delivery) {
     if (!files.has(path.slice(2).split(/[?#]/)[0])) return match;
     return `${attr}="${base}${path.slice(2)}" crossorigin="anonymous"`;
   }));
+  const preloads = (delivery.modulepreloads || []).map(path => `<link rel="modulepreload" href="${base}${path}" crossorigin="anonymous">`).join('');
+  result = result.replace('</head>', `${preloads}</head>`);
   return result;
 }
 
@@ -37,7 +62,7 @@ export async function packageStaticFiles(root, origin) {
     await mkdir(dirname(destination), {recursive:true});
     await copyFile(resolve(root,file.path), destination);
   }
-  const delivery = {origin,prefix,files};
+  const delivery = {origin,prefix,files,modulepreloads:await staticModuleGraph(root, files)};
   await writeFile(resolve(root,"static-delivery.json"),JSON.stringify(delivery,null,2));
   await writeFile(resolve(root,"index.html"),rewriteStaticHtml(await readFile(resolve(root,"index.html"),"utf8"),delivery));
   return delivery;

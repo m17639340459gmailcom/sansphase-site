@@ -4,6 +4,7 @@ import {publicKind,visibleBootstrap} from './server/reader-access.ts';
 import {bookManifest,bookPart} from './server/book-delivery.ts';
 import {imageSources} from './src/image-sources.mjs';
 import {uploadTimeoutMs} from './src/upload-policy.mjs';
+import {communityHostDocument} from './server/community-host-document.ts';
 import http from "node:http";
 import { open, readFile, realpath } from "node:fs/promises";
 import { Readable } from "node:stream";
@@ -267,7 +268,7 @@ export function createPreviewServer({
             return;
           }
           let html = await readFile(resolve(rootPath, "index.html"), "utf8");
-          if (communityOnly) html = html.replace(/<body\b/, '<body data-community-only="true" data-community-boot="pending"');
+          if (communityOnly) html = communityHostDocument(html);
           if (data.profile?.background) {
             html = html.replaceAll(
               "./assets/materials/blog-space.png",
@@ -328,7 +329,7 @@ export function createPreviewServer({
       if(!['.html'].includes(extname(file))) {
         const etag=`W/"${stats.size.toString(16)}-${stats.mtimeMs.toString(16)}"`;
         res.setHeader('ETag',etag);
-        res.setHeader('Cache-Control',/^(?:\/chunks\/[^/]+-[A-Z0-9]+\.mjs|\/assets\/scene\/[^/]+-[A-Z0-9]{8}\.jpg)$/.test(path)?'public, max-age=31536000, immutable':'public, max-age=0, must-revalidate');
+        res.setHeader('Cache-Control',/^(?:\/chunks\/[^/]+-[A-Z0-9]+\.mjs|\/assets\/scene\/[^/]+-[A-Z0-9]{8}\.jpg|\/assets\/site\/[a-f0-9]{24}\/.+)$/.test(path)?'public, max-age=31536000, immutable':'public, max-age=0, must-revalidate');
         if(req.headers['if-none-match']?.split(',').map(x=>x.trim()).some(x=>x===etag||x==='*')) {
           await fileHandle.close();fileHandle=undefined;res.writeHead(304);res.end();return;
         }

@@ -1,4 +1,4 @@
-import { parseRoute, escapeHTML } from './core.mjs';
+import { parseRoute } from './core.mjs';
 
 export type CommunityHostConfig = { communityDestination?: unknown; communityOnly?: unknown; mainSiteOrigin?: unknown };
 export type CommunityEntryState = 'idle' | 'pending' | 'leaving' | 'error' | 'auth';
@@ -89,18 +89,4 @@ export function rewriteCommunityMainSiteLinks(root: ParentNode, config: Communit
       link.removeAttribute('data-reader-return');
     }
   }
-  const origin = exactOrigin(config.mainSiteOrigin, mainOrigin) || mainOrigin;
-  for (const button of root.querySelectorAll<HTMLButtonElement>('button[data-author-login]')) {
-    const link = button.ownerDocument.createElement('a');
-    for (const attribute of button.attributes) if (!['type', 'data-author-login', 'disabled'].includes(attribute.name)) link.setAttribute(attribute.name, attribute.value);
-    link.href = `${origin}/#/account`;
-    link.append(...button.childNodes);
-    button.replaceWith(link);
-  }
-}
-export function communityEntryPageHTML(state: CommunityEntryState, common: { t: (zh: string, en: string) => string; esc?: (value: unknown) => string; arrow?: string }) {
-  const { t, esc = escapeHTML, arrow = '' } = common;
-  const busy = state === 'pending' || state === 'leaving';
-  const text = state === 'error' ? t('社区暂时无法进入，请稍后重试。', 'The community could not be opened. Please try again.') : t('正在进入社区，请稍候。', 'Opening the community. Please wait.');
-  return `<section class="page catalog-page community-entry-page" data-community-entry><div class="eyebrow">COMMUNITY</div><div class="page-heading"><div><h1>${esc(t('社区', 'Community'))}</h1><p role="status" aria-live="polite">${esc(text)}</p></div></div><div class="community-entry-actions"${busy ? ' aria-busy="true"' : ''}><button type="button" class="button" data-community-entry-retry${busy ? ' disabled' : ''}>${esc(busy ? t('正在进入…', 'Opening…') : t('重试进入社区', 'Try again'))}${arrow}</button><a class="text-link" href="#/notes">${esc(t('返回博客', 'Back to the blog'))}</a></div></section>`;
 }
