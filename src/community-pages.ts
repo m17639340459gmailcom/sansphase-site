@@ -3,7 +3,7 @@
 
 import {
   communityBoards, boardName, boardHref, postHref, memberHref, stardustHref, inboxHref, shopHref, manageHref, communityHomeHref, rulesHref,
-  avatarHTML, whoHTML, nameHTML, nameLabelHTML, growthChipHTML, levelMarksHTML, roleChipHTML, badgeHTML, cardHead, moreLink, bannerHTML, statsHTML, emptyHTML,
+  avatarHTML, whoHTML, nameHTML, nameLabelHTML, growthChipHTML, levelMarksHTML, roleChipHTML, badgeHTML, cardHead, moreLink, bannerHTML, statsHTML, emptyHTML, communityManagementRole,
   communityStatusHTML, communityTopicsHTML, communityBodyHTML, relativeTime, beijingTime, readyData, communityLevelName, plainText,
 } from './community.mjs';
 import type { Common, CommunityLoad, CommunityMe, CommunityPerson, CommunityTopic, CommunityUnread, CommunityInventory, CommunityModerationContacts, Translate } from './community.ts';
@@ -115,7 +115,7 @@ const pageHead = (eyebrow: string, title: string, text: string, side = "") =>
 
 /* ---------- 签到 ---------- */
 // 月历：签过的日子点亮；最近 7 天里漏掉的日子可以补签（橙色虚线）。
-function calendarHTML(data: CommunityCheckin, today: string, { t, icons = {} }: Common, owner = false) {
+function calendarHTML(data: CommunityCheckin, today: string, { t, icons = {} }: Common, owner = false, me: CommunityMe | null = null) {
   const preview = Boolean(data.browsingAsReader);
   const [year, month] = data.month.split("-").map(Number);
   const first = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
@@ -134,7 +134,11 @@ function calendarHTML(data: CommunityCheckin, today: string, { t, icons = {} }: 
   const shift = (delta: number) => new Date(Date.UTC(year, month - 1 + delta, 1)).toISOString().slice(0, 7);
   const current = today.slice(0, 7);
   const cost = data.makeup.cards ? t(`先用补签卡（剩 ${data.makeup.cards} 张）`, `a make-up card first (${data.makeup.cards} left)`) : data.makeup.free ? t("本月第一次免费（VIP）", "free the first time this month (VIP)") : t(`每次 ${communityRules.makeupCost} 星尘`, `${communityRules.makeupCost} stardust each`);
-  const note = owner ? t("站长仅查看签到日历。", "The owner can view this calendar only.") : preview ? t('当前仅查看日历；返回版主身份后可以签到和补签。', 'This calendar is read-only. Restore your moderator perspective to check in or make up a day.') : !data.makeup.left ? t("这个月的补签次数用完了。", "No make-ups left this month.")
+  const managementRole = communityManagementRole(me);
+  const previewNote = managementRole === 'owner' ? t('当前仅查看日历；作者不参与签到和补签。', 'This calendar is read-only. The owner does not check in or make up days.')
+    : managementRole === 'steward' ? t('当前仅查看日历；返回版主身份后可以签到和补签。', 'This calendar is read-only. Restore your moderator perspective to check in or make up a day.')
+    : t('当前仅查看日历；请先返回管理身份。', 'This calendar is read-only. Restore management first.');
+  const note = owner ? t("站长仅查看签到日历。", "The owner can view this calendar only.") : preview ? previewNote : !data.makeup.left ? t("这个月的补签次数用完了。", "No make-ups left this month.")
     : data.makeup.days.length
       ? t(`橙色虚线的日期可以补签：${cost}，本月还剩 ${data.makeup.left} 次。补签接上连签、计入满勤，不补发那天的签到星尘。`, `Dashed days can be made up: ${cost}; ${data.makeup.left} left this month. Make-ups restore the streak and count toward full-month attendance, without daily income.`)
       : t(`最近 ${communityRules.makeupWindow} 天没有漏签。本月还能补签 ${data.makeup.left} 次。`, `No missed days in the last ${communityRules.makeupWindow}. ${data.makeup.left} make-ups left this month.`);
@@ -145,15 +149,19 @@ function calendarHTML(data: CommunityCheckin, today: string, { t, icons = {} }: 
     + `<p class="community-muted community-calendar-note"><span>${t(`这个月签了 <b>${data.days.length}</b> 天。`, `<b>${data.days.length}</b> days this month. `)}</span>${note}</p></section>`;
 }
 
-export function communityCheckinHTML({ checkin, ...common }: Common & { checkin: CommunityLoad<CommunityCheckin> }) {
+export function communityCheckinHTML({ checkin, me = null, ...common }: Common & { checkin: CommunityLoad<CommunityCheckin>; me?: CommunityMe | null }) {
   const { t, esc, now = Date.now(), icons = {} } = common;
   const r = communityRules;
   const data = readyData(checkin);
   if (!data) return pageOf("checkin", common, checkin);
   const today = beijingDay(now);
   const month = checkinMonth(data.month, data.days);
+  const managementRole = communityManagementRole(me);
+  const previewText = managementRole === 'owner' ? t('当前是只读的读者浏览视角；作者不参与签到。', 'This reader preview is read-only. The owner does not check in.')
+    : managementRole === 'steward' ? t('当前是只读的读者浏览视角；返回版主身份后可以签到。', 'This reader preview is read-only. Restore your moderator perspective to check in.')
+    : t('当前是只读的读者浏览视角；请先返回管理身份。', 'This reader preview is read-only. Restore management first.');
   const text = data.owner ? t("站长不参与签到；这里保留签到星图和日历供查看。", "The owner does not check in; the star map and calendar remain viewable.")
-    : data.browsingAsReader ? t('当前是只读的读者浏览视角；返回版主身份后可以签到。', 'This reader preview is read-only. Restore your moderator perspective to check in.')
+    : data.browsingAsReader ? previewText
     : t(`每日签到 +${r.checkinBase} 星尘，自然月满勤额外 +${r.monthBonus}。补签计入满勤，北京时间 0 点换日。`, `Daily check-in +${r.checkinBase} stardust; full calendar month +${r.monthBonus} extra. Make-ups count. Days change at midnight Beijing time.`);
   const early = data.earlyBirds.length
     ? `<ol class="community-rank">${data.earlyBirds.map((bird, i) => `<li><span class="community-hot-rank${i < 3 ? " is-top" : ""}">${i + 1}</span>${avatarHTML(bird.person, common, "sm")}${whoHTML(bird.person, common)}<span class="community-rank-count">${esc(beijingTime(bird.at).slice(6))}</span></li>`).join("")}</ol>`
@@ -170,7 +178,7 @@ export function communityCheckinHTML({ checkin, ...common }: Common & { checkin:
     + pageHead('', t("签到", "Check-in"), esc(text), data.owner ? "" : statsHTML([[t("星尘", "Stardust"), data.balance], [t("本月已签", "Days this month"), month.signed.length]]))
     + `<section class="community-ck-section community-ck-cycle community-rv" style="--i:1">${cardHead(t("每月星图", "Monthly star map"), "", `<span class="community-muted">${t(`连线上的一颗星代表一天 · ${data.month} 共 ${month.totalDays} 天`, `One connected star per day · ${month.totalDays} days in ${data.month}`)}</span>`)}`
     + checkinStarsHTML({ month: data.month, days: data.days, today, owner: data.owner, monthBonus: data.monthBonus }, t) + `</section>`
-    + `<div class="community-pt-grid community-ck-panels">${calendarHTML(data, today, common, data.owner)}`
+    + `<div class="community-pt-grid community-ck-panels">${calendarHTML(data, today, common, data.owner, me)}`
     + `<section class="community-ck-section community-ck-early community-rv" style="--i:3">${cardHead(t("今日早鸟", "Early birds"), icons.sunrise)}<div class="community-ck-early-body"><p class="community-muted">${t("每天前 10 名，计入“晨光先至”成就", "The first ten each day count toward the First light achievement")}</p>${early}</div></section>`
     + (data.owner ? "" : `<section class="community-ck-section community-ck-badges community-span-2 community-rv" style="--i:4">${cardHead(t("签到徽章", "Check-in badges"), icons.award, data.uid ? moreLink(memberHref(data.uid, "badges"), t("我的徽章", "My badges"), icons) : moreLink(stardustHref(), t("我的星尘", "My stardust"), icons))}<div class="community-badge-row is-large">${achievements}</div>${history}</section>`) + `</div>`
     + `</section>`;

@@ -496,7 +496,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         return communityComposeHTML({ ...common, board: thread.data.topic.board, members: ctx.members, me: viewer, uploads: composeUploads(current, thread.data), editing: editingFrom(thread), simple: ctx.simpleCompose });
       }
       case 'post': return communityPostHTML({ ...common, thread: threads.get(current.id) || loading, me: viewer, reporting, editingReply, menuOpen: postMenu, deleting, moving, retagging, quoting, replySort });
-      case 'checkin': return communityCheckinHTML({ ...common, checkin: checkin || loading });
+      case 'checkin': return communityCheckinHTML({ ...common, checkin: checkin || loading, me: viewer });
       case 'bookmarks': return communityBookmarksHTML({ ...common, list: bookmarks || loading });
       case 'manage': return communityManageHTML({ ...common, manage: manages.get(['contact', 'convention'].includes(current.tab) ? 'queue' : current.tab) || loading, tab: current.tab, itemEditing, shippingOrder, rejecting, deleting, me: viewer, selectedReviews: [...reviewSelection], managementBoard, stewardCandidate, stewardEditingUid, bannerEditor: bannerEditor.state(), convention });
       case 'member': return communityMemberHTML({ ...common, member: memberPages.get(memberKey(current.id, current.tab)) || loading, me: viewer, muting, badgeSelection: badgeExplorer.state() });
@@ -1459,7 +1459,12 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (switchingBrowseMode) { notify(tr('正在切换浏览身份，请稍候。', 'Switching browsing perspective; please wait.')); return; }
     const { action, id = '', kind } = target.dataset;
     if (route().view === 'manage' && ['community-ship', 'community-reject', 'community-queue-delete', 'community-batch-reject', 'community-uphold'].includes(action || '')) managementOpener = { action: action!, id };
-    if (readyData(me)?.management?.browsingAsReader && !['community-browse-mode', 'community-sort', 'community-more', 'community-search-clear', 'community-retry', 'community-reply-sort', 'community-lightbox', 'community-delivery', 'community-month', 'community-level-mode', 'community-level-select', 'community-badge-family', 'community-badge-tier'].includes(action || '')) {
+    if (readyData(me)?.management?.browsingAsReader && ![
+      'community-browse-mode', 'community-sort', 'community-more', 'community-search-clear', 'community-retry', 'community-reply-sort',
+      'community-lightbox', 'community-post-menu', 'community-copy-link', 'community-copy-prompt', 'community-copy-delivery',
+      'community-delivery', 'community-delivery-close', 'community-month', 'community-flow', 'community-notice',
+      'community-level-mode', 'community-level-select', 'community-badge-family', 'community-badge-tier',
+    ].includes(action || '')) {
       notify(tr('当前预览仅供查看，请先返回管理身份。', 'This preview is read-only. Restore management first.')); return;
     }
     if (bannerEditor.action(target)) return;
@@ -1644,8 +1649,10 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       case 'community-notice': {
         const href = target.dataset.href || '';
         void act(target, async () => {
-          await send('inbox/read', { id });
-          inboxes.clear();
+          if (!readyData(me)?.management?.browsingAsReader) {
+            await send('inbox/read', { id });
+            inboxes.clear();
+          }
           if (href && href !== location.hash) navigate(href); else await reload();
         });
         return;

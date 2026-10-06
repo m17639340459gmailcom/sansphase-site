@@ -15,6 +15,14 @@ const thread = () => ({
 const response = data => ({ ok: true, json: async () => structuredClone(data) });
 const turn = () => new Promise(resolve => setTimeout(resolve, 0));
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
+const readerPreview = role => ({ ...person, management: { role, browsingAsReader: true } });
+function clipboardFixture(t) {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  const copied = [];
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { clipboard: { writeText: async value => { copied.push(value); } } } });
+  t.after(() => { if (previous) Object.defineProperty(globalThis, 'navigator', previous); else delete globalThis.navigator; });
+  return copied;
+}
 
 async function setup(t, hash, handle = () => null, ctxOptions = {}) {
   const dom = new JSDOM('<main></main>', { url: `http://localhost/${hash}`, pretendToBeVisual: true });
@@ -784,10 +792,10 @@ test('switching a moderator perspective preserves an unresolved purchase key for
   assert.equal(attempts[1], attempts[0], 'changing only the browsing perspective must not create another economic operation');
 });
 
-test('a read-only moderator perspective can browse previous check-in months without sending write requests', async t => {
+for (const role of ['owner', 'steward']) test(`a read-only ${role} perspective can browse previous check-in months with its correct identity note and no write requests`, async t => {
   const month = new Date().toISOString().slice(0, 7);
   const { main, requests } = await setup(t, '#/community/checkin', url => {
-    if (url.endsWith('/me')) return response({ ...person, management: { role: 'steward', browsingAsReader: true } });
+    if (url.endsWith('/me')) return response(readerPreview(role));
     if (url.includes('/checkin')) return response({ checkedIn: false, streak: 0, balance: 0, gainedToday: 0, behaviourToday: 0, vip: false,
       owner: false, browsingAsReader: true, month: new URL(url, 'http://localhost').searchParams.get('month') || month, days: [], monthBonus: 0, checkinsToday: 0, earlyBirds: [], badges: [], makeup: { used: 0, allowed: 2, left: 2, free: false, cards: 0, cost: 30, days: [] } });
     return null;
@@ -797,6 +805,95 @@ test('a read-only moderator perspective can browse previous check-in months with
   previous.click(); await turn(); await turn();
   assert.ok(requests.some(entry => /\/checkin\?month=/.test(entry.url)));
   assert.equal(requests.some(entry => entry.init.method === 'POST'), false);
+  assert.match(main.textContent, role === 'owner' ? /作者不参与签到/ : /返回版主身份后可以签到/);
+  assert.match(main.querySelector('.community-calendar-note').textContent, role === 'owner' ? /作者不参与签到和补签/ : /返回版主身份后可以签到和补签/);
+  if (role === 'owner') assert.doesNotMatch(main.textContent, /返回版主身份/);
+});
+
+for (const role of ['owner', 'steward']) {
+  test(`${role} reader preview filters the real stardust ledger using only GET requests`, async t => {
+    const { main, requests } = await setup(t, '#/community/stardust', url => {
+      if (url.endsWith('/me')) return response(readerPreview(role));
+      if (url.includes('/stardust')) {
+        const flow = new URL(url, 'http://localhost').searchParams.get('flow') || 'all';
+        return response({ balance: 30, gainedToday: 0, behaviourToday: 0, dailyCap: 6, checkedIn: true, month: { gained: 5, spent: 5 }, flow,
+          ledger: [{ id: `ledger-${flow}`, amount: flow === 'out' ? -5 : 5, kind: flow === 'out' ? 'spend' : 'earn', reason: 'shop', detail: `明细 ${flow}`, createdAt: '2026-10-01T10:00:00Z', reverted: false, topic: null }],
+          level: 1, owner: false, steward: false, browsingAsReader: true, stats: {}, progress: null });
+      }
+      return null;
+    });
+    for (const flow of ['in', 'out']) {
+      main.querySelector(`[data-action="community-flow"][data-flow="${flow}"]`).click(); await turn();
+      assert.equal(requests.some(entry => entry.url.endsWith(`/stardust?flow=${flow}`) && (entry.init.method || 'GET') === 'GET'), true);
+      assert.match(main.querySelector('.community-ledger-wrap').textContent, new RegExp(`明细 ${flow}`));
+      assert.equal(main.querySelector(`[data-flow="${flow}"]`).getAttribute('aria-pressed'), 'true');
+    }
+    assert.equal(requests.some(entry => entry.init.method === 'POST'), false);
+  });
+
+  test(`${role} reader preview opens the post menu and copies visible content without enabling stale write controls`, async t => {
+    const copied = clipboardFixture(t), notices = [];
+    const shown = thread();
+    Object.assign(shown.topic, { board: 'showcase', canModerate: true, meta: { tools: '现有工具', model: '', usage: '作品展示', promptMode: 'public', prompt: '已公开的提示词' } });
+    const { main, w, requests } = await setup(t, '#/post/p1', url => {
+      if (url.endsWith('/me')) return response(readerPreview(role));
+      if (url.endsWith('/topics/p1')) return response(shown);
+      return null;
+    }, { notify: value => notices.push(value) });
+    const section = main.querySelector('[data-community]');
+    const button = main.querySelector('[data-action="community-post-menu"]');
+    assert.ok(button);
+    button.click();
+    assert.equal(button.getAttribute('aria-expanded'), 'true');
+    assert.equal(main.querySelector('#community-post-menu').hidden, false);
+    main.querySelector('[data-action="community-pin"]').click();
+    assert.match(notices.at(-1), /当前预览仅供查看/);
+    button.click();
+    assert.equal(button.getAttribute('aria-expanded'), 'false');
+    assert.equal(main.querySelector('[data-community]'), section);
+    main.querySelector('[data-action="community-copy-link"]').click(); await turn();
+    main.querySelector('[data-action="community-copy-prompt"]').click(); await turn();
+    assert.deepEqual(copied, [w.location.href, '已公开的提示词']);
+    main.querySelector('[data-action="community-like"]').click();
+    main.querySelector('[data-action="community-bookmark"]').click();
+    assert.equal(requests.some(entry => entry.init.method === 'POST'), false);
+  });
+
+  test(`${role} reader preview reads, copies and closes an already-owned digital delivery without writing`, async t => {
+    const copied = clipboardFixture(t);
+    const { main, requests } = await setup(t, '#/community/shop/mine', url => {
+      if (url.endsWith('/me')) return response(readerPreview(role));
+      if (url.endsWith('/shop/mine')) return response({ balance: 30, inventory: {}, decorations: { frame: null, color: null, cover: null }, looks: [], digital: [{ id: 'pack', name: '已有资源', desc: '正式资源' }], orders: [] });
+      if (url.endsWith('/shop/items/pack/delivery')) return response({ name: '已有资源', delivery: '链接：https://x.example/owned' });
+      return null;
+    });
+    main.querySelector('[data-action="community-delivery"]').click(); await turn();
+    assert.ok(main.querySelector('.community-delivery'));
+    assert.equal(requests.some(entry => entry.url.endsWith('/shop/items/pack/delivery') && (entry.init.method || 'GET') === 'GET'), true);
+    main.querySelector('[data-action="community-copy-delivery"]').click(); await turn();
+    assert.deepEqual(copied, ['链接：https://x.example/owned']);
+    main.querySelector('[data-action="community-delivery-close"]').click();
+    assert.equal(main.querySelector('.community-delivery'), null);
+    assert.equal(requests.some(entry => entry.init.method === 'POST'), false);
+  });
+}
+
+for (const role of ['owner', 'steward', 'reader']) test(`${role} inbox notification opens its public post and marks read only outside preview`, async t => {
+  const { main, w, requests, remount } = await setup(t, '#/community/inbox', url => {
+    if (url.endsWith('/me')) return response(role === 'reader' ? person : readerPreview(role));
+    if (url.includes('/inbox?')) return response({ tab: 'all', unread: { all: 1, reply: 1, thanks: 0, system: 0 }, items: [{ id: 'n1', type: 'reply', actor: person, topicId: 'p1', replyId: null, text: '', data: {}, link: '#/post/p1', count: 1, createdAt: '2026-10-01T10:00:00Z', read: false, topicTitle: '公开讨论' }] });
+    if (url.endsWith('/inbox/read')) return response({ ok: true });
+    return null;
+  });
+  const notice = main.querySelector('[data-action="community-notice"]');
+  assert.ok(notice);
+  notice.click(); await turn();
+  assert.equal(w.location.hash, '#/post/p1');
+  assert.equal(requests.filter(entry => entry.init.method === 'POST').length, role === 'reader' ? 1 : 0);
+  if (role === 'reader') assert.equal(requests.some(entry => entry.url.endsWith('/inbox/read') && entry.init.method === 'POST'), true);
+  await remount();
+  assert.match(main.querySelector('.community-text').textContent, /保留正在阅读的正文/);
+  assert.equal(requests.some(entry => entry.url.endsWith('/topics/p1') && (entry.init.method || 'GET') === 'GET'), true);
 });
 
 for (const role of ['owner', 'steward']) test(`${role} perspective switches stay on the current board without opening management or scrolling`, async t => {

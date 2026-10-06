@@ -34,6 +34,8 @@
 
 正式兑换所仅展示作者在管理台明确上架的持久商品。内置金环、轨道、星云头像框及昵称、封面、道具卡样品只在本地预览 fixture 显式使用 `previewCatalog: true` 时出售，正常主站与香港启动没有该选项。旧样品定义保留用于已有订单、流水名称和已拥有权益，停止出售不删除这些持久记录，也不影响作者主动上架的商品；此修复不需要商品数据迁移或删库。
 
+2026-10-07 用户确认：站长使用“以读者身份浏览”时，复用真实读者的页面、正式帖子与已上架商品，自己显示最高成长等级、VIP8 和全部炫彩徽章。此展示仅对服务端验证的站长本人在读者视角生效，使用已有规则生成响应投影；不写入真实经验、VIP、签到、徽章或星尘记录，不创建示例内容或独立展示页面。只读查看、筛选、复制和通知跳转可用，社区互动与管理写操作保持禁止；普通读者、协管和其他人查看站长资料不获得该投影。
+
 初次 TLS 签发用 `deploy/nginx-community-bootstrap.conf`，获得证书后替换为 `deploy/nginx-community.conf`，不能同时启用。腾讯云防火墙必须放行 TCP 80、443；应用端口 4176 不对公网开放。Nginx 覆写客户端 IP 代理头，访问日志仅记 pathname，不记录 query、Cookie、请求正文或衔接凭证。证书续期成功后验证 Nginx 配置并 reload。
 
 香港备份：`COMMUNITY_CONFIG_FILE=<private-config> node scripts/backup-community.mjs <new-private-backup-directory>`。检查：`node scripts/backup-community.mjs --verify <backup-directory>`。恢复：`node scripts/restore-community.mjs <backup-directory> <new-data-directory> <new-private-config-file>`。备份包含两份独立 SQLite 库、完整上传目录（未知文件保留）、屏蔽词、审计、迁移快照及私有配置；逐文件 SHA-256、数据库完整性和引用图片校验通过后才记成功。恢复只写新目录和配置，不切换在线服务；保留待清理图片队列，并使旧进入会话失效。
