@@ -74,13 +74,48 @@ test('a definite identity denial removes a previously readable post and its repl
 
 test('identity service failure is visible without discarding the last confirmed account', async t => {
   let unavailable = false;
-  const { main, ui, retry } = await setup(t, url => url.endsWith('/me') && unavailable ? errorResponse(503) : null);
-  unavailable = true; retry(); await settle();
-  assert.ok(main.querySelector('[data-content-state="not-open"]'));
+  const { main, ui, remount, common, w } = await setup(t, url => url.endsWith('/me') && unavailable ? errorResponse(503) : null);
+  unavailable = true; await remount('#/post/p1');
+  assert.ok(main.querySelector('[data-content-state="error"]'));
+  assert.equal(main.querySelector('[data-content-state="not-open"]'), null);
+  assert.match(main.textContent, /身份服务暂时不可用/);
+  assert.doesNotMatch(main.textContent, /社区尚未开放/);
   assert.equal(main.querySelector('.community-topic'), null);
+  assert.equal(main.querySelector('.community-thread'), null);
+  assert.equal(main.querySelector('form[data-community-form="reply"]'), null);
   assert.equal(ui.me()?.uid, person.uid, '503 is not a sign-out response');
-  unavailable = false; retry(); await settle();
-  assert.ok(main.querySelector('.community-topic'));
+  const frame = w.document.createElement('template'); frame.innerHTML = ui.frameHTML(common);
+  assert.ok(frame.content.querySelector('[data-content-state="error"]'));
+  assert.equal(frame.content.querySelector('[data-content-state="not-open"]'), null);
+  assert.match(frame.content.textContent, /身份服务暂时不可用/);
+  assert.doesNotMatch(frame.content.textContent, /社区尚未开放/);
+  assert.equal(frame.content.querySelector('.community-topic'), null);
+  assert.equal(frame.content.querySelector('a.community-post'), null);
+  assert.ok(frame.content.querySelector('button[data-action="community-retry"]'));
+  const retry = main.querySelector('button[data-action="community-retry"]');
+  assert.ok(retry, 'the actual error page offers its existing retry action');
+  unavailable = false; retry.click(); await settle();
+  assert.ok(main.querySelector('.community-thread'));
+  assert.equal(main.querySelector('[data-content-state="error"]'), null);
+  assert.equal(ui.me()?.uid, person.uid);
+});
+
+test('actual community closure keeps its existing 503 closed presentation', async t => {
+  const { main, ui } = await setup(t, url => url.includes('/topics?') || url.endsWith('/summary') ? errorResponse(503) : null);
+  assert.ok(main.querySelector('[data-content-state="not-open"]'));
+  assert.match(main.textContent, /社区尚未开放/);
+  assert.doesNotMatch(main.textContent, /身份服务暂时不可用/);
+  assert.equal(ui.me()?.uid, person.uid);
+});
+
+test('the configured service closure response from me retains the genuine closed presentation', async t => {
+  const { main, ui, common } = await setup(t, url => url.endsWith('/me')
+    ? { ok: false, status: 503, json: async () => ({ error: '社区尚未开放。' }) } : null);
+  assert.ok(main.querySelector('[data-content-state="not-open"]'));
+  assert.match(main.textContent, /社区尚未开放/);
+  assert.doesNotMatch(main.textContent, /身份服务暂时不可用/);
+  assert.equal(main.querySelector('button[data-action="community-retry"]'), null);
+  assert.match(ui.frameHTML(common), /data-content-state="not-open"/);
 });
 
 test('ready topics cannot paint until the current identity read succeeds', async t => {

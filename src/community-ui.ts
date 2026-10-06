@@ -621,6 +621,12 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     return saved && typeof saved === 'object' ? saved : null;
   }
 
+  function displayedViewerFailure(t: Translate): ReturnType<typeof failure> | null {
+    // Keep the real authority status in viewerFailure. Only its presentation
+    // uses the existing generic retry layout; 503 elsewhere still means closed.
+    return viewerFailure?.status === 503 && viewerFailure.message !== '社区尚未开放。' ? { ...viewerFailure, status: 0,
+      message: t('身份服务暂时不可用，请稍后重试。', 'The identity service is temporarily unavailable. Please retry later.') } : viewerFailure;
+  }
   // The page for the current route, from what is cached; null outside the pages this module owns.
   function pageHTML(ctx: CommunityContext) {
     const identity = readyData(me);
@@ -628,8 +634,9 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     ctx = { ...ctx, members: members(ctx) };
     const current = route();
     const common = { t: ctx.t, esc: ctx.esc, icons: ctx.icons, ownerAvatar: ctx.ownerAvatar ?? null, showTopicCovers: ctx.simpleCompose, meForSort: identity };
-    if (viewerFailure && current.view !== 'unknown' && current.view !== 'landing')
-      return `<section class="page community-page" data-community="${current.view}">${communityStatusHTML(viewerFailure, common)}</section>`;
+    const identityFailure = displayedViewerFailure(ctx.t);
+    if (identityFailure && current.view !== 'unknown' && current.view !== 'landing')
+      return `<section class="page community-page" data-community="${current.view}">${communityStatusHTML(identityFailure, common)}</section>`;
     if (viewerHash !== location.hash && current.view !== 'unknown' && current.view !== 'landing')
       return `<section class="page community-page" data-community="${current.view}">${communityStatusHTML(loading, common)}</section>`;
     if (current.view === 'manage' && (!(identity?.owner || identity?.mod) || identity.management?.browsingAsReader))
@@ -2476,12 +2483,13 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       const activityBoard = current.view === 'board' || current.view === 'new' ? current.board
         : current.view === 'post' || current.view === 'edit' ? readyData(threads.get(current.id))?.topic.board || '' : '';
       const visibleMembers = members(ctx);
-      const rejected = viewerFailure || (viewerHash !== location.hash ? loading : null);
+      const identityFailure = displayedViewerFailure(ctx.t);
+      const rejected = identityFailure || (viewerHash !== location.hash ? loading : null);
       const list: CommunityLoad<CommunityListing> = rejected || (scope === 'vip' && !visibleMembers
         ? { state: 'error', status: 403, message: '' } : highlightsFor(scope));
       const frameMembers = !viewerFailure && visibleMembers;
       return `<div data-frame-highlights-state="${list.state}" data-frame-board="${ctx.esc(activityBoard)}">` + communityHomeHTML({ t: ctx.t, esc: ctx.esc, icons: ctx.icons,
-        summary: viewerFailure || summary || loading, list, sort: 'active', members: frameMembers, me: viewerFailure ? null : me, activityBoard,
+        summary: identityFailure || summary || loading, list, sort: 'active', members: frameMembers, me: viewerFailure ? null : me, activityBoard,
         showCompose: !rejected, showTopicCovers: ctx.simpleCompose })
         + communityFrameBannersHTML(rejected || (scope === 'vip' && !visibleMembers ? { state: 'error', status: 403, message: '' } : banners.get(scope || 'home') || loading), ctx, scope || 'home') + '</div>';
     },
