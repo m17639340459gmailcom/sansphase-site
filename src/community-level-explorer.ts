@@ -52,13 +52,11 @@ function levelBodyHTML(data: CommunityStardust, common: Common, selection: Commu
   const name = (n: number) => growth ? communityGrowthLevel(n) : mode === 'vip' ? { name: code(n), en: code(n) } : communityLevels[n];
   const definition = name(level);
   const [min, max] = bounds(mode);
-  const arrow = common.icons?.right || '<span class="community-level-arrow" aria-hidden="true"></span>';
-  const neighbour = (step: number) => {
-    const n = level + step;
-    if (n < min || n > max) return '<span class="community-level-neighbour-empty" aria-hidden="true"></span>';
-    return `<button type="button" class="community-level-neighbour community-level-mark" data-tier="${growth || mode === 'vip' ? n : n + 1}" data-action="community-level-select" data-level="${n}" aria-label="${esc(t(`查看 ${code(n)} ${mode === 'vip' ? '' : name(n).name}`, `View ${code(n)} ${mode === 'vip' ? '' : name(n).en}`))}" aria-controls="community-level-detail">${levelIconHTML(n, mode)}<span>${mode === 'vip' ? `${communityVIPMultipliers[n - 1]}×` : text(name(n).name, name(n).en)}</span></button>`;
-  };
-  const preview = `<div class="community-level-visual"><div class="community-level-stage">${neighbour(-1)}<div data-level-preview data-selected-level="${level}" data-tier="${growth || mode === 'vip' ? level : level + 1}" class="community-level-preview community-level-mark" tabindex="0" role="group" aria-label="${esc(t(`等级展示：${code(level)} ${mode === 'vip' ? '' : definition.name}`, `Level preview: ${code(level)} ${mode === 'vip' ? '' : definition.en}`))}" aria-controls="community-level-detail" aria-keyshortcuts="ArrowLeft ArrowRight Home End"><div class="community-level-emblem">${levelIconHTML(level, mode)}</div><h2 id="community-level-title">${text(definition.name, definition.en)}</h2></div>${neighbour(1)}</div><div class="community-level-controls" role="group" aria-label="${text('切换等级', 'Switch levels')}"><button type="button" class="community-level-nav-button community-level-prev" data-action="community-level-step" data-step="-1" aria-controls="community-level-detail" aria-label="${text('上一个等级', 'Previous level')}"${level === min ? ' disabled' : ''}>${arrow}</button><button type="button" class="community-level-nav-button" data-action="community-level-step" data-step="1" aria-controls="community-level-detail" aria-label="${text('下一个等级', 'Next level')}"${level === max ? ' disabled' : ''}>${arrow}</button></div></div>`;
+  const gallery = `<div class="community-level-gallery" data-level-gallery data-gallery-mode="${mode}" role="group" aria-label="${text('选择要查看的等级', 'Choose a level to explore')}">${Array.from({ length: max - min + 1 }, (_, i) => {
+    const n = i + min;
+    return `<button type="button" class="community-level-choice community-level-mark" data-tier="${growth || mode === 'vip' ? n : n + 1}" data-action="community-level-select" data-level="${n}" aria-pressed="${n === level}" aria-label="${esc(t(`查看 ${code(n)} ${mode === 'vip' ? '' : name(n).name}`, `View ${code(n)} ${mode === 'vip' ? '' : name(n).en}`))}" aria-controls="community-level-detail" aria-keyshortcuts="ArrowLeft ArrowRight Home End">${levelIconHTML(n, mode)}<span>${mode === 'vip' ? code(n) : text(name(n).name, name(n).en)}</span></button>`;
+  }).join('')}</div>`;
+  const preview = `<div class="community-level-visual"><div class="community-level-stage"><div data-level-preview data-selected-level="${level}" data-tier="${growth || mode === 'vip' ? level : level + 1}" class="community-level-preview community-level-mark" tabindex="0" role="group" aria-label="${esc(t(`等级展示：${code(level)} ${mode === 'vip' ? '' : definition.name}`, `Level preview: ${code(level)} ${mode === 'vip' ? '' : definition.en}`))}" aria-controls="community-level-detail" aria-keyshortcuts="ArrowLeft ArrowRight Home End"><div class="community-level-emblem">${levelIconHTML(level, mode)}</div><h2 id="community-level-title">${text(definition.name, definition.en)}</h2></div></div></div>`;
 
   let details: string;
   if (growth) {
@@ -68,7 +66,7 @@ function levelBodyHTML(data: CommunityStardust, common: Common, selection: Commu
   } else {
     details = `<span class="community-level-caption">${text('社区等级', 'Community levels')}</span><h3>${text(`${code(level)} ${definition.name}`, `${code(level)} ${definition.en}`)}</h3><h4>${text('权限与限制', 'Permissions and limits')}</h4><ul class="community-level-perks">${(communityLevelPerks[level] || []).map(([zh, en]) => `<li>${text(zh, en)}</li>`).join('')}</ul><p class="community-level-note">${text('版主由作者任命，管理指定板块并可执行全社区禁言；VIP 不改变信任等级或管理权。', 'Moderators are appointed by the owner, manage assigned boards and can mute community-wide. VIP does not change trust or management rights.')}</p>`;
   }
-  return preview + `<div id="community-level-detail" class="community-level-detail" data-level-detail role="region" aria-labelledby="community-level-title" tabindex="0">${details}</div>`;
+  return preview + `<div id="community-level-detail" class="community-level-detail" data-level-detail role="region" aria-labelledby="community-level-title" tabindex="0">${details}</div>` + gallery;
 }
 
 function personalStatus(data: CommunityStardust, { esc, t }: Common, mode: Mode) {
@@ -81,7 +79,7 @@ function personalStatus(data: CommunityStardust, { esc, t }: Common, mode: Mode)
 export function communityLevelExplorerHTML(data: CommunityStardust, common: Common, selection: CommunityLevelSelection = initial()) {
   const { esc, t } = common;
   const modes = [['growth', '成长等级', 'Growth levels'], ['trust', '社区等级', 'Community levels'], ['vip', 'VIP 等级', 'VIP levels']] as const;
-  return `<section class="community-card community-level-explorer" data-level-explorer data-mode="${selection.mode}"><header class="community-level-head"><div class="community-seg is-small" role="group" aria-label="${esc(t('等级介绍', 'Level information'))}">${modes.map(([mode, zh, en]) => `<button type="button" data-action="community-level-mode" data-level-mode="${mode}" aria-pressed="${mode === selection.mode}">${esc(t(zh, en))}</button>`).join('')}</div><p><span data-level-status>${personalStatus(data, common, selection.mode)}</span></p></header><div class="community-level-body" data-level-body>${levelBodyHTML(data, common, selection)}</div></section>`;
+  return `<section class="community-card community-level-explorer" data-level-explorer data-mode="${selection.mode}"><header class="community-level-head"><div class="community-level-modes" role="group" aria-label="${esc(t('等级介绍', 'Level information'))}">${modes.map(([mode, zh, en]) => `<button type="button" data-action="community-level-mode" data-level-mode="${mode}" aria-pressed="${mode === selection.mode}">${esc(t(zh, en))}</button>`).join('')}</div><p><span data-level-status>${personalStatus(data, common, selection.mode)}</span></p></header><div class="community-level-body" data-level-body>${levelBodyHTML(data, common, selection)}</div></section>`;
 }
 
 // Updates only the explorer. No navigation, requests or page repaint.
@@ -93,14 +91,24 @@ export function createCommunityLevelExplorer(options: {
     const root = options.root(), data = options.data(), common = options.common();
     const body = root?.querySelector<HTMLElement>('[data-level-body]');
     if (!root || !data || !common || !body) return;
-    body.innerHTML = levelBodyHTML(data, common, selection);
+    const gallery = body.querySelector<HTMLElement>('[data-level-gallery]');
+    if (gallery?.dataset.galleryMode === selection.mode) {
+      // Keep the existing strip so mouse/touch browsing never resets its scroll position.
+      const next = document.createElement('template');
+      next.innerHTML = levelBodyHTML(data, common, selection);
+      for (const selector of ['.community-level-visual', '[data-level-detail]']) {
+        const current = body.querySelector(selector), replacement = next.content.querySelector(selector);
+        if (current && replacement) current.replaceWith(replacement);
+      }
+      const selected = selectedLevel(data, selection);
+      for (const button of gallery.querySelectorAll<HTMLElement>('[data-level]')) button.setAttribute('aria-pressed', String(Number(button.dataset.level) === selected));
+    } else body.innerHTML = levelBodyHTML(data, common, selection);
     root.dataset.mode = selection.mode;
     for (const button of root.querySelectorAll<HTMLElement>('[data-level-mode]')) button.setAttribute('aria-pressed', String(button.dataset.levelMode === selection.mode));
     const status = root.querySelector('[data-level-status]');
     if (status) status.innerHTML = personalStatus(data, common, selection.mode);
-    // At the first/last level, the clicked arrow becomes disabled. Focus the preview instead.
     const requested = root.querySelector<HTMLElement>(focus);
-    (requested && !requested.matches(':disabled') ? requested : root.querySelector<HTMLElement>('[data-level-preview]'))?.focus({ preventScroll: true });
+    (requested ?? root.querySelector<HTMLElement>('[data-level-preview]'))?.focus({ preventScroll: true });
   }
   function action(target: HTMLElement) {
     if (!target.dataset.action?.startsWith('community-level-')) return false;
@@ -115,24 +123,29 @@ export function createCommunityLevelExplorer(options: {
       case 'community-level-select': {
         const value = Number(target.dataset.level);
         if (!Number.isInteger(value) || value !== clamp(value, selection.mode) || value === level) return true;
-        selection[selection.mode] = value; update(`[data-level-preview]`); return true;
-      }
-      case 'community-level-step': {
-        const step = Number(target.dataset.step); if (step !== 1 && step !== -1) return true;
-        const next = clamp(level + step, selection.mode); if (next === level) return true;
-        selection[selection.mode] = next; update(`[data-step="${step}"]`); return true;
+        selection[selection.mode] = value; update(`[data-level="${value}"]`); return true;
       }
       default: return true;
     }
   }
   function keydown(event: KeyboardEvent) {
-    const target = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-level-preview], [data-action="community-level-step"], [data-action="community-level-select"]') : null;
+    const target = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-level-preview], [data-action="community-level-select"]') : null;
     const data = options.data();
     if (!target || !data || !options.root()?.contains(target) || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
-    const [min, max] = bounds(selection.mode), current = selectedLevel(data, selection);
+    const fromGallery = target.hasAttribute('data-level');
+    const [min, max] = bounds(selection.mode), current = fromGallery ? clamp(Number(target.dataset.level), selection.mode) : selectedLevel(data, selection);
     const next = event.key === 'Home' ? min : event.key === 'End' ? max : clamp(current + (event.key === 'ArrowLeft' ? -1 : 1), selection.mode);
-    selection[selection.mode] = next; update(`[data-level-preview]`);
+    selection[selection.mode] = next; update(fromGallery ? `[data-level="${next}"]` : '[data-level-preview]');
+    if (fromGallery) {
+      const gallery = options.root()?.querySelector<HTMLElement>('[data-level-gallery]');
+      const button = gallery?.querySelector<HTMLElement>(`[data-level="${next}"]`);
+      if (gallery && button) {
+        const frame = gallery.getBoundingClientRect(), item = button.getBoundingClientRect();
+        if (item.left < frame.left) gallery.scrollLeft += item.left - frame.left;
+        else if (item.right > frame.right) gallery.scrollLeft += item.right - frame.right;
+      }
+    }
   }
   return { state: () => selection, reset: () => { selection = initial(); }, action, keydown };
 }

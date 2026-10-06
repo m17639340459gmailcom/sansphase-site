@@ -5,7 +5,9 @@
 import { communityTags, communityLevels, communityBadges, communityNameEffect } from './community-rules.mjs';
 import type { PromptMode, NameEffect } from './community-rules.ts';
 import { bodyImageContent, imageIdFromLine } from './community-body-images.mjs';
-import { checkinBadgeIconHTML } from './community-badge-icons.mjs';
+import { checkinBadgeIconHTML, communityBadgeArtHTML, legacyBadgeArtHTML } from './community-badge-icons.mjs';
+import { communityBadgeFamilies } from './community-badge-policy.mjs';
+import type { BadgeTier, CommunityBadgeState } from './community-badge-policy.ts';
 import { nameEffectVariables } from './community-name-effects.mjs';
 import { communityGrowthLevel } from './community-growth.mjs';
 import { communityGrowthArtHTML, communityTrustArtHTML, communityVipArtHTML } from './community-growth-art.mjs';
@@ -215,6 +217,7 @@ export type CommunityModerationContact = { qq: string; email: string };
 export type CommunityModerationContactPerson = CommunityModerationContact & { uid: string; name: string; owner: boolean; boards: string[] };
 export type CommunityModerationContacts = { items: CommunityModerationContactPerson[] };
 export type CommunityMe = CommunityPerson & {
+  badgeState?: CommunityBadgeState;
   convention?: { version: string; agreed: boolean };
   management?: { role: 'owner' | 'steward'; browsingAsReader: boolean } | null;
   moderationContact?: CommunityModerationContact | null;
@@ -367,13 +370,19 @@ export function flagsHTML(topic: Pick<CommunityTopic, "pinned" | "paidPin" | "fe
   if (topic.resource && topic.resource.dead > topic.resource.alive) flags.push(`<span class="community-flag is-warn">${icons.alert || ""}${t("可能失效", "May be dead")}</span>`);
   return flags.join("");
 }
-// 徽章：铜、银、金三档；没拿到的是暗的。
-export function badgeHTML(id: string, has: boolean, { t, esc, icons = {} }: Common, size: "sm" | "md" | "lg" = "md", withName = false) {
+// Legacy badges retain their names and grades. Supplying a material explicitly
+// selects a new family; callers must use the actual server award for `has`.
+export function badgeHTML(id: string, has: boolean, { t, esc, icons = {} }: Common, size: "sm" | "md" | "lg" = "md", withName = false, material?: BadgeTier) {
+  const family = material ? communityBadgeFamilies.find(item => item.id === id) : null;
+  if (family && material) {
+    const name = t(family.name, family.en), desc = t(family.criteria[material], family.criteriaEn[material]);
+    return `<span class="community-badge is-${material} is-${size} is-family${has ? '' : ' is-off'}" title="${esc(`${name}：${desc}${has ? '' : t('（未获得）', ' (not earned)')}`)}"><span class="community-badge-ic">${communityBadgeArtHTML(family.id, material, has)}</span>${withName ? `<span class="community-badge-n">${esc(name)}</span>` : `<span class="sr-only">${esc(name)}</span>`}</span>`;
+  }
   const badge = communityBadges[id];
   if (!badge) return "";
   const name = t(badge.name, badge.en), desc = t(badge.desc, badge.descEn);
   return `<span class="community-badge is-${badge.tier} is-${size}${has ? "" : " is-off"}" title="${esc(`${name}：${desc}${has ? "" : t("（未获得）", " (not yet)")}`)}">`
-    + `<span class="community-badge-ic">${checkinBadgeIconHTML(id) || icons[badge.icon] || ""}</span>${withName ? `<span class="community-badge-n">${esc(name)}</span>` : `<span class="sr-only">${esc(name)}</span>`}</span>`;
+    + `<span class="community-badge-ic">${(size === 'sm' ? checkinBadgeIconHTML(id) || icons[badge.icon] : legacyBadgeArtHTML(id, has)) || icons[badge.icon] || ""}</span>${withName ? `<span class="community-badge-n">${esc(name)}</span>` : `<span class="sr-only">${esc(name)}</span>`}</span>`;
 }
 export const cardHead = (title: string, icon = "", link = "") => `<div class="community-card-h"><h2>${icon}${title}</h2>${link}</div>`;
 export const moreLink = (href: string, label: string, icons: Icons) => `<a class="community-link-sm" href="${href}">${label}${icons["chevron-right"] || ""}</a>`;

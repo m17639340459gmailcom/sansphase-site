@@ -34,11 +34,15 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
   const rules = communityRules;
   // Check-ins.
   const insertCheckin = db.prepare(`INSERT INTO community_checkins (member_kind, member_id, day, streak, reward, created_at) VALUES (?, ?, ?, ?, ?, ?)`);
+  const recordEarly = db.prepare("INSERT OR IGNORE INTO community_badge_events(kind,source_id,actor_key,first_at) VALUES('early',?,?,?)");
+  const nextCheckinPosition = db.prepare('INSERT INTO community_badge_checkin_ranks(day,count) VALUES(?,1) ON CONFLICT(day) DO UPDATE SET count=count+1 RETURNING count');
   const checkedOn = db.prepare('SELECT COUNT(*) AS count FROM community_checkins WHERE member_kind = ? AND member_id = ? AND day = ?');
   const daysUpTo = db.prepare('SELECT day FROM community_checkins WHERE member_kind = ? AND member_id = ? AND day <= ? ORDER BY day DESC LIMIT 800');
   const daysBetween = db.prepare('SELECT day FROM community_checkins WHERE member_kind = ? AND member_id = ? AND day >= ? AND day <= ? ORDER BY day');
   const checkinsOn = db.prepare("SELECT COUNT(*) AS count FROM community_checkins WHERE day = ? AND member_kind = 'reader'");
-  const earliest = db.prepare("SELECT member_kind, member_id, created_at FROM community_checkins WHERE day = ? AND reward > 0 AND member_kind = 'reader' ORDER BY created_at, rowid LIMIT ?");
+  const earliest = db.prepare(`SELECT c.member_kind,c.member_id,c.created_at FROM community_badge_events e
+    JOIN community_checkins c ON c.day=e.source_id AND e.actor_key=c.member_kind || ':' || c.member_id
+    WHERE e.kind='early' AND c.day=? AND c.reward>0 AND c.member_kind='reader' ORDER BY c.created_at,c.rowid LIMIT ?`);
   const recentCheckers = db.prepare(`SELECT DISTINCT member_kind, member_id FROM community_checkins WHERE day >= ? AND member_kind = 'reader'`);
   const insertMakeup = db.prepare('INSERT INTO community_makeups (member_kind, member_id, day, month, cost, created_at) VALUES (?, ?, ?, ?, ?, ?)');
   const makeupsIn = db.prepare('SELECT COUNT(*) AS count FROM community_makeups WHERE member_kind = ? AND member_id = ? AND month = ?');
@@ -121,11 +125,6 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
     const month = nextDay.slice(0, 7);
     return checkinReward(!monthBonus(member, month) && monthAttendance(member, month, nextDay).complete);
   }
-  function streakBadges(member: CommunityAuthor, streak: number, now: string) {
-    members.award(member, 'first_checkin', now);
-    for (const [need, badge] of [[7, 'streak7'], [30, 'streak30'], [100, 'streak100'], [365, 'streak365']] as const)
-      if (streak >= need) members.award(member, badge, now);
-  }
   function makeupState(member: CommunityAuthor, { vip = false, now = Date.now() }: { vip?: boolean; now?: number } = {}) {
     const month = beijingDay(now).slice(0, 7);
     const used = countOf(makeupsIn, member.kind, member.id, month);
@@ -205,13 +204,14 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
         if (checked(member, today)) throw fail('今天已经签到过了。', 409);
         const streak = streakEnding(member, previousDay(today)) + 1;
         const reward = checkinReward();
-        const position = countOf(checkinsOn, today) + 1;
+        // Makeups are attendance only and never consume a real check-in ranking position.
+        const position = Number(nextCheckinPosition.get(today)?.count);
         insertCheckin.run(member.kind, member.id, today, streak, reward.total, at);
+        if (position <= 10) recordEarly.run(today, `${member.kind}:${member.id}`, at);
         ledger.credit(member, reward.total, 'checkin', null, at);
         const bonus = awardMonth(member, today.slice(0, 7), at);
         members.visit(member, now);
-        streakBadges(member, streak, at);
-        if (position <= 10) members.award(member, 'early', at);
+        members.checkBadges(member, at);
         return { streak, reward: reward.total + bonus, bonus, balance: ledger.balance(member), position };
       });
     },
@@ -231,7 +231,7 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
         insertCheckin.run(member.kind, member.id, key, streakEnding(member, previousDay(key)) + 1, 0, at);
         insertMakeup.run(member.kind, member.id, key, beijingDay(now).slice(0, 7), cost, at);
         const streak = currentStreak(member, now);
-        streakBadges(member, streak, at);
+        members.checkBadges(member, at);
         const bonus = awardMonth(member, key.slice(0, 7), at);
         return { streak, cost, bonus, balance: ledger.balance(member) };
       });

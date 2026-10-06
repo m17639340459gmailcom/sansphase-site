@@ -102,6 +102,34 @@ const png = async () => (await import("sharp")).default({ create: { width: 1200,
 const topicBody = { board: "qa", title: "ComfyUI 人脸崩了", body: "IPAdapter 和 ControlNet 一起用就崩。" };
 const imageMarker = id => `![图片](/api/community/images/${id}.webp)`;
 
+test('badge family state is public but reviewed evidence and revoke/restore operations require owner and are audited', async t => {
+  const { get, post, store, audits } = await setup(t);
+  const author = { kind: 'reader', id: 'r1' };
+  const first = store.createTopic({ board: 'qa', author, title: '徽章复核测试主题', body: '检查荣誉授予、错误撤销、来源复核以及恢复过程。', now: '2025-10-01T00:00:00.000Z' });
+  store.members.setSteward({ kind: 'reader', id: 's1' }, true, ['qa']);
+  const profile = await json(get('members/u1'));
+  assert.equal(profile.badgeState.families.find(item => item.id === 'writing').tier, 'gold');
+  assert.equal(Object.hasOwn(profile.badgeState, 'evidence'), false);
+  assert.equal((await get('manage/badges/u1', 'reader=s1')).status, 403);
+  assert.equal((await get('manage/badges/u1', 'reader=r2')).status, 403);
+  const review = { action: 'revoke', family: 'writing', tier: 'gold', reason: '复核认为来源有误', sources: [{ kind: 'topic', id: first.id }] };
+  assert.equal((await post('manage/badges/u1/review', review, 'reader=s1')).status, 403);
+  assert.equal((await post('manage/badges/u1/review', review, 'owner=yes; community_browse=reader')).status, 403);
+  assert.equal((await post('manage/badges/u1/review', review, 'owner=yes')).status, 200);
+  assert.equal((await json(get('members/u1'))).badgeState.families.find(item => item.id === 'writing').tier, null);
+  assert.equal((await post('manage/badges/u1/review', { ...review, action: 'restore', sources: [] }, 'owner=yes')).status, 409, 'invalid progress cannot restore a revoked honor');
+  assert.equal((await post('manage/badges/u1/review', { ...review, action: 'restore', reason: '申诉核实原复核有误' }, 'owner=yes')).status, 200);
+  const owner = await json(get('manage/badges/u1', 'owner=yes'));
+  assert.equal(owner.badgeState.families.find(item => item.id === 'writing').tier, 'gold');
+  assert.equal(owner.reviews.length, 2);
+  assert.ok(audits.some(item => item.action === 'community-badge-revoked'));
+  assert.ok(audits.some(item => item.action === 'community-badge-restored'));
+  const sanction = store.members.mute(author, 7, '其他', { kind: 'owner', id: 'owner' });
+  assert.equal((await post(`manage/badge-violations/sanction/${sanction.id}/reverse`, { reason: '申诉复核认定处罚错误' }, 'reader=s1')).status, 403);
+  assert.equal((await post(`manage/badge-violations/sanction/${sanction.id}/reverse`, { reason: '申诉复核认定处罚错误' }, 'owner=yes')).status, 200);
+  assert.ok(audits.some(item => item.action === 'community-badge-violation-reversed'));
+});
+
 test('level catalogue receives the real reader membership state without fabricating VIP growth', async t => {
   const { get, post } = await setup(t);
   const vip = await json(get('stardust', 'reader=v1'));
@@ -673,7 +701,8 @@ test("readers post, list, read and reply; the owner can remove anything, readers
   assert.equal(detail.replies[0].author.name, "远山");
   assert.equal(detail.replies[0].canDelete, false, "a reader cannot delete someone else's reply");
   assert.equal(detail.replies[0].byTopicAuthor, false);
-  assert.deepEqual([detail.author.name, detail.author.topics, detail.author.bio, detail.author.badges, detail.author.following], ["林间", 1, "喜欢画画", ["first_topic"], false]);
+  assert.deepEqual([detail.author.name, detail.author.topics, detail.author.bio, detail.author.badges, detail.author.following], ["林间", 1, "喜欢画画", [], false]);
+  assert.equal(detail.author.badgeState.families.find(item => item.id === 'writing').tier, 'gold');
   assert.deepEqual(detail.related, [], "no other topics in this board yet");
   assert.deepEqual(detail.viewer, { level: 1, muted: null });
   const replyId = detail.replies[0].id;
@@ -806,7 +835,8 @@ test("likes, bookmarks, views, thanks, check-ins and the viewer's own state", as
   const board = await json(get("checkin", "reader=r2"));
   assert.equal(board.days.length, 1);
   assert.deepEqual(board.earlyBirds.map((bird) => bird.person.name), ["远山"]);
-  assert.deepEqual(board.badges.sort(), ["early", "first_checkin"]);
+  assert.deepEqual(board.badges, []);
+  assert.deepEqual(board.badgeState.families.slice(0, 2).map(item => item.tier), ['gold', 'gold']);
   assert.equal((await json(get("stardust", "reader=r2"))).ledger[0].reason, "checkin");
   setLevel("r2", 1);
   await post("checkin", {}, "reader=v1");

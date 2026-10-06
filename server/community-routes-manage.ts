@@ -6,6 +6,9 @@ import type { Body, Ctx } from './community-context.ts';
 import type { CustomItemInput } from './community-economy.ts';
 import { saveCommunityImage } from './community-images.ts';
 import { reviewTopics } from './community-review.ts';
+import { communityBadgeFamilies, communityBadgeTiers } from '../src/community-badge-policy.ts';
+import type { BadgeFamilyId, BadgeTier } from '../src/community-badge-policy.ts';
+import type { BadgeReview, BadgeSource } from './community-badges.ts';
 
 const tabs = ['queue', 'reports', 'content', 'orders', 'items', 'stewards', 'sanctions', 'data', 'banners', 'contact', 'convention'] as const;
 // The owner manages the shop, orders and steward appointments; stewards handle moderation.
@@ -62,6 +65,15 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
   const { live, path, method, url } = ctx;
   if (!path.startsWith('manage')) return false;
   if (!ctx.mod) throw fail('只有站长和协管能进入社区管理。', 403);
+  const badgeMember = /^manage\/badges\/([^/]+)$/.exec(path);
+  if (method === 'GET' && badgeMember) {
+    if (!ctx.owner) throw fail('只有作者能查阅徽章复核证据。', 403);
+    const member = await ctx.options.findMember?.(badgeMember[1]);
+    if (!member) throw fail('找不到这个成员。', 404);
+    const info = (await ctx.people([member])).get(memberKey(member));
+    ctx.send({ badgeState: live.members.badgeState(member, { joinedAt: info?.joinedAt }), ...live.members.badgeReviewDetails(member) });
+    return true;
+  }
   if (method === 'GET' && path === 'manage') {
     const tab = (tabs as readonly string[]).includes(url.searchParams.get('tab') || '') ? url.searchParams.get('tab')! : 'queue';
     if (ownerTabs.has(tab) && !ctx.owner) throw fail(tab === 'stewards' ? '只有作者能管理版主。' : tab === 'convention' ? '只有作者能修改社区公约。' : '只有站长能管理兑换所。', 403);
@@ -152,6 +164,45 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
   }
   const body = await ctx.json();
   if (!ctx.mod) throw fail('只有站长和协管能进入社区管理。', 403);
+  const badgeReview = /^manage\/badges\/([^/]+)\/review$/.exec(path);
+  if (badgeReview) {
+    if (!ctx.owner) throw fail('只有作者能复核徽章荣誉。', 403);
+    const member = await ctx.options.findMember?.(badgeReview[1]);
+    if (!member) throw fail('找不到这个成员。', 404);
+    if (!ctx.owner) throw fail('管理权限发生变化，请重新打开管理页面。', 403);
+    if (!communityBadgeFamilies.some(item => item.id === body.family) || !(communityBadgeTiers as readonly unknown[]).includes(body.tier)
+      || !['revoke', 'restore'].includes(String(body.action))) throw fail('请选择有效的徽章系列、材质及复核操作。');
+    const sources: BadgeSource[] = [];
+    if (body.sources !== undefined) {
+      if (!Array.isArray(body.sources) || body.sources.length > 200) throw fail('复核来源格式无效。');
+      for (const value of body.sources) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) throw fail('复核来源格式无效。');
+        const source = value as Record<string, unknown>;
+        if (typeof source.kind !== 'string' || !['topic', 'reply', 'reaction', 'acceptance', 'featured', 'checkin', 'contributor'].includes(source.kind)
+          || typeof source.id !== 'string' || (source.actor !== undefined && typeof source.actor !== 'string')) throw fail('复核来源格式无效。');
+        sources.push({ kind: source.kind as BadgeSource['kind'], id: source.id, ...(typeof source.actor === 'string' ? { actor: source.actor } : {}) });
+      }
+    }
+    const input: BadgeReview = { family: body.family as BadgeFamilyId, tier: body.tier as BadgeTier, reason: ctx.clean(body.reason, [2, 200], '复核依据', false), sources,
+      ...(typeof body.legacyBadge === 'string' ? { legacyBadge: body.legacyBadge } : {}) };
+    ctx.throttle('action');
+    const action = body.action === 'restore' ? 'badge-restored' : 'badge-revoked';
+    const result = await ctx.auditMutation(action, () => body.action === 'restore' ? live.members.restoreBadges(member, input, ctx.me) : live.members.reviewBadges(member, input, ctx.me),
+      { member: memberKey(member), ...input });
+    ctx.send(result);
+    return true;
+  }
+  const badgeAppeal = /^manage\/badge-violations\/(penalty|sanction)\/([^/]+)\/reverse$/.exec(path);
+  if (badgeAppeal) {
+    if (!ctx.owner) throw fail('只有作者能撤销已确认违规记录。', 403);
+    const reason = ctx.clean(body.reason, [2, 200], '申诉复核依据', false);
+    ctx.throttle('action');
+    const kind = badgeAppeal[1] as 'penalty' | 'sanction';
+    const result = await ctx.auditMutation('badge-violation-reversed', () => live.members.reverseBadgeViolation(kind, badgeAppeal[2], reason, ctx.me),
+      { kind, source: badgeAppeal[2], reason });
+    ctx.send(result);
+    return true;
+  }
   if (path === 'manage/convention') {
     if (!ctx.owner) throw fail('只有作者能修改社区公约。', 403);
     if (Object.keys(body).some(key => key !== 'body' && key !== 'version')) throw fail('社区公约请求格式无效。');

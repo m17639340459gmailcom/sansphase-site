@@ -101,6 +101,7 @@ async function threadDTO(ctx: Ctx, id: string) {
     replies: [...replies.filter(reply => reply.accepted), ...replies.filter(reply => !reply.accepted)],
     author: {
       ...ctx.person(topic.author, map), ...stats, badges: live.members.badges(topic.author).slice(0, 6),
+      badgeState: live.members.badgeState(topic.author, { joinedAt: map.get(memberKey(topic.author))?.joinedAt }),
       bio: map.get(memberKey(topic.author))?.bio || '', following: !isAuthor && live.members.following(me, topic.author),
     },
     related: related.map(item => ctx.topicDTO(item, map)),

@@ -102,9 +102,13 @@ test('all growth levels are selectable without a request, navigation, page repla
   const { main, w, calls, scrolls, notices } = await setup(t);
   const page = main.querySelector('[data-community]'), banner = main.querySelector('.community-banner');
   const initialCalls = calls.length, initialScrolls = scrolls.length;
+  const gallery = main.querySelector('[data-level-gallery]');
+  assert.ok(gallery);
+  assert.equal(gallery.querySelectorAll('[data-level]').length, 10);
+  gallery.scrollLeft = 180;
   main.scrollTop = 210;
   for (let level = 1; level <= 10; level++) {
-    if (level > 1) main.querySelector('[data-step="1"]').click();
+    main.querySelector(`[data-level="${level}"]`).click();
     assert.equal(main.querySelector('[data-level-preview]').getAttribute('data-selected-level'), String(level));
     assert.equal(main.querySelectorAll('.community-level-scale, [role="tablist"]').length, 0);
     assert.equal(main.querySelectorAll('[data-level-detail]').length, 1);
@@ -112,14 +116,17 @@ test('all growth levels are selectable without a request, navigation, page repla
     assert.equal(main.querySelector('[data-community]'), page);
     assert.equal(main.querySelector('.community-banner'), banner);
     assert.equal(main.scrollTop, 210);
+    assert.equal(main.querySelector('[data-level-gallery]'), gallery);
+    assert.equal(gallery.scrollLeft, 180);
+    assert.equal(gallery.querySelector(`[data-level="${level}"]`).getAttribute('aria-pressed'), 'true');
   }
   assert.equal(calls.length, initialCalls); assert.equal(scrolls.length, initialScrolls);
   assert.deepEqual(notices, []);
   assert.equal(w.location.hash, '#/community/stardust/levels');
-  assert.equal(main.querySelector('[data-step="1"]').disabled, true);
-  main.querySelector('[data-step="-1"]').click();
+  assert.equal(main.querySelector('[data-step]'), null);
+  main.querySelector('[data-level="9"]').click();
   assert.equal(main.querySelector('[data-level-preview]').getAttribute('data-selected-level'), '9');
-  assert.equal(w.document.activeElement.getAttribute('data-step'), '-1');
+  assert.equal(w.document.activeElement.getAttribute('data-level'), '9');
 });
 
 test('keyboard selection preserves focus and roles; reader previews can browse growth and trust details', async t => {
@@ -143,29 +150,41 @@ test('keyboard selection preserves focus and roles; reader previews can browse g
   assert.deepEqual(notices, []); assert.equal(calls.filter(url => url.includes('/stardust')).length, 1);
 });
 
-test('level navigation uses the shared published arrow icon in a single substantial control group', async () => {
-  const stockArrow = '<svg data-stock-arrow="lucide-arrow-right" aria-hidden="true"></svg>';
-  const page = new JSDOM(communityLevelExplorerHTML(data, { ...common, icons: { right: stockArrow } }));
-  const buttons = [...page.window.document.querySelectorAll('.community-level-controls button')];
-  assert.equal(buttons.length, 2);
-  assert.ok(buttons.every(button => button.classList.contains('community-level-nav-button')));
-  assert.ok(buttons.every(button => button.querySelector('[data-stock-arrow="lucide-arrow-right"]')));
-  assert.equal(buttons[0].disabled, true);
-  assert.equal(buttons[1].disabled, false);
-  assert.equal(page.window.document.querySelector('.community-level-controls .community-act'), null);
+test('level navigation uses artwork thumbnails and flat mode choices without the old arrow group', async () => {
+  const page = new JSDOM(communityLevelExplorerHTML(data, common));
+  const buttons = [...page.window.document.querySelectorAll('[data-level-gallery] button')];
+  assert.equal(buttons.length, 10);
+  assert.ok(buttons.every((button, i) => button.querySelector(`img[src="/assets/community/levels/constellation-g${i + 1}.svg"]`)));
+  assert.equal(buttons.filter(button => button.getAttribute('aria-pressed') === 'true').length, 1);
+  assert.equal(page.window.document.querySelector('.community-level-controls, .community-level-neighbour, [data-step]'), null);
+  assert.equal(page.window.document.querySelector('.community-level-head .community-seg'), null);
   page.window.close();
-  const fallback = new JSDOM(communityLevelExplorerHTML(data, common));
-  assert.equal(fallback.window.document.querySelectorAll('.community-level-arrow').length, 2);
-  assert.equal(fallback.window.document.querySelector('.community-level-controls').textContent.trim(), '');
-  fallback.window.close();
-  const directory = new URL('../public/assets/community/levels/', import.meta.url);
-  const sources = JSON.parse(await readFile(new URL('sources.json', directory), 'utf8'));
-  const arrow = await readFile(new URL('arrow-right.svg', directory));
-  assert.equal(createHash('sha256').update(arrow).digest('hex'), sources.navigation.sha256);
-  assert.equal(sources.navigation.author, 'Lucide contributors');
-  assert.equal(sources.navigation.license, 'ISC');
   const css = await readFile(new URL('../src/community.css', import.meta.url), 'utf8');
-  assert.match(css, /\.community-level-nav-button\s*\{[^}]*min-height:\s*44px/);
+  assert.match(css, /\.community-level-choice\s*\{[^}]*min-height:\s*44px/);
+  assert.doesNotMatch(css, /\.community-level-controls\s*\{|\.community-level-nav-button\s*\{|\.community-level-neighbour\s*\{/);
+});
+
+test('gallery keyboard selection retains the gallery and focuses the selected thumbnail without scrolling the document', async t => {
+  const { main, w, scrolls } = await setup(t);
+  const gallery = main.querySelector('[data-level-gallery]'), before = scrolls.length;
+  gallery.getBoundingClientRect = () => ({ left: 250, right: 850, width: 600 });
+  gallery.querySelector('[data-level="10"]').getBoundingClientRect = () => ({ left: 940, right: 1012, width: 72 });
+  main.scrollTop = 210;
+  const first = gallery.querySelector('[data-level="1"]');
+  first.focus();
+  first.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+  assert.equal(main.querySelector('[data-level-gallery]'), gallery);
+  assert.equal(w.document.activeElement, gallery.querySelector('[data-level="10"]'));
+  assert.equal(gallery.scrollLeft, 162, 'only the gallery scrolls enough to bring the thumbnail inside its right edge');
+  w.document.activeElement.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+  assert.equal(w.document.activeElement, gallery.querySelector('[data-level="9"]'));
+  assert.equal(main.scrollTop, 210);
+  assert.equal(scrolls.length, before);
+  const unselected = gallery.querySelector('[data-level="4"]');
+  unselected.focus();
+  unselected.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+  assert.equal(main.querySelector('[data-level-preview]').dataset.selectedLevel, '5', 'arrow browsing starts at the focused thumbnail');
+  assert.equal(w.document.activeElement, gallery.querySelector('[data-level="5"]'));
 });
 
 test('VIP tiers show only the eight multipliers and no fabricated personal grade or progress', () => {
@@ -200,13 +219,14 @@ test('VIP selection, keyboard bounds and mode changes preserve page position and
   main.scrollTop = 210;
   main.querySelector('[data-level-mode="vip"]').click();
   for (let level = 1; level <= 8; level++) {
-    if (level > 1) main.querySelector('[data-step="1"]').click();
+    main.querySelector(`[data-level="${level}"]`).click();
     assert.equal(main.querySelector('[data-vip-multiplier]').textContent.trim(), `${communityVIPMultipliers[level - 1]}×`);
     assert.equal(main.querySelector('[data-community]'), page);
     assert.equal(main.querySelector('.community-banner'), banner);
     assert.equal(main.scrollTop, 210);
   }
-  assert.equal(main.querySelector('[data-step="1"]').disabled, true);
+  assert.equal(main.querySelectorAll('[data-level-gallery] [data-level]').length, 8);
+  assert.equal(main.querySelector('[data-level="8"]').getAttribute('aria-pressed'), 'true');
   main.querySelector('[data-level-mode="growth"]').click();
   assert.equal(main.querySelector('[data-level-preview]').dataset.selectedLevel, '1');
   main.querySelector('[data-level-mode="vip"]').click();
@@ -214,7 +234,7 @@ test('VIP selection, keyboard bounds and mode changes preserve page position and
   const preview = main.querySelector('[data-level-preview]');
   preview.focus(); preview.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
   assert.equal(main.querySelector('[data-level-preview]').dataset.selectedLevel, '1');
-  assert.equal(main.querySelector('[data-step="-1"]').disabled, true);
+  assert.equal(main.querySelector('[data-level="1"]').getAttribute('aria-pressed'), 'true');
   w.document.activeElement.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'End', bubbles: true }));
   assert.equal(main.querySelector('[data-level-preview]').dataset.selectedLevel, '8');
   assert.equal(calls.length, initialCalls); assert.equal(scrolls.length, initialScrolls);

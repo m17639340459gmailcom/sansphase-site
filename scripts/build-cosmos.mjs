@@ -127,6 +127,8 @@ for (const file of [
   "community-sky.mjs",
   "community-body-images.mjs",
   "community-badge-icons.mjs",
+  "community-badge-policy.mjs",
+  "community-badge-explorer.mjs",
   "community-checkin-stars.mjs",
 ]) {
   if (typedBrowserModules.has(file)) {

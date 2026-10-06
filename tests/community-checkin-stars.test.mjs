@@ -147,9 +147,10 @@ test('check-in panels retain date actions and earned badges within the new prese
   assert.equal(early.querySelector('.community-card-h .community-muted'), null, 'the caption must not enlarge only the early-bird heading');
   assert.match(early.querySelector('.community-ck-early-body > .community-muted').textContent, /前 10 名/);
   assert.ok(early.querySelector('.community-ck-early-body > .community-rank'));
-  assert.equal(d.querySelectorAll('.community-ck-achievement').length, 6);
-  assert.equal(d.querySelectorAll('.community-ck-achievement[data-earned="true"]').length, 2);
-  assert.equal(d.querySelectorAll('.community-ck-achievement[data-earned="false"]').length, 4);
+  assert.equal(d.querySelectorAll('.community-ck-achievement').length, 2);
+  assert.equal(d.querySelectorAll('.community-ck-achievement[data-earned="true"]').length, 0);
+  assert.equal(d.querySelectorAll('.community-ck-achievement[data-earned="false"]').length, 2);
+  assert.equal(d.querySelectorAll('[data-badge-legacy]').length, 2, 'old earned records remain in history');
   assert.equal(d.querySelectorAll('.community-ck-achievement button, .community-ck-achievement a').length, 0);
   assert.equal(d.querySelector('[data-action="community-checkin"]'), null);
   assert.equal(d.querySelector('[data-community="checkin"] .community-card, [data-community="checkin"] .community-banner, [data-community="checkin"] .community-spot'), null, 'the check-in view is open, without card surfaces or card effects');
@@ -188,22 +189,18 @@ test('the marked header, status and month controls retain meaning without decora
   signed.window.close();
 });
 
-test('six check-in emblems are distinct, keep achievement identity and earned state, and need no image assets', () => {
+test('check-in families use the approved atlas and keep earlier awards in history without granting new materials', () => {
   const dom = render({ badges: ['first_checkin', 'early'] });
   const d = dom.window.document;
   const badges = [...d.querySelectorAll('.community-ck-achievement')];
-  const expected = ['first_checkin', 'streak7', 'streak30', 'streak100', 'streak365', 'early'];
-  assert.deepEqual(badges.map(badge => badge.querySelector('svg.community-checkin-emblem')?.dataset.emblem), expected);
-  assert.equal(new Set(badges.map(badge => badge.querySelector('svg').innerHTML)).size, 6);
-  badges.forEach((badge, i) => {
-    assert.equal(badge.dataset.earned, String(i === 0 || i === 5));
-    assert.equal(badge.querySelector('.community-badge').classList.contains('is-off'), !(i === 0 || i === 5));
-    const svg = badge.querySelector('svg');
-    assert.equal(svg.getAttribute('viewBox'), '0 0 64 64');
-    assert.equal(svg.getAttribute('aria-hidden'), 'true', 'the existing badge name supplies the accessible label');
-    assert.equal(svg.getAttribute('focusable'), 'false');
-    assert.equal(svg.querySelector('image, use, foreignObject, script, a'), null);
-    assert.equal(svg.querySelector('[id]'), null, 'repeated emblems never create conflicting gradient IDs');
+  assert.deepEqual(badges.map(badge => badge.dataset.badgeFamily), ['attendance', 'early']);
+  assert.deepEqual([...d.querySelectorAll('[data-badge-legacy]')].map(badge => badge.dataset.badgeLegacy), ['first_checkin', 'early']);
+  badges.forEach(badge => {
+    assert.equal(badge.dataset.earned, 'false');
+    assert.equal(badge.querySelector('.community-badge').classList.contains('is-off'), true);
+    assert.equal(badge.querySelector('.community-badge-art').getAttribute('aria-hidden'), 'true');
+    assert.equal(badge.querySelector('svg.ui-icon, input, select'), null);
+    assert.match(badge.textContent, /状态暂未提供/);
     assert.ok(badge.querySelector('.community-badge').getAttribute('title'));
   });
   dom.window.close();

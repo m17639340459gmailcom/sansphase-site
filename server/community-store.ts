@@ -69,7 +69,7 @@ export function createCommunityStore(directory: string) {
   const tx = createTransaction(db);
   const ledger = createLedger(db);
   const convention = createCommunityConvention(db, tx);
-  const members = createMembers(db, convention);
+  const members = createMembers(db, convention, tx);
   const banners = createCommunityBanners(db, tx, members);
   const economy = createEconomy(db, tx, ledger, members);
   const requests = createCommunityRequests(db, tx);
@@ -133,19 +133,20 @@ export function createCommunityStore(directory: string) {
   const removeTopic = db.prepare('UPDATE community_topics SET deleted_at = ?, deleted_reason = ? WHERE id = ? AND deleted_at IS NULL');
   const removeReply = db.prepare('UPDATE community_replies SET deleted_at = ?, deleted_reason = ? WHERE id = ? AND deleted_at IS NULL');
   const setPinned = db.prepare('UPDATE community_topics SET pinned = ?, paid_pin_until = CASE WHEN ? = 0 THEN NULL ELSE paid_pin_until END WHERE id = ?');
-  const setFeatured = db.prepare('UPDATE community_topics SET featured = ?, featured_at = CASE WHEN ? = 1 THEN COALESCE(featured_at, ?) ELSE featured_at END WHERE id = ?');
+  const setFeatured = db.prepare('UPDATE community_topics SET featured = ?, featured_at = CASE WHEN ? = 1 THEN COALESCE(featured_at, ?) ELSE featured_at END, badge_featured_since=? WHERE id = ?');
   const setLocked = db.prepare('UPDATE community_topics SET locked = ? WHERE id = ?');
-  const setBoard = db.prepare('UPDATE community_topics SET board = ? WHERE id = ?');
+  const setBoard = db.prepare("UPDATE community_topics SET board = ?, badge_visible_since=CASE WHEN board='vip' OR ?='vip' THEN ? ELSE badge_visible_since END WHERE id = ?");
   const setAccepted = db.prepare('UPDATE community_topics SET accepted_reply_id = ?, accepted_at = ? WHERE id = ?');
   const approve = db.prepare('UPDATE community_topics SET pending = 0, pending_reason = NULL, created_at = ?, last_activity_at = ? WHERE id = ? AND pending = 1');
   const hideTopic = db.prepare('UPDATE community_topics SET hidden_at = ?, hidden_reason = ? WHERE id = ? AND hidden_at IS NULL');
-  const showTopic = db.prepare('UPDATE community_topics SET hidden_at = NULL, hidden_reason = NULL WHERE id = ?');
+  const showTopic = db.prepare('UPDATE community_topics SET badge_visible_since=CASE WHEN hidden_at IS NOT NULL THEN ? ELSE badge_visible_since END, hidden_at = NULL, hidden_reason = NULL WHERE id = ?');
   const hideReply = db.prepare('UPDATE community_replies SET hidden_at = ? WHERE id = ? AND hidden_at IS NULL');
-  const showReply = db.prepare('UPDATE community_replies SET hidden_at = NULL WHERE id = ?');
+  const showReply = db.prepare('UPDATE community_replies SET badge_visible_since=CASE WHEN hidden_at IS NOT NULL THEN ? ELSE badge_visible_since END, hidden_at = NULL WHERE id = ?');
   const replyAuthorsOf = db.prepare(`SELECT DISTINCT author_kind, author_id FROM community_replies WHERE topic_id = ? AND deleted_at IS NULL`);
   // Likes, bookmarks and views.
   const hasReaction = db.prepare('SELECT COUNT(*) AS count FROM community_reactions WHERE target_kind = ? AND target_id = ? AND member_kind = ? AND member_id = ?');
   const addReaction = db.prepare('INSERT OR IGNORE INTO community_reactions (target_kind, target_id, member_kind, member_id, created_at) VALUES (?, ?, ?, ?, ?)');
+  const rememberBadgeEvent = db.prepare('INSERT OR IGNORE INTO community_badge_events(kind,source_id,actor_key,first_at) VALUES(?,?,?,?)');
   const dropReaction = db.prepare('DELETE FROM community_reactions WHERE target_kind = ? AND target_id = ? AND member_kind = ? AND member_id = ?');
   const countReactions = db.prepare('SELECT COUNT(*) AS count FROM community_reactions WHERE target_kind = ? AND target_id = ?');
   const hasBookmark = db.prepare('SELECT COUNT(*) AS count FROM community_bookmarks WHERE topic_id = ? AND member_kind = ? AND member_id = ?');
@@ -460,6 +461,7 @@ export function createCommunityStore(directory: string) {
         const author = authorOf(row);
         if (same(author, member)) throw fail('不能给自己点赞。');
         if (on) {
+          rememberBadgeEvent.run('reaction', `${target.kind}:${target.id}`, `${member.kind}:${member.id}`, now);
           const added = Number(addReaction.run(target.kind, target.id, member.kind, member.id, now).changes) > 0;
           const topicId = target.kind === 'topic' ? target.id : (row as ReplyRow).topic_id;
           if (added) {
@@ -510,6 +512,7 @@ export function createCommunityStore(directory: string) {
         if (same(authorOf(topic), authorOf(reply))) throw fail('不能采纳自己的回答。');
         setAccepted.run(replyId, now, topic.id);
         const answerer = authorOf(reply);
+        rememberBadgeEvent.run('acceptance', topic.id, `${answerer.kind}:${answerer.id}`, now);
         const bounty = economy.payBounty(topic.id, answerer, now);
         const reward = ledger.reward(answerer, rules.acceptReward, 'accepted', { kind: 'reply', id: replyId }, now, rules.acceptDaily);
         notify(answerer, { type: 'accept', actor: authorOf(topic), topicId: topic.id, replyId, text: '采纳了你的回答', data: { amount: bounty + reward } }, now);
@@ -538,7 +541,7 @@ export function createCommunityStore(directory: string) {
       return tx(() => {
         const row = topicRow(id);
         if (!row || Boolean(row.featured) === on) return false;
-        setFeatured.run(on ? 1 : 0, on ? 1 : 0, now, id);
+        setFeatured.run(on ? 1 : 0, on ? 1 : 0, now, on ? now : null, id);
         const ref = { kind: 'topic', id: `featured:${id}` };
         const author = authorOf(row);
         if (on) {
@@ -554,7 +557,7 @@ export function createCommunityStore(directory: string) {
       const row = topicRow(id);
       if (!row) throw fail('帖子不存在，或已被删除。', 404);
       if (row.board === board) return false;
-      setBoard.run(board, id);
+      setBoard.run(board, board, now, id);
       notify(authorOf(row), { type: 'system', topicId: id, text: '你的帖子被移动到了其他版块', data: { moved: board } }, now);
       return true;
     },
@@ -562,7 +565,7 @@ export function createCommunityStore(directory: string) {
       return target.kind === 'topic' ? Number(hideTopic.run(now, reason, target.id).changes) > 0 : Number(hideReply.run(now, target.id).changes) > 0;
     },
     restore(target: Target, now = new Date().toISOString()) {
-      if (target.kind === 'topic') showTopic.run(target.id); else showReply.run(target.id);
+      if (target.kind === 'topic') showTopic.run(now, target.id); else showReply.run(now, target.id);
       for (const report of reportsOn.all(target.kind, target.id) as Array<{ id: string }>) closeReport.run('dismissed', now, report.id);
     },
     // The review queue: pending topics, and topics and replies hidden after reports.
@@ -625,7 +628,7 @@ export function createCommunityStore(directory: string) {
         const target = { kind: report.target_kind, id: report.target_id };
         if (!uphold) {
           closeReport.run('dismissed', now, id);
-          if (!countOf(openReportsFrom, target.kind, target.id, 0)) { if (target.kind === 'topic') showTopic.run(target.id); else showReply.run(target.id); }
+          if (!countOf(openReportsFrom, target.kind, target.id, 0)) { if (target.kind === 'topic') showTopic.run(now, target.id); else showReply.run(now, target.id); }
           return { removed: false };
         }
         const reporters = reportsOn.all(target.kind, target.id) as Array<{ id: string; reporter_kind: Kind; reporter_id: string }>;

@@ -357,7 +357,9 @@ test("签到 and 补签: streaks from the actual days, bonuses, early birds, bad
   for (let d = 1; d < 30; d++) rewards.push(store.economy.checkin(me, { now: start + d * 86400e3 }).reward);
   assert.deepEqual([rewards[6], rewards[13], rewards[27], rewards[29]], [1, 1, 1, 1]);
   assert.equal(store.ledger.balance(me), 30, "a streak spanning incomplete calendar months earns no monthly bonus");
-  assert.deepEqual(store.members.badges(me).sort(), ["early", "first_checkin", "streak30", "streak7"]);
+  assert.deepEqual(store.members.badges(me), [], "new grants do not fabricate legacy history");
+  const checkinHonors = store.members.badgeState(me, { now: start + 29 * 86400e3 });
+  assert.deepEqual(checkinHonors.families.slice(0, 2).map(item => item.tier), ["gold", "gold"]);
   assert.equal(store.economy.checkin(reader("v"), { vip: true, now: start }).reward, 1);
   assert.equal(store.economy.checkinsToday(start), 2);
   assert.deepEqual(store.economy.earlyBirds(start).map((bird) => bird.member.id), ["r1", "v"]);
@@ -558,7 +560,8 @@ test("resource votes, follows, sanctions, the review queue, hiding, locking and 
   assert.equal(store.approveTopic(pending.id).earned, 2);
   assert.throws(() => store.approveTopic(pending.id), /不在待审/);
   assert.equal(store.queue().topics.length, 0);
-  assert.deepEqual(store.members.badges(reader("new")), ["first_topic"]);
+  assert.deepEqual(store.members.badges(reader("new")), []);
+  assert.equal(store.members.badgeState(reader("new")).families.find(item => item.id === "writing").tier, "gold");
   const rejected = post(store, reader("new"), { title: "另一个待审帖子", pending: "初光等级，帖子带链接" });
   store.deleteTopic(rejected.id, { moderated: true });
   assert.equal(store.members.inbox(reader("new"))[0].data.state, "rejected");
@@ -610,7 +613,8 @@ test("notifications: replies, quotes, accepted answers, thanks and badges; unrea
   assert.equal(store.members.notice(asker, inbox[0].id), null, "someone else's notice is not found");
   assert.equal(store.members.readAll(helper), 3);
   assert.deepEqual(store.members.inbox(helper, "reply").map((notice) => notice.type), ["reply"]);
-  assert.deepEqual(store.members.badges(helper), ["accepted1"]);
+  assert.deepEqual(store.members.badges(helper), []);
+  assert.equal(store.members.badgeState(helper).families.find(item => item.id === "answers").tier, "gold");
   store.members.notify(helper, { type: "system", actor: helper, text: "自己" });
   assert.equal(store.members.unread(helper).all, 0, "nobody is told about their own actions");
 });

@@ -19,6 +19,7 @@ import { autosizeCommunityTextarea } from './community-editor-size.mjs';
 import { createCommunityBannerController } from './community-banner-controller.mjs';
 import { createCommunityConventionConsent } from './community-convention-consent.mjs';
 import { createCommunityLevelExplorer } from './community-level-explorer.mjs';
+import { createCommunityBadgeExplorer } from './community-badge-explorer.mjs';
 import type { CommunityConvention } from './community-convention.ts';
 import { createCommunityWriteRequest } from './community-write-request.mjs';
 import { communityFrameBannersHTML } from './community-frame-banners.mjs';
@@ -114,6 +115,11 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     common: () => mounted?.ctx || null,
   });
   const memberPages = new Map<string, CommunityLoad<CommunityMember>>();
+  const badgeExplorer = createCommunityBadgeExplorer({
+    root: () => route().view === 'member' && route().tab === 'badges' ? mounted?.main.querySelector<HTMLElement>('[data-badge-explorer]') || null : null,
+    data: () => { const current = route(); return readyData(memberPages.get(memberKey(current.id, current.tab)))?.badgeState || null; },
+    common: () => mounted?.ctx || null,
+  });
   const inboxes = new Map<string, CommunityLoad<CommunityInbox>>();
   const manages = new Map<string, CommunityLoad<CommunityManage>>();
   const manageRequests = new Map<string, number>();
@@ -444,7 +450,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       case 'checkin': return communityCheckinHTML({ ...common, checkin: checkin || loading });
       case 'bookmarks': return communityBookmarksHTML({ ...common, list: bookmarks || loading });
       case 'manage': return communityManageHTML({ ...common, manage: manages.get(['contact', 'convention'].includes(current.tab) ? 'queue' : current.tab) || loading, tab: current.tab, itemEditing, shippingOrder, rejecting, deleting, me: viewer, selectedReviews: [...reviewSelection], managementBoard, stewardCandidate, stewardEditingUid, bannerEditor: bannerEditor.state(), convention });
-      case 'member': return communityMemberHTML({ ...common, member: memberPages.get(memberKey(current.id, current.tab)) || loading, me: viewer, muting });
+      case 'member': return communityMemberHTML({ ...common, member: memberPages.get(memberKey(current.id, current.tab)) || loading, me: viewer, muting, badgeSelection: badgeExplorer.state() });
       case 'stardust': return communityStardustHTML({ ...common, stardust: stardusts.get(flow) || loading, tab: current.tab, levelSelection: levelExplorer.state() });
       case 'inbox': return communityInboxHTML({ ...common, inbox: inboxes.get(current.tab) || loading, tab: current.tab, me: viewer });
       case 'shop': return current.tab === 'mine'
@@ -1404,11 +1410,12 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (switchingBrowseMode) { notify(tr('正在切换浏览身份，请稍候。', 'Switching browsing perspective; please wait.')); return; }
     const { action, id = '', kind } = target.dataset;
     if (route().view === 'manage' && ['community-ship', 'community-reject', 'community-queue-delete', 'community-batch-reject', 'community-uphold'].includes(action || '')) managementOpener = { action: action!, id };
-    if (readyData(me)?.management?.browsingAsReader && !['community-browse-mode', 'community-sort', 'community-more', 'community-search-clear', 'community-retry', 'community-reply-sort', 'community-lightbox', 'community-delivery', 'community-month', 'community-level-mode', 'community-level-select', 'community-level-step'].includes(action || '')) {
+    if (readyData(me)?.management?.browsingAsReader && !['community-browse-mode', 'community-sort', 'community-more', 'community-search-clear', 'community-retry', 'community-reply-sort', 'community-lightbox', 'community-delivery', 'community-month', 'community-level-mode', 'community-level-select', 'community-badge-family', 'community-badge-tier'].includes(action || '')) {
       notify(tr('当前预览仅供查看，请先返回管理身份。', 'This preview is read-only. Restore management first.')); return;
     }
     if (bannerEditor.action(target)) return;
     if (levelExplorer.action(target)) return;
+    if (badgeExplorer.action(target)) return;
     switch (action) {
       case 'community-management-board': {
         if (reviewBusy || route().view !== 'manage' || !['queue', 'reports'].includes(route().tab)) return;
@@ -1982,6 +1989,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     managementBoard = ''; stewardCandidate = null; stewardLookupUid = ''; stewardLookupRequest++; stewardBusy = false; stewardEditingUid = null; stewardScopeDraft = null;
     checkinRequest++; stardustRequest++;
     levelExplorer.reset();
+    badgeExplorer.reset();
     frameIdentity++; frameHighlightsPending.clear(); frameHighlights.clear(); listRequests.clear();
     summary = null; me = null; moderationContacts = null; checkin = null; bookmarks = null; shop = null; shopMine = null; rank = null; headerKey = '';
     stardusts.clear(); memberPages.clear(); inboxes.clear(); manages.clear(); manageRequests.clear(); lists.clear(); threads.clear(); lastHash = '';

@@ -92,7 +92,7 @@ test('account menu and member profile show the same growth while keeping role, t
   } finally { profile.window.close(); }
 });
 
-test('levels show one approved icon and arrow controls without a bottom grade strip', () => {
+test('levels show one selected icon with artwork choices instead of the old arrow controls', () => {
   const dom = documentOf(communityStardustHTML({ ...common, stardust: { state: 'ready', data: stardust }, tab: 'levels' }));
   try {
     const doc = dom.window.document, panel = doc.querySelector('[data-level-explorer]');
@@ -100,7 +100,8 @@ test('levels show one approved icon and arrow controls without a bottom grade st
     assert.equal(panel.querySelectorAll('[data-level-preview]').length, 1);
     assert.equal(panel.querySelector('[data-level-preview] h2')?.textContent, '星芽');
     assert.equal(panel.querySelectorAll('.community-level-scale, [role="tablist"]').length, 0);
-    assert.equal(panel.querySelectorAll('[data-step]').length, 2);
+    assert.equal(panel.querySelectorAll('[data-step]').length, 0);
+    assert.equal(panel.querySelectorAll('[data-level-gallery] [data-level]').length, 10);
     assert.match(panel.querySelector('[data-level-detail]')!.textContent!, /成长等级/);
     assert.equal(panel.querySelector('.community-level-threshold, .community-level-earn'), null);
     assert.match(panel.textContent!, /待启用/);
@@ -116,7 +117,8 @@ test('owners can see the ten titles without receiving a personal growth level', 
     const panel = dom.window.document.querySelector('[data-level-explorer]');
     assert.ok(panel);
     assert.equal(panel.querySelectorAll('[role="tab"]').length, 0);
-    assert.equal(panel.querySelectorAll('[data-step]').length, 2);
+    assert.equal(panel.querySelectorAll('[data-step]').length, 0);
+    assert.equal(panel.querySelectorAll('[data-level-gallery] [data-level]').length, 10);
     assert.equal(panel.querySelector('[data-personal-level]'), null);
     assert.match(panel.textContent!, /作者不参与成长等级/);
   } finally { dom.window.close(); }

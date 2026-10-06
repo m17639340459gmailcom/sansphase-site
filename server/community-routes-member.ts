@@ -54,6 +54,7 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
         unread: members.unread(me), agreed: members.agreed(me), inventory: economy.inventory(me),
         muted: muted ? { until: muted.until, reason: muted.reason } : null,
         manageTodo: ctx.mod ? queue.topics.length + queue.replies.length + reports + orders : 0,
+        badgeState: members.badgeState(me, { joinedAt: map.get(memberKey(me))?.joinedAt }),
       });
       return true;
     }
@@ -67,7 +68,7 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
         checkedIn, streak, balance: ledger.balance(me), gainedToday: ledger.gainedToday(me), behaviourToday: ledger.behaviourToday(me), vip: viewer.vip, owner: ctx.actualOwner, browsingAsReader: ctx.browsingAsReader, uid: ctx.person(me, map).uid,
         month, days: economy.checkinDays(me, `${month}-01`, `${month}-31`), monthBonus: economy.monthBonus(me, month), checkinsToday: economy.checkinsToday(),
         earlyBirds: early.map(bird => ({ person: ctx.person(bird.member, map), at: bird.at })),
-        makeup: economy.makeupState(me, { vip: viewer.vip }), badges: members.badges(me),
+        makeup: economy.makeupState(me, { vip: viewer.vip }), badges: members.badges(me), badgeState: members.badgeState(me, { joinedAt: map.get(memberKey(me))?.joinedAt }),
       });
       return true;
     }
@@ -145,6 +146,7 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
         person: ctx.person(member, map), bio: info.bio, joinedAt: member.kind === 'owner' ? null : info.joinedAt || members.joinedAt(member),
         cover: members.decorations(member).cover, streak: economy.currentStreak(member), stats: { ...stats, topics: topics.length, replies: replies.length },
         follows: members.followCounts(member), following: !self && members.following(me, member), self, badges: members.badges(member),
+        badgeState: members.badgeState(member, { joinedAt: info.joinedAt }),
         muted: (self || ctx.mod) && muted ? { id: muted.id, until: muted.until, reason: muted.reason } : null,
         canMute: ctx.mod && !self && member.kind === 'reader', canAppoint: ctx.owner && member.kind === 'reader', steward: members.steward(member),
         reasons: ctx.mod ? communityReportReasons : undefined,

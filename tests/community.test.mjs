@@ -621,9 +621,11 @@ test("the check-in page: constellation, calendar with make-up days, early birds 
   assert.match(html, /每次 30 星尘，本月还剩 2 次/);
   assert.match(html, /data-month="2026-10"[^>]*disabled/, "no future months");
   assert.match(html, /今日早鸟[\s\S]*林间[\s\S]*00:05/);
-  assert.equal(count(html, /class="community-badge is-/g), 6);
-  assert.match(html, /class="community-badge is-bronze is-md" title="第一次签到/);
-  assert.match(html, /class="community-badge is-bronze is-md is-off" title="连签 7 天/);
+  assert.equal(count(html, /class="community-badge is-/g), 2);
+  assert.match(html, /data-badge-family="attendance" data-earned="false"/);
+  assert.match(html, /data-badge-family="early" data-earned="false"/);
+  assert.match(html, /data-badge-legacy="first_checkin"/);
+  assert.match(html, /状态暂未提供/);
   assert.doesNotMatch(html, /community-table/, "the ledger lives in 我的星尘");
   const noLeft = communityCheckinHTML({ checkin: ready({ ...data, makeup: { ...data.makeup, left: 0 } }), ...common });
   assert.doesNotMatch(noLeft, /is-makeup/);
@@ -665,7 +667,8 @@ test("the 星尘 center: the ledger, levels and the rules", () => {
   assert.match(ledger, /兑换 · &lt;金环头像框&gt;[\s\S]*−80/);
   const levels = communityStardustHTML({ stardust: ready(stardust()), tab: "levels", ...common });
   assert.match(levels, /data-level-explorer data-mode="growth"/);
-  assert.equal(count(levels, /data-action="community-level-step"/g), 2);
+  assert.equal(count(levels, /data-action="community-level-step"/g), 0);
+  assert.equal(count(levels, /data-action="community-level-select"/g), 10);
   assert.equal(count(levels, /data-level-detail/g), 1);
   assert.doesNotMatch(levels, /community-ladder|community-rung|community-lv-rings/);
   const trust = (entry = stardust(), level = 2) => communityStardustHTML({ stardust: ready(entry), tab: "levels", levelSelection: { mode: "trust", growth: null, trust: level }, ...common });
@@ -797,8 +800,9 @@ test("member pages: the hero, follows, moderation, quick links for yourself, and
   assert.match(self, /还没有收藏/);
   assert.doesNotMatch(self, /community-follow/, "no following yourself");
   const badges = communityMemberHTML({ member: ready(memberPage({ tab: "badges" })), me: me(), ...common });
-  assert.equal(count(badges, /class="community-bw-item/g), 12);
-  assert.match(badges, /class="community-bw-item"><span class="community-badge is-bronze is-lg"[\s\S]*<b>第一帖<\/b>/);
+  assert.equal(count(badges, /class="community-bw-item/g), 6);
+  assert.match(badges, /data-badge-legacy="first_topic"[\s\S]*<b>第一帖<\/b>/);
+  assert.match(badges, /历史徽章[\s\S]*状态暂未提供|状态暂未提供[\s\S]*历史徽章/);
   const replies = communityMemberHTML({ member: ready(memberPage({ tab: "replies", replies: [{ id: "r1", topicId: "t1", topicTitle: "<主题>", board: "qa", body: "**好**", createdAt: "2026-09-30T11:00:00Z", likes: 2 }] })), me: me(), ...common });
   assert.match(replies, /<a class="community-rep-ref" href="#\/post\/t1">&lt;主题&gt;<\/a><div class="community-text is-small"><p><strong>好<\/strong><\/p><\/div><span class="community-muted">1 小时前 · 2 赞<\/span>/);
   assert.match(communityMemberHTML({ member: { state: "error", status: 404, message: "找不到这个成员。" }, ...common }), /data-content-state="missing"[\s\S]*找不到这个成员/);

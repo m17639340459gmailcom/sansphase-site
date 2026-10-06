@@ -1,4 +1,28 @@
 import { communityCheckinBadges } from './community-rules.mjs';
+import { communityBadgeFamilies, communityBadgeTiers, legacyBadgeFamily } from './community-badge-policy.mjs';
+import type { BadgeFamilyId, BadgeTier } from './community-badge-policy.ts';
+
+// The approved atlas is 1536 × 1024. Its drawings are optically centred rather
+// than equal tile crops; keep the reviewed 248 × 300 windows unchanged.
+const columnCenters = [143, 398, 643, 885, 1150, 1405] as const;
+const rowStarts = [50, 370, 683] as const;
+export function communityBadgeAtlasPosition(column: number, tier: BadgeTier) {
+  const row = communityBadgeTiers.indexOf(tier);
+  if (!Number.isInteger(column) || column < 0 || column >= columnCenters.length || row < 0) throw new RangeError('Invalid badge atlas coordinate');
+  return { x: `${(columnCenters[column] - 124) / (1536 - 248) * 100}%`, y: `${rowStarts[row] / (1024 - 300) * 100}%` };
+}
+export function communityBadgeArtHTML(id: BadgeFamilyId, tier: BadgeTier, earned = true): string {
+  const family = communityBadgeFamilies.find(item => item.id === id);
+  if (!family) return '';
+  const position = communityBadgeAtlasPosition(family.column, tier);
+  return `<span class="community-badge-art" data-badge-art="${family.id}" data-finish="${earned ? tier : 'locked'}" style="--atlas-x:${position.x};--atlas-y:${position.y}" aria-hidden="true"></span>`;
+}
+// Historical emblems reuse the family drawing in gold without acquiring a new
+// material or animation. The surrounding legacy label retains the old award.
+export function legacyBadgeArtHTML(id: string, earned = true): string {
+  const family = legacyBadgeFamily(id);
+  return family ? communityBadgeArtHTML(family, 'gold', earned) : '';
+}
 
 type CheckinBadge = (typeof communityCheckinBadges)[number];
 
