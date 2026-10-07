@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { communityApprovedAvatarURL } from './community-avatar-url.ts';
+import { communityApprovedAvatarURL, isApprovedAvatarVersion } from './community-avatar-url.ts';
+import { LRUCache } from 'lru-cache';
 import { appendFile, lstat, readFile, realpath, unlink } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, resolve, sep } from 'node:path';
@@ -113,11 +114,16 @@ export function createCommunityHostRuntime(config: CommunityHostConfig, client: 
     }
     return { removed, retained };
   })().finally(() => { queueRun = null; });
+  let avatarVisibilityRevision = 0;
   const purge = async (readerId: string) => {
     // This is called only by the HMAC-authenticated notification surface.
     // Commit a durable tombstone before SQL/file cleanup: already-running
     // identity/profile responses cannot recreate this reader during retries.
     hostStore.markReaderDeleted(readerId);
+    // A response may already be in transit while another member is purged.
+    // Retire byte retention and in-flight confirmations without adding a
+    // cross-region UID lookup or treating an older approval as current.
+    avatarVisibilityRevision++; avatarCache.clear();
     const result = store.purgeReaderData(readerId, (filename, reason) => hostStore.queueFile(filename, reason));
     const files = await drainFileQueue();
     if (files.retained) throw failure('Community image cleanup is queued for retry.');
@@ -142,6 +148,12 @@ export function createCommunityHostRuntime(config: CommunityHostConfig, client: 
     return personal;
   };
   const memberAlive = (member: CommunityAuthor) => member.kind !== 'reader' || !hostStore.readerDeleted(member.id);
+  // Byte retention is bounded separately from authorization. Every hit still
+  // makes a fresh avatar authority request; no TTL or stale-error fallback can
+  // keep a revoked approval visible. UID also separates brand/personal assets.
+  const avatarCache = new LRUCache<string, { uid: string; version: string; bytes: Buffer }>({
+    max: 64, maxSize: 8 * 1024 * 1024, sizeCalculation: image => image.bytes.length,
+  });
   const request = async <T>(operation: IdentityOperation, input: Record<string, unknown>): Promise<T> => {
     const sessionRef = current().session.sessionRef;
     const selfProfile = ['profile', 'profile-signature', 'profile-nickname', 'profile-avatar', 'profile-avatar-remove', 'profile-avatar-pending'].includes(operation);
@@ -216,10 +228,30 @@ export function createCommunityHostRuntime(config: CommunityHostConfig, client: 
     },
     findByNames: async names => new Map((await request<Array<[string, CommunityAuthor]>>('names', { names })).filter(([, member]) => memberAlive(member))),
     avatarBytes: async (uid: string) => {
-      const image = await request<{ base64: string } | null>('avatar', { uid });
-      if (!image) return null;
-      if (typeof image.base64 !== 'string' || image.base64.length > 2 * 1024 * 1024 || !/^[A-Za-z0-9+/]*={0,2}$/.test(image.base64)) throw failure('Approved avatar data is invalid.');
-      return Buffer.from(image.base64, 'base64');
+      const visibilityRevision = avatarVisibilityRevision;
+      const cached = avatarCache.find(image => image.uid === uid);
+      const cachedKey = cached ? `${uid}:${cached.version}` : null;
+      try {
+        const image = await request<unknown>('avatar', { uid, knownVersion: cached?.version ?? null });
+        if (visibilityRevision !== avatarVisibilityRevision) return null;
+        if (image === null) { if (cachedKey) avatarCache.delete(cachedKey); return null; }
+        if (!image || typeof image !== 'object' || Array.isArray(image)) throw failure('Approved avatar data is invalid.');
+        const keys = Object.keys(image);
+        const version = 'version' in image ? image.version : null;
+        if (version !== null && !isApprovedAvatarVersion(version) || keys.some(key => !['version', 'base64', 'unchanged'].includes(key))) throw failure('Approved avatar data is invalid.');
+        if ('unchanged' in image) {
+          if (image.unchanged !== true || keys.length !== 2 || !cached || version !== cached.version) throw failure('Approved avatar confirmation is invalid.');
+          return cached.bytes;
+        }
+        if (!('base64' in image) || typeof image.base64 !== 'string' || !image.base64 || image.base64.length > 2 * 1024 * 1024 || !/^[A-Za-z0-9+/]+={0,2}$/.test(image.base64)) throw failure('Approved avatar data is invalid.');
+        const bytes = Buffer.from(image.base64, 'base64');
+        if (bytes.length > 1_500_000 || bytes.toString('base64') !== image.base64 || keys.length !== (version === null ? 1 : 2)) throw failure('Approved avatar data is invalid.');
+        if (cachedKey) avatarCache.delete(cachedKey);
+        // Legacy unversioned replies are still freshly authorized full reads,
+        // but cannot establish a UUID binding and are deliberately not retained.
+        if (version !== null) avatarCache.set(`${uid}:${version}`, { uid, version, bytes });
+        return bytes;
+      } catch (error) { if (cachedKey) avatarCache.delete(cachedKey); throw error; }
     },
     words: words(directory),
     audit: async (action, details) => { await appendFile(resolve(directory, 'community-admin-audit.jsonl'), JSON.stringify({ action, ...details, at: new Date().toISOString() }) + '\n', { mode: 0o600 }); },
@@ -242,7 +274,7 @@ export function createCommunityHostRuntime(config: CommunityHostConfig, client: 
     },
     async close() {
       if (closed) return;
-      closed = true; clearInterval(retryTimer);
+      closed = true; clearInterval(retryTimer); avatarCache.clear();
       if (queueRun) await queueRun;
       store.close(); hostStore.close(); contentDb.close();
     },

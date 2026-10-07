@@ -197,7 +197,8 @@ export function createCommunityService(options: ServiceOptions) {
 
   // Call only after the current request and image visibility were checked.
   // Browsers may retain bytes, but every reuse returns through those same checks.
-  function sendImage(ctx: Ctx, data: Buffer) {
+  function sendImage(ctx: Ctx, data: Buffer, cacheable = true) {
+    if (!cacheable) { ctx.res.writeHead(200, { 'Content-Type':'image/webp', 'Content-Length':data.length, 'Cache-Control':'private, no-store', Vary:'Cookie', 'X-Content-Type-Options':'nosniff' }); ctx.res.end(data); return; }
     const etag = `"${createHash('sha256').update(data).digest('hex')}"`;
     const headers = { 'Content-Type': 'image/webp', 'Cache-Control': 'private, no-cache', Vary: 'Cookie', ETag: etag, 'X-Content-Type-Options': 'nosniff' };
     const validator = ctx.req.headers['if-none-match'];
@@ -227,7 +228,15 @@ export function createCommunityService(options: ServiceOptions) {
     try { data = await readFile(resolve(uploads, `community-${thumb ? 'thumb' : 'image'}-${id}.webp`)); } catch { throw fail('图片不存在。', 404); }
     await ctx.refreshStaff();
     if (!allowed()) throw fail('图片不存在。', 404);
-    sendImage(ctx, data);
+    // A reviewer can see pending/withdrawn content without making it approved.
+    // Re-evaluate publication state after the asynchronous authority check.
+    const image=ctx.live.image(id);
+    const topic=image?.topic_id ? ctx.live.topic(image.topic_id) : null;
+    const reply=image?.reply_id ? ctx.live.reply(image.reply_id) : null;
+    const cacheable=image?.purpose==='profile' ? ctx.live.profileBackgrounds.imageApproved(id)
+      : image?.topic_id ? Boolean(topic&&!topic.pending&&!topic.hidden&&(!image.reply_id||reply&&!reply.hidden))
+      : image?.purpose==='shop'||image?.purpose==='banner';
+    sendImage(ctx, data, cacheable);
   }
   // Approved avatars are shown to other signed-in members; pending ones stay private.
   async function serveAvatar(ctx: Ctx, uid: string) {

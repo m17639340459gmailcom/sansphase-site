@@ -52,6 +52,7 @@ export function createCommunityProfileBackgrounds(db: DatabaseSync, tx: Transact
   };
   return {
     state,
+    imageApproved(imageId: string) { return Boolean(imageDTO(imageId)) && (referenced.all(imageId,imageId) as BackgroundRow[]).some(row=>row.approved_image===imageId); },
     advice(imageId: string) { return (adviceRows.all(imageId) as AdviceRow[]).map(row => ({ id:row.id,decision:row.decision,reason:row.reason,by:{kind:row.by_kind,id:row.by_id},createdAt:row.created_at })); },
     submit(member: CommunityAuthor, imageId: string, now = new Date().toISOString()) {
       return tx(() => {

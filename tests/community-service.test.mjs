@@ -167,18 +167,43 @@ test('community image validators preserve attachment ownership, variant bytes an
   const image = await json(upload(await png()));
   const path = `images/${image.id}.webp`;
   const first = await get(path); const etag = first.headers.get('etag');
-  assert.equal(first.status, 200); assert.equal(first.headers.get('cache-control'), 'private, no-cache');
-  assert.equal(first.headers.get('vary'), 'Cookie'); assert.ok(etag); await first.arrayBuffer();
-  assert.equal((await get(path, 'reader=r1', { 'If-None-Match': etag })).status, 304);
-  let denied = await get(path, 'reader=r2', { 'If-None-Match': etag });
+  assert.equal(first.status, 200); assert.equal(first.headers.get('cache-control'), 'private, no-store');
+  assert.equal(etag, null); await first.arrayBuffer();
+  assert.equal((await get(path, 'reader=r1', { 'If-None-Match': '*' })).status, 200);
+  let denied = await get(path, 'reader=r2', { 'If-None-Match': '*' });
   assert.equal(denied.status, 404); assert.equal(denied.headers.get('etag'), null); assert.equal(denied.headers.get('cache-control'), 'private, no-store');
   const topic = store.createTopic({ ...topicBody, author: { kind: 'reader', id: 'r1' }, images: [image.id] });
-  assert.equal((await get(path, 'reader=r2', { 'If-None-Match': etag })).status, 304);
-  const thumb = await get(`images/${image.id}.thumb.webp`, 'reader=r2', { 'If-None-Match': etag });
-  assert.equal(thumb.status, 200); assert.notEqual(thumb.headers.get('etag'), etag);
+  const published = await get(path, 'reader=r2'); const approvedTag=published.headers.get('etag');
+  assert.ok(approvedTag); assert.equal(published.headers.get('cache-control'), 'private, no-cache'); await published.arrayBuffer();
+  assert.equal((await get(path, 'reader=r2', { 'If-None-Match': approvedTag })).status, 304);
+  const thumb = await get(`images/${image.id}.thumb.webp`, 'reader=r2', { 'If-None-Match': approvedTag });
+  assert.equal(thumb.status, 200); assert.notEqual(thumb.headers.get('etag'), approvedTag);
   store.hide({ kind: 'topic', id: topic.id }, '隐藏后必须重新授权图片');
+  const reviewOnly=await get(path,'owner=yes',{'If-None-Match':approvedTag});
+  assert.equal(reviewOnly.status,200);assert.equal(reviewOnly.headers.get('cache-control'),'private, no-store');assert.equal(reviewOnly.headers.get('etag'),null);await reviewOnly.arrayBuffer();
   denied = await get(path, 'reader=r2', { 'If-None-Match': '*' });
   assert.equal(denied.status, 404); assert.equal(denied.headers.get('etag'), null); assert.equal(denied.headers.get('cache-control'), 'private, no-store');
+});
+
+test('pending topic and background images never cache or return 304 to uploaders or reviewers', async t => {
+  const {get,upload,store,directory}=await setup(t),author={kind:'reader',id:'r1'};
+  const image=await json(upload(await png()));
+  const topic=store.createTopic({...topicBody,author,images:[image.id],pending:'待审'});
+  const background='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  store.addImage({id:background,uploader:author,width:64,height:64,purpose:'profile'});
+  await writeFile(resolve(directory,'uploads',`community-image-${background}.webp`),await png());
+  await writeFile(resolve(directory,'uploads',`community-thumb-${background}.webp`),await png());
+  store.profileBackgrounds.submit(author,background);
+  for(const id of [image.id,background])for(const cookie of ['reader=r1','owner=yes'])for(const suffix of ['.webp','.thumb.webp']) {
+    const response=await get(`images/${id}${suffix}`,cookie,{'If-None-Match':'*'});
+    assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'private, no-store');assert.equal(response.headers.get('etag'),null);await response.arrayBuffer();
+  }
+  store.approveTopic(topic.id);store.profileBackgrounds.review(author,background,true,{kind:'owner',id:'owner'},'');
+  for(const id of [image.id,background]) {
+    const response=await get(`images/${id}.webp`,'reader=r2');const tag=response.headers.get('etag');
+    assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'private, no-cache');assert.ok(tag);await response.arrayBuffer();
+    assert.equal((await get(`images/${id}.webp`,'reader=r2',{'If-None-Match':tag})).status,304);
+  }
 });
 
 test('matching image validator cannot skip the final visibility check after file reading', async t => {
@@ -679,7 +704,7 @@ test('economic actions share durable action throttling while completed request r
 test('private image and approved avatar responses require current permission rather than reuse a previous identity cache', async t => {
   const { post, get, upload } = await setup(t);
   const image = await json(upload(await png()));
-  assert.equal((await get(`images/${image.id}.webp`)).headers.get('cache-control'), 'private, no-cache');
+  assert.equal((await get(`images/${image.id}.webp`)).headers.get('cache-control'), 'private, no-store');
   const topic = await json(post('topics', { ...topicBody, images: [image.id] }));
   assert.ok(topic.id);
   for (const suffix of ['.webp', '.thumb.webp']) {

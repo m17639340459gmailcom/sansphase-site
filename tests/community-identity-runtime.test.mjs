@@ -145,8 +145,11 @@ test('real main runtime optionally constructs the authority and keeps a migrated
         assert.equal(people[0][1].avatar,media.id); assert.equal(people[0][1].uid,'owner');
         const image=await client.request('avatar',{sessionRef,uid:'owner'}),metadata=await sharp(Buffer.from(image.base64,'base64')).metadata();
         assert.equal(metadata.format,'webp');assert.equal(metadata.width,320);assert.equal(metadata.height,320);
+        assert.deepEqual(await client.request('avatar',{sessionRef,uid:'owner',knownVersion:null}),{version:media.id,base64:image.base64},'formal main runtime binds its normalized brand bytes to the published UUID');
+        assert.deepEqual(await client.request('avatar',{sessionRef,uid:'owner',knownVersion:media.id}),{version:media.id,unchanged:true},'formal runtime exposes conditional approval through the existing avatar operation');
         await runtime.payload.update({collection:'site_profile',id:profile.id,data:{avatar:null}});
         assert.equal(await client.request('avatar',{sessionRef,uid:'owner'}),null,'removed brand avatar is not retained as a stale copy');
+        assert.equal(await client.request('avatar',{sessionRef,uid:'owner',knownVersion:media.id}),null,'conditional approval cannot survive removal in the actual main database');
       } finally {await new Promise(done=>server.close(done));}
       console.log(JSON.stringify({enabled:runtime.communityEnabled,destination:runtime.communityDestination,authority:!!runtime.identityAuthority,strict:typeof runtime.readerService.identityStrict,strictOwner:typeof runtime.authorService.identityStrict}));
     } finally {await runtime.close();}

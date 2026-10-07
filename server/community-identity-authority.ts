@@ -5,7 +5,8 @@ import { clientAddress } from './client-ip.ts';
 import { createIdentityStore } from './community-identity-store.ts';
 import type { IdentitySourceSession } from './community-identity-store.ts';
 import { IdentityBridgeError, identityBridgePath, identityHandoffCookie, identityPeerOrigin, identityRequestBytes, identityAvatarRequestBytes, verifyIdentityRequest } from './community-identity-protocol.ts';
-import type { IdentityDTO } from './community-identity-protocol.ts';
+import type { IdentityDTO, ApprovedAvatarRead } from './community-identity-protocol.ts';
+import { isApprovedAvatarVersion } from './community-avatar-url.ts';
 import { normalizeReaderAvatar, readerProfileAvatarBytes } from './reader-profile-commands.ts';
 import type { ReaderProfileCommands } from './reader-profile-commands.ts';
 import type { ProfileKind } from './reader-workflow.ts';
@@ -25,6 +26,7 @@ export type IdentityAuthorityOptions = {
   findMember: (uid: string) => Promise<CommunityAuthor | null>;
   findByNames: (names: string[]) => Promise<Map<string, CommunityAuthor>>;
   avatar: (uid: string) => Promise<Buffer | null>;
+  approvedAvatar?: (uid: string, knownVersion: string | null) => Promise<ApprovedAvatarRead | null>;
   purgeRemote?: (readerId: string) => Promise<unknown>;
   profiles?: ReaderProfileCommands;
   profileReviewer?: CommunityProfileReviewerCheck;
@@ -188,9 +190,28 @@ export function createIdentityAuthority(options: IdentityAuthorityOptions) {
         if (value.operation === 'member' || value.operation === 'avatar') {
           if (typeof input.uid !== 'string' || !/^[0-9a-z]{1,15}$/.test(input.uid)) throw invalidInput();
           if (value.operation === 'member') { const member = await options.findMember(input.uid); send(res, member ? memberValue(member) : null); return; }
+          const versioned = Object.hasOwn(input, 'knownVersion');
+          if (versioned && input.knownVersion !== null && !isApprovedAvatarVersion(input.knownVersion)) throw invalidInput();
+          const check = async () => {
+            const current = await validateSession(req, input);
+            if (current.viewer.kind !== dto.viewer.kind || current.viewer.id !== dto.viewer.id) throw invalidSession();
+          };
+          if (versioned && options.approvedAvatar) {
+            const avatar = await options.approvedAvatar(input.uid, input.knownVersion as string | null);
+            await check();
+            if (!avatar) { send(res, null); return; }
+            if (!isApprovedAvatarVersion(avatar.version)) throw new IdentityBridgeError('头像服务暂不可用。');
+            if ('unchanged' in avatar) {
+              if (avatar.unchanged !== true || avatar.version !== input.knownVersion) throw new IdentityBridgeError('头像服务暂不可用。');
+              send(res, { version: avatar.version, unchanged: true }); return;
+            }
+            if (!Buffer.isBuffer(avatar.bytes) || !avatar.bytes.length || avatar.bytes.length > 1_500_000) throw new IdentityBridgeError('头像服务暂不可用。');
+            send(res, { version: avatar.version, base64: avatar.bytes.toString('base64') }); return;
+          }
+          // Older local adapters and peers still return full bytes. They never
+          // claim a version confirmation that a new HK host could cache.
           const avatar = await options.avatar(input.uid);
-          const current = await validateSession(req, input);
-          if (current.viewer.kind !== dto.viewer.kind || current.viewer.id !== dto.viewer.id) throw invalidSession();
+          await check();
           if (avatar && avatar.length > 1_500_000) throw new IdentityBridgeError('头像服务暂不可用。');
           send(res, avatar ? { base64: avatar.toString('base64') } : null); return;
         }

@@ -1,6 +1,6 @@
 import type { IncomingMessage } from 'node:http';
 import { readFileSync } from 'node:fs';
-import { appendFile, readFile } from 'node:fs/promises';
+import { appendFile, lstat, readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { Payload, Where } from 'payload';
@@ -10,6 +10,7 @@ import { createCommunityService } from './community-service.ts';
 import type { CommunityViewer, PersonInfo } from './community-service.ts';
 import type { CommunityProfileAccess } from './community-profile-access.ts';
 import { membershipState } from './reader-membership.ts';
+import type { ApprovedAvatarRead } from './community-identity-protocol.ts';
 
 type ReaderIdentity = { id: string; nickname: string; vip?: boolean } | null;
 type ReaderRow = { id: string | number; nickname?: string; avatar?: string | null; signature?: string | null; createdAt?: string; vip_until?: string | null; disabled?: boolean; _verified?: boolean };
@@ -79,25 +80,41 @@ export function createCommunityDirectory({ payload, directory, ownerName, ownerA
     if (names.includes(name)) map.set(name, owner);
     return map;
   };
-  const avatarFile = async (uid: string) => {
+  const readerAvatar = async (uid: string) => {
     const id = uidStore.readerId(uid);
     if (!id) return null;
     const [row] = await readers({ id: { equals: id } }, 1);
-    return row && uuid.test(row.avatar || '') && !row.disabled ? resolve(directory, 'uploads', `reader-avatar-${row.avatar}.webp`) : null;
+    return row && uuid.test(row.avatar || '') && !row.disabled
+      ? { version: row.avatar!, file: resolve(directory, 'uploads', `reader-avatar-${row.avatar}.webp`) } : null;
   };
-  const avatar = async (uid: string) => {
+  const avatarFile = async (uid: string) => (await readerAvatar(uid))?.file ?? null;
+  const approvedAvatar = async (uid: string, knownVersion: string | null): Promise<ApprovedAvatarRead | null> => {
     if (uid === 'owner') {
       const id = await ownerAvatar?.current();
       if (!id || !uuid.test(id) || !ownerAvatar) return null;
+      if (knownVersion === id) return await ownerAvatar.current() === id ? { version: id, unchanged: true } : null;
       const bytes = await ownerAvatar.read(id);
-      return await ownerAvatar.current() === id ? bytes : null;
+      return await ownerAvatar.current() === id && bytes ? { version: id, bytes } : null;
     }
-    const file = await avatarFile(uid);
-    if (!file) return null;
-    try { const bytes = await readFile(file); return await avatarFile(uid) === file ? bytes : null; }
+    const approved = await readerAvatar(uid);
+    if (!approved) return null;
+    try {
+      if (knownVersion === approved.version) {
+        // Keep the original missing-file boundary without transferring or
+        // reading its full bytes. Approved upload files are immutable by UUID.
+        const stat = await lstat(approved.file);
+        return stat.isFile() && !stat.isSymbolicLink() && (await readerAvatar(uid))?.file === approved.file
+          ? { version: approved.version, unchanged: true } : null;
+      }
+      const bytes = await readFile(approved.file);
+      return (await readerAvatar(uid))?.file === approved.file ? { version: approved.version, bytes } : null;
+    }
     catch (error) { if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null; throw error; }
   };
-  return { people, findMember, findByNames, avatarFile, avatar };
+  // Local callers keep their Buffer/null API. Only the bridge opts into
+  // conditional reads, and both forms retain the final target-source check.
+  const avatar = async (uid: string) => { const result = await approvedAvatar(uid, null); return result && 'bytes' in result ? result.bytes : null; };
+  return { people, findMember, findByNames, avatarFile, avatar, approvedAvatar };
 }
 
 // The community store opens only after `node scripts/migrate-community.mjs`.

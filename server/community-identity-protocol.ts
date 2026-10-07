@@ -14,6 +14,10 @@ export type IdentityOperation = 'exchange' | 'session' | 'people' | 'member' | '
   | 'profile-reviews' | 'profile-review-image' | 'profile-review' | 'profile-advise';
 export type IdentityReader = { id: string; uid: string | null; nickname: string; signature: string; avatar: string | null; role: 'reader'; vip: boolean; vipStartedAt: string | null; vipUntil: string | null };
 export type IdentityDTO = { viewer: CommunityViewer; reader: IdentityReader | null; author: { name: string } | null; ownerReader?: IdentityReader };
+// The source binds immutable approved bytes to their full upload UUID. An
+// unchanged result is only a current approval confirmation, never authority
+// to skip the caller's session checks or to read a caller-selected file.
+export type ApprovedAvatarRead = { version: string; bytes: Buffer } | { version: string; unchanged: true };
 export class IdentityBridgeError extends Error {
   status: number;
   constructor(message: string, status = 503) { super(message); this.name = 'IdentityBridgeError'; this.status = status; }
