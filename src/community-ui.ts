@@ -27,7 +27,7 @@ import { createCommunityWriteRequest } from './community-write-request.mjs';
 import { createCommunityProfileDialog } from './community-profile-dialog.mjs';
 import type { CommunityProfile } from './community-profile.ts';
 import { validReaderNickname } from './reader-policy.mjs';
-import { communityStaffCapabilities, communityStaffNextRole } from './community-staff.mjs';
+import { communityStaffCapabilities, communityStaffAssignableRoles, communityStaffCanAppointRole } from './community-staff.mjs';
 import type { CommunityStaffState, CommunityStaffPermission } from './community-staff.ts';
 import { communityFrameBannersHTML } from './community-frame-banners.mjs';
 import type { CommunityBannerConfig } from './community-banners.ts';
@@ -191,6 +191,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   let stewardLookupUid = '';
   let stewardLookupRequest = 0;
   let stewardBusy = false;
+  let stewardConfirmation: { form: Form; configuration: string } | null = null;
   let stewardEditingUid: string | null = null;
   let stewardScopeDraft: { uid: string; boards: string[]; role?: string; permissions?: CommunityStaffPermission[]; delegable?: CommunityStaffPermission[] } | null = null;
   let managementOpener: { action: string; id: string } | null = null;
@@ -1878,8 +1879,27 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       if (stewardBusy && scopeDraft && control.form?.dataset.uid === scopeDraft.uid) control.checked = (control.name === 'boards' ? scopeDraft.boards : control.name === 'permissions' ? scopeDraft.permissions : scopeDraft.delegable)?.includes(control.value as CommunityStaffPermission) ?? control.checked;
     });
     root.querySelectorAll<HTMLSelectElement>('[data-community-form="steward-scope"] select').forEach(control => { control.disabled = stewardBusy; if (stewardBusy && scopeDraft?.role && control.form?.dataset.uid === scopeDraft.uid) control.value = scopeDraft.role; });
+    root.querySelectorAll<Form>('[data-community-form="steward-scope"]').forEach(syncStewardWarning);
+    for (const [select, control] of selects) if (select.form?.dataset.communityForm === 'steward-scope') control.update();
     const lookup = root.querySelector<HTMLButtonElement>('[data-community-form="steward-lookup"] button[type="submit"]');
     if (lookup) lookup.disabled = stewardBusy || stewardCandidate?.state === 'loading';
+  }
+  function syncStewardWarning(form: Form) {
+    const warning = form.querySelector<HTMLElement>('[data-steward-chain-warning]');
+    if (warning) warning.hidden = form.dataset.parentChange !== 'true' && valueOf(form, 'role') === form.dataset.originalRole;
+  }
+  function changeStewardScope(field: HTMLInputElement | HTMLSelectElement) {
+    const form = field.form;
+    if (!form || form.dataset.communityForm !== 'steward-scope') return false;
+    if (stewardBusy) { syncStewardTools(form); return true; }
+    stewardConfirmation = null;
+    if (field instanceof HTMLInputElement && (field.name === 'permissions' || field.name === 'delegable')) {
+      const counterpart = [...form.querySelectorAll<HTMLInputElement>(`input[name="${field.name === 'permissions' ? 'delegable' : 'permissions'}"]`)].find(input => input.value === field.value);
+      if (counterpart && (field.name === 'permissions' ? !field.checked : field.checked)) counterpart.checked = field.checked;
+    }
+    syncStewardWarning(form);
+    status(form, '');
+    return true;
   }
   async function submitStewardScope(form: Form) {
     if (stewardBusy || !canAppointStaff() || route().view !== 'manage' || route().tab !== 'stewards') return;
@@ -1898,15 +1918,22 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const staff = readyData(me)?.staff;
     if (staff !== undefined) {
       const target = existing ? readyData(manages.get('stewards'))?.stewards?.find(person => person.uid === uid) : null;
-      const legacyModerator = staff?.role === 'owner' && target?.canAppoint === true
-        && target.staff?.role === 'moderator' && target.staff.parent?.kind === 'owner';
-      const role = legacyModerator ? 'moderator' : staff && communityStaffNextRole(staff.role);
-      if (!staff || !role || valueOf(form, 'role') !== role || boards.some(board => !staff.boards.includes(board))) return status(form, tr('管理身份或板块授权已改变，请重新读取后配置。', 'Management authority or board scope changed; reload before configuring.'));
+      const role = valueOf(form, 'role');
+      if (!staff || !communityStaffCanAppointRole(staff.role, role) || (existing && target?.canAppoint !== true) || boards.some(board => !staff.boards.includes(board))) return status(form, tr('管理身份或板块授权已改变，请重新读取后配置。', 'Management authority or board scope changed; reload before configuring.'));
       const selected = (name: string) => [...form.querySelectorAll<HTMLInputElement>(`input[name="${name}"]:checked`)].map(input => input.value);
       const requested = selected('permissions'), delegated = selected('delegable');
       const validCapability = (value: string): value is CommunityStaffPermission => communityStaffCapabilities.some(cap => cap.id === value);
       if (!requested.every(validCapability) || !delegated.every(validCapability) || requested.some(cap => !staff.delegable.includes(cap)) || delegated.some(cap => !requested.includes(cap))) return status(form, tr('只可下发上级允许的能力；可继续下发的能力必须同时设为可执行。', 'Grant only capabilities your superior permits; delegable capabilities must also be granted.'));
       const configuration = { role, boards, permissions: requested, delegable: delegated };
+      const chainChanges = existing && (target?.staff?.role !== role || (staff.role === 'owner' && target?.staff?.parent?.kind === 'reader'));
+      if (chainChanges) {
+        const confirmation = JSON.stringify(configuration);
+        if (stewardConfirmation?.form !== form || stewardConfirmation.configuration !== confirmation) {
+          stewardConfirmation = { form, configuration: confirmation };
+          return status(form, tr('此操作会撤销这位成员的全部下属职务。请核对配置，再次点击保存以确认。', 'This revokes all subordinate appointments. Check the configuration, then click Save again to confirm.'));
+        }
+      }
+      stewardConfirmation = null;
       stewardScopeDraft = { uid, ...configuration };
       await saveSteward(uid, true, configuration);
     } else {
@@ -1916,7 +1943,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   }
   function canAppointStaff() {
     const viewer = readyData(me);
-    return Boolean(viewer && !viewer.management?.browsingAsReader && (viewer.staff === undefined ? viewer.owner : viewer.staff?.permissions.includes('staff.appoint')));
+    return Boolean(viewer && !viewer.management?.browsingAsReader && (viewer.staff === undefined ? viewer.owner : viewer.staff && communityStaffAssignableRoles(viewer.staff.role).length && viewer.staff.permissions.includes('staff.appoint')));
   }
   async function updateSteward(button: HTMLButtonElement) {
     if (stewardBusy || !canAppointStaff()) return;
@@ -2752,6 +2779,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   }
   function onChange(event: Event) {
     if (routeHandoffPending()) return;
+    const scopeField = event.target;
+    if ((scopeField instanceof HTMLInputElement || scopeField instanceof HTMLSelectElement) && changeStewardScope(scopeField)) return;
     const field = event.target as HTMLInputElement;
     if (field instanceof HTMLInputElement && bannerEditor.change(field)) return;
     if (field.matches?.('[data-community-review-select], [data-community-review-all]')) {
@@ -2849,7 +2878,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     managementOpener = null;
     reviewBusy = false;
     reviewSelection.clear();
-    managementBoard = ''; stewardCandidate = null; stewardLookupUid = ''; stewardLookupRequest++; stewardBusy = false; stewardEditingUid = null; stewardScopeDraft = null;
+    managementBoard = ''; stewardCandidate = null; stewardLookupUid = ''; stewardLookupRequest++; stewardBusy = false; stewardEditingUid = null; stewardScopeDraft = null; stewardConfirmation = null;
     checkinRequest++; stardustRequest++;
     levelExplorer.reset();
     badgeExplorer.reset();

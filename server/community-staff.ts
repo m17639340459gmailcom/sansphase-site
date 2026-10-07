@@ -2,7 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { CommunityAuthor, Transaction } from './community-db.ts';
 import { fail, same, parseJson } from './community-db.ts';
 import { communityBoards } from '../src/community.mjs';
-import { communityStaffCapabilities, communityStaffNextRole, communityStaffRank } from '../src/community-staff.ts';
+import { communityStaffCapabilities, communityStaffCanAppointRole, communityStaffRank } from '../src/community-staff.ts';
 import type { CommunityStaffPermission, CommunityStaffRole, CommunityStaffState } from '../src/community-staff.ts';
 const boards=communityBoards.map(board=>board.id);
 const permissions=communityStaffCapabilities.map(cap=>cap.id);
@@ -29,9 +29,9 @@ export function createCommunityStaff(db:DatabaseSync,tx:Transaction){
     if(!array(scope,boards)||!scope.length||!array(caps,permissions)||!array(delegable,permissions)||delegable.some(cap=>!caps.includes(cap)))return null;
     const parent:CommunityAuthor=value.parent_kind==='owner'&&value.legacy_origin&&value.parent_id===null?owner():{kind:value.parent_kind,id:value.parent_id||''};
     const ancestry=new Set(seen);ancestry.add(member.id);const upstream=state(parent,ancestry);
-    if(!upstream||!(communityStaffNextRole(upstream.role)===value.role||value.legacy_origin===1&&upstream.role==='owner'&&value.role==='moderator'))return null;
-    // Legacy appointments were made directly by the fixed owner. Every modern
-    // descendant is restricted by today's parent scope and delegable authority.
+    if(!upstream||!communityStaffCanAppointRole(upstream.role,value.role))return null;
+    // The fixed owner can directly appoint any reader staff role, including
+    // legacy moderators. Reader descendants retain adjacent role delegation.
     let legacyScope:string[]|null=null;
     if(value.legacy_live){const old=db.prepare('SELECT steward,steward_boards FROM community_members WHERE member_kind=? AND member_id=?').get(member.kind,member.id) as {steward:number;steward_boards:string|null}|undefined;if(!old?.steward)return null;const oldScope=old.steward_boards===null?boards:parseJson<unknown>(old.steward_boards,null);if(!array(oldScope,boards)||!oldScope.length)return null;legacyScope=oldScope;}
     const currentBoards=boards.filter(board=>scope.includes(board)&&upstream.boards.includes(board)&&(!legacyScope||legacyScope.includes(board)));
@@ -44,8 +44,8 @@ export function createCommunityStaff(db:DatabaseSync,tx:Transaction){
   const protect=(actor:CommunityAuthor,target:CommunityAuthor)=>{if(same(actor,target))throw fail('不能对自己这样做。',403);const a=state(actor),b=state(target),raw=stored(target);const targetRole=b?.role ?? (raw&&!raw.revoked_at?raw.role:null);if(!a||target.kind==='owner'||targetRole&&communityStaffRank(targetRole)<=communityStaffRank(a.role))throw fail('不能操作同级或上级管理人员。',403);};
   function appoint(actor:CommunityAuthor,target:CommunityAuthor,input:CommunityStaffInput,now=new Date().toISOString()){
     return tx(()=>{protect(actor,target);const current=state(actor)!;if(!can(actor,'staff.appoint')||current.role==='assistant')throw fail('没有任命权限。',403);
-      const previous=stored(target),legacy=Boolean(previous?.legacy_origin&&current.role==='owner'&&input.role==='moderator');
-      if(input.role!==communityStaffNextRole(current.role)&&!legacy)throw fail('只能任命下一级职务。',403);
+      const previous=stored(target);
+      if(!communityStaffCanAppointRole(current.role,input.role))throw fail(current.role==='owner'?'只能任命总版主、版主或协管。':'只能任命下一级职务。',403);
       if(previous&&!previous.revoked_at&&!(current.role==='owner'||previous.parent_kind===actor.kind&&previous.parent_id===actor.id))throw fail('不能修改其他管理者任命的人员。',403);
       if(!array(input.boards,boards)||!input.boards.length||input.boards.some(board=>!current.boards.includes(board)))throw fail('只能配置自己管理的有效板块。',403);
       if(!array(input.permissions,permissions)||!array(input.delegable,permissions)||input.permissions.some(cap=>!current.delegable.includes(cap))||input.delegable.some(cap=>!input.permissions.includes(cap)))throw fail('不能授予或委派自己没有的权限。',403);

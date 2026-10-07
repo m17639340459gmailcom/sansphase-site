@@ -6,12 +6,63 @@ import { communityLevelExplorerHTML, createCommunityLevelExplorer } from '../src
 import { communityStewardsHTML } from '../src/community-stewards.ts';
 import { communityManageHTML } from '../src/community-pages.ts';
 import { communityPostHTML, communityDeletePanelHTML } from '../src/community-post.ts';
+import { communityStaffCapabilities } from '../src/community-staff.ts';
 
 const common = { t: zh => zh, esc: value => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;'), icons: {} };
 const person = { uid: '10001', name: '读者', role: 'reader', level: 2, steward: true, staffRole: 'assistant' };
 const staff = { role: 'moderator', boards: ['qa'], permissions: ['staff.appoint', 'topic.approve', 'profile.avatar.advise'], delegable: ['topic.approve', 'profile.avatar.advise'], parent: { kind: 'reader', id: 'parent' } };
 const dust = { owner: false, steward: true, staffRole: 'assistant', level: 3, vip: false };
 const baseManage = { owner: false, actorStaff: staff, tab: 'stewards', counts: {}, kpis: {}, queue: { topics: [], replies: [] }, reports: [], orders: [], sanctions: [], items: [], data: null, stewards: [] };
+
+const ownerStaff = { role: 'owner', boards: ['qa', 'tools'], permissions: communityStaffCapabilities.map(cap => cap.id), delegable: communityStaffCapabilities.map(cap => cap.id), parent: null };
+test('owner role picker offers all three management roles, and editing preserves any lower current role', () => {
+  for (const role of [null, 'general', 'moderator', 'assistant']) {
+    const existing = role ? { ...person, staff: { ...staff, role, parent: { kind: 'reader', id: 'another-manager' } }, canAppoint: true } : null;
+    const dom = new JSDOM(communityStewardsHTML(existing ? [existing] : [], existing ? null : { state: 'ready', data: { person: { ...person, steward: false }, steward: false, canAppoint: true, self: false, staff: null } }, common, existing?.uid, ownerStaff));
+    const form = dom.window.document.querySelector('[data-community-form="steward-scope"]');
+    assert.ok(form);
+    const select = form.querySelector('select[name="role"]');
+    assert.deepEqual([...select.options].map(option => option.value), ['general', 'moderator', 'assistant']);
+    assert.equal(select.value, role || 'general');
+    assert.ok(select.classList.contains('community-select'));
+    assert.equal(form.querySelectorAll('[name="role"]').length, 1);
+    if (existing) assert.match(form.querySelector('[data-steward-chain-warning]').textContent, /撤销.*下属/);
+    dom.window.close();
+  }
+});
+
+test('grouped capability rows keep complete accessible choices without duplicate descriptions', () => {
+  for (const t of [zh => zh, (zh, en) => en]) {
+    const dom = new JSDOM(communityStewardsHTML([], { state: 'ready', data: { person: { ...person, steward: false }, steward: false, canAppoint: true, self: false, staff: null } }, { ...common, t }, null, ownerStaff));
+    const form = dom.window.document.querySelector('[data-community-form="steward-scope"]');
+    const groups = form.querySelectorAll('[data-staff-permission-group]');
+    assert.equal(groups.length, 6);
+    const rows = [...form.querySelectorAll('[data-staff-permission]')];
+    assert.equal(rows.length, communityStaffCapabilities.length);
+    assert.deepEqual(new Set(rows.map(row => row.dataset.staffPermission)), new Set(ownerStaff.delegable));
+    for (const row of rows) {
+      const controls = [...row.querySelectorAll('input')];
+      assert.deepEqual(controls.map(control => control.name), ['permissions', 'delegable']);
+      controls.forEach(control => {
+        assert.equal(control.value, row.dataset.staffPermission);
+        assert.equal(control.type, 'checkbox');
+        assert.ok(control.getAttribute('aria-labelledby').split(' ').every(id => dom.window.document.getElementById(id)));
+        assert.equal(dom.window.document.querySelector(`label[for="${control.id}"]`).control, control);
+      });
+    }
+    dom.window.close();
+  }
+});
+
+test('non-owner pickers retain adjacent roles and a direct assistant has no appointment form', () => {
+  for (const [role, next] of [['general', 'moderator'], ['moderator', 'assistant'], ['assistant', null]]) {
+    const dom = new JSDOM(communityStewardsHTML([], { state: 'ready', data: { person: { ...person, steward: false }, steward: false, canAppoint: true, self: false, staff: null } }, common, null, { ...staff, role }));
+    const options = [...dom.window.document.querySelectorAll('select[name="role"] option')];
+    assert.deepEqual(options.map(option => option.value), next ? [next] : []);
+    if (!next) assert.equal(dom.window.document.querySelector('[data-community-form="steward-scope"]'), null);
+    dom.window.close();
+  }
+});
 
 test('appointed role labels remain separate from earned community levels and reader mode', () => {
   assert.match(levelChipHTML({ ...person, staffRole: 'general' }, common), /总版主/);

@@ -244,6 +244,25 @@ test('actual hierarchical profile grants separate advice from decisions and keep
   assert.equal((await f.commands.state(f.readerId)).pendingNickname,null,'invalid multi-field input cannot partially enqueue a name');
 });
 
+test('direct owner-appointed moderator and assistant use the existing profile bridge for advice and final approval',{timeout:20000},async t=>{
+  const f=await fixture(t),hk=await f.host(),owner={kind:'owner' as const,id:f.ownerId};
+  const moderator={kind:'reader' as const,id:f.moderatorId},assistant={kind:'reader' as const,id:f.assistantId};
+  hk.store.staff.appoint(owner,moderator,{role:'moderator',boards:['qa'],permissions:['profile.nickname.decide'],delegable:[]});
+  hk.store.staff.appoint(owner,assistant,{role:'assistant',boards:['qa'],permissions:['profile.nickname.advise'],delegable:[]});
+  const moderatorCookie=await hk.enter('sansphase_reader_session=mod.token');
+  const assistantCookie=await hk.enter('sansphase_reader_session=assistant.token');
+  await f.commands.submitNickname(f.readerId,'直属审核的新昵称');const [proposal]=await f.commands.reviews(['nickname']);
+  const queue=await(await hk.get('manage?tab=profiles',assistantCookie)).json();
+  const advice=queue.profiles.find((row:{id:string})=>row.id===proposal.id);
+  assert.equal(advice.canAdvise,true);assert.equal(advice.canDecide,false);
+  assert.equal((await hk.post(`manage/profiles/${proposal.id}/advise`,assistantCookie,{decision:'approve'})).status,200);
+  assert.equal((await f.commands.state(f.readerId)).nickname,'普通读者','advice does not publish profile data');
+  assert.equal((await hk.post(`manage/profiles/${proposal.id}/approve`,moderatorCookie)).status,200);
+  const state=await f.commands.state(f.readerId);assert.equal(state.nickname,'直属审核的新昵称');assert.equal(state.pendingNickname,null);
+  const me=await(await hk.get('me',moderatorCookie)).json();assert.equal(me.owner,false);assert.equal(me.staff.role,'moderator');
+  assert.deepEqual(hk.store.staff.state(moderator)?.parent,owner);assert.deepEqual(hk.store.staff.state(assistant)?.parent,owner);
+});
+
 test('main rejects queued nickname approval when a real ancestor account becomes disabled',{timeout:20000},async t=>{
   const f=await fixture(t),hk=await f.host(),owner={kind:'owner' as const,id:f.ownerId},general={kind:'reader' as const,id:f.generalId},mod={kind:'reader' as const,id:f.moderatorId};
   const permissions:CommunityStaffPermission[]=['staff.appoint','profile.nickname.decide'];

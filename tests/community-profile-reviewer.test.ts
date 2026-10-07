@@ -81,6 +81,33 @@ test('modern account profile authority is per-kind/global and confirms all curre
   f.inactive.add(moderator.id);await assert.rejects(f.client(assistant,'assistant',{action:'advise',kind:'avatar'}),{status:403});
 });
 
+test('signed profile reviewer proofs accept every direct owner-appointed reader role without treating it as the owner',async t=>{
+  const f=await fixture(t);
+  for(const role of ['general','moderator','assistant'] as const){
+    f.store.staff.appoint(owner,moderator,{role,boards:['qa'],permissions:['profile.avatar.advise'],delegable:[]});
+    assert.deepEqual(f.authority(moderator,role,{action:'advise',kind:'avatar'}),{kinds:['avatar'],ancestors:[]});
+    assert.deepEqual(await f.client(moderator,role,{action:'inspect'}),['avatar']);
+    assert.deepEqual(await f.client(moderator,role,{action:'advise',kind:'avatar'}),['avatar']);
+    await assert.rejects(f.client(moderator,'owner',{action:'advise',kind:'avatar'}),{status:403});
+    await assert.rejects(f.client(moderator,role,operation),{status:403});
+  }
+  f.inactive.add(moderator.id);await assert.rejects(f.client(moderator,'assistant',{action:'advise',kind:'avatar'}),{status:403});
+  f.inactive.clear();f.store.staff.revoke(owner,moderator);
+  await assert.rejects(f.client(moderator,'assistant',{action:'advise',kind:'avatar'}),{status:403});
+});
+
+test('profile review for a direct owner moderator checks its descendants current chain and reader accounts',async t=>{
+  const f=await fixture(t),permissions=['staff.appoint','profile.avatar.advise'] as const;
+  f.store.staff.appoint(owner,moderator,{role:'moderator',boards:['qa'],permissions:[...permissions],delegable:[...permissions]});
+  f.store.staff.appoint(moderator,stranger,{role:'assistant',boards:['qa'],permissions:['profile.avatar.advise'],delegable:[]});
+  assert.deepEqual(f.authority(stranger,'assistant',{action:'advise',kind:'avatar'}),{kinds:['avatar'],ancestors:[moderator]});
+  assert.deepEqual(await f.client(stranger,'assistant',{action:'advise',kind:'avatar'}),['avatar']);
+  f.inactive.add(moderator.id);await assert.rejects(f.client(stranger,'assistant',{action:'advise',kind:'avatar'}),{status:403});
+  f.inactive.clear();f.store.staff.appoint(owner,moderator,{role:'general',boards:['qa'],permissions:[...permissions],delegable:[...permissions]});
+  await assert.rejects(f.client(stranger,'assistant',{action:'advise',kind:'avatar'}),{status:403});
+  assert.equal(f.store.staff.state(stranger),null,'changing the directly appointed parent role revokes the previous subtree');
+});
+
 test('a delayed outbound HTTP confirmation denies a moderator removed while approval waits', async t => {
   const f = await fixture(t); f.store.members.setSteward(moderator, true, ['qa']);
   let forwarded!: () => void, resume!: () => void;

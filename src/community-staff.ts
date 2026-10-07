@@ -46,6 +46,13 @@ export type CommunityStaffState = {
 };
 export const communityStaffNextRole = (role: CommunityStaffRole): Exclude<CommunityStaffRole, 'owner'> | null =>
   role === 'owner' ? 'general' : role === 'general' ? 'moderator' : role === 'moderator' ? 'assistant' : null;
+export const communityStaffAssignableRoles = (role: CommunityStaffRole): readonly Exclude<CommunityStaffRole, 'owner'>[] => {
+  if (role === 'owner') return ['general', 'moderator', 'assistant'];
+  const next = communityStaffNextRole(role);
+  return next ? [next] : [];
+};
+export const communityStaffCanAppointRole = (actorRole: CommunityStaffRole, targetRole: string): targetRole is Exclude<CommunityStaffRole, 'owner'> =>
+  communityStaffAssignableRoles(actorRole).some(role => role === targetRole);
 export const communityStaffRank = (role: CommunityStaffRole) => communityStaffRoles.findIndex(item => item.id === role);
 export const communityStaffDefaultPermissions: Readonly<Record<Exclude<CommunityStaffRole, 'owner'>, readonly CommunityStaffPermission[]>> = {
   general: ['content.inspect', 'topic.approve', 'topic.reject', 'feature.recommend', 'feature.decide', 'staff.appoint'],

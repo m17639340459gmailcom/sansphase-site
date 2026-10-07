@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { createCommunityUI } from '../src/community-ui.ts';
 import { communityAccountHTML } from '../src/community.ts';
+import { communityStaffCapabilities } from '../src/community-staff.ts';
 
 const person = { name: '测试成员', uid: 'u1', role: 'reader', level: 1, owner: false, mod: false, balance: 30, checkedIn: true, streak: 1, nextReward: { total: 10 }, unread: { all: 0 }, inventory: {}, agreed: true };
 const topic = id => ({ id, board: 'qa', title: `讨论 ${id}`, author: person, createdAt: '2026-10-01T10:00:00Z', lastActivityAt: '2026-10-01T10:00:00Z', replies: 2, likes: 1 });
@@ -71,6 +72,110 @@ async function setup(t, hash, handle = () => null, ctxOptions = {}) {
 
 const managementViewer = { ...person, name: '無相', uid: 'owner', role: 'owner', owner: true, mod: true, management: { role: 'owner', browsingAsReader: false } };
 const managementData = { owner: true, tab: 'items', counts: { queue: 0, reports: 0, orders: 0, sanctions: 0 }, kpis: { topics24h: 1, replies24h: 2 }, queue: { topics: [], replies: [] }, reports: [], content: [topic('p1')], items: [], orders: [], sanctions: [], data: null };
+
+const ownerStaff = { role: 'owner', boards: ['qa', 'tools'], permissions: communityStaffCapabilities.map(cap => cap.id), delegable: communityStaffCapabilities.map(cap => cap.id), parent: null };
+async function staffSetup(t, { actor = ownerStaff, target = null, save } = {}) {
+  const targetPerson = { ...person, uid: '10002', steward: Boolean(target), staff: target, canAppoint: true };
+  return setup(t, '#/community/manage/stewards', (url, init) => {
+    if (url.endsWith('/me')) return response({ ...managementViewer, staff: actor });
+    if (url.includes('/manage?')) return response({ ...managementData, actorStaff: actor, stewards: target ? [targetPerson] : [] });
+    if (url.includes('/members/10002?')) return response({ person: targetPerson, steward: Boolean(target), canAppoint: true, self: false, staff: target });
+    if (url.endsWith('/members/10002/steward')) return save ? save(url, init) : response({ ok: true });
+    return null;
+  });
+}
+async function staffForm(fixture, existing = false) {
+  const { main, w } = fixture;
+  if (existing) main.querySelector('[data-action="community-steward-edit"]').click();
+  else {
+    const lookup = main.querySelector('[data-community-form="steward-lookup"]');
+    lookup.elements.namedItem('uid').value = '10002';
+    lookup.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+    await turn();
+  }
+  return main.querySelector('[data-community-form="steward-scope"]');
+}
+function selectStaffField(fixture, form, name, value, checked = true) {
+  const field = name === 'role' ? form.elements.namedItem(name) : [...form.querySelectorAll(`input[name="${name}"]`)].find(field => field.value === value);
+  if (name === 'role') field.value = value; else field.checked = checked;
+  field.dispatchEvent(new fixture.w.Event('change', { bubbles: true }));
+  return field;
+}
+const submitStaff = (fixture, form) => form.dispatchEvent(new fixture.w.Event('submit', { bubbles: true, cancelable: true }));
+
+for (const role of ['general', 'moderator', 'assistant']) test(`owner submits chosen ${role} with original form and board choices intact`, async t => {
+  const fixture = await staffSetup(t), form = await staffForm(fixture);
+  selectStaffField(fixture, form, 'boards', 'qa');
+  selectStaffField(fixture, form, 'permissions', 'topic.delete');
+  selectStaffField(fixture, form, 'role', role);
+  assert.equal(fixture.main.querySelector('[data-community-form="steward-scope"]'), form);
+  assert.equal(form.querySelector('[name="boards"][value="qa"]').checked, true);
+  assert.equal(form.querySelector('[name="permissions"][value="topic.delete"]').checked, true);
+  submitStaff(fixture, form); await turn();
+  const writes = fixture.requests.filter(call => call.url.endsWith('/steward'));
+  assert.equal(writes.length, 1);
+  const body = JSON.parse(writes[0].init.body);
+  assert.equal(body.role, role);
+  assert.deepEqual(body.boards, ['qa']);
+  assert.ok(body.permissions.includes('topic.delete'));
+});
+
+test('delegation check links to execution in place and removing execution clears delegation', async t => {
+  const fixture = await staffSetup(t), form = await staffForm(fixture);
+  const delegated = selectStaffField(fixture, form, 'delegable', 'topic.delete');
+  assert.equal(form.querySelector('[name="permissions"][value="topic.delete"]').checked, true);
+  selectStaffField(fixture, form, 'permissions', 'topic.delete', false);
+  assert.equal(delegated.checked, false);
+  assert.equal(delegated.isConnected, true);
+});
+
+test('modern appointment rejects empty boards, forged roles and unauthorized capabilities without writing', async t => {
+  const actor = { ...ownerStaff, role: 'general', delegable: ['topic.approve'] };
+  const fixture = await staffSetup(t, { actor }), form = await staffForm(fixture);
+  submitStaff(fixture, form); await turn();
+  assert.equal(fixture.requests.some(call => call.url.endsWith('/steward')), false);
+  selectStaffField(fixture, form, 'boards', 'qa');
+  const select = form.elements.namedItem('role');
+  const forged = fixture.w.document.createElement('option'); forged.value = 'assistant'; select.append(forged); select.value = 'assistant';
+  submitStaff(fixture, form); await turn();
+  select.value = 'moderator';
+  const cap = fixture.w.document.createElement('input'); cap.type = 'checkbox'; cap.name = 'permissions'; cap.value = 'topic.delete'; cap.checked = true; form.append(cap);
+  submitStaff(fixture, form); await turn();
+  assert.equal(fixture.requests.some(call => call.url.endsWith('/steward')), false);
+});
+
+test('owner takeover or role change warns and confirms a precise configuration, while failed saves preserve selections', async t => {
+  const target = { role: 'assistant', boards: ['qa'], permissions: ['topic.approve'], delegable: [], parent: { kind: 'reader', id: 'parent' } };
+  const fixture = await staffSetup(t, { target, save: () => Promise.resolve({ ok: false, status: 503, json: async () => ({ error: '保存失败请重试' }) }) });
+  const form = await staffForm(fixture, true);
+  assert.equal(form.elements.namedItem('role').value, 'assistant');
+  assert.equal(form.querySelector('[data-steward-chain-warning]').hidden, false);
+  submitStaff(fixture, form); await turn();
+  assert.equal(fixture.requests.some(call => call.url.endsWith('/steward')), false);
+  selectStaffField(fixture, form, 'role', 'moderator');
+  submitStaff(fixture, form); await turn();
+  assert.equal(fixture.requests.some(call => call.url.endsWith('/steward')), false, 'changed configuration needs a new confirmation');
+  submitStaff(fixture, form); await turn();
+  assert.equal(fixture.requests.filter(call => call.url.endsWith('/steward')).length, 1);
+  assert.equal(form.elements.namedItem('role').value, 'moderator');
+  assert.equal(form.querySelector('[name="permissions"][value="topic.approve"]').checked, true);
+  assert.match(form.querySelector('[role="status"]').textContent, /保存失败/);
+  assert.equal(form.querySelector('button[type="submit"]').disabled, false);
+});
+
+test('pending direct appointment locks enhanced role picker and checkboxes through remount', async t => {
+  const pending = deferred(), fixture = await staffSetup(t, { save: () => pending.promise }), form = await staffForm(fixture);
+  selectStaffField(fixture, form, 'boards', 'tools'); selectStaffField(fixture, form, 'role', 'assistant');
+  submitStaff(fixture, form);
+  assert.equal(form.elements.namedItem('role').disabled, true);
+  await fixture.remount();
+  const rebuilt = fixture.main.querySelector('[data-community-form="steward-scope"]');
+  assert.equal(rebuilt.elements.namedItem('role').value, 'assistant');
+  assert.equal(rebuilt.elements.namedItem('role').disabled, true);
+  assert.ok([...rebuilt.querySelectorAll('input')].every(input => input.disabled));
+  submitStaff(fixture, rebuilt); assert.equal(fixture.requests.filter(call => call.url.endsWith('/steward')).length, 1);
+  pending.resolve(response({ ok: true })); await turn(); await turn();
+});
 
 test('authors list a profile background through the existing product form and image upload', async t => {
   const image = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';

@@ -119,13 +119,40 @@ test('a disabled or unverified upstream account denies descendants and late revo
   f.accounts.get('g')!.active=true;let calls=0;f.onPeople(()=>{if(++calls===3)f.accounts.get('m')!.active=false;});
   assert.equal((await f.post(`topics/${topic.id}/delete`,{reason:'等待时撤销上级'})).status,403);assert.ok(f.store.topic(topic.id));
 });
-test('new owner appointments are strictly adjacent and reader presentation never grants staff actions',async t=>{
+test('owner appointments still require explicit role and capabilities and reader presentation never grants staff actions',async t=>{
   const f=await setup(t);
   assert.equal((await f.post('members/10005/steward',{on:true,boards:['qa']},'owner')).status,400);
   assert.equal(f.store.staff.state(reader('other')),null);
-  assert.equal((await f.post('members/10005/steward',{on:true,role:'assistant',boards:['qa'],permissions:[],delegable:[]},'owner')).status,403);
   const topic=f.topic();assert.equal((await f.post(`topics/${topic.id}/delete`,{reason:'不能用读者模式管理'},'m; community_browse=reader')).status,403);
   assert.equal((await f.post('members/10001/mute',{days:1,reason:'广告引流'},'m')).status,403);
+});
+
+test('the existing steward endpoint lets only the fixed owner directly appoint every reader management role',async t=>{
+  const f=await setup(t);
+  for(const role of ['general','moderator','assistant'] as const){
+    const response=await f.post('members/10005/steward',{on:true,role,boards:['qa'],permissions:['content.inspect'],delegable:[]},'owner');
+    assert.equal(response.status,200);const result=await response.json();
+    assert.equal(result.staff.role,role);assert.deepEqual(result.staff.parent,owner);assert.equal(result.steward,true);
+    const me=await(await f.get('me','other')).json();
+    assert.equal(me.staff.role,role);assert.equal(me.management.role,role);assert.equal(me.owner,false);assert.equal(me.mod,true);
+    assert.deepEqual(me.staff.parent,owner);assert.deepEqual(me.staff.permissions,['content.inspect']);
+  }
+  assert.equal((await f.post('members/10005/steward',{on:true,role:'owner',boards:['qa'],permissions:[],delegable:[]},'owner')).status,400);
+  assert.equal(f.store.staff.state(reader('other'))?.role,'assistant');
+  assert.equal((await f.post('members/10004/steward',{on:true,role:'assistant',boards:['qa'],permissions:[],delegable:[]},'g')).status,403);
+  assert.equal((await f.post('members/10004/steward',{on:true,role:'general',boards:['qa'],permissions:[],delegable:[]},'m')).status,403);
+  assert.equal(f.store.staff.state(reader('r')),null);
+});
+
+test('a direct owner moderator still loses HTTP authority when its own account or appointment becomes invalid',async t=>{
+  const f=await setup(t);
+  assert.equal((await f.post('members/10005/steward',{on:true,role:'moderator',boards:['qa'],permissions:['staff.appoint','content.inspect','topic.delete'],delegable:['content.inspect']},'owner')).status,200);
+  assert.equal((await f.post('members/10004/steward',{on:true,role:'assistant',boards:['qa'],permissions:['topic.delete'],delegable:[]},'other')).status,403,'held deletion capability was not delegated');
+  assert.equal((await f.post('members/10004/steward',{on:true,role:'assistant',boards:['tools'],permissions:['content.inspect'],delegable:[]},'other')).status,403);
+  const topic=f.topic();f.accounts.get('other')!.active=false;
+  assert.equal((await f.post(`topics/${topic.id}/delete`,{reason:'停用的直属版主'},'other')).status,401);assert.ok(f.store.topic(topic.id));
+  f.accounts.get('other')!.active=true;f.store.staff.revoke(owner,reader('other'));
+  assert.equal((await f.post(`topics/${topic.id}/delete`,{reason:'撤职后不能继续管理'},'other')).status,403);assert.ok(f.store.topic(topic.id));
 });
 test('late parent deactivation prevents feature decisions and banner replacement without mutating either record',async t=>{
   const f=await setup(t),topic=f.topic();const {id}=await(await f.post(`topics/${topic.id}/feature-recommend`)).json();
