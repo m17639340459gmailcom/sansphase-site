@@ -259,12 +259,26 @@ test('an uncertain personal reader publication blocks identity switching until t
     if (url.endsWith('/topics/p1/replies')) { if (!attempts++) throw Error('response lost'); return response({ id: 'confirmed', reward: 0 }); }
     return null;
   }, { notify: value => notices.push(value) });
-  const publish = () => { const form = main.querySelector('[data-community-form="reply"]'); form.elements.namedItem('body').value = '结果需要确认的正式回复。'; form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); };
-  publish(); await turn(); await turn();
+  const publish = async expectedWrites => {
+    const form = main.querySelector('[data-community-form="reply"]'); assert.ok(form);
+    const button = form.querySelector('button[type="submit"]'); assert.ok(button);
+    assert.equal(button.disabled, false, 'the previous reply attempt must settle before a deliberate retry');
+    form.elements.namedItem('body').value = '结果需要确认的正式回复。';
+    form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+    // WebCrypto may finish after several event-loop turns. Wait for the actual
+    // request and busy() settlement, so a retry cannot be silently ignored.
+    const deadline = performance.now() + 5000;
+    while (requests.filter(entry => entry.url.endsWith('/topics/p1/replies')).length < expectedWrites || (form.isConnected && button.disabled)) {
+      assert.ok(performance.now() < deadline, `reply attempt ${expectedWrites} and its form must settle`);
+      await turn();
+    }
+    assert.equal(requests.filter(entry => entry.url.endsWith('/topics/p1/replies')).length, expectedWrites, 'one deliberate reply submit makes one request');
+  };
+  await publish(1);
   await ui.setBrowsing(false);
   assert.equal(requests.some(entry => entry.url.endsWith('/browse-mode')), false);
   assert.match(notices.at(-1), /提交.*确认|确认.*提交/);
-  publish(); await turn(); await turn();
+  await publish(2);
   const writes = requests.filter(entry => entry.url.endsWith('/topics/p1/replies'));
   assert.equal(writes.length, 2);
   assert.equal(writes[0].init.headers['X-Idempotency-Key'], writes[1].init.headers['X-Idempotency-Key']);

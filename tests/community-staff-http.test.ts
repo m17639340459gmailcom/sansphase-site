@@ -9,6 +9,10 @@ import { resolve } from 'node:path';
 import { migrateCommunity } from '../server/payload/community-migration.ts';
 import { createCommunityStore } from '../server/community-store.ts';
 import { createCommunityService } from '../server/community-service.ts';
+import { JSDOM } from 'jsdom';
+import { communityPostHTML } from '../src/community-post.ts';
+import type { CommunityThread } from '../src/community-post.ts';
+import type { Common,CommunityMe } from '../src/community.ts';
 import { communityStaffCapabilities,communityStaffDefaultPermissions } from '../src/community-staff.ts';
 import type {CommunityStaffPermission} from '../src/community-staff.ts';
 import type { CommunityAuthor } from '../server/community-db.ts';
@@ -71,6 +75,36 @@ test('recommendation is durable and idempotent without reward, and only the corr
   assert.equal((await f.post(`manage/feature-recommendations/${id}/approve`,{},'m')).status,200);assert.equal(f.store.topic(topic.id)?.featured,true);
   const balance=f.store.ledger.balance(reader('r'));assert.equal((await f.post(`manage/feature-recommendations/${id}/approve`,{},'m')).status,200);assert.equal(f.store.ledger.balance(reader('r')),balance);
   const other=f.topic();const next=await(await f.post(`topics/${other.id}/feature-recommend`)).json();f.grant(['content.inspect']);assert.equal((await f.post(`manage/feature-recommendations/${next.id}/approve`,{},'m')).status,403);
+});
+const common:Common={t:zh=>zh,esc:value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;'),icons:{}};
+for(const state of ['pending','hidden','published'] as const){
+  test(`thread recommendation proof and rendered button match the real ${state} post action`,async t=>{
+    const f=await setup(t);f.grant(['content.inspect','feature.recommend']);const topic=f.topic('qa',state==='pending');
+    if(state==='hidden')f.store.hide({kind:'topic',id:topic.id},'人工隐藏');
+    const response=await f.get(`topics/${topic.id}`);assert.equal(response.status,200);
+    const thread:CommunityThread=await response.json(),me:CommunityMe=await(await f.get('me')).json(),allowed=state==='published';
+    assert.equal(thread.topic.pending,state==='pending');assert.equal(thread.topic.hidden,state==='hidden');
+    const action=await f.post(`topics/${topic.id}/feature-recommend`,{reason:'优质教程'});
+    assert.equal(action.status,allowed?200:403,'the existing write route must reject unpublished or hidden content');
+    assert.equal(f.store.featureRecommendations.pending(reader('m')).length,allowed?1:0);
+    const dom=new JSDOM(communityPostHTML({...common,me,thread:{state:'ready',data:thread}}));
+    t.after(()=>dom.window.close());
+    assert.equal(Boolean(dom.window.document.querySelector('[data-action="community-feature-recommend"]')),allowed,'the rendered button must match the real recommendation action');
+    assert.equal(thread.topic.canRecommend,allowed,'the response must not claim an unavailable action');
+  });
+}
+test('recommendation proof uses the fresh post state after person projection waits',async t=>{
+  const f=await setup(t);f.grant(['content.inspect','feature.recommend']);const topic=f.topic();let hidden=false;
+  f.onPeople(()=>{if(!hidden&&f.store.topic(topic.id)!.views>0){hidden=true;f.store.hide({kind:'topic',id:topic.id},'读取期间隐藏');}});
+  const response=await f.get(`topics/${topic.id}`);assert.equal(response.status,200);
+  const thread:CommunityThread=await response.json(),me:CommunityMe=await(await f.get('me')).json();
+  assert.equal(hidden,true,'the post is hidden only after threadDTO has captured it and recorded the view');
+  assert.equal(f.store.topic(topic.id)?.hidden,true);
+  const dom=new JSDOM(communityPostHTML({...common,me,thread:{state:'ready',data:thread}}));t.after(()=>dom.window.close());
+  assert.equal(dom.window.document.querySelector('[data-action="community-feature-recommend"]'),null);
+  assert.equal(thread.topic.canRecommend,false);
+  assert.equal((await f.post(`topics/${topic.id}/feature-recommend`,{reason:'已隐藏'})).status,403);
+  assert.equal(f.store.featureRecommendations.pending(reader('m')).length,0);
 });
 test('report review alone cannot uphold-delete or restore hidden content',async t=>{
   const f=await setup(t),topic=f.topic();f.store.hide({kind:'topic',id:topic.id},'人工隐藏');const report=f.store.report({target:{kind:'topic',id:topic.id},reporter:reader('other'),reason:'广告引流'});f.grant(['content.inspect','report.review']);
