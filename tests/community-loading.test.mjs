@@ -45,6 +45,54 @@ test('ready community discussions paint while slow supporting summary and banner
   assert.match(main.textContent, /可以立即阅读的讨论/);
 });
 
+test('the board index waits for real summary counts, then shows tags above boards without extra listing requests', async t => {
+  const slow = deferred();
+  const { main, calls } = await setup(t, url => url.endsWith('/summary') ? slow.promise : null, { hash: '#/community/boards' });
+  assert.equal(main.querySelector('.community-tagcloud'), null);
+  assert.equal(main.querySelector('.community-board-grid'), null);
+  slow.resolve(response({ ...summary, tags: { ComfyUI: 3 } })); await settle();
+  const tags = main.querySelector('.community-tagcloud');
+  assert.equal(tags.querySelector('a[href="#/community/tag/ComfyUI"] .community-tag-count').textContent, '3');
+  assert.ok(tags.closest('section').nextElementSibling.matches('.community-board-grid'));
+  assert.equal(calls.filter(call => call.url.includes('/topics?') || call.url.startsWith('/api/community/banners')).length, 0);
+  assert.equal(calls.filter(call => call.url.endsWith('/summary')).length, 1);
+});
+
+test('refreshing a ready board index retains tags and cards until its refreshed counts arrive', async t => {
+  const slow = deferred(); let pending = false;
+  const { main, retry } = await setup(t, url => url.endsWith('/summary')
+    ? pending ? slow.promise : response({ ...summary, tags: { ComfyUI: 3 } }) : null, { hash: '#/community/boards' });
+  const tags = main.querySelector('.community-tagcloud');
+  const grid = main.querySelector('.community-board-grid');
+  pending = true; retry(); await settle();
+  assert.equal(main.querySelector('.community-tagcloud'), tags);
+  assert.equal(main.querySelector('.community-board-grid'), grid);
+  assert.equal(tags.querySelector('.community-tag-count').textContent, '3');
+  assert.doesNotMatch(main.textContent, /正在读取/);
+  slow.resolve(response({ ...summary, tags: { ComfyUI: 4 } })); await settle();
+  const updated = main.querySelector('.community-tagcloud');
+  assert.equal(updated.querySelector('a[href="#/community/tag/ComfyUI"] .community-tag-count').textContent, '4');
+  assert.ok(updated.closest('section').nextElementSibling.matches('.community-board-grid'));
+});
+
+test('a slow old board index cannot replace a selected tag or overwrite counts when returning', async t => {
+  const slow = deferred(); let first = true;
+  const { main, calls, remount } = await setup(t, url => {
+    if (!url.endsWith('/summary')) return null;
+    if (first) { first = false; return slow.promise; }
+    return response({ ...summary, total: 9, tags: { ComfyUI: 9 } });
+  }, { hash: '#/community/boards' });
+  await remount('#/community/tag/ComfyUI');
+  assert.ok(main.querySelector('[data-community="tag"] .community-topic'));
+  assert.ok(calls.some(call => call.url.includes('/topics?') && new URL(call.url, 'http://localhost').searchParams.get('tag') === 'ComfyUI'));
+  await remount('#/community/boards');
+  const tags = main.querySelector('.community-tagcloud');
+  assert.equal(tags.querySelector('a[href="#/community/tag/ComfyUI"] .community-tag-count').textContent, '9');
+  slow.resolve(response({ ...summary, total: 88, tags: { ComfyUI: 88 } })); await settle();
+  assert.equal(main.querySelector('.community-tagcloud'), tags);
+  assert.equal(tags.querySelector('a[href="#/community/tag/ComfyUI"] .community-tag-count').textContent, '9');
+});
+
 for (const status of [401, 403]) test(`me ${status} removes ready protected content and controls before slow supporting reads finish`, async t => {
   const slow = deferred();
   const { main, ui } = await setup(t, url => {

@@ -368,6 +368,31 @@ test("load failures explain themselves: sign in, not open, missing, forbidden, o
   assert.match(missing, /data-community="post"[\s\S]*data-content-state="missing"[\s\S]*帖子不存在/);
 });
 
+test("board tags appear below the heading and statistics, before the board cards", () => {
+  for (const state of [summary({ tags: { ComfyUI: 3 } }), { state: "loading" }]) {
+    const dom = new JSDOM(communityBoardsHTML({ summary: state, members: false, ...common }));
+    try {
+      const page = dom.window.document.querySelector('[data-community="boards"]');
+      const cloud = page.querySelector('.community-tagcloud');
+      const tags = cloud.closest('section');
+      assert.ok(tags.previousElementSibling.matches('.community-banner'), 'tags follow the page heading and its statistics');
+      assert.ok(tags.nextElementSibling.matches('.community-board-grid'), 'all board cards follow the tag section');
+      assert.equal(page.querySelectorAll('.community-tagcloud').length, 1);
+      assert.equal(cloud.querySelectorAll('a').length, communityTags.length);
+      assert.equal(cloud.querySelector('a[href="#/community/tag/ComfyUI"] .community-tag-count')?.textContent || '', state.state === 'ready' ? '3' : '');
+      assert.equal(page.querySelectorAll('.community-board-card').length, communityBoards.length);
+      assert.ok(page.querySelector('.community-board-card[href="#/community/boards/vip"].is-locked'));
+    } finally { dom.window.close(); }
+  }
+  for (const status of [401, 503]) {
+    const dom = new JSDOM(communityBoardsHTML({ summary: { state: "error", status, message: "" }, members: false, ...common }));
+    try {
+      assert.equal(dom.window.document.querySelector('.community-tagcloud'), null);
+      assert.equal(dom.window.document.querySelector('.community-board-grid'), null);
+    } finally { dom.window.close(); }
+  }
+});
+
 test("board cards and a board page follow the demo", () => {
   const boards = communityBoardsHTML({ summary: summary({ total: 3, boards: { qa: stats(3, 2, { id: "q1", title: "<最新>", lastActivityAt: "2026-09-30T11:00:00Z" }) }, tags: { ComfyUI: 3 } }), members: false, ...common });
   assert.equal(count(boards, /class="community-board-card /g), 6);

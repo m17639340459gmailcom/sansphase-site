@@ -15,7 +15,7 @@ const headerMarkup = `<header id="site-header" class="community-header"><a class
 const hostMarkup = '<section class="community-page" data-community="home"><div class="community-layout"><div class="community-main"><form class="community-search" data-community-form="search"><input name="q"></form><a class="community-post" href="#/community/new"><span>发帖</span></a></div><aside class="community-aside">热门</aside></div></section>';
 const settle = () => new Promise<void>(resolve => setImmediate(resolve));
 
-function fixture(t: TestContext, narrow = false) {
+function fixture(t: TestContext, narrow = false, withBoards = false) {
   const { window } = new JSDOM(`${headerMarkup}<main id="main">${hostMarkup}</main>`, { url: "http://localhost/?interior=feed#/community/home" });
   const callbacks = new Set<EventListenerOrEventListenerObject>();
   const media = {
@@ -23,10 +23,15 @@ function fixture(t: TestContext, narrow = false) {
     addEventListener: (_type: string, callback: EventListenerOrEventListenerObject | null) => { if (callback) callbacks.add(callback); },
     removeEventListener: (_type: string, callback: EventListenerOrEventListenerObject | null) => { if (callback) callbacks.delete(callback); },
   };
-  const shellWindow = { matchMedia: (query: string) => { assert.equal(query, "(max-width: 1200px)"); return media; } };
+  const shellWindow = { matchMedia: (query: string) => { assert.equal(query, withBoards ? "(max-width: 700px)" : "(max-width: 1200px)"); return media; } };
   const document = window.document;
   const host = document.querySelector<HTMLElement>("[data-community]")!;
-  const shell = createFeedShell(host, shellWindow);
+  const boards = withBoards ? document.createElement('nav') : undefined;
+  if (boards) {
+    boards.className = 'community-frame-boards';
+    boards.innerHTML = '<h2><a href="#/community/boards">社区板块</a></h2><a href="#/community/boards/qa">学习问答</a>';
+  }
+  const shell = createFeedShell(host, shellWindow, { boards });
   t.after(() => { shell.release(); window.close(); });
   const resize = (nextNarrow: boolean) => {
     media.matches = nextNarrow;
@@ -35,8 +40,28 @@ function fixture(t: TestContext, narrow = false) {
       else callback.handleEvent(new Event("change"));
     }
   };
-  return { window, document, host, shell, resize, callbacks, shellWindow };
+  return { window, document, host, shell, resize, callbacks, shellWindow, boards };
 }
+
+for (const open of [false, true]) test(`a focused board heading moves to the visible mobile entry when the menu is ${open ? 'open' : 'closed'}`, t => {
+  const { document, host, shell, resize, boards } = fixture(t, false, true);
+  shell.sync();
+  const nav = document.getElementById('navigation')!;
+  nav.classList.toggle('open', open);
+  const menu = document.querySelector<HTMLButtonElement>('button[data-action="menu"]')!;
+  menu.setAttribute('aria-expanded', String(open));
+  const heading = boards!.querySelector<HTMLAnchorElement>('h2 > a')!;
+  heading.focus();
+  resize(true);
+  const visible = open ? document.querySelector('#navigation a[href="#/community/boards"]') : menu;
+  assert.equal(document.activeElement, visible, 'focus stays on a visible navigation control rather than a hidden heading');
+  assert.equal(boards!.parentElement, host.querySelector('.community-main'));
+  resize(false);
+  const input = host.querySelector<HTMLInputElement>('input')!;
+  input.focus();
+  resize(true);
+  assert.equal(document.activeElement, input, 'resizing never steals unrelated form focus');
+});
 
 test("desktop feed moves the original nav before main and restores exact nodes, links, focus and handlers", t => {
   const { document, host, shell } = fixture(t);

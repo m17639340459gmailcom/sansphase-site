@@ -14,19 +14,27 @@ export function createFrameBoards(document: Document) {
   const nav = document.createElement('nav');
   nav.dataset.frameBoards = '';
   nav.className = 'community-frame-boards';
+  const title = document.createElement('h2');
+  const allBoards = document.createElement('a');
+  allBoards.href = '#/community/boards';
+  title.append(allBoards);
+  nav.append(title);
   let key = '';
   return {
     element: nav,
     sync(source: ParentNode, hash: string, english: boolean) {
       const boards = source.querySelector<HTMLElement>('.community-boards');
       const items = boards ? readCategories(boards) : [];
+      const label = english ? 'Boards' : '社区板块';
+      const hint = english ? 'View all boards' : '查看所有板块';
+      if (allBoards.textContent !== label) allBoards.textContent = label;
+      if (allBoards.title !== hint) allBoards.title = hint;
+      if (nav.getAttribute('aria-label') !== label) nav.setAttribute('aria-label', label);
       const nextKey = JSON.stringify([items, english]);
       if (key !== nextKey) {
         key = nextKey;
-        const title = document.createElement('h2');
-        title.textContent = english ? 'Boards' : '社区板块';
-        nav.setAttribute('aria-label', title.textContent);
-        nav.replaceChildren(title, ...items.map(item => {
+        for (const link of nav.querySelectorAll(':scope > a')) link.remove();
+        nav.append(...items.map(item => {
           const link = document.createElement('a');
           link.href = item.href;
           link.textContent = item.label;
@@ -50,10 +58,11 @@ export function createFrameBoards(document: Document) {
           return link;
         }));
       }
+      const selected = hash.split('?')[0].replace('#/community/new/', '#/community/boards/');
       for (const link of nav.querySelectorAll('a')) {
-        const selected = hash.split('?')[0].replace('#/community/new/', '#/community/boards/');
-        if (link.getAttribute('href') === selected) link.setAttribute('aria-current', 'page');
-        else link.removeAttribute('aria-current');
+        if (link.getAttribute('href') === selected) {
+          if (link.getAttribute('aria-current') !== 'page') link.setAttribute('aria-current', 'page');
+        } else if (link.hasAttribute('aria-current')) link.removeAttribute('aria-current');
       }
     },
   };

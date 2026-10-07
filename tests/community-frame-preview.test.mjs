@@ -547,7 +547,9 @@ test('left board navigation stays stable while highlights belong exclusively to 
   const carousel = main.querySelector('[data-frame-showcase] .community-feed-showcase');
   const boardNav = main.querySelector('.community-feed-rail [data-frame-boards]');
   assert.ok(carousel && boardNav);
-  assert.equal(boardNav.querySelectorAll('a').length, communityBoards.length);
+  assert.equal(boardNav.querySelectorAll(':scope > a').length, communityBoards.length);
+  const allBoardsLink = boardNav.querySelector('h2 > a');
+  assert.equal(allBoardsLink?.getAttribute('href'), '#/community/boards');
   assert.equal(frame.center().querySelector('.community-feed-categories'), null);
   assert.equal(frame.center().querySelector('a.community-post'), null);
   const track = carousel.querySelector('.community-feed-showcase-track');
@@ -555,14 +557,15 @@ test('left board navigation stays stable while highlights belong exclusively to 
   track.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
   assert.equal(track.scrollLeft, 600);
   assert.equal(carousel.querySelector('button'), null);
-  const firstLink = boardNav.querySelector('a');
+  const firstLink = boardNav.querySelector(':scope > a');
   for (const board of ['showcase', 'qa', 'tools']) {
     render(`#/community/boards/${board}`); await turn();
     const current = main.querySelector('[data-frame-showcase] .community-feed-showcase');
     assert.notEqual(current, carousel);
     assert.deepEqual([...current.querySelectorAll('.community-feed-showcase-card')].map(card => card.getAttribute('href')), [`#/post/${board}-p1`, `#/post/${board}-p2`]);
     assert.equal(main.querySelector('.community-feed-rail [data-frame-boards]'), boardNav);
-    assert.equal(boardNav.querySelector('a'), firstLink);
+    assert.equal(boardNav.querySelector(':scope > a'), firstLink);
+    assert.equal(boardNav.querySelector('h2 > a'), allBoardsLink);
     assert.equal(boardNav.querySelector('[aria-current="page"]').getAttribute('href'), `#/community/boards/${board}`);
     assert.equal(main.querySelector('.community-feed-rail-compose').getAttribute('href'), `#/community/new/${board}`);
     assert.equal(frame.center().querySelectorAll('.community-feed-showcase').length, 1);

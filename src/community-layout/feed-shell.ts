@@ -194,12 +194,22 @@ export function createFeedShell(host: HTMLElement, window: FeedShellWindow, { bo
     const header = document.getElementById("site-header");
     const layout = host.querySelector<HTMLElement>(":scope > .community-layout");
     const main = layout?.querySelector<HTMLElement>(":scope > .community-main");
+    const focusedBoardHeading = Boolean(narrow?.matches && boards?.querySelector('h2 > a') === document.activeElement);
     const ready = Boolean(narrow && !narrow.matches && host.isConnected && header && layout && main);
     if (move && (!ready || header !== move.header || layout !== move.layout
       || move.marker.parentNode !== header || move.nav.parentNode !== move.rail
       || move.rail.parentNode !== layout || header?.querySelector(":scope > #navigation"))) clear();
     if (!ready || !header || !layout || !main) {
       if (boards && main && boards.parentElement !== main) main.prepend(boards);
+      // The board heading is hidden on mobile. Transfer only its existing
+      // keyboard focus to the restored menu's visible equivalent.
+      if (focusedBoardHeading && header?.isConnected && host.isConnected) {
+        const nav = header.querySelector<HTMLElement>(':scope > #navigation');
+        const entry = nav?.querySelector<HTMLAnchorElement>('a[href="#/community/boards"]');
+        const menu = header.querySelector<HTMLButtonElement>('button[data-action="menu"][aria-controls="navigation"]');
+        const target = nav?.classList.contains('open') ? entry : menu;
+        target?.focus({ preventScroll: true });
+      }
       return;
     }
     if (!move) {

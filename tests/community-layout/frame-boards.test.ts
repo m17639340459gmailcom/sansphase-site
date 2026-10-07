@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { test, type TestContext } from 'node:test';
 import { Box, CircleHelp, Coffee, Feather, Image, Megaphone, type IconNode } from 'lucide';
-import { communityBoards } from '../../src/community.ts';
+import { communityBoards, communityRoute } from '../../src/community.ts';
 import { createFrameBoards } from '../../src/community-layout/frame-boards.ts';
 
 interface TestWindow extends Window { close(): void }
@@ -28,7 +28,7 @@ function fixture(t: TestContext) {
 test('board links display the existing Lucide drawings without changing labels or VIP access hints', t => {
   const { source, boards } = fixture(t);
   boards.sync(source, '#/community/home', false);
-  const links = [...boards.element.querySelectorAll('a')];
+  const links = [...boards.element.querySelectorAll(':scope > a')];
   assert.equal(links.length, communityBoards.length);
   for (const [index, link] of links.entries()) {
     const board = communityBoards[index];
@@ -80,6 +80,61 @@ test('icons do not add hidden, disabled, duplicate or unknown board destinations
   container.append(source.querySelector('a[href$="/qa"]')!.cloneNode(true));
   container.insertAdjacentHTML('beforeend', '<a class="community-board-link" href="#/community/boards/unknown"><span>未知板块</span></a>');
   boards.sync(source, '#/community/home', true);
-  assert.deepEqual([...boards.element.querySelectorAll('a')].map(link => link.getAttribute('href')), communityBoards.slice(0, 4).map(board => `#/community/boards/${board.id}`));
+  assert.deepEqual([...boards.element.querySelectorAll(':scope > a')].map(link => link.getAttribute('href')), communityBoards.slice(0, 4).map(board => `#/community/boards/${board.id}`));
   assert.equal(boards.element.getAttribute('aria-label'), 'Boards');
+});
+
+test('the board heading opens the existing all-boards route and retains focus across navigation updates', t => {
+  const { document, source, boards } = fixture(t);
+  boards.sync(source, '#/community/home', false);
+  const heading = boards.element.querySelector<HTMLAnchorElement>('h2 > a')!;
+  assert.ok(heading, 'the section heading is a keyboard-accessible link');
+  assert.equal(heading.textContent, '社区板块');
+  assert.equal(heading.getAttribute('title'), '查看所有板块');
+  assert.equal(heading.getAttribute('href'), '#/community/boards');
+  assert.equal(communityRoute(heading.getAttribute('href')!).view, 'boards');
+  assert.equal(heading.hasAttribute('aria-current'), false);
+  heading.focus();
+  boards.sync(source, '#/community/boards?from=heading', false);
+  assert.equal(boards.element.querySelector('h2 > a'), heading);
+  assert.equal(document.activeElement, heading);
+  assert.equal(heading.getAttribute('aria-current'), 'page');
+  assert.equal(boards.element.querySelectorAll('[aria-current="page"]').length, 1);
+  boards.sync(source, '#/community/boards/qa', false);
+  assert.equal(heading.hasAttribute('aria-current'), false);
+  assert.equal(boards.element.querySelector('a[aria-current="page"]')?.getAttribute('href'), '#/community/boards/qa');
+  boards.sync(source, '#/community/boards', true);
+  const english = boards.element.querySelector<HTMLAnchorElement>('h2 > a')!;
+  assert.equal(english.textContent, 'Boards');
+  assert.equal(english.getAttribute('title'), 'View all boards');
+  assert.equal(english.getAttribute('href'), '#/community/boards');
+});
+
+test('membership and language updates retain the all-boards heading and its keyboard focus', t => {
+  const { document, source, boards } = fixture(t);
+  boards.sync(source, '#/community/boards', false);
+  const heading = boards.element.querySelector<HTMLAnchorElement>('h2 > a')!;
+  heading.focus();
+  source.querySelector<HTMLElement>('.community-board-lock')!.hidden = true;
+  boards.sync(source, '#/community/boards', false);
+  assert.equal(boards.element.querySelector('h2 > a'), heading);
+  assert.equal(document.activeElement, heading);
+  assert.equal(heading.getAttribute('aria-current'), 'page');
+  assert.equal(boards.element.querySelector('.community-feed-category-lock'), null);
+  boards.sync(source, '#/community/boards', true);
+  assert.equal(boards.element.querySelector('h2 > a'), heading);
+  assert.equal(document.activeElement, heading);
+  assert.equal(heading.textContent, 'Boards');
+  assert.equal(heading.title, 'View all boards');
+});
+
+test('an unchanged summary update does not mutate board navigation or the selected heading', t => {
+  const { document, source, boards } = fixture(t);
+  boards.sync(source, '#/community/boards', false);
+  const observer = new document.defaultView!.MutationObserver(() => {});
+  observer.observe(boards.element, { attributes: true, childList: true, subtree: true });
+  source.querySelector<HTMLElement>('.community-board-count')!.textContent = '4';
+  boards.sync(source, '#/community/boards', false);
+  assert.deepEqual(observer.takeRecords(), [], 'a background count refresh does not touch stable sidebar nodes');
+  observer.disconnect();
 });

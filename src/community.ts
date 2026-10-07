@@ -704,8 +704,8 @@ export function communityBoardsHTML({ summary, members, ...common }: Common & { 
   const stats = statsHTML([[t("版块", "Boards"), communityBoards.length], [t("主题", "Topics"), ready ? ready.total : "—"], [t("标签", "Tags"), communityTags.length]]);
   return `<section class="page community-page" data-community="boards">`
     + bannerHTML({ eyebrow: "BOARDS", title: t("版块", "Boards"), text: t("版块少一点，内容才不会散。更细的分类用标签。", "A few boards, so conversations stay together; tags do the rest."), esc, side: stats })
-    + (blocked ? communityStatusHTML(summary, common) : `<div class="community-board-grid">${cards}</div>`
-      + `<section class="community-card community-rv" style="--i:8">${cardHead(t("标签", "Tags"), "", `<span class="community-muted">${t("点标签看所有版块里的相关帖子", "Posts with a tag, across boards")}</span>`)}<div class="community-tagcloud">${tags}</div></section>`)
+    + (blocked ? communityStatusHTML(summary, common) : `<section class="community-card community-rv" style="--i:8">${cardHead(t("标签", "Tags"), "", `<span class="community-muted">${t("点标签看所有版块里的相关帖子", "Posts with a tag, across boards")}</span>`)}<div class="community-tagcloud">${tags}</div></section>`
+      + `<div class="community-board-grid">${cards}</div>`)
     + `</section>`;
 }
 
