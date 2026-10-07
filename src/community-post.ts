@@ -21,7 +21,7 @@ export type CommunityReply = {
   likes?: number; liked?: boolean; thanked?: boolean; thanks?: number;
   byTopicAuthor: boolean; accepted?: boolean; mine?: boolean; hidden?: boolean;
   quote?: { id: string; author: string; excerpt: string } | null;
-  canDelete: boolean; deleteReasonRequired?: boolean; canEdit?: boolean; canAccept?: boolean; canRestore?: boolean;
+  canDelete: boolean; deleteReasonRequired?: boolean; canEdit?: boolean; canAccept?: boolean; canRestore?: boolean; canPenalty?: boolean; canMute?: boolean;
 };
 // The prompt is there only when the viewer may read it; a paid prompt otherwise comes as a masked preview.
 export type CommunityThreadMeta = CommunityShowcaseMeta & { prompt: string | null; preview: string | null; unlocked: boolean; unlocks: number };
@@ -30,6 +30,7 @@ export type CommunityThreadTopic = Omit<CommunityTopic, "meta" | "resource"> & {
   rawTitle?: string;
   liked?: boolean; bookmarked?: boolean; bookmarks?: number; thanked?: boolean; thanks?: number; mine?: boolean;
   canEdit?: boolean; canModerate?: boolean; canFeature?: boolean; canRetag?: boolean; canPaidPin?: boolean; canHighlight?: boolean; canReply?: boolean;
+  canPenalty?: boolean; canMute?: boolean; canRecommend?: boolean; canPin?: boolean; canLock?: boolean; canMove?: boolean; canApprove?: boolean; canRestore?: boolean;
   meta?: CommunityThreadMeta | null;
   resource?: (CommunityResource & { myVote?: "alive" | "dead" | null }) | null;
   pendingReason?: string | null; hiddenReason?: string | null;
@@ -43,7 +44,7 @@ export type CommunityThread = {
   mentions?: Record<string, string>;
   viewer?: { level: number; muted: { until: string; reason: string } | null };
 };
-export type CommunityTarget = { kind: "topic" | "reply"; id: string; mine?: boolean; reportId?: string };
+export type CommunityTarget = { kind: "topic" | "reply"; id: string; mine?: boolean; reportId?: string; canPenalty?: boolean; canMute?: boolean };
 export type CommunityReplySort = "floor" | "likes";
 
 // 与服务端校验一致（server/community-routes-content.ts）。随想没有标题，正文 2–300 字；作品和资源的正文可以不写。
@@ -84,14 +85,13 @@ export function communityDeletePanelHTML(target: CommunityTarget, { t, esc }: Co
   return `<form class="community-panel is-danger" data-community-form="delete" data-kind="${target.kind}" data-id="${esc(target.id)}"${target.reportId ? ` data-report="${esc(target.reportId)}"` : ''} novalidate>`
     + `<p class="community-panel-title">${t(`删除${what}`, `Delete ${what}`)}</p>`
     + `<div class="community-field"><label class="community-field-l" for="community-delete-reason">${t('删除理由（必填）', 'Deletion reason (required)')}</label><textarea id="community-delete-reason" name="reason" rows="2" minlength="2" maxlength="200" required placeholder="${t('说明删除原因，原作者会收到通知', 'Explain why; the author will be notified')}"></textarea></div>`
-    + (target.reportId ? `<p class="community-muted">${t('举报成立会删除内容并按违规处理，请填写核实后的删除理由。', 'Upholding removes the content as a violation. Enter the verified reason.')}</p>` : target.mine ? '' :
-    `<label class="community-check"><input type="checkbox" name="violation" checked><span>${t(`按违规处理：收回它带来的星尘，再扣 ${communityRules.penalty}`, `Treat as a violation: take back its stardust and ${communityRules.penalty} more`)}</span></label>`
-    + `<fieldset class="community-inline-choices"><legend>${t("同时禁言作者", "Also mute the author")}</legend>${[[0, t("不禁言", "No")], [1, t("1 天", "1 day")], [7, t("7 天", "7 days")], [30, t("30 天", "30 days")]].map(([days, label]) => `<label><input type="radio" name="mute" value="${days}"${days === 0 ? " checked" : ""}><span>${label}</span></label>`).join("")}</fieldset>`
-    ) + `<p class="community-form-status" role="status" aria-live="polite"></p>`
+    + (target.reportId ? `<p class="community-muted">${t('举报成立会删除内容，请填写核实后的删除理由；违规扣分需要单独授权。', 'Upholding removes the content. Enter the verified reason; penalties require separate authority.')}</p>` : '')
+    + (!target.mine && target.canPenalty !== false ? `<label class="community-check"><input type="checkbox" name="violation" checked><span>${t(`按违规处理：收回它带来的星尘，再扣 ${communityRules.penalty}`, `Treat as a violation: take back its stardust and ${communityRules.penalty} more`)}</span></label>` : '')
+    + (!target.mine && !target.reportId && target.canMute !== false ? `<fieldset class="community-inline-choices"><legend>${t("同时禁言作者", "Also mute the author")}</legend>${[[0, t("不禁言", "No")], [1, t("1 天", "1 day")], [7, t("7 天", "7 days")], [30, t("30 天", "30 days")]].map(([days, label]) => `<label><input type="radio" name="mute" value="${days}"${days === 0 ? " checked" : ""}><span>${label}</span></label>`).join("")}</fieldset>` : '') + `<p class="community-form-status" role="status" aria-live="polite"></p>`
     + `<div class="community-form-actions"><button type="button" class="community-button" data-action="community-delete-cancel">${t("取消", "Cancel")}</button><button type="submit" class="community-button is-danger">${t("确认删除", "Delete")}</button></div></form>`;
 }
 
-const moveBoards = (topic: CommunityThreadTopic, me: CommunityMe | null) => communityBoards.filter(board => board.id !== topic.board && (me?.owner || me?.moderationBoards === undefined || me.moderationBoards.includes(board.id)));
+const moveBoards = (topic: CommunityThreadTopic, me: CommunityMe | null) => communityBoards.filter(board => board.id !== topic.board && (me?.owner || (me?.staff?.boards ?? me?.moderationBoards) === undefined || (me?.staff?.boards ?? me?.moderationBoards)?.includes(board.id)));
 function movePanelHTML(topic: CommunityThreadTopic, { t, esc }: Common, me: CommunityMe | null) {
   const options = moveBoards(topic, me).map((board) => `<option value="${board.id}">${esc(t(board.zh, board.en))}</option>`).join("");
   return `<form class="community-panel" data-community-form="move" data-id="${esc(topic.id)}" novalidate>`
@@ -285,12 +285,13 @@ export function communityPostHTML({ thread, me = null, reporting = null, editing
     topic.canEdit && !topic.locked ? `<a role="menuitem" href="#/community/edit/${encodeURIComponent(topic.id)}">${icons.pen || ""}<span>${t("编辑", "Edit")}</span></a>` : "",
     topic.canPaidPin ? `<button type="button" role="menuitem" data-action="community-paid-pin" data-id="${esc(topic.id)}">${icons.sparkles || icons.pin || ""}<span>${inventory?.pin ? t(`推荐 24 小时 · 用推荐卡（剩 ${inventory.pin} 张）`, `Recommend for 24 h · use a card (${inventory.pin} left)`) : t(`推荐 24 小时 · ${communityRules.pinCost} 星尘`, `Recommend for 24 h · ${communityRules.pinCost} stardust`)}</span></button>` : "",
     topic.canHighlight ? `<button type="button" role="menuitem" data-action="community-highlight" data-id="${esc(topic.id)}">${icons.sparkles || ""}<span>${inventory?.highlight ? t(`标题发光 ${communityRules.glowDays} 天 · 用高亮卡（剩 ${inventory.highlight} 张）`, `Glow for ${communityRules.glowDays} days · use a card (${inventory.highlight} left)`) : t(`标题发光 ${communityRules.glowDays} 天 · 需要高亮卡`, `Glow for ${communityRules.glowDays} days · needs a card`)}</span></button>` : "",
-    topic.canModerate ? `<button type="button" role="menuitem" data-action="community-pin" data-id="${esc(topic.id)}" aria-pressed="${Boolean(topic.pinned)}">${icons.pin || ""}<span>${topic.pinned ? t("取消置顶", "Unpin") : t("置顶", "Pin")}</span></button>` : "",
+    (topic.canPin ?? topic.canModerate) ? `<button type="button" role="menuitem" data-action="community-pin" data-id="${esc(topic.id)}" aria-pressed="${Boolean(topic.pinned)}">${icons.pin || ""}<span>${topic.pinned ? t("取消置顶", "Unpin") : t("置顶", "Pin")}</span></button>` : "",
     topic.canFeature ? `<button type="button" role="menuitem" data-action="community-feature" data-id="${esc(topic.id)}" aria-pressed="${Boolean(topic.featured)}">${icons.award || ""}<span>${topic.featured ? t("取消精华", "Unfeature") : t("评为精华", "Feature")}</span></button>` : "",
-    topic.canModerate ? `<button type="button" role="menuitem" data-action="community-lock" data-id="${esc(topic.id)}" aria-pressed="${Boolean(topic.locked)}">${icons.lock || ""}<span>${topic.locked ? t("解除锁定", "Unlock") : t("锁定，禁止回复", "Lock replies")}</span></button>` : "",
-    topic.canModerate && moveBoards(topic, me).length ? `<button type="button" role="menuitem" data-action="community-move" data-id="${esc(topic.id)}">${icons.move || ""}<span>${t("移动到其他版块", "Move to another board")}</span></button>` : "",
-    topic.canModerate && topic.hidden ? `<button type="button" role="menuitem" data-action="community-restore" data-kind="topic" data-id="${esc(topic.id)}">${icons.eye || ""}<span>${t("恢复显示", "Show again")}</span></button>` : "",
-    topic.canModerate && topic.pending ? `<button type="button" role="menuitem" data-action="community-approve" data-id="${esc(topic.id)}">${icons.check || ""}<span>${t("审核通过", "Approve")}</span></button>` : "",
+    topic.canRecommend && !topic.canFeature ? `<button type="button" role="menuitem" data-action="community-feature-recommend" data-id="${esc(topic.id)}">${icons.award || ''}<span>${t('推荐精选给所属版主', 'Recommend for a featured decision')}</span></button>` : '',
+    (topic.canLock ?? topic.canModerate) ? `<button type="button" role="menuitem" data-action="community-lock" data-id="${esc(topic.id)}" aria-pressed="${Boolean(topic.locked)}">${icons.lock || ""}<span>${topic.locked ? t("解除锁定", "Unlock") : t("锁定，禁止回复", "Lock replies")}</span></button>` : "",
+    (topic.canMove ?? topic.canModerate) && moveBoards(topic, me).length ? `<button type="button" role="menuitem" data-action="community-move" data-id="${esc(topic.id)}">${icons.move || ""}<span>${t("移动到其他版块", "Move to another board")}</span></button>` : "",
+    (topic.canRestore ?? topic.canModerate) && topic.hidden ? `<button type="button" role="menuitem" data-action="community-restore" data-kind="topic" data-id="${esc(topic.id)}">${icons.eye || ""}<span>${t("恢复显示", "Show again")}</span></button>` : "",
+    (topic.canApprove ?? topic.canModerate) && topic.pending ? `<button type="button" role="menuitem" data-action="community-approve" data-id="${esc(topic.id)}">${icons.check || ""}<span>${t("审核通过", "Approve")}</span></button>` : "",
     topic.canRetag ? `<button type="button" role="menuitem" data-action="community-retag" data-id="${esc(topic.id)}">${icons.tags || ""}<span>${t("修改标签", "Change tags")}</span></button>` : "",
   ].filter(Boolean);
   const menu = menuItems.length
@@ -323,7 +324,7 @@ export function communityPostHTML({ thread, me = null, reporting = null, editing
     + actbar
     + (open(reporting, "topic", topic.id) ? reportFormHTML({ kind: "topic", id: topic.id }, common) : "")
     + (open(deleting, "topic", topic.id) ? communityDeletePanelHTML({ kind: "topic", id: topic.id, mine: Boolean(topic.mine) }, common) : "")
-    + (moving && topic.canModerate && moveBoards(topic, me).length ? movePanelHTML(topic, common, me) : "")
+    + (moving && (topic.canMove ?? topic.canModerate) && moveBoards(topic, me).length ? movePanelHTML(topic, common, me) : "")
     + (retagging && topic.canRetag ? retagPanelHTML(topic, common) : "")
     + `<section class="community-discussion" aria-labelledby="community-replies-title"><div class="community-replies-head"><h2 id="community-replies-title" tabindex="-1">${t(`${replies.length} 条回复`, `${replies.length} replies`)}</h2>${sortSeg}</div>${repliesHTML}</section>`
     + form + `</article>`

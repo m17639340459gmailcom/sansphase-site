@@ -12,6 +12,7 @@ import { createCommunityStore } from '../server/community-store.ts';
 import { createCommunityService } from '../server/community-service.ts';
 import type { CommunityAuthor } from '../server/community-db.ts';
 import { acceptCommunityConvention } from './fixtures/community-convention-consent.ts';
+import { publicModerationContacts } from '../server/community-moderation-contact.ts';
 
 const moderator: CommunityAuthor = { kind: 'reader', id: 'moderator' };
 const other: CommunityAuthor = { kind: 'reader', id: 'other' };
@@ -33,7 +34,7 @@ async function setup(t: TestContext) {
   acceptCommunityConvention(store, [moderator, other, { kind: 'reader', id: 'reader' }, { kind: 'owner', id: 'owner' }]);
   store.members.setSteward(moderator, true, ['qa', 'tools']);
   store.members.setSteward(other, true, ['showcase']);
-  const accounts = new Map([
+  const accounts = new Map<string, { uid: string; name: string; active?: boolean }>([
     ['reader', { uid: '10001', name: '读者' }],
     ['moderator', { uid: '10002', name: '问答版主' }],
     ['other', { uid: '10003', name: '作品版主' }],
@@ -58,7 +59,7 @@ async function setup(t: TestContext) {
     people: async authors => {
       const map = new Map(authors.flatMap(author => {
         const info = author.kind === 'owner' ? { uid: 'owner', name: '無相' } : accounts.get(author.id);
-        return info ? [[`${author.kind}:${author.id}`, { ...info, avatar: null, vip: false, joinedAt: null, bio: '', email: 'private@example.test', phone: '13800138000' }] as const] : [];
+        return info ? [[`${author.kind}:${author.id}`, { active: true, ...info, avatar: null, vip: false, joinedAt: null, bio: '', email: 'private@example.test', phone: '13800138000' }] as const] : [];
       }));
       afterPeople?.();
       return map;
@@ -178,6 +179,27 @@ test('public reads recheck appointments after asynchronous people lookup and omi
   await post({ qq: '12345678', email: '' });
   accounts.delete('moderator');
   assert.deepEqual((await contacts('?board=qa')).items, []);
+});
+
+test('explicitly inactive staff contacts are excluded without changing stored appointments or voluntary data', async t => {
+  const { store, accounts, post, contacts } = await setup(t);
+  assert.equal((await post({ qq: '12345678', email: 'moderator@example.test' })).status, 200);
+  assert.equal((await post({ qq: '23456789', email: '' }, 'other')).status, 200);
+  const inactive = accounts.get('moderator')!;
+  accounts.set('moderator', { ...inactive, active: false });
+  accounts.set('other', { ...accounts.get('other')!, active: true });
+  assert.deepEqual((await contacts('?board=qa')).items, []);
+  assert.deepEqual((await contacts()).items.map(item => item.uid), ['10003']);
+  assert.deepEqual(store.members.moderationContact(moderator), { qq: '12345678', email: 'moderator@example.test' });
+  assert.deepEqual(store.members.moderationBoards(moderator), ['qa', 'tools']);
+  // Restoring a live account reveals the retained voluntary contact.
+  accounts.set('moderator', inactive);
+  assert.equal((await contacts('?board=qa')).items[0]?.uid, '10002');
+  // The public projection also accepts older providers that omit active.
+  const legacy = await publicModerationContacts(store, { kind: 'owner', id: 'owner' }, async () => new Map([
+    ['reader:moderator', { name: inactive.name, uid: inactive.uid, avatar: null, vip: false, joinedAt: null, bio: '' }],
+  ]), 'qa');
+  assert.equal(legacy.items[0]?.uid, '10002');
 });
 
 test('formal migration adds public-contact fields to existing member rows without changing their scopes or decorations', async t => {

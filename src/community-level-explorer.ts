@@ -3,17 +3,19 @@ import { communityGrowthArtHTML, communityTrustArtHTML, communityVipArtHTML } fr
 import { communityLevels, communityLevelPerks } from './community-rules.mjs';
 import type { Common } from './community.ts';
 import type { CommunityStardust } from './community-pages.ts';
+import { communityStaffRoles } from './community-staff.mjs';
 
-type Mode = 'growth' | 'trust' | 'vip';
-export type CommunityLevelSelection = { mode: Mode; growth: number | null; trust: number | null; vip?: number | null };
-const initial = (): CommunityLevelSelection => ({ mode: 'growth', growth: null, trust: null, vip: null });
+type Mode = 'growth' | 'trust' | 'vip' | 'staff';
+export type CommunityLevelSelection = { mode: Mode; growth: number | null; trust: number | null; vip?: number | null; staff?: number | null };
+const initial = (): CommunityLevelSelection => ({ mode: 'growth', growth: null, trust: null, vip: null, staff: null });
+const staffRanks = [...communityStaffRoles].reverse();
 const bounds = (mode: Mode) => mode === 'growth' ? [1, 10] : mode === 'vip' ? [1, 8] : [0, 3];
 const clamp = (value: number, mode: Mode) => {
   const [min, max] = bounds(mode);
   return Number.isFinite(value) ? Math.max(min, Math.min(max, Math.trunc(value))) : min;
 };
 const selectedLevel = (data: CommunityStardust, selection: CommunityLevelSelection) => clamp(
-  selection[selection.mode] ?? (selection.mode === 'growth' ? data.owner ? 1 : data.growth?.level ?? 1 : selection.mode === 'vip' ? data.vipGrowth?.active ? data.vipGrowth.level ?? 1 : 1 : data.owner ? 0 : data.level), selection.mode,
+  selection[selection.mode] ?? (selection.mode === 'growth' ? data.owner ? 1 : data.growth?.level ?? 1 : selection.mode === 'vip' ? data.vipGrowth?.active ? data.vipGrowth.level ?? 1 : 1 : selection.mode === 'staff' ? Math.max(0, staffRanks.findIndex(item => item.id === (data.owner ? 'owner' : data.staffRole))) : data.owner ? 0 : data.level), selection.mode,
 );
 
 const finiteCount = (value: number | null | undefined) => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.trunc(value).toLocaleString('en-US') : '—';
@@ -36,6 +38,7 @@ function growthProgressHTML(data: CommunityStardust, common: Common, selected: n
 }
 
 const levelIconHTML = (level: number, mode: Mode) => {
+  if (mode === 'staff') return `<span data-staff-art-slot data-staff-role="${staffRanks[level].id}" aria-hidden="true"></span>`;
   if (mode === 'growth') return communityGrowthArtHTML(level);
   if (mode === 'vip') return communityVipArtHTML(level);
   return communityTrustArtHTML(level);
@@ -56,7 +59,7 @@ function levelBodyHTML(data: CommunityStardust, common: Common, selection: Commu
   const { esc, t } = common, text = (zh: string, en: string) => esc(t(zh, en));
   const mode = selection.mode, growth = mode === 'growth', level = selectedLevel(data, selection);
   const code = (n: number) => mode === 'vip' ? `VIP${n}` : `L${n}`;
-  const name = (n: number) => growth ? communityGrowthLevel(n) : mode === 'vip' ? { name: code(n), en: code(n) } : communityLevels[n];
+  const name = (n: number) => growth ? communityGrowthLevel(n) : mode === 'vip' ? { name: code(n), en: code(n) } : mode === 'staff' ? { name: staffRanks[n].name, en: staffRanks[n].nameEn } : communityLevels[n];
   const rankLabel = (n: number, english = false) => `${mode === 'trust' ? `${code(n)} ` : ''}${english ? name(n).en : name(n).name}`;
   const definition = name(level);
   const [min, max] = bounds(mode);
@@ -78,22 +81,34 @@ function levelBodyHTML(data: CommunityStardust, common: Common, selection: Commu
   } else if (mode === 'vip') {
     const multiplier = data.vipCatalogue?.find(item => item.level === level)?.multiplier;
     details = `<span class="community-level-caption">${text('会员等级', 'VIP levels')}</span><h3>${code(level)}</h3><div class="community-vip-benefit"><span>${text('登录经验加速', 'Login experience multiplier')}</span><strong data-vip-multiplier>${finiteCount(multiplier)}<small>×</small></strong></div>${vipProgressHTML(data, common)}`;
+  } else if (mode === 'staff') {
+    const notes = [
+      ['协助所属版主审核与推荐精选，建议通过后仍需具有最终审批权的人决定。', 'Assist the assigned moderator with review and featured recommendations; advice still needs a final decision.'],
+      ['由总版主任命，管理获分配的板块；可以按上级授予的权限任命和配置协管。', 'Appointed by a general moderator to manage assigned boards and configure assistants within granted authority.'],
+      ['由站长任命，协调所负责的板块；可以按站长授予的权限任命和配置版主。', 'Appointed by the owner to coordinate assigned boards and configure moderators within granted authority.'],
+      ['负责全社区管理、任命总版主以及最终权限配置。', 'Responsible for community management, general moderator appointments and final permission configuration.'],
+    ];
+    details = `<span class="community-level-caption">${text('管理身份', 'Management roles')}</span><h3>${text(definition.name, definition.en)}</h3><p>${text(notes[level][0], notes[level][1])}</p><p class="community-level-note">${text('管理身份由上级任命，与社区 L0–L3 等级、成长和 VIP 分开；具体能力及可下发的能力由上级配置。删除、违规扣分和禁言分别授权，不会自动获得。', 'Management roles are appointed separately from earned L0–L3, growth and VIP levels. The superior assigns capabilities and which may be delegated. Deletion, penalties and mutes are granted separately.')}</p><p class="community-level-note">${text('需要申请管理职务时，请通过社区规则中的管理联系方式联系对应上级，由管理台正式任命。读者身份下没有管理权。', 'Apply through the management contacts in the community rules to the appropriate superior; appointments are made in management. Reader perspective has no management authority.')} <a href="#/community/rules">${text('查看管理联系方式', 'View management contacts')}</a></p>`;
   } else {
-    details = `<span class="community-level-caption">${text('社区等级', 'Community levels')}</span><h3>${text(`${code(level)} ${definition.name}`, `${code(level)} ${definition.en}`)}</h3><h4>${text('权限与限制', 'Permissions and limits')}</h4><ul class="community-level-perks">${(communityLevelPerks[level] || []).map(([zh, en]) => `<li>${text(zh, en)}</li>`).join('')}</ul><p class="community-level-note">${text('版主由作者任命，管理指定板块并可执行全社区禁言；VIP 不改变信任等级或管理权。', 'Moderators are appointed by the owner, manage assigned boards and can mute community-wide. VIP does not change trust or management rights.')}</p>`;
+    details = `<span class="community-level-caption">${text('社区等级', 'Community levels')}</span><h3>${text(`${code(level)} ${definition.name}`, `${code(level)} ${definition.en}`)}</h3><h4>${text('权限与限制', 'Permissions and limits')}</h4><ul class="community-level-perks">${(communityLevelPerks[level] || []).map(([zh, en]) => `<li>${text(zh, en)}</li>`).join('')}</ul><p class="community-level-note">${text('社区等级按参与情况获得，不自动给予管理权；管理身份及具体能力见右侧管理身份页签。VIP 不改变信任等级或管理权。', 'Community levels are earned through participation and do not grant management authority. See Management roles for appointments and specific capabilities. VIP does not change trust or management rights.')}</p>`;
   }
   return preview + `<div id="community-level-detail" class="community-level-detail" data-level-detail role="region" aria-labelledby="community-level-title" tabindex="0">${details}</div>`;
 }
 
 function personalStatus(data: CommunityStardust, { esc, t }: Common, mode: Mode) {
+  if (mode === 'staff') {
+    const item = communityStaffRoles.find(role => role.id === (data.owner ? 'owner' : data.staffRole));
+    return esc(item ? t(`当前管理身份：${item.name}`, `Current management role: ${item.nameEn}`) : t('当前为普通读者，没有管理权。', 'Currently a reader, with no management authority.'));
+  }
   if (mode === 'vip') return esc(data.owner ? t('作者账号', 'Owner account') : data.vipGrowth?.active && validRank(data.vipGrowth.level, 1, 8) ? t(`当前 VIP${data.vipGrowth.level}`, `Current VIP${data.vipGrowth.level}`) : data.vip === true ? t('当前为 VIP 会员', 'Active VIP member') : data.vip === false ? t('当前为普通读者', 'Regular reader') : t('会员状态暂未提供', 'Membership status unavailable'));
   if (data.owner) return esc(t('作者不参与成长等级，拥有全部管理权限。', 'The owner has no growth level and has all management permissions.'));
   if (mode === 'growth') return data.growth?.configured && validRank(data.growth.level, 1, 10) ? `<span data-personal-level>${esc(t(`当前 ${communityGrowthLevel(data.growth.level).name}`, `Current ${communityGrowthLevel(data.growth.level).en}`))}</span>` : esc(t('成长等级暂未提供', 'Growth level is not available'));
-  return esc(t(`当前权限：${data.steward ? '版主' : communityLevels[clamp(data.level, 'trust')].name}`, `Current role: ${data.steward ? 'moderator' : communityLevels[clamp(data.level, 'trust')].en}`));
+  return esc(t(`当前社区等级：${communityLevels[clamp(data.level, 'trust')].name}`, `Current community level: ${communityLevels[clamp(data.level, 'trust')].en}`));
 }
 
 export function communityLevelExplorerHTML(data: CommunityStardust, common: Common, selection: CommunityLevelSelection = initial()) {
   const { esc, t } = common;
-  const modes = [['growth', '成长等级', 'Growth levels'], ['trust', '社区等级', 'Community levels'], ['vip', 'VIP 等级', 'VIP levels']] as const;
+  const modes = [['growth', '成长等级', 'Growth levels'], ['trust', '社区等级', 'Community levels'], ['vip', 'VIP 等级', 'VIP levels'], ['staff', '管理身份', 'Management roles']] as const;
   return `<section class="community-card community-level-explorer" data-level-explorer data-mode="${selection.mode}"><header class="community-level-head"><div class="community-level-modes" role="group" aria-label="${esc(t('等级介绍', 'Level information'))}">${modes.map(([mode, zh, en]) => `<button type="button" data-action="community-level-mode" data-level-mode="${mode}" aria-pressed="${mode === selection.mode}">${esc(t(zh, en))}</button>`).join('')}</div><p><span data-level-status>${personalStatus(data, common, selection.mode)}</span></p></header><div class="community-level-body" data-level-body>${levelBodyHTML(data, common, selection)}</div></section>`;
 }
 
@@ -121,7 +136,7 @@ export function createCommunityLevelExplorer(options: {
     switch (target.dataset.action) {
       case 'community-level-mode': {
         const mode = target.dataset.levelMode;
-        if ((mode !== 'growth' && mode !== 'trust' && mode !== 'vip') || mode === selection.mode) return true;
+        if ((mode !== 'growth' && mode !== 'trust' && mode !== 'vip' && mode !== 'staff') || mode === selection.mode) return true;
         selection.mode = mode; update(`[data-level-mode="${mode}"]`); return true;
       }
       case 'community-level-select': {

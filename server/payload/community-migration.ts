@@ -3,6 +3,7 @@ import { mkdir, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { communityBoards } from '../../src/community.ts';
+import { communityLegacyStaffPermissions } from '../community-staff.ts';
 
 // Community posts are durable reader content, so they live in content.db and
 // are covered by the existing content.db backups (reader_uids and
@@ -10,6 +11,30 @@ import { communityBoards } from '../../src/community.ts';
 // this explicit, backed-up migration adds the community tables.
 const member = (prefix = 'member') => `${prefix}_kind TEXT NOT NULL CHECK(${prefix}_kind IN ('reader','owner')), ${prefix}_id TEXT NOT NULL`;
 const tables: Record<string, string> = {
+  community_staff: `CREATE TABLE community_staff (
+  member_kind TEXT NOT NULL CHECK(member_kind='reader'), member_id TEXT NOT NULL,
+  role TEXT NOT NULL CHECK(role IN ('general','moderator','assistant')),
+  boards TEXT NOT NULL, permissions TEXT NOT NULL, delegable TEXT NOT NULL,
+  parent_kind TEXT NOT NULL CHECK(parent_kind IN ('owner','reader')), parent_id TEXT,
+  legacy_origin INTEGER NOT NULL DEFAULT 0 CHECK(legacy_origin IN (0,1)),
+  legacy_live INTEGER NOT NULL DEFAULT 0 CHECK(legacy_live IN (0,1)),
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL, revoked_at TEXT,
+  PRIMARY KEY(member_kind,member_id)
+);`,
+  community_feature_recommendations: `CREATE TABLE community_feature_recommendations (
+  id TEXT PRIMARY KEY, topic_id TEXT NOT NULL, board TEXT NOT NULL,
+  by_kind TEXT NOT NULL CHECK(by_kind='reader'), by_id TEXT NOT NULL, reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')),
+  decided_kind TEXT CHECK(decided_kind IN ('owner','reader')), decided_id TEXT, decision_reason TEXT,
+  created_at TEXT NOT NULL, decided_at TEXT
+);
+CREATE UNIQUE INDEX community_feature_pending_idx ON community_feature_recommendations(topic_id,by_kind,by_id) WHERE status='pending';`,
+  community_profile_background_advice: `CREATE TABLE community_profile_background_advice (
+  id TEXT PRIMARY KEY, member_kind TEXT NOT NULL CHECK(member_kind='reader'), member_id TEXT NOT NULL,
+  image_id TEXT NOT NULL, decision TEXT NOT NULL CHECK(decision IN ('approve','reject')), reason TEXT NOT NULL,
+  by_kind TEXT NOT NULL CHECK(by_kind IN ('reader','owner')), by_id TEXT NOT NULL, created_at TEXT NOT NULL,
+  UNIQUE(image_id,by_kind,by_id)
+);`,
   // A new independent account starts at migration time. No historical balance,
   // visit or membership duration is converted into experience or VIP login days.
   community_experience_config: `CREATE TABLE community_experience_config (
@@ -188,7 +213,7 @@ CREATE INDEX community_images_topic_idx ON community_images(topic_id, deleted_at
   community_profile_background_reviews: `CREATE TABLE community_profile_background_reviews (
   id TEXT PRIMARY KEY, member_kind TEXT NOT NULL CHECK(member_kind='reader'), member_id TEXT NOT NULL,
   image_id TEXT NOT NULL, approved INTEGER NOT NULL CHECK(approved IN (0,1)), reason TEXT NOT NULL,
-  by_kind TEXT NOT NULL CHECK(by_kind='owner'), by_id TEXT NOT NULL, created_at TEXT NOT NULL
+  by_kind TEXT NOT NULL CHECK(by_kind IN ('reader','owner')), by_id TEXT NOT NULL, created_at TEXT NOT NULL
 );`,
   community_reports: `CREATE TABLE community_reports (
   id TEXT PRIMARY KEY,
@@ -405,6 +430,7 @@ CREATE INDEX community_orders_status_idx ON community_orders(status, created_at)
 };
 // Columns added to the first two tables after they were first created.
 const columns: Array<[string, string, string]> = [
+  ['community_staff', 'legacy_live', 'INTEGER NOT NULL DEFAULT 0 CHECK(legacy_live IN (0,1))'],
   ['community_topics', 'edited_at', 'TEXT'],
   ['community_topics', 'accepted_reply_id', 'TEXT'],
   ['community_topics', 'tags', "TEXT NOT NULL DEFAULT '[]'"],
@@ -476,12 +502,14 @@ const missingParts = (db: DatabaseSync) => {
     .find(column => column.name === 'topic_id' && column.notnull));
   const shopSQL = (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='community_shop_items'").get() as { sql: string } | undefined)?.sql || '';
   const shopCoverUpgrade = /CHECK\s*\(\s*kind\s+IN\s*\(\s*'frame'\s*,\s*'color'\s*\)\s*\)/i.test(shopSQL);
-  return { tablesMissing, columnsMissing, imagesPurposeUpgrade, bannerCapacityUpgrade, bannerImagesUpgrade, shopCoverUpgrade };
+  const backgroundSQL = (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='community_profile_background_reviews'").get() as { sql: string } | undefined)?.sql || '';
+  const backgroundReviewerUpgrade = /CHECK\s*\(\s*by_kind\s*=\s*'owner'\s*\)/i.test(backgroundSQL);
+  return { tablesMissing, columnsMissing, imagesPurposeUpgrade, bannerCapacityUpgrade, bannerImagesUpgrade, shopCoverUpgrade, backgroundReviewerUpgrade };
 };
 // True when content.db has every community table and column.
 export const communitySchemaReady = (db: DatabaseSync) => {
-  const { tablesMissing, columnsMissing, imagesPurposeUpgrade, bannerCapacityUpgrade, bannerImagesUpgrade, shopCoverUpgrade } = missingParts(db);
-  return !tablesMissing.length && !columnsMissing.length && !imagesPurposeUpgrade && !bannerCapacityUpgrade && !bannerImagesUpgrade && !shopCoverUpgrade;
+  const { tablesMissing, columnsMissing, imagesPurposeUpgrade, bannerCapacityUpgrade, bannerImagesUpgrade, shopCoverUpgrade, backgroundReviewerUpgrade } = missingParts(db);
+  return !tablesMissing.length && !columnsMissing.length && !imagesPurposeUpgrade && !bannerCapacityUpgrade && !bannerImagesUpgrade && !shopCoverUpgrade && !backgroundReviewerUpgrade;
 };
 
 // SQLite cannot widen a column CHECK in place. Recreate only this table from its
@@ -518,6 +546,15 @@ function extendBannerEntries(db: DatabaseSync) {
 
 // Expand the existing decoration kinds without altering product IDs, orders,
 // ownership, stock or custom maintenance indexes and triggers.
+function extendBackgroundReviewer(db: DatabaseSync) {
+  const source=db.prepare("SELECT sql FROM sqlite_master WHERE name='community_profile_background_reviews' AND type='table'").get() as {sql:string};
+  const objects=db.prepare("SELECT sql FROM sqlite_master WHERE tbl_name='community_profile_background_reviews' AND type IN ('index','trigger') AND sql IS NOT NULL").all() as Array<{sql:string}>;
+  const sql=source.sql.replace(/CREATE TABLE\s+["`\[]?community_profile_background_reviews["`\]]?/i,'CREATE TABLE community_background_reviews_upgrade').replace(/CHECK\s*\(\s*by_kind\s*=\s*'owner'\s*\)/i,"CHECK(by_kind IN ('reader','owner'))");
+  if(!sql.includes('community_background_reviews_upgrade')||sql===source.sql)throw Error('Background reviewer schema cannot be upgraded safely.');
+  const names=(db.prepare('PRAGMA table_info(community_profile_background_reviews)').all() as Array<{name:string}>).map(column=>`"${column.name.replaceAll('"','""')}"`).join(',');
+  db.exec(sql);db.exec(`INSERT INTO community_background_reviews_upgrade(${names}) SELECT ${names} FROM community_profile_background_reviews;DROP TABLE community_profile_background_reviews;ALTER TABLE community_background_reviews_upgrade RENAME TO community_profile_background_reviews;`);
+  for(const object of objects)db.exec(object.sql);
+}
 function extendShopCover(db: DatabaseSync) {
   const source = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='community_shop_items'").get() as { sql: string };
   const objects = db.prepare("SELECT sql FROM sqlite_master WHERE tbl_name='community_shop_items' AND type IN ('index','trigger') AND sql IS NOT NULL").all() as Array<{ sql: string }>;
@@ -555,8 +592,8 @@ export async function migrateCommunity(directory: string) {
   await stat(database);
   const db = new DatabaseSync(database);
   try {
-    const { tablesMissing, columnsMissing, imagesPurposeUpgrade, bannerCapacityUpgrade, bannerImagesUpgrade, shopCoverUpgrade } = missingParts(db);
-    if (!tablesMissing.length && !columnsMissing.length && !imagesPurposeUpgrade && !bannerCapacityUpgrade && !bannerImagesUpgrade && !shopCoverUpgrade) return { changed: false };
+    const { tablesMissing, columnsMissing, imagesPurposeUpgrade, bannerCapacityUpgrade, bannerImagesUpgrade, shopCoverUpgrade, backgroundReviewerUpgrade } = missingParts(db);
+    if (!tablesMissing.length && !columnsMissing.length && !imagesPurposeUpgrade && !bannerCapacityUpgrade && !bannerImagesUpgrade && !shopCoverUpgrade && !backgroundReviewerUpgrade) return { changed: false };
     const root = resolve(directory, 'schema-backups');
     await mkdir(root, { recursive: true });
     const snapshot = resolve(root, `before-community-${Date.now()}-${randomUUID()}.db`);
@@ -564,7 +601,7 @@ export async function migrateCommunity(directory: string) {
     // A table rebuild must not execute ON DELETE actions on referencing rows.
     // Keep references intact, then check them inside the transaction before committing.
     const foreignKeys = Number((db.prepare('PRAGMA foreign_keys').get() as { foreign_keys: number }).foreign_keys);
-    const rebuildTables = imagesPurposeUpgrade || bannerCapacityUpgrade || bannerImagesUpgrade || shopCoverUpgrade;
+    const rebuildTables = imagesPurposeUpgrade || bannerCapacityUpgrade || bannerImagesUpgrade || shopCoverUpgrade || backgroundReviewerUpgrade;
     if (rebuildTables) db.exec('PRAGMA foreign_keys=OFF');
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -574,6 +611,16 @@ export async function migrateCommunity(directory: string) {
       if (imagesPurposeUpgrade) extendImagePurpose(db);
       if (bannerCapacityUpgrade || bannerImagesUpgrade) extendBannerEntries(db);
       if (shopCoverUpgrade) extendShopCover(db);
+      if (backgroundReviewerUpgrade) extendBackgroundReviewer(db);
+      if (tablesMissing.includes('community_staff')) {
+        const validBoards=communityBoards.map(board=>board.id);
+        const legacyRows=db.prepare("SELECT member_id,steward_boards,created_at FROM community_members WHERE member_kind='reader' AND steward=1").all() as Array<{member_id:string;steward_boards:string|null;created_at:string}>;
+        const save=db.prepare("INSERT INTO community_staff(member_kind,member_id,role,boards,permissions,delegable,parent_kind,parent_id,legacy_origin,legacy_live,created_at,updated_at)VALUES('reader',?,'moderator',?,?,'[]','owner',NULL,1,1,?,?)");
+        for(const row of legacyRows){let scope:unknown=null;try{scope=row.steward_boards===null?validBoards:JSON.parse(row.steward_boards);}catch{/* Damaged appointments fail closed. */}
+          if(!Array.isArray(scope)||!scope.length||scope.some(board=>typeof board!=='string'||!validBoards.includes(board))||new Set(scope).size!==scope.length)continue;
+          save.run(row.member_id,JSON.stringify(validBoards.filter(board=>scope.includes(board))),JSON.stringify(communityLegacyStaffPermissions),row.created_at,row.created_at);
+        }
+      }
       if (tablesMissing.includes('community_banners')) snapshotHighlights(db);
       if (tablesMissing.includes('community_badge_events')) {
         db.exec(`INSERT OR IGNORE INTO community_badge_events(kind,source_id,actor_key,first_at)

@@ -130,7 +130,12 @@ test('reader registers, verifies email, signs in and never receives author permi
   assert.equal((await post('profile', { nickname: '新昵称', phone: '13900139000', signature: 'x'.repeat(101) }, cookie)).status, 400);
   assert.equal((await post('profile', { nickname: '新昵称', phone: '13900139000', signature: '加微信 13800138000' }, cookie)).status, 400);
   assert.equal((await post('profile', { nickname: '新昵称', phone: '13900139000', signature: '在星光里继续阅读' }, cookie)).status, 200);
-  assert.equal((await (await fetch(base + '/api/reader/session', { headers: { cookie } })).json()).signature, '');
+  const pendingProfile=await(await fetch(base+'/api/reader/session',{headers:{cookie}})).json();
+  assert.equal(pendingProfile.signature,'');assert.equal(pendingProfile.nickname,'读者');assert.equal(pendingProfile.pendingNickname,'新昵称');
+  const nicknameProposal=(await(await fetch(base+'/api/manage/review',{headers:{cookie:'owner=yes'}})).json()).profiles.find(row=>row.kind==='nickname');
+  assert.equal(nicknameProposal.proposedValue,'新昵称');assert.deepEqual(nicknameProposal.advice,[]);
+  await approveReview('nickname');
+  const approvedName=await(await fetch(base+'/api/reader/session',{headers:{cookie}})).json();assert.equal(approvedName.nickname,'新昵称');assert.equal(approvedName.pendingNickname,null);
   await approveReview('signature');
   assert.equal((await (await fetch(base + '/api/reader/session', { headers: { cookie } })).json()).signature, '在星光里继续阅读');
   const avatarUpload = async (data, type = 'image/png', headers = {}, readerCookie = cookie) => {
@@ -168,8 +173,13 @@ test('reader registers, verifies email, signs in and never receives author permi
   assert.equal((await avatarUpload(image)).status, 200);
   const rejectedReview = (await (await fetch(base + '/api/manage/review', { headers: { cookie: 'owner=yes' } })).json()).profiles.find(row => row.kind === 'avatar');
   const rejectedAvatarId = workflow.profile(rejectedReview.id).proposed_value;
+  const rejectedPath=base+`/api/manage/review/profile/${rejectedReview.id}/reject`,reviewHeaders={cookie:'owner=yes',Origin:base,'X-Author-Request':'1','Content-Type':'application/json'};
+  for(const reason of [undefined,'','   ','<bad>','换\n行','x'.repeat(201)]) {
+    const invalid=await fetch(rejectedPath,{method:'POST',headers:reviewHeaders,body:JSON.stringify(reason===undefined?{}:{reason})});assert.equal(invalid.status,400);
+    assert.ok(workflow.profile(rejectedReview.id),'invalid rejection retains pending proposal');
+  }
   const rejection = await fetch(base + `/api/manage/review/profile/${rejectedReview.id}/reject`, {
-    method: 'POST', headers: { cookie: 'owner=yes', Origin: base, 'X-Author-Request': '1', 'Content-Type': 'application/json' }, body: '{}',
+    method: 'POST', headers: reviewHeaders, body: JSON.stringify({reason:'图片内容不符合社区要求'}),
   });
   assert.equal(rejection.status, 200);
   await assert.rejects(access(resolve(directory, 'uploads', `pending-reader-avatar-${rejectedAvatarId}.webp`)));

@@ -234,7 +234,7 @@ export async function createCommunityDemo({ simplePosting = true, visualDemo = f
       if (author.kind === 'owner') return [[`owner:${author.id}`, { name: ownerName, uid: 'owner', avatar: null, vip: true, joinedAt: null, bio: '' }]];
       const info = profilePeople[author.id];
       const current = profiles.publicRow(author.id);
-      return info ? [[`reader:${author.id}`, { name: current?.nickname ?? info.name, uid: info.uid, avatar: current?.avatar ?? null, vip: info.vip, joinedAt: at(joinedDays(author.id) * 24 * 60), bio: current?.signature ?? info.bio, ...(info.ownerReader ? { ownerReader: true } : {}) }]] : [];
+      return info ? [[`reader:${author.id}`, { name: current?.nickname ?? info.name, uid: info.uid, avatar: current?.avatar ?? null, vip: info.vip, joinedAt: at(joinedDays(author.id) * 24 * 60), bio: current?.signature ?? info.bio, active: current?._verified === true && !current.disabled, ...(info.ownerReader ? { ownerReader: true } : {}) }]] : [];
     })),
     findMember: async (uid) => uid === 'owner' ? member('owner') : byUid.get(uid) || null,
     findByNames: async (names) => new Map([...Object.entries(profilePeople).map(([id, info]) => [profiles.publicRow(id)?.nickname ?? info.name, member(id)]), [ownerName, member('owner')]].filter(([name]) => names.includes(name))),

@@ -111,7 +111,8 @@ test('levels show a center icon and adjacent choices on an arc without the old s
     assert.equal(panel.querySelector('.community-meter'), null);
     assert.doesNotMatch(panel.textContent!, /37|200/, 'legacy contribution totals and balance are not represented as actual experience');
     assert.equal(doc.querySelectorAll('.community-rung, .community-lv-hero, .community-ladder').length, 0, 'old stacked sections are removed');
-    assert.equal(panel.querySelectorAll('[data-level-mode]').length, 3);
+    assert.deepEqual([...panel.querySelectorAll<HTMLElement>('[data-level-mode]')].map(button => button.dataset.levelMode),
+      ['growth', 'trust', 'vip', 'staff'], 'appointed management has its own fourth tab rather than changing earned community levels');
   } finally { dom.window.close(); }
 });
 

@@ -11,6 +11,7 @@ import { storedModerationContact, validateModerationContact } from './community-
 import type { createCommunityConvention } from './community-convention.ts';
 import { createCommunityBadges } from './community-badges.ts';
 import type { Transaction } from './community-db.ts';
+import type { createCommunityStaff } from './community-staff.ts';
 
 type MemberRow = { level: number; level_day: string | null; steward: number; steward_boards: string | null; frame: string | null; name_color: string | null; cover: string | null; agreed_at: string | null; created_at: string };
 type NoticeRow = {
@@ -33,7 +34,7 @@ const validModerationBoards = (value: unknown): value is string[] => Array.isArr
 const orderedModerationBoards = (boards: readonly string[]) => moderationBoardIds.filter(board => boards.includes(board));
 
 // Members: trust levels, visits, stewards, decorations, follows, notifications, badges and sanctions.
-export function createMembers(db: DatabaseSync, convention: Pick<ReturnType<typeof createCommunityConvention>, 'state'>, tx: Transaction) {
+export function createMembers(db: DatabaseSync, convention: Pick<ReturnType<typeof createCommunityConvention>, 'state'>, tx: Transaction, staff: ReturnType<typeof createCommunityStaff>) {
   const ensureRow = db.prepare('INSERT OR IGNORE INTO community_members (member_kind, member_id, created_at) VALUES (?, ?, ?)');
   const memberRow = db.prepare('SELECT level, level_day, steward, steward_boards, frame, name_color, cover, agreed_at, created_at FROM community_members WHERE member_kind = ? AND member_id = ?');
   const saveLevel = db.prepare('UPDATE community_members SET level = ?, level_day = ? WHERE member_kind = ? AND member_id = ?');
@@ -46,7 +47,6 @@ export function createMembers(db: DatabaseSync, convention: Pick<ReturnType<type
     color: db.prepare('UPDATE community_members SET name_color = ? WHERE member_kind = ? AND member_id = ?'),
     cover: db.prepare('UPDATE community_members SET cover = ? WHERE member_kind = ? AND member_id = ?'),
   };
-  const stewards = db.prepare("SELECT member_kind, member_id FROM community_members WHERE steward = 1");
   const addVisit = db.prepare('INSERT OR IGNORE INTO community_visits (member_kind, member_id, day) VALUES (?, ?, ?)');
   // Level statistics.
   const visits = db.prepare('SELECT COUNT(*) AS count FROM community_visits WHERE member_kind = ? AND member_id = ? AND day >= ?');
@@ -166,7 +166,7 @@ export function createMembers(db: DatabaseSync, convention: Pick<ReturnType<type
     return validModerationBoards(stored) ? orderedModerationBoards(stored) : [];
   }
   function moderationBoards(member: CommunityAuthor): string[] {
-    return member.kind === 'owner' ? [...moderationBoardIds] : moderationScope(row(member));
+    return staff.state(member)?.boards ?? [];
   }
 
   return {
@@ -177,13 +177,12 @@ export function createMembers(db: DatabaseSync, convention: Pick<ReturnType<type
     // level 3 falls back to 2 when its conditions lapse. Stewards are level 4; the owner is above levels.
     level(member: CommunityAuthor, now = Date.now()) {
       if (member.kind === 'owner') return 4;
-      return row(member).steward ? 4 : trustLevel(member, now);
+      return staff.state(member) ? 4 : trustLevel(member, now);
     },
     trustLevel,
     moderationBoards,
     // Signed reviewer confirmation must not create a member or award a visit.
-    storedModerationBoards: (member: CommunityAuthor) => member.kind === 'owner' ? [...moderationBoardIds]
-      : moderationScope(memberRow.get(member.kind, member.id) as MemberRow | undefined),
+    storedModerationBoards: (member: CommunityAuthor) => staff.state(member)?.boards ?? [],
     moderationContact(member: CommunityAuthor) {
       if (!moderationBoards(member).length) return null;
       const contact = contactRow.get(member.kind, member.id) as { contact_qq: string | null; contact_email: string | null } | undefined;
@@ -205,18 +204,19 @@ export function createMembers(db: DatabaseSync, convention: Pick<ReturnType<type
         clean: next === 1 ? true : (next === 2 ? value.violations30 : value.violations180) === 0,
       };
     },
-    steward: (member: CommunityAuthor) => member.kind === 'reader' && Boolean(row(member).steward),
+    steward: (member: CommunityAuthor) => member.kind === 'reader' && Boolean(staff.state(member)),
     setSteward(member: CommunityAuthor, on: boolean, boards?: readonly string[], now = new Date().toISOString()) {
       if (on && boards !== undefined && !validModerationBoards(boards)) throw fail('请至少选择一个有效的管理板块。');
       ensure(member, now);
       const wasSteward = Boolean(row(member).steward);
       const assigned = on && boards !== undefined ? orderedModerationBoards(boards) : null;
       setStewardRow.run(on ? 1 : 0, assigned ? JSON.stringify(assigned) : null, member.kind, member.id);
+      staff.legacy(member, on, on ? moderationScope(row(member)) : [], now);
       if (!on) clearContactRow.run(member.kind, member.id);
       saveLevel.run(row(member).level, null, member.kind, member.id);
       notify(member, { type: 'system', text: on ? wasSteward ? '你的管理板块已更新' : '你被任命为协管' : '你的协管职务已撤销', data: { steward: on, boards: on ? moderationBoards(member) : [], ...(wasSteward && on ? { scopeChanged: true } : {}) } }, now);
     },
-    stewards: () => (stewards.all() as Array<{ member_kind: CommunityAuthor['kind']; member_id: string }>).map(item => ({ kind: item.member_kind, id: item.member_id })),
+    stewards: () => staff.roster().filter(member => staff.state(member)),
     decorations(member: CommunityAuthor) {
       const value = row(member);
       return { frame: value.frame, color: value.name_color, cover: value.cover };
@@ -301,6 +301,10 @@ export function createMembers(db: DatabaseSync, convention: Pick<ReturnType<type
     },
     muted(member: CommunityAuthor, now = Date.now()) {
       return (activeSanction.get(member.kind, member.id, iso(now)) as { id: string; days: number; reason: string; until: string } | undefined) || null;
+    },
+    sanctionMember(id:string) {
+      const sanction=oneSanction.get(id) as {member_kind:CommunityAuthor['kind'];member_id:string}|undefined;
+      return sanction?{kind:sanction.member_kind,id:sanction.member_id}:null;
     },
     lift(id: string, now = new Date().toISOString()) {
       const sanction = oneSanction.get(id) as { member_kind: CommunityAuthor['kind']; member_id: string; lifted_at: string | null } | undefined;

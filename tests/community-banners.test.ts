@@ -23,20 +23,21 @@ async function setup(t: TestContext) {
   const mod = { kind: 'reader' as const, id: 'mod' }, owner = { kind: 'owner' as const, id: 'owner' };
   acceptCommunityConvention(store, [owner, mod, { kind: 'reader', id: 'reader' }, { kind: 'reader', id: 'vip' }]);
   store.members.setSteward(mod, true, ['qa']);
+  const inactive=new Set<string>();let beforePeople:(()=>void|Promise<void>)|undefined;
   let service: ReturnType<typeof createCommunityService>;
   const server = createServer((req, res) => { void service.handle(req, res); });
   await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   service = createCommunityService({ store, directory, siteOrigin: origin,
     identify: async req => { const id = String(req.headers.cookie || 'reader').split(';')[0]; return { kind: id === 'owner' ? 'owner' : 'reader', id, name: id, vip: id === 'owner' || id === 'vip' }; },
-    people: async authors => new Map(authors.map(author => [`${author.kind}:${author.id}`, { name: author.id, uid: author.id, avatar: null, vip: false, joinedAt: null, bio: '' }])), audit: async () => {},
+    people: async authors => {await beforePeople?.();return new Map(authors.map(author => [`${author.kind}:${author.id}`, { name: author.id, uid: author.id, avatar: null, vip: false, joinedAt: null, bio: '', active:!inactive.has(author.id) }]));}, audit: async () => {},
   });
   t.after(async () => { await new Promise<void>(done => server.close(() => done())); store.close(); await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
   const get = (path: string, as = 'reader') => fetch(`${origin}/api/community/${path}`, { headers: { cookie: as } });
   const post = (body: unknown, as = 'owner') => fetch(`${origin}/api/community/manage/banners`, { method: 'POST', headers: { cookie: as, origin, 'X-Reader-Request': '1', 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   const upload = (scope: string, data: Buffer, as = 'mod') => { const form = new FormData(); form.set('file', new Blob([new Uint8Array(data)], { type: 'image/png' }), 'banner.png'); return fetch(`${origin}/api/community/manage/banner-image?scope=${scope}`, { method: 'POST', headers: { cookie: as, origin, 'X-Reader-Request': '1' }, body: form }); };
   const topic = (board = 'qa', pending = false) => store.createTopic({ board, author: owner, title: `${board}展示测试帖子`, body: '独立横幅回归测试正文', ...(pending ? { pending: '审核中' } : {}) }).id;
-  return { directory, store, get, post, upload, topic, mod, owner, origin };
+  return { directory, store, get, post, upload, topic, mod, owner, origin,inactive,onPeople:(hook:()=>void|Promise<void>)=>{beforePeople=hook;} };
 }
 const config = (scope: string, topicId: string, version = 0, cover: string | null = null) => ({ scope, version, items: [{ topicId, title: '', cover }] });
 
@@ -131,7 +132,7 @@ test('banner uploads stay private until a visible publication and cannot be reus
   assert.equal((await get(`images/${image.id}.webp`, 'mod')).status, 200);
   assert.equal((await post(config('qa', qa, 0, cover), 'mod')).status, 200);
   const published = await get(`images/${image.id}.webp`); assert.equal(published.status, 200);
-  assert.equal(published.headers.get('cache-control'), 'private, no-store', 'banner visibility changes are never served from a stale private cache');
+  assert.equal(published.headers.get('cache-control'), 'private, no-cache', 'banner visibility must be revalidated before browser byte reuse');
   assert.equal((await post(config('tools', tools, 0, cover))).status, 400);
   assert.equal((await post(config('qa', qa, 1, cover), 'owner')).status, 200, 'owner may retain an existing moderator cover');
   const stale = new DatabaseSync(resolve(directory, 'content.db')); stale.prepare('UPDATE community_images SET created_at=? WHERE id=?').run('2000-01-01T00:00:00Z', image.id); stale.close();
@@ -163,6 +164,17 @@ test('an appointment withdrawn during upload cannot record an image or leave dec
   assert.equal((await upload('qa', png)).status, 403);
   assert.deepEqual(await readdir(resolve(directory, 'uploads')), []);
   const db = new DatabaseSync(resolve(directory, 'content.db')); assert.equal(db.prepare("SELECT COUNT(*) AS n FROM community_images WHERE purpose='banner'").get()?.n, 0); db.close();
+});
+test('a parent disabled after decoded banner files are written denies registration and removes only this upload',async t=>{
+  const f=await setup(t),child={kind:'reader' as const,id:'child'},capabilities=['staff.appoint','banner.manage'] as const;
+  acceptCommunityConvention(f.store,[child]);f.store.staff.appoint(f.owner,f.mod,{role:'general',boards:['qa'],permissions:[...capabilities],delegable:[...capabilities]});
+  f.store.staff.appoint(f.mod,child,{role:'moderator',boards:['qa'],permissions:['banner.manage'],delegable:[]});
+  await writeFile(resolve(f.directory,'uploads','unrelated-image.webp'),'existing persistent file');let reads=0,sawDecodedFiles=false;
+  f.onPeople(async()=>{if(++reads===2){const files=await readdir(resolve(f.directory,'uploads'));sawDecodedFiles=files.filter(file=>file.startsWith('community-')).length===2;f.inactive.add(f.mod.id);}});
+  const png=await sharp({create:{width:80,height:40,channels:3,background:'#334455'}}).png().toBuffer();
+  assert.equal((await f.upload('qa',png,child.id)).status,403);assert.equal(sawDecodedFiles,true);
+  assert.deepEqual(await readdir(resolve(f.directory,'uploads')),['unrelated-image.webp']);
+  const db=new DatabaseSync(resolve(f.directory,'content.db'));assert.equal(db.prepare("SELECT COUNT(*) AS n FROM community_images WHERE purpose='banner'").get()?.n,0);db.close();
 });
 
 test('configuration validation rejects malformed fields without replacing the saved order', async t => {

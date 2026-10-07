@@ -13,7 +13,7 @@ type Topic = { id: string; board: string; title: string; body: string; pending: 
 type Image = { id: string; uploader_kind: CommunityAuthor['kind']; uploader_id: string; purpose: string; banner_scope: string | null; deleted_at: string | null };
 
 /** The homepage and each board own a separate ordered selection. Post flags never alter it. */
-export function createCommunityBanners(db: DatabaseSync, tx: Transaction, members: ReturnType<typeof createMembers>) {
+export function createCommunityBanners(db: DatabaseSync, tx: Transaction, members: ReturnType<typeof createMembers>, staff: ReturnType<typeof import('./community-staff.ts').createCommunityStaff>) {
   const current = db.prepare('SELECT version FROM community_banners WHERE scope=?');
   const entries = db.prepare('SELECT scope, position, topic_id, topic_board, title, cover FROM community_banner_entries WHERE scope=? ORDER BY position');
   const topicById = db.prepare('SELECT id, board, title, body, pending, hidden_at, deleted_at FROM community_topics WHERE id=?');
@@ -37,7 +37,7 @@ export function createCommunityBanners(db: DatabaseSync, tx: Transaction, member
   const validateScope = (scope: string) => { if (!scopes.includes(scope)) throw fail('没有这个横幅范围。', 404); };
   const authorize = (scope: string, access: Access) => {
     validateScope(scope);
-    if (access.browsingAsReader || (scope === 'home' ? access.actor.kind !== 'owner' : !members.moderationBoards(access.actor).includes(scope)))
+    if (access.browsingAsReader || (scope === 'home' ? staff.state(access.actor)?.role !== 'owner' : !staff.can(access.actor,'banner.manage',scope)))
       throw fail(scope === 'home' ? '只有作者能设置社区首页横幅。' : '你没有这个板块的横幅管理权限。', 403);
   };
   const get = (scope: string, canSeeBoard: Access['canSeeBoard']): CommunityBannerConfig => {
@@ -67,7 +67,7 @@ export function createCommunityBanners(db: DatabaseSync, tx: Transaction, member
     get,
     managed(access: Access) {
       if (access.browsingAsReader) throw fail('请先返回管理身份。', 403);
-      const allowed = access.actor.kind === 'owner' ? scopes : members.moderationBoards(access.actor);
+      const allowed = staff.state(access.actor)?.role === 'owner' ? scopes : members.moderationBoards(access.actor).filter(scope=>staff.can(access.actor,'banner.manage',scope));
       return allowed.map(scope => get(scope, access.canSeeBoard));
     },
     replace(scope: string, version: unknown, value: unknown, access: Access) {
@@ -109,11 +109,11 @@ export function createCommunityBanners(db: DatabaseSync, tx: Transaction, member
         return get(scope, access.canSeeBoard);
       });
     },
-    imageVisible(id: string, actor: CommunityAuthor, canSeeBoard: Access['canSeeBoard']) {
+    imageVisible(id: string, actor: CommunityAuthor, canSeeBoard: Access['canSeeBoard'], canManage?: (scope:string)=>boolean) {
       const image = imageById.get(id) as Image | undefined;
       if (!image || image.deleted_at || image.purpose !== 'banner') return false;
       const references = imageEntries.all(id) as Entry[];
-      if (!references.length) return same(actor, { kind: image.uploader_kind, id: image.uploader_id });
+      if (!references.length) return same(actor, { kind: image.uploader_kind, id: image.uploader_id }) && Boolean(image.banner_scope && (canManage ? canManage(image.banner_scope) : image.banner_scope==='home' ? staff.state(actor)?.role==='owner' : staff.can(actor,'banner.manage',image.banner_scope)));
       return references.some(entry => image.banner_scope === entry.scope
         && (entry.topic_id === null ? validImageEntry(entry, canSeeBoard) : Boolean(validTopic(entry, canSeeBoard))));
     },

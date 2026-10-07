@@ -110,7 +110,20 @@ export async function createPayloadRuntime(
     readerIdentity: readerService.identityStrict, ownerIdentity: req => authorService.identityStrict(req),
     ownerReaderIdentity: readerService.ownerReaderIdentity,
     profiles: profileCommands,
-    profileReviewer: createCommunityProfileReviewerClient({ origin: bridgeSettings.communityOrigin, secret: bridgeSettings.bridgeSecret }),
+    profileReviewer: createCommunityProfileReviewerClient({ origin: bridgeSettings.communityOrigin, secret: bridgeSettings.bridgeSecret,
+      accountsActive: async members => {
+        for (const member of members) {
+          if (member.kind !== 'reader') return false;
+          try {
+            const reader = await payload.findByID({ collection: 'readers', id: member.id, depth: 0 }) as unknown as { _verified?: boolean; disabled?: boolean };
+            if (reader._verified !== true || reader.disabled) return false;
+          } catch (error) {
+            if (error && typeof error === 'object' && 'status' in error && error.status === 404) return false;
+            throw error;
+          }
+        }
+        return true;
+      } }),
     ...community.directory,
     purgeRemote: async readerId => {
       const result = await purgeClient!.request<{ ok?: boolean }>('purge', { readerId });

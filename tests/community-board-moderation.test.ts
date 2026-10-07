@@ -55,10 +55,10 @@ async function setup(t: TestContext, boards = ['qa', 'showcase'], beforePeople?:
       return info ? { kind: 'reader', id, name: info.name, vip: info.vip } : null;
     },
     people: async authors => {
-      await beforePeople?.();
+      if(authors.some(author=>author.id!==moderator.id))await beforePeople?.();
       return new Map(authors.flatMap(author => {
       const info = author.kind === 'owner' ? { name: '無相', uid: 'owner', vip: true } : accounts.get(author.id);
-      return info ? [[`${author.kind}:${author.id}`, { ...info, avatar: null, joinedAt: null, bio: '' }]] : [];
+      return info ? [[`${author.kind}:${author.id}`, { ...info, avatar: null, joinedAt: null, bio: '',active:true }]] : [];
       }));
     },
     findMember: async uid => {
@@ -78,6 +78,7 @@ async function setup(t: TestContext, boards = ['qa', 'showcase'], beforePeople?:
   const post = (path: string, body: Record<string, unknown>, identity = 'moderator') => fetch(`${origin}/api/community/${path}`, {
     method: 'POST', headers: { cookie: identity, origin, 'X-Reader-Request': '1', 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   });
+  store.members.setSteward(moderator,true,boards); // Existing legacy appointment remains directly adjustable by its owner.
   assert.equal((await post('members/103/steward', { on: true, boards }, 'owner')).status, 200);
   const topic = (board: string, pending = false, author = writer) => store.createTopic({ board, author, title: `${board}测试帖子`, body: '完整的板块测试正文内容', ...(pending ? { pending: '需要审核' } : {}) });
   return { get, post, store, topic, audits, directory };

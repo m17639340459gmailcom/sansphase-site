@@ -11,7 +11,7 @@ import { uuidPattern } from './content-service.ts';
 import { withStreamUpload } from './stream-upload.ts';
 import { readerImageBytes } from '../src/upload-policy.mjs';
 import { createReaderWorkflow } from './reader-workflow.ts';
-import { createReaderProfileCommands, normalizeReaderAvatar, readerSignature } from './reader-profile-commands.ts';
+import { createReaderProfileCommands, normalizeReaderAvatar, readerSignature, readerNickname } from './reader-profile-commands.ts';
 import type { ReaderProfileCommands } from './reader-profile-commands.ts';
 import { validCommunityFrame } from './community-frame-authority.ts';
 import type { CommunityFrameAccess, CommunityFrameState } from './community-frame-authority.ts';
@@ -104,6 +104,7 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
   const dto = (user: ReaderUser | null) => user && ({ id: user.id, uid: uidStore.get(user.id), nickname: user.nickname, email: user.email, phone: user.phone || '', signature: user.signature || '', avatar: uuidPattern.test(user.avatar || '') ? `/api/reader/avatar/${user.avatar}.webp` : null,
     pendingSignature: workflow.profileFor(user.id, 'signature')?.proposed_value ?? null,
     pendingAvatar: Boolean(workflow.profileFor(user.id, 'avatar')),
+    pendingNickname: workflow.profileFor(user.id, 'nickname')?.proposed_value ?? null,
     role: 'reader', ...membershipState(user), ...(ownerBinding && user.id === ownerBinding ? { ownerReader: true as const } : {}) });
   const noFrames = (): CommunityFrameState => ({ frame: null, frameImage: null, items: [], available: false });
   const frameState = async (user: ReaderUser) => { try { return frames ? await frames.state(user.id) : noFrames(); } catch { return noFrames(); } };
@@ -358,13 +359,16 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
           const user = await personal(req);
           if (!user) throw fail('请先登录。', 401);
           const proposed = Object.hasOwn(body, 'signature') ? readerSignature(body.signature) : null;
-          const data = { nickname: nickname(body.nickname), ...(Object.hasOwn(body, 'phone') ? { phone: phone(body.phone) } : {}) };
-          const updated = await profiles.accountMutation(async () => {
+          const proposedNickname = readerNickname(body.nickname);
+          const data = Object.hasOwn(body, 'phone') ? { phone: phone(body.phone) } : null;
+          const check = async () => { const current = await personal(req); if (!current || current.id !== user.id) throw fail('请重新登录。', 401); };
+          const updated = data ? await profiles.accountMutation(async () => {
             const current = await personal(req); if (!current || current.id !== user.id) throw fail('请重新登录。', 401);
             return payload.update({ collection: 'readers', id: user.id, data });
-          });
-          if (proposed !== null) await profiles.submitSignature(user.id, proposed, async () => { const current = await personal(req); if (!current || current.id !== user.id) throw fail('请重新登录。', 401); });
-          send(res, { ...dto(updated as ReaderUser), reviewPending: proposed !== null && proposed !== (user.signature || '') }); return;
+          }) : user;
+          await profiles.submitNickname(user.id, proposedNickname, check);
+          if (proposed !== null) await profiles.submitSignature(user.id, proposed, check);
+          send(res, { ...dto(updated as ReaderUser), reviewPending: proposedNickname !== user.nickname || proposed !== null && proposed !== (user.signature || '') }); return;
         }
         if (path === 'avatar/remove') {
           const user = await personal(req); if (!user) throw fail('请先登录。', 401);

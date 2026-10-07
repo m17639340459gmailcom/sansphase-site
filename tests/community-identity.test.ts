@@ -18,7 +18,7 @@ const path = '/api/community-identity/bridge';
 const reader = { id: 'reader-a', uid: '10001', nickname: '测试读者', role: 'reader' as const, signature: '已审核签名', avatar: null, vip: true, vipStartedAt: '2026-10-01T00:00:00Z', vipUntil: '2026-12-01T00:00:00Z', email: 'private@example.invalid', phone: '13800138000', pendingSignature: '未审核签名' };
 const person = { name: reader.nickname, uid: reader.uid, avatar: null, vip: true, joinedAt: '2026-01-01T00:00:00Z', bio: reader.signature };
 
-async function fixture(t: test.TestContext) {
+async function fixture(t: test.TestContext, avatar?: () => Promise<Buffer | null>) {
   const directory = await mkdtemp(resolve(tmpdir(), 'community-identity-'));
   prepareIdentityStore(directory);
   const state = { at: Date.now(), enabled: true, vip: true, unavailable: false, purges: [] as string[] };
@@ -28,7 +28,7 @@ async function fixture(t: test.TestContext) {
     people: async authors => new Map(authors.filter(author => author.id === reader.id).map(author => [`${author.kind}:${author.id}`, { ...person, vip: state.vip }])),
     findMember: async uid => uid === reader.uid ? { kind: 'reader', id: reader.id } : null,
     findByNames: async names => new Map(names.filter(name => name === reader.nickname).map(name => [name, { kind: 'reader' as const, id: reader.id }])),
-    avatar: async () => Buffer.from('approved avatar'),
+    avatar: avatar || (async () => Buffer.from('approved avatar')),
     purgeRemote: async id => { state.purges.push(id); },
   });
   const server = http.createServer((req, res) => { void (req.url === '/api/community-entry' ? authority.handleEntry(req, res) : authority.handleBridge(req, res)); });
@@ -50,6 +50,19 @@ async function fixture(t: test.TestContext) {
   const exchange = async () => { const issued = await entry(); const response = await bridge('exchange', { ticket: issued.ticket, binding: issued.binding }); assert.equal(response.status, 200); return await response.json() as { sessionRef: string; identity: typeof reader }; };
   return { authority, directory, state, local, entry, bridge, exchange };
 }
+
+test('approved avatar bridge rechecks its source session after awaiting image bytes', async t => {
+  let started!: () => void, release!: () => void;
+  const waiting = new Promise<void>(done => { started = done; }), held = new Promise<void>(done => { release = done; });
+  const f = await fixture(t, async () => { started(); await held; return Buffer.from('approved avatar'); });
+  const { sessionRef } = await f.exchange();
+  const response = f.bridge('avatar', { sessionRef, uid: reader.uid });
+  await waiting; f.state.enabled = false; release();
+  const denied = await response;
+  assert.equal(denied.status, 401);
+  assert.equal(denied.headers.get('cache-control'), 'private, no-store');
+  assert.ok(!JSON.stringify(await denied.json()).includes('base64'));
+});
 
 test('bridge signature binds method, path and exact body, rejects stale requests and replay', () => {
   const at = Date.now(), body = '{"operation":"session","input":{}}';
@@ -206,7 +219,7 @@ test('entry rate limits persist and bridge rejects unknown operations, malformed
 test('approved profiles, UID lookup, mentions and avatars require a session and owner ID stays server-controlled', async t => {
   const f = await fixture(t), { sessionRef } = await f.exchange();
   const response = await f.bridge('people', { sessionRef, authors: [{ kind: 'reader', id: reader.id }] });
-  assert.deepEqual(await response.json(), [[`reader:${reader.id}`, person]]);
+  assert.deepEqual(await response.json(), [[`reader:${reader.id}`, {...person,active:false}]], 'missing private account proof cannot authorize management');
   assert.deepEqual(await (await f.bridge('member', { sessionRef, uid: reader.uid })).json(), { kind: 'reader', id: reader.id });
   assert.deepEqual(await (await f.bridge('names', { sessionRef, names: [reader.nickname] })).json(), [[reader.nickname, { kind: 'reader', id: reader.id }]]);
   assert.deepEqual(await (await f.bridge('avatar', { sessionRef, uid: reader.uid })).json(), { base64: Buffer.from('approved avatar').toString('base64') });

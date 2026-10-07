@@ -35,6 +35,21 @@ test('publication retains growth asset generators and internal community rules f
   }
 });
 
+test('publication keeps the complete community repair acceptance checklist', async () => {
+  assert.ok(new Set(await publicationFiles()).has('docs/COMMUNITY-REPAIR-20261007.md'));
+});
+
+test('publication retains hierarchical moderation rules and the explicit profile migration', async () => {
+  const files = new Set(await publicationFiles());
+  for (const file of ['docs/COMMUNITY-STAFF.md', 'scripts/migrate-reader-profiles.mjs', 'server/reader-profile-workflow-migration.ts', 'server/reader-profile-backup.ts']) assert.ok(files.has(file), `missing staff/profile maintenance source ${file}`);
+});
+
+test('publication includes the explicit profile workflow upgrade, durable backup/restore helpers and maintenance contract',async()=>{
+  const files=new Set(await publicationFiles());
+  for(const file of ['scripts/migrate-reader-profiles.mjs','server/reader-profile-workflow-migration.ts','server/reader-profile-backup.ts','server/reader-workflow.ts','scripts/backup-payload.mjs','scripts/restore-payload.mjs','docs/COMMUNITY-PROFILES.md'])
+    assert.ok(files.has(file),`profile maintenance publication is missing ${file}`);
+});
+
 test('publication retains the complete banner source, migration and linked maintenance guide', async () => {
   const files = new Set(await publicationFiles());
   for (const file of [

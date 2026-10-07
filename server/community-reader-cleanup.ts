@@ -11,8 +11,9 @@ export function purgeCommunityReaderData(db: DatabaseSync, readerId: string, { q
     CREATE TEMP TABLE IF NOT EXISTS reader_cleanup_replies (id TEXT PRIMARY KEY);
     CREATE TEMP TABLE IF NOT EXISTS reader_cleanup_parents (id TEXT PRIMARY KEY);
     CREATE TEMP TABLE IF NOT EXISTS reader_cleanup_images (id TEXT PRIMARY KEY);
+    CREATE TEMP TABLE IF NOT EXISTS reader_cleanup_staff (id TEXT PRIMARY KEY);
     DELETE FROM reader_cleanup_topics; DELETE FROM reader_cleanup_replies;
-    DELETE FROM reader_cleanup_parents; DELETE FROM reader_cleanup_images;`);
+    DELETE FROM reader_cleanup_parents; DELETE FROM reader_cleanup_images; DELETE FROM reader_cleanup_staff;`);
   db.prepare("INSERT INTO reader_cleanup_topics SELECT id FROM community_topics WHERE author_kind='reader' AND author_id=?").run(readerId);
   db.prepare("INSERT INTO reader_cleanup_replies SELECT id FROM community_replies WHERE (author_kind='reader' AND author_id=?) OR topic_id IN reader_cleanup_topics").run(readerId);
   db.exec(`INSERT INTO reader_cleanup_parents SELECT DISTINCT topic_id FROM community_replies
@@ -23,6 +24,13 @@ export function purgeCommunityReaderData(db: DatabaseSync, readerId: string, { q
   // Other members' approved/pending backgrounds remain durable assets.
   db.prepare("DELETE FROM community_profile_backgrounds WHERE member_kind='reader' AND member_id=?").run(readerId);
   db.prepare("DELETE FROM community_profile_background_reviews WHERE member_kind='reader' AND member_id=?").run(readerId);
+  db.prepare("DELETE FROM community_profile_background_advice WHERE member_kind='reader' AND member_id=? OR by_kind='reader' AND by_id=?").run(readerId,readerId);
+  db.prepare("DELETE FROM community_feature_recommendations WHERE topic_id IN reader_cleanup_topics OR by_kind='reader' AND by_id=?").run(readerId);
+  db.prepare(`WITH RECURSIVE descendants(id) AS (SELECT member_id FROM community_staff WHERE parent_kind='reader' AND parent_id=?
+    UNION SELECT s.member_id FROM community_staff s JOIN descendants d ON s.parent_kind='reader' AND s.parent_id=d.id)
+    INSERT INTO reader_cleanup_staff SELECT id FROM descendants`).run(readerId);
+  db.exec("UPDATE community_staff SET revoked_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE member_id IN reader_cleanup_staff; UPDATE community_members SET steward=0 WHERE member_kind='reader' AND member_id IN reader_cleanup_staff");
+  db.prepare("DELETE FROM community_staff WHERE member_kind='reader' AND member_id=?").run(readerId);
   // A moderator's upload can be in a surviving banner. Shared site assets stay.
   db.prepare(`INSERT INTO reader_cleanup_images SELECT i.id FROM community_images i
     WHERE ((i.uploader_kind='reader' AND i.uploader_id=? AND

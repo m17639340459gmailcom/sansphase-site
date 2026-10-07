@@ -62,6 +62,21 @@ test('the candidate list uses the first body image as one cover in every board',
     const topic = { id: board, board, title: '标题', author: common.me, thumbs: [id, 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'] };
     const doc = new JSDOM(communityTopicsHTML([topic], { ...common, showTopicCovers: true })).window.document;
     assert.equal(doc.querySelectorAll('.community-topic-thumbs img').length, 1);
-    assert.ok(doc.querySelector('.community-topic-thumbs img').src.includes(id));
+    assert.equal(doc.querySelector('.community-topic-thumbs img').getAttribute('src'), `/api/community/images/${id}.webp`, 'a single cover must start with the complete image instead of a cropped thumbnail');
+    assert.equal(doc.querySelector('.community-topic-thumbs img').getAttribute('loading'), 'lazy');
+  }
+});
+
+test('single image previews preserve the complete source while multi-image previews retain their thumbnail grid', () => {
+  for (const board of ['showcase', 'moments']) {
+    for (const count of [1, 2, 3, 4]) {
+      const ids = [id, 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'].slice(0, count);
+      const dom = new JSDOM(communityTopicsHTML([{ id: 'p1', board, title: '完整海报', author: common.me, thumbs: ids }], common));
+      try {
+        const images = [...dom.window.document.querySelectorAll('.community-topic-thumbs img')];
+        assert.equal(images.length, count);
+        assert.deepEqual(images.map(image => image.getAttribute('src')), ids.map(value => `/api/community/images/${value}${count === 1 ? '' : '.thumb'}.webp`));
+      } finally { dom.window.close(); }
+    }
   }
 });

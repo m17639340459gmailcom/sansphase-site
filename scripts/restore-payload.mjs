@@ -1,6 +1,7 @@
 import { readFile, mkdir, copyFile, writeFile } from "node:fs/promises";
 import { resolve, dirname, sep } from "node:path";
 import {fileHash} from '../server/file-hash.ts';
+import { verifyReaderProfileWorkflowSnapshot } from '../server/reader-profile-backup.ts';
 const [backupPath, targetPath, configPath] = process.argv.slice(2);
 if (!backupPath || !targetPath || !configPath)
   throw Error(
@@ -23,6 +24,10 @@ for (const file of manifest.files) {
     await fileHash(path) !== file.sha256
   )
     throw Error(`Checksum mismatch: ${file.path}`);
+}
+if (manifest.profileWorkflow !== undefined) {
+  if(manifest.profileWorkflow !== 'durable-v1') throw Error('Unsupported profile workflow backup version.');
+  verifyReaderProfileWorkflowSnapshot(source,manifest.files);
 }
 // Refuse to overwrite an existing database or configuration, including live data.
 await mkdir(target, { recursive: false });

@@ -4,6 +4,7 @@ import { fail, memberKey } from './community-db.ts';
 import type { CommunityAuthor } from './community-db.ts';
 import type { Body, Ctx } from './community-context.ts';
 import type { CustomItemInput } from './community-economy.ts';
+import type { StoredTopic } from './community-store.ts';
 import { saveCommunityImage } from './community-images.ts';
 import { reviewTopics } from './community-review.ts';
 import { communityBadgeFamilies, communityBadgeTiers } from '../src/community-badge-policy.ts';
@@ -11,9 +12,10 @@ import type { BadgeFamilyId, BadgeTier } from '../src/community-badge-policy.ts'
 import type { BadgeReview, BadgeSource } from './community-badges.ts';
 import { communityProfileReviews } from './community-routes-profile.ts';
 
-const tabs = ['queue', 'reports', 'content', 'orders', 'items', 'stewards', 'sanctions', 'data', 'banners', 'contact', 'convention', 'profiles'] as const;
-// The owner manages the shop, orders and steward appointments; stewards handle moderation.
-const ownerTabs = new Set(['orders', 'items', 'stewards', 'convention']);
+const tabs = ['queue', 'reports', 'content', 'orders', 'items', 'stewards', 'sanctions', 'data', 'banners', 'contact', 'convention', 'profiles', 'features'] as const;
+// Commerce and the convention stay owner-only; staff tools use individual grants.
+const ownerTabs = new Set(['orders', 'items', 'convention']);
+const canTab=(ctx:Ctx,tab:string)=>ctx.owner || tab==='contact' || (tab==='stewards'?ctx.canStaff('staff.appoint'):tab==='sanctions'?ctx.canStaff('member.mute')||ctx.canStaff('member.unmute'):tab==='profiles'?ctx.staff?.permissions.some(cap=>cap.startsWith('profile.')):ctx.moderationBoards.some(board=>ctx.canStaff(tab==='reports'?'report.review':tab==='banners'?'banner.manage':tab==='features'?'feature.decide':'content.inspect',board)) && (tab!=='features'||ctx.staff?.role!=='assistant'));
 const whole = (value: unknown, label: string, min: number, max: number) => {
   const number = Number(value);
   if (!Number.isInteger(number) || number < min || number > max) throw fail(`${label}需要是 ${min} 到 ${max} 之间的整数。`);
@@ -71,7 +73,7 @@ function itemInput(ctx: Ctx, body: Body, id?: string): CustomItemInput {
 export async function manageRoutes(ctx: Ctx): Promise<boolean> {
   const { live, path, method, url } = ctx;
   if (!path.startsWith('manage')) return false;
-  if (!ctx.mod) throw fail('只有站长和协管能进入社区管理。', 403);
+  if (!ctx.mod) throw fail('当前身份没有社区管理权限。', 403);
   const badgeMember = /^manage\/badges\/([^/]+)$/.exec(path);
   if (method === 'GET' && badgeMember) {
     if (!ctx.owner) throw fail('只有作者能查阅徽章复核证据。', 403);
@@ -84,7 +86,9 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
   if (method === 'GET' && path === 'manage') {
     const tab = (tabs as readonly string[]).includes(url.searchParams.get('tab') || '') ? url.searchParams.get('tab')! : 'queue';
     if (ownerTabs.has(tab) && !ctx.owner) throw fail(tab === 'stewards' ? '只有作者能管理版主。' : tab === 'convention' ? '只有作者能修改社区公约。' : '只有站长能管理兑换所。', 403);
+    if(!canTab(ctx,tab))throw fail('没有这个管理通道的权限。',403);
     const moderationBoards = ctx.moderationBoards;
+    const staffSnapshot=JSON.stringify(ctx.staff);
     const allQueue = live.queue();
     const queue = {
       topics: allQueue.topics.filter(topic => ctx.canModerateBoard(topic.board)),
@@ -97,11 +101,12 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
       const reply = report.target.kind === 'reply' ? live.reply(report.target.id) : null;
       const topic = report.target.kind === 'reply' && !reply ? null : live.topic(reply ? reply.topicId : report.target.id);
       return { report, reply, topic };
-    }).filter(({ topic }) => ctx.owner || Boolean(topic && ctx.canModerateBoard(topic.board)));
+    }).filter(({ topic }) => ctx.owner || Boolean(topic && ctx.canStaff('report.review',topic.board)));
     const reports = reportTargets.map(({ report }) => report);
     const orders = ctx.owner ? live.economy.goodsOrders() : [];
-    const sanctions = live.members.sanctions();
-    const stewards = tab === 'stewards' ? live.members.stewards() : [];
+    const sanctions = ctx.canStaff('member.mute')||ctx.canStaff('member.unmute') ? live.members.sanctions() : [];
+    const stewards = tab === 'stewards' ? live.members.stewards().filter(member=>ctx.owner||live.staff.ancestor(ctx.me,member)) : [];
+    const features=tab==='features'?live.featureRecommendations.pending(ctx.me):[];
     const content = tab === 'content' ? (ctx.owner
       ? live.listTopics({ sort: 'newest', page: 1, pageSize: 100 }).items
       : ctx.moderationBoards.flatMap(board => live.listTopics({ board, sort: 'newest', page: 1, pageSize: 100 }).items)
@@ -109,12 +114,10 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
     const people: CommunityAuthor[] = [
       ...queue.topics.map(topic => topic.author), ...queue.replies.map(reply => reply.author),
       ...reports.map(report => report.reporter), ...orders.map(order => order.member), ...sanctions.map(sanction => sanction.member), ...content.map(topic => topic.author), ...stewards,
+      ...features.flatMap(row=>[row.by,...live.staff.ancestors(row.by)]),...features.flatMap(row=>{const topic=live.topic(row.topicId);return topic?[topic.author]:[];}),
     ];
     for (const { reply, topic } of reportTargets) if (reply) people.push(reply.author); else if (topic) people.push(topic.author);
     const map = await ctx.people(people);
-    const currentBoards = ctx.moderationBoards;
-    if (!ctx.mod || currentBoards.length !== moderationBoards.length || currentBoards.some(board => !moderationBoards.includes(board)))
-      throw fail('管理权限发生变化，请重新打开管理页面。', 403);
     const stillModeratesTopic = (id: string) => {
       const topic = live.topic(id);
       return Boolean(topic && ctx.canModerateBoard(topic.board));
@@ -123,29 +126,50 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
       const reply = live.reply(id);
       return Boolean(reply && stillModeratesTopic(reply.topicId));
     };
-    if (!ctx.owner && (queue.topics.some(topic => !stillModeratesTopic(topic.id))
-      || queue.replies.some(reply => !stillModeratesReply(reply.id))
-      || content.some(topic => !stillModeratesTopic(topic.id))
-      || reports.some(report => !(report.target.kind === 'reply' ? stillModeratesReply(report.target.id) : stillModeratesTopic(report.target.id)))))
-      throw fail('内容所属板块发生变化，请重新打开管理页面。', 403);
+    const assertReadable = () => {
+      const currentBoards = ctx.moderationBoards;
+      if (!ctx.mod || !canTab(ctx,tab) || JSON.stringify(ctx.staff)!==staffSnapshot || currentBoards.length !== moderationBoards.length || currentBoards.some(board => !moderationBoards.includes(board)))
+        throw fail('管理权限发生变化，请重新打开管理页面。', 403);
+      if (!ctx.owner && (queue.topics.some(topic => !stillModeratesTopic(topic.id))
+        || queue.replies.some(reply => !stillModeratesReply(reply.id))
+        || content.some(topic => !stillModeratesTopic(topic.id))
+        || reports.some(report => {const reply=report.target.kind==='reply'?live.reply(report.target.id):null;const topic=live.topic(reply?reply.topicId:report.target.id);return !topic||!ctx.canStaff('report.review',topic.board);})))
+        throw fail('内容所属板块发生变化，请重新打开管理页面。', 403);
+    };
+    assertReadable();
     const activity = live.activity(Date.now(), ctx.owner ? undefined : ctx.moderationBoards);
     const profileReviews = tab === 'profiles' ? await communityProfileReviews(ctx) : undefined;
-    if (!ctx.mod) throw fail('管理权限发生变化，请重新打开管理页面。', 403);
+    assertReadable();
+    const protectedTarget = (author:CommunityAuthor) => { try { live.staff.protect(ctx.me,author);return true; } catch { return false; } };
+    const topicProof = (topic:StoredTopic) => ({
+      canApprove:topic.pending && ctx.canStaff('topic.approve',topic.board),
+      canDelete:ctx.canStaff(topic.pending?'topic.reject':'topic.delete',topic.board) && protectedTarget(topic.author),
+      canRestore:ctx.canStaff('topic.restore',topic.board),
+      canPenalty:ctx.canStaff('topic.penalty',topic.board) && protectedTarget(topic.author),
+      canMute:ctx.canStaff('member.mute') && protectedTarget(topic.author),
+    });
     ctx.send({
-      tab, owner: ctx.owner, moderationBoards: ctx.moderationBoards,
+      tab, owner: ctx.owner, moderationBoards: ctx.moderationBoards, actorStaff:ctx.staff, allowedTabs:tabs.filter(tab=>canTab(ctx,tab)&&(!ownerTabs.has(tab)||ctx.owner)),
       ...(profileReviews || {}),
-      ...(tab === 'stewards' ? { stewards: stewards.map(member => ctx.person(member, map)) } : {}),
+      ...(tab === 'stewards' ? { stewards: stewards.map(member => ({...ctx.person(member, map),staff:live.staff.state(member),canAppoint:live.staff.canAppoint(ctx.me,member)})) } : {}),
+      ...(tab === 'features'?{features:features.filter(row=>[row.by,...live.staff.ancestors(row.by)].filter(member=>member.kind==='reader').every(member=>map.get(memberKey(member))?.active===true)&&live.featureRecommendations.pending(ctx.me).some(current=>current.id===row.id)).flatMap(row=>{const topic=live.topic(row.topicId);return topic?[{id:row.id,topic:ctx.topicDTO({...topic,replies:topic.replyCount},map),by:ctx.person(row.by,map),reason:row.reason,createdAt:row.createdAt}]:[];})}:{}),
       ...(tab === 'banners' ? { banners: live.banners.managed({ actor: ctx.me, browsingAsReader: ctx.browsingAsReader, canSeeBoard: ctx.canSeeBoard }) } : {}),
       ...(tab === 'convention' ? { convention: live.convention.current() } : {}),
-      content: content.map(topic => ctx.topicDTO(topic, map)),
+      content: content.map(topic => ({...ctx.topicDTO(topic, map),...topicProof(topic)})),
       counts: { queue: queue.topics.length + queue.replies.length, reports: reports.length, orders: orders.filter(order => order.status === 'pending').length, sanctions: sanctions.filter(sanction => sanction.active).length },
       kpis: { topics24h: activity.topics24h, replies24h: activity.replies24h },
       queue: {
-        topics: queue.topics.map(topic => ({ ...ctx.topicDTO(topic, map), body: [...topic.body].slice(0, 200).join(''), pendingReason: topic.pendingReason, hiddenReason: topic.hiddenReason })),
-        replies: queue.replies.map(reply => ({ ...reply, board: live.topic(reply.topicId)?.board ?? null, author: ctx.person(reply.author, map), body: [...reply.body].slice(0, 200).join('') })),
+        topics: queue.topics.map(topic => ({ ...ctx.topicDTO(topic, map),...topicProof(topic), body: [...topic.body].slice(0, 200).join(''), pendingReason: topic.pendingReason, hiddenReason: topic.hiddenReason })),
+        replies: queue.replies.map(reply => {const board=live.topic(reply.topicId)?.board;return { ...reply, board:board ?? null,
+          canDelete:ctx.canStaff('reply.delete',board)&&protectedTarget(reply.author),canRestore:ctx.canStaff('reply.restore',board),
+          canPenalty:ctx.canStaff('reply.penalty',board)&&protectedTarget(reply.author),canMute:ctx.canStaff('member.mute')&&protectedTarget(reply.author),
+          author: ctx.person(reply.author, map), body: [...reply.body].slice(0, 200).join('') };}),
       },
       reports: reportTargets.map(({ report, reply, topic }) => ({
         id: report.id, reason: report.reason, note: report.note, createdAt: report.createdAt, reporter: ctx.person(report.reporter, map),
+        canUphold:Boolean(topic&&ctx.canStaff('report.review',topic.board)&&ctx.canStaff(report.target.kind==='topic'?'topic.delete':'reply.delete',topic.board)&&protectedTarget(reply?reply.author:topic.author)),
+        canDismiss:ctx.owner||Boolean(topic&&ctx.canStaff('report.review',topic.board)&&(!(reply?reply.hidden:topic.hidden)||ctx.canStaff(report.target.kind==='topic'?'topic.restore':'reply.restore',topic.board))),
+        canPenalty:Boolean(topic&&ctx.canStaff(report.target.kind==='topic'?'topic.penalty':'reply.penalty',topic.board)&&protectedTarget(reply?reply.author:topic.author)),
         target: {
           kind: report.target.kind, id: report.target.id, topicId: topic?.id || null, board: topic?.board ?? null, title: topic?.title || '（已删除）',
           excerpt: [...(reply ? reply.body : topic?.body || '')].slice(0, 140).join(''),
@@ -173,7 +197,7 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
     return true;
   }
   const body = await ctx.json();
-  if (!ctx.mod) throw fail('只有站长和协管能进入社区管理。', 403);
+  if (!ctx.mod) throw fail('当前身份没有社区管理权限。', 403);
   const badgeReview = /^manage\/badges\/([^/]+)\/review$/.exec(path);
   if (badgeReview) {
     if (!ctx.owner) throw fail('只有作者能复核徽章荣誉。', 403);
@@ -223,9 +247,13 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
   }
   if (path === 'manage/banners') {
     const scope = typeof body.scope === 'string' ? body.scope : '';
+    live.banners.authorize(scope,{actor:ctx.me,browsingAsReader:ctx.browsingAsReader,canSeeBoard:ctx.canSeeBoard});
     ctx.throttle('action');
-    const config = await ctx.auditMutation('banners', () => live.banners.replace(scope, body.version, body.items,
-      { actor: ctx.me, browsingAsReader: ctx.browsingAsReader, canSeeBoard: ctx.canSeeBoard }),
+    const config = await ctx.auditMutation('banners', () => {
+      if(scope !== 'home')ctx.requireStaff('banner.manage',scope);
+      else if(!ctx.owner)throw fail('只有站长能管理首页横幅。',403);
+      return live.banners.replace(scope, body.version, body.items,
+      { actor: ctx.me, browsingAsReader: ctx.browsingAsReader, canSeeBoard: ctx.canSeeBoard });},
     saved => ({ scope, version: saved.version, topics: saved.items.map(item => item.topicId) }));
     ctx.send(config);
     return true;
@@ -237,36 +265,53 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
     if (!pending) throw fail('这条举报已经处理过了。', 404);
     const reply = pending.target.kind === 'reply' ? live.reply(pending.target.id) : null;
     const topic = pending.target.kind === 'reply' && !reply ? null : live.topic(reply ? reply.topicId : pending.target.id);
-    if (!ctx.owner && (!topic || !ctx.canModerateBoard(topic.board))) throw fail('你没有这条举报所属板块的管理权限。', 403);
+    if (!ctx.owner && (!topic || !ctx.canStaff('report.review',topic.board))) throw fail('你没有这条举报所属板块的管理权限。', 403);
     const reason = body.uphold === true ? ctx.clean(body.reason, [2, 200], '删除理由', false) : '';
+    const penalty=body.uphold===true&&(body.penalty===true||body.penalty===undefined&&Boolean(topic&&ctx.canStaff(pending.target.kind==='topic'?'topic.penalty':'reply.penalty',topic.board)));
     const result = await ctx.auditMutation(body.uphold === true ? 'report-upheld' : 'report-dismissed',
-      () => live.resolveReport(report[1], body.uphold === true, new Date().toISOString(), reason),
-      { report: report[1], ...(reason ? { reason } : {}) });
+      () => {const current=live.openReports().find(row=>row.id===report[1]);if(!current)throw fail('这条举报已经处理。',404);const r=current.target.kind==='reply'?live.reply(current.target.id):null;const t=live.topic(r?r.topicId:current.target.id);if(!t){if(!ctx.owner)throw fail('原内容已不存在。',403);}else{ctx.requireStaff('report.review',t.board);if(body.uphold===true){ctx.requireStaff(current.target.kind==='topic'?'topic.delete':'reply.delete',t.board);live.staff.protect(ctx.me,r?r.author:t.author);if(penalty)ctx.requireStaff(current.target.kind==='topic'?'topic.penalty':'reply.penalty',t.board);}else if(r?r.hidden:t.hidden)ctx.requireStaff(current.target.kind==='topic'?'topic.restore':'reply.restore',t.board);}return live.resolveReport(report[1], body.uphold === true, new Date().toISOString(), reason,penalty);},
+      { report: report[1], penalty, ...(reason ? { reason } : {}) });
     ctx.send(result);
     return true;
   }
   const lift = /^manage\/sanctions\/([^/]+)\/lift$/.exec(path);
   if (lift) {
     await ctx.auditMutation('lift', () => {
-      const member = live.members.lift(lift[1]);
-      if (!member) throw fail('这条禁言已经结束了。', 409);
-      return member;
+      ctx.requireStaff('member.unmute');const member=live.members.sanctionMember(lift[1]);if(!member)throw fail('禁言记录不存在。',404);live.staff.protect(ctx.me,member);
+      const lifted = live.members.lift(lift[1]);
+      if (!lifted) throw fail('这条禁言已经结束了。', 409);
+      return lifted;
     }, member => ({ sanction: lift[1], member: memberKey(member) }));
     ctx.send({ ok: true });
     return true;
   }
   const reject = /^manage\/topics\/([^/]+)\/reject$/.exec(path);
   if (reject) {
-    if (!ctx.mod) throw fail('只有站长和协管能审核帖子。', 403);
+    if (!ctx.mod) throw fail('当前身份没有帖子审核权限。', 403);
     const topic = live.topic(reject[1]);
     if (!topic) throw fail('这个帖子已被处理。', 404);
-    if (!ctx.canModerateBoard(topic.board)) throw fail('你没有这个板块的管理权限。', 403);
+    ctx.requireStaff('topic.reject',topic.board);
     const reason = String(body.reason || '');
     if (!(communityReviewReasons as readonly string[]).includes(reason)) throw fail('请选择审核不通过的理由。');
     const note = typeof body.note === 'string' && body.note.trim() ? ctx.clean(body.note, [1, 200], '补充说明', false) : '';
-    const result = await ctx.auditMutation('reject-topic', () => live.rejectTopic(reject[1], reason, note), { topic: reject[1], reason, note });
+    const result = await ctx.auditMutation('reject-topic', () => {const current=live.topic(reject[1]);ctx.requireStaff('topic.reject',current?.board);if(current)live.staff.protect(ctx.me,current.author);return live.rejectTopic(reject[1], reason, note);}, { topic: reject[1], reason, note });
     ctx.send({ ok: true, ...result });
     return true;
+  }
+  const recommendation=/^manage\/feature-recommendations\/([^/]+)\/(approve|reject)$/.exec(path);
+  if(recommendation){
+    const approve=recommendation[2]==='approve',reason=approve&&body.reason===undefined?'':ctx.clean(body.reason,[approve?0:2,200],'精选审批理由',false);
+    const proposed=live.featureRecommendations.get(recommendation[1]);if(!proposed)throw fail('精选推荐不存在。',404);
+    const ancestors=live.staff.ancestors(proposed.by),chain=JSON.stringify(ancestors);
+    // Keep these persisted actors in every subsequent authorization refresh for
+    // this one request, including the final audit transaction's check.
+    await ctx.refreshStaff([proposed.by,...ancestors]);
+    await ctx.auditMutation('feature-recommendation-'+recommendation[2],()=>{
+      const current=live.featureRecommendations.get(recommendation[1]);if(!current)throw fail('精选推荐不存在。',404);
+      ctx.requireStaff('feature.decide',current.board);
+      if(JSON.stringify(live.staff.ancestors(current.by))!==chain)throw fail('推荐人的管理权限发生变化，请刷新。',403);
+      return live.featureRecommendations.decide(ctx.me,recommendation[1],approve,reason,id=>live.setFeatured(id,true,{actor:ctx.me}));
+    },{recommendation:recommendation[1],reason});ctx.send({ok:true});return true;
   }
   if (!ctx.owner) throw fail('只有站长能管理兑换所。', 403);
   if (path === 'manage/categories') {

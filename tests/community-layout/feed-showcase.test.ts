@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import postcss from 'postcss';
 import { communityFrameBannersHTML, createSharedFeedShowcase } from '../../src/community-layout/feed-showcase.ts';
 import { createStableCommunityFrame } from '../../src/community-layout/stable-frame.ts';
 import type { Common } from '../../src/community.ts';
@@ -13,6 +15,19 @@ const item = (id: string, board: string, title: string, image = '') => `<a data-
 const config = (scope: string, items = '', state = 'ready') => `<div data-frame-banners-state="${state}" data-frame-banners-scope="${escape(scope)}">${items}</div>`;
 const pinned = (id: string) => `<div class="community-topics"><article class="community-topic is-pinned"><div class="community-topic-main"><h3><a href="#/post/${id}">自动置顶${id}</a></h3><a class="community-topic-board" href="#/community/boards/qa">学习问答</a></div></article></div>`;
 const common: Common = { t: zh => zh, esc: value => escape(String(value ?? '')) };
+
+test('home and board banner artwork has no tinted overlay in either theme', async () => {
+  const css = postcss.parse(await readFile(new URL('../../src/community-layout/feed.css', import.meta.url), 'utf8'));
+  css.walkRules(rule => {
+    if (!/\.community-feed-showcase-(?:art|image|card)/.test(rule.selector)) return;
+    rule.walkDecls(declaration => {
+      if (declaration.prop === 'filter' || declaration.prop === 'backdrop-filter') assert.equal(declaration.value, 'none', 'banner artwork must not be dimmed or blurred');
+      if (declaration.prop === 'opacity') assert.equal(declaration.value, '1', 'banner artwork must retain its original brightness');
+      if (/::(?:before|after)/.test(rule.selector) && /^(?:background|background-image|background-color)$/.test(declaration.prop))
+        assert.match(declaration.value, /^(?:none|transparent)$/, 'banner pseudo-elements must not paint a mask over the image');
+    });
+  });
+});
 
 test('frame renderer uses the resolved authorized image and safely falls back from custom title to the linked topic', () => {
   const data: CommunityBannerConfig = { scope: 'qa', version: 3, items: [

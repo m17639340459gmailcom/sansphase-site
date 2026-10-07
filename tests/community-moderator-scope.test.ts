@@ -62,7 +62,7 @@ async function setup(t: TestContext, simplePosting = true) {
     },
     people: async authors => new Map(authors.flatMap(author => {
       const info = author.kind === 'owner' ? { name: '無相', uid: 'owner' } : accounts.get(author.id);
-      return info ? [[`${author.kind}:${author.id}`, { ...info, avatar: null, vip: false, joinedAt: null, bio: '' }]] : [];
+      return info ? [[`${author.kind}:${author.id}`, { ...info, avatar: null, vip: false, joinedAt: null, bio: '',active:true }]] : [];
     })),
     findMember: async uid => {
       if (uid === 'owner') return { kind: 'owner', id: 'owner' };
@@ -147,7 +147,7 @@ test('corrupt or unknown stored scope data fails closed instead of restoring glo
       assert.equal((await post('members/10001/mute', { days: 1, reason: '人身攻击' }, 'moderator')).status, 403);
     }
     db.prepare("UPDATE community_members SET steward_boards=NULL WHERE member_id=?").run(moderator.id);
-    assert.deepEqual(store.members.moderationBoards(moderator), boardIds, 'only the explicit legacy NULL retains previous global assignments');
+    assert.deepEqual(store.members.moderationBoards(moderator), ['qa'], 'a legacy NULL cannot widen the independently migrated staff scope');
   } finally { db.close(); }
 });
 
@@ -164,12 +164,12 @@ test('public appointment requires explicit valid scopes and owner permissions be
   for (const identity of ['reader', 'moderator', 'owner; community_browse=reader'])
     assert.equal((await post('members/10002/steward', { on: true, boards: ['tools'] }, identity)).status, 403, identity);
   assert.equal(audits.length, 0);
-  assert.equal((await post('members/10002/steward', { on: true, boards: ['tools', 'qa'] })).status, 200);
+  assert.equal((await post('members/10002/steward', {on:true,role:'general',boards:['tools','qa'],permissions:['content.inspect'],delegable:[]})).status, 200);
   assert.deepEqual(store.members.moderationBoards(candidate), ['qa', 'tools'], 'scope order is canonical');
-  assert.equal((await post('members/10002/steward', { on: true, boards: ['showcase'] })).status, 200);
+  assert.equal((await post('members/10002/steward', {on:true,role:'general',boards:['showcase'],permissions:['content.inspect'],delegable:[]})).status, 200);
   assert.deepEqual(store.members.moderationBoards(candidate), ['showcase']);
   const me = await (await post('members/10002/steward', { on: false })).json();
-  assert.deepEqual(me, { steward: false });
+  assert.deepEqual(me, { steward: false,staff:null });
   assert.deepEqual(store.members.moderationBoards(candidate), []);
   assert.deepEqual(audits.map(row => row.details.boards), [['qa', 'tools'], ['showcase'], []]);
   const notices = store.members.inbox(candidate, 'system');

@@ -10,6 +10,8 @@ import { createCommunityStore } from '../server/community-store.ts';
 import { createCommunityService } from '../server/community-service.ts';
 import { acceptCommunityConvention } from './fixtures/community-convention-consent.ts';
 import type { PersonInfo } from '../server/community-context.ts';
+import { communityBoards } from '../src/community.ts';
+import { communityStaffCapabilities } from '../src/community-staff.ts';
 
 const ownerId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const personalId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
@@ -60,7 +62,12 @@ async function fixture(t: test.TestContext, linked = true) {
 test('owner reader mode uses its distinct real member and allows ordinary writes without management', async t => {
   const f = await fixture(t), me = await f.me();
   assert.equal(me.uid, '10008'); assert.equal(me.role, 'reader'); assert.equal(me.owner, false); assert.equal(me.mod, false);
-  assert.deepEqual(me.management, { role: 'owner', browsingAsReader: true, interactive: true });
+  assert.deepEqual(me.management, { role: 'owner', browsingAsReader: true, interactive: true, staff: {
+    role: 'owner', boards: communityBoards.map(board => board.id), permissions: communityStaffCapabilities.map(capability => capability.id),
+    delegable: communityStaffCapabilities.map(capability => capability.id), parent: null,
+  } }, 'the original management identity is available for switching back, including its exact scope');
+  assert.equal(me.staff, null, 'the active reader identity has no management appointment');
+  assert.deepEqual(me.moderationBoards, []);
   assert.equal((await f.request('manage')).status, 403);
   assert.equal((await f.request('manage/items', {})).status, 403);
   const read = await f.request('inbox/read-all', {}); assert.equal(read.status, 200);

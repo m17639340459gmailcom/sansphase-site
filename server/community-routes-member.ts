@@ -5,6 +5,8 @@ import { fail, same, memberKey } from './community-db.ts';
 import type { CommunityAuthor } from './community-db.ts';
 import type { Ctx } from './community-context.ts';
 import { createOwnerReaderPreview } from './community-owner-reader-preview.ts';
+import { communityStaffDefaultPermissions } from '../src/community-staff.ts';
+import type { CommunityStaffRole, CommunityStaffPermission } from '../src/community-staff.ts';
 
 const r = communityRules;
 const flag = (value: unknown) => value !== false;
@@ -42,12 +44,13 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
         if (ctx.owner) return true;
         const reply = report.target.kind === 'reply' ? live.reply(report.target.id) : null;
         const topic = live.topic(reply ? reply.topicId : report.target.id);
-        return Boolean(topic && ctx.canModerateBoard(topic.board));
+        return Boolean(topic && ctx.canStaff('report.review',topic.board));
       }).length : 0;
       const orders = ctx.owner ? economy.goodsOrders().filter(order => order.status === 'pending').length : 0;
       ctx.send({
         ...ctx.person(me, map), vip: viewer.vip, owner: ctx.owner, mod: ctx.mod, trustLevel: ctx.trustLevel, moderationBoards: ctx.moderationBoards, balance: ledger.balance(me),
-        management: ctx.actualMod ? { role: ctx.actualOwner ? 'owner' : 'steward', browsingAsReader: ctx.browsingAsReader,
+        staff: ctx.staff,
+        management: ctx.actualMod ? { role: ctx.actualOwner ? 'owner' : live.staff.state(me)?.role ?? null, staff: live.staff.state(ctx.actualOwner ? ctx.ownerMember : me), browsingAsReader: ctx.browsingAsReader,
           ...(ctx.actualOwner && ctx.browsingAsReader && !ctx.readOnly ? { interactive: true } : {}) } : null,
         moderationContact: members.moderationContact(me),
         convention: live.convention.state(me),
@@ -92,7 +95,7 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
         balance: ledger.balance(me), gainedToday: ledger.gainedToday(me), behaviourToday: ledger.behaviourToday(me), dailyCap: r.dailyCap,
         checkedIn: economy.checked(me), month: ledger.month(me), flow,
         ledger: rows.map(({ ref, ...row }) => ({ ...row, topic: titles.get(row.id) || null, detail: detail(ref) })),
-        level, owner: ctx.owner, vip: ctx.ownerReaderPreview !== null || me.kind === 'reader' && profile?.vip === true, browsingAsReader: ctx.browsingAsReader, readOnly: ctx.readOnly, steward: members.steward(me), stats: members.stats(me),
+        level, owner: ctx.owner, vip: ctx.ownerReaderPreview !== null || me.kind === 'reader' && profile?.vip === true, browsingAsReader: ctx.browsingAsReader, readOnly: ctx.readOnly, steward: members.steward(me), staffRole: ctx.staff?.role ?? null, stats: members.stats(me),
         growth: ctx.ownerReaderPreview?.growth ?? live.experience.state(me), vipGrowth: ctx.ownerReaderPreview?.vipGrowth ?? live.experience.vipState(me, profile?.vip === true), experienceCatalogue, vipCatalogue,
         progress: ctx.owner || level >= 3 ? null : members.levelProgress(me, level),
       });
@@ -151,7 +154,8 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
         follows: members.followCounts(member), following: !self && members.following(me, member), self, badges: members.badges(member),
         badgeState: info.ownerReader ? createOwnerReaderPreview().badgeState : self && ctx.ownerReaderPreview ? ctx.ownerReaderPreview.badgeState : members.badgeState(member, { joinedAt: info.joinedAt }),
         muted: (self || ctx.mod) && muted ? { id: muted.id, until: muted.until, reason: muted.reason } : null,
-        canMute: ctx.mod && !self && member.kind === 'reader', canAppoint: ctx.owner && member.kind === 'reader', steward: members.steward(member),
+        canMute: ctx.canStaff('member.mute') && !self && member.kind === 'reader' && (()=>{try{live.staff.protect(me,member);return true;}catch{return false;}})(), canAppoint: ctx.canStaff('staff.appoint') && live.staff.canAppoint(me, member), steward: members.steward(member),
+        staff: self ? ctx.staff : ctx.canStaff('staff.appoint') && live.staff.canAppoint(me, member) ? live.staff.state(member) : null,
         reasons: ctx.mod ? communityReportReasons : undefined,
         tab, topics: tab === 'topics' ? await ctx.topicsDTO(topics) : [], replies: tab === 'replies' ? replies : [],
         bookmarks: tab === 'bookmarks' && self ? await ctx.topicsDTO(bookmarks) : [], counts: { topics: topics.length, replies: replies.length, bookmarks: bookmarks.length },
@@ -207,9 +211,9 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
       return true;
     }
     case 'me/contact': {
-      if (!members.moderationBoards(me).length) throw fail('只有作者和现任版主能设置管理联系方式。', 403);
+      if (!ctx.staff) throw fail('只有当前管理身份能设置管理联系方式。', 403);
       ctx.throttle('action');
-      const contact = await ctx.auditMutation('contact', () => members.setModerationContact(me, body),
+      const contact = await ctx.auditMutation('contact', () => {if(!ctx.staff)throw fail('管理权限发生变化，请刷新页面。',403);return members.setModerationContact(me, body);},
         result => ({ qqPublished: Boolean(result.qq), emailPublished: Boolean(result.email) }));
       ctx.send(contact);
       return true;
@@ -267,27 +271,37 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
     if (memberAction[2] === 'follow') { ctx.throttle('action'); ctx.send(members.follow(me, member, flag(body.on))); return true; }
     if (member.kind !== 'reader') throw fail('不能对站长这样做。', 403);
     if (memberAction[2] === 'mute') {
-      if (!ctx.mod) throw fail('只有站长和协管能禁言。', 403);
+      ctx.requireStaff('member.mute'); live.staff.protect(me,member);
       const days = Number(body.days);
       if (![1, 7, 30].includes(days)) throw fail('请选择禁言天数。');
       const reason = String(body.reason || '');
       if (!(communityReportReasons as readonly string[]).includes(reason)) throw fail('请选择禁言原因。');
-      const result = await ctx.auditMutation('mute', () => members.mute(member, days, reason, me), { member: memberKey(member), days, reason });
+      const result = await ctx.auditMutation('mute', () => {ctx.requireStaff('member.mute');live.staff.protect(me,member);return members.mute(member, days, reason, me);}, { member: memberKey(member), days, reason });
       ctx.send(result);
       return true;
     }
-    if (!ctx.owner) throw fail('只有站长能任命协管。', 403);
+    ctx.requireStaff('staff.appoint');
     if (typeof body.on !== 'boolean') throw fail('请选择任命或撤销版主。');
     const on = body.on;
     const boards = body.boards;
     const knownBoards = communityBoards.map(board => board.id);
     if (on && (!Array.isArray(boards) || boards.length === 0 || boards.some(board => typeof board !== 'string' || !knownBoards.includes(board)) || new Set(boards).size !== boards.length))
       throw fail('请至少选择一个有效的管理板块。');
-    await ctx.auditMutation('steward', () => {
-      members.setSteward(member, on, on ? boards as string[] : undefined);
-      return members.moderationBoards(member);
-    }, assigned => ({ member: memberKey(member), on, boards: assigned }));
-    ctx.send({ steward: on });
+    const current=live.staff.state(member);
+    const legacyCompatibility=on && body.role===undefined && ctx.owner && live.staff.stored(member)?.legacy_origin===1 && current?.role==='moderator';
+    if(on && !legacyCompatibility && (body.role===undefined || body.permissions===undefined || body.delegable===undefined))throw fail('任命需要明确职务、权限及可向下授予的权限，请刷新管理页面。');
+    const role=(body.role ?? current?.role) as Exclude<CommunityStaffRole,'owner'>;
+    if(on&&!['general','moderator','assistant'].includes(role))throw fail('请选择下一级职务。');
+    const permissions=(body.permissions ?? current?.permissions ?? communityStaffDefaultPermissions[role]) as CommunityStaffPermission[];
+    const delegable=(body.delegable ?? current?.delegable ?? []) as CommunityStaffPermission[];
+    if(on)await ctx.refreshStaff([member]);
+    const result=await ctx.auditMutation('staff-appointment', () => {
+      ctx.requireStaff('staff.appoint');
+      const result=on?{staff:(()=>{members.ensure(member);return live.staff.appoint(me,member,{role,boards:boards as string[],permissions,delegable});})(),revoked:[]}: {staff:null,revoked:live.staff.revoke(me,member)};
+      members.notify(member,{type:'system',actor:me,text:on?'你的管理职务及权限已更新':'你的管理职务已撤销',data:{role:on?role:null,steward:on,boards:result.staff?.boards??[]}});
+      return result;
+    }, result => ({ member: memberKey(member), on, role, boards: result.staff?.boards??[], permissions:on?permissions:[],delegable:on?delegable:[],revoked:result.revoked.map(memberKey) }));
+    ctx.send({ steward: on, staff:result.staff });
     return true;
   }
   return false;

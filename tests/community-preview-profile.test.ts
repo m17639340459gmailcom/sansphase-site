@@ -7,6 +7,13 @@ import { DatabaseSync } from 'node:sqlite';
 import type { IncomingMessage } from 'node:http';
 import sharp from 'sharp';
 import { createCommunityPreviewProfile } from '../scripts/fixtures/community-preview-profile.ts';
+import type { CommunityProfileModeration, CommunityProfileGuard } from '../server/community-profile-access.ts';
+
+const reviewGuard = (moderation: CommunityProfileModeration): CommunityProfileGuard => async operation => {
+  const allowed = moderation.role === 'owner' ? ['avatar','signature','nickname'] as const : ['avatar'] as const;
+  if (operation.kind && !allowed.some(kind => kind === operation.kind)) throw Object.assign(Error('This preview role cannot review that profile kind.'), {status:403});
+  return allowed;
+};
 
 const req = (id: string) => ({ headers: { cookie: `preview_as=${id}` } }) as IncomingMessage;
 const ownerReaderId = 'ffffffff-ffff-4fff-8fff-fffffffffff8';
@@ -24,9 +31,9 @@ test('isolated preview reuses actual review commands without showing unapproved 
   assert.equal(demo.publicRow('demo')?.signature, '已通过的签名');
   assert.equal((await access.state(req('demo'))).pendingSignature, '待审的个签');
   const owner = { role: 'owner' as const, actor: { kind: 'owner' as const, id: 'owner' } };
-  const rows = await access.reviews(req('owner'), owner, () => {});
+  const rows = await access.reviews(req('owner'), owner, reviewGuard(owner));
   assert.equal(rows.length, 1);
-  await access.review(req('owner'), rows[0].id, 'approve', owner, () => {});
+  await access.review(req('owner'), rows[0].id, 'approve', owner, reviewGuard(owner));
   assert.equal(demo.publicRow('demo')?.signature, '待审的个签');
   assert.equal((await access.state(req('demo'))).pendingSignature, null);
 });
@@ -36,9 +43,9 @@ test('isolated preview avatar approval remains private until a moderator reviews
   await access.avatar(req('demo'), bytes);
   assert.equal(await demo.avatarFile('10001'), null);
   const moderator = { role: 'steward' as const, actor: { kind: 'reader' as const, id: 'steward' } };
-  const rows = await access.reviews(req('steward'), moderator, () => {});
+  const rows = await access.reviews(req('steward'), moderator, reviewGuard(moderator));
   assert.equal(rows[0].kind, 'avatar');
-  await access.review(req('steward'), rows[0].id, 'approve', moderator, () => {});
+  await access.review(req('steward'), rows[0].id, 'approve', moderator, reviewGuard(moderator));
   assert.deepEqual(await readFile((await demo.avatarFile('10001'))!), bytes);
   await access.removeAvatar(req('demo'));
   assert.equal(await demo.avatarFile('10001'), null);
@@ -47,11 +54,11 @@ test('isolated preview retains actor guards and moderator signature restrictions
   const { access } = await fixture(t);
   await access.signature(req('demo'), '待审');
   const owner = { role: 'owner' as const, actor: { kind: 'owner' as const, id: 'owner' } };
-  const row = (await access.reviews(req('owner'), owner, () => {}))[0];
+  const row = (await access.reviews(req('owner'), owner, reviewGuard(owner)))[0];
   const moderator = { role: 'steward' as const, actor: { kind: 'reader' as const, id: 'steward' } };
-  await assert.rejects(access.review(req('steward'), row.id, 'approve', moderator, () => {}), { status: 403 });
+  await assert.rejects(access.review(req('steward'), row.id, 'approve', moderator, reviewGuard(moderator)), { status: 403 });
   await assert.rejects(access.signature(req('owner'), '越权'), { status: 403 });
-  await assert.rejects(access.reviews(req('demo'), owner, () => {}), { status: 403 });
+  await assert.rejects(access.reviews(req('demo'), owner, reviewGuard(owner)), { status: 403 });
 });
 
 test('the verified fixture owner may edit its separate linked reader without changing the brand or another reader', async t => {
@@ -70,8 +77,8 @@ test('the verified fixture owner may edit its separate linked reader without cha
   assert.equal((await demo.access.state(forged)).id, 'demo');
   await assert.rejects(demo.access.signature(req('owner'), '品牌不可改'), { status: 403 });
   const owner = { role: 'owner' as const, actor: { kind: 'owner' as const, id: 'owner' } };
-  const [proposal] = await demo.access.reviews(req('owner'), owner, () => {});
-  await demo.access.review(req('owner'), proposal.id, 'approve', owner, () => {});
+  const [proposal] = await demo.access.reviews(req('owner'), owner, reviewGuard(owner));
+  await demo.access.review(req('owner'), proposal.id, 'approve', owner, reviewGuard(owner));
   assert.equal(demo.publicRow(ownerReaderId)?.signature, '站长的个人新签名');
 });
 
@@ -82,7 +89,7 @@ test('fixture main account reads the same approved owner reader avatar and signa
   const image = await sharp({ create: { width: 320, height: 320, channels: 3, background: '#5566aa' } }).webp().toBuffer();
   await demo.access.avatar(personalReq(), image); await demo.access.signature(personalReq(), '相同个人实体');
   const owner = { role: 'owner' as const, actor: { kind: 'owner' as const, id: 'owner' } };
-  for (const proposal of await demo.access.reviews(req('owner'), owner, () => {})) await demo.access.review(req('owner'), proposal.id, 'approve', owner, () => {});
+  for (const proposal of await demo.access.reviews(req('owner'), owner, reviewGuard(owner))) await demo.access.review(req('owner'), proposal.id, 'approve', owner, reviewGuard(owner));
   const approved = await main.displayIdentity(personalReq()); assert.equal(approved?.signature, '相同个人实体'); assert.match(approved?.avatar || '', /^\/api\/reader\/avatar\/[0-9a-f-]{36}\.webp$/);
   assert.equal((await demo.access.state(personalReq())).avatar, demo.publicRow(ownerReaderId)?.avatar);
   assert.deepEqual(await readFile((await demo.avatarFile('10008'))!), image);

@@ -1,11 +1,13 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { resolve } from 'node:path';
+import { readerProfileAdviceSchema, readerProfileRequestSchema, readerProfileWorkflowReady } from './reader-profile-workflow-migration.ts';
 
 type RegistrationInput = { email: string; nickname: string; phone: string; password: string };
 type RegistrationRow = { id: string; email: string; nickname: string; phone: string; password_cipher: string; token_hash: string; failed_attempts: number; created_at: string; expires_at: string };
 type ExpiredRegistrationRow = { id: string; email: string; createdAt: string; expiresAt: string };
-export type ProfileKind = 'avatar' | 'signature';
+export type ProfileKind = 'avatar' | 'signature' | 'nickname';
+export type ProfileAdviceRow = { id: string; profile_id: string; reader_id: string; kind: ProfileKind; decision: 'approve'|'reject'; reason: string; by_kind: 'reader'|'owner'; by_id: string; created_at: string };
 type ProfileRow = { id: string; reader_id: string; kind: ProfileKind; proposed_value: string; created_at: string };
 type CleanupFileRow = { id: string; filename: string; reason: string; created_at: string; last_error: string | null };
 type CleanupAccountRow = { reader_id: string; avatar: string | null; action: string; created_at: string; last_error: string | null };
@@ -18,8 +20,8 @@ const avatarIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-
 // collection: no reader, session, or UID exists until email verification succeeds.
 export function createReaderWorkflow(directory: string, secret: string) {
   if (!directory || typeof secret !== 'string' || secret.length < 32) throw Error('Reader workflow requires private storage and the Payload secret.');
-  // Temporary requests and cleanup jobs stay outside the durable content
-  // snapshot, so a backup cannot resurrect an expired registration.
+  // Private profile proposals and retry jobs have their own durable snapshot;
+  // backup excludes the transient registration/authentication tables.
   const dbPath = resolve(directory, 'reader-workflow.db');
   const key = createHash('sha256').update('sansphase-reader-registration-v1\0').update(secret).digest();
   const withDb = <T>(operation: (db: DatabaseSync) => T): T => {
@@ -27,19 +29,20 @@ export function createReaderWorkflow(directory: string, secret: string) {
     try { db.exec('PRAGMA busy_timeout = 5000'); return operation(db); }
     finally { db.close(); }
   };
-  withDb(db => { db.exec(`
+  const profileMutation = <T>(operation: (db: DatabaseSync) => T): T => withDb(db => {
+    db.exec('BEGIN IMMEDIATE');
+    try { const result = operation(db); db.exec('COMMIT'); return result; }
+    catch (error) { db.exec('ROLLBACK'); throw error; }
+  });
+  withDb(db => {
+    const hadProfiles = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='reader_profile_requests'").get());
+    db.exec(`
     CREATE TABLE IF NOT EXISTS reader_registration_requests (
       id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, nickname TEXT NOT NULL,
       phone TEXT NOT NULL, password_cipher TEXT NOT NULL,
       token_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, expires_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS reader_registration_expires_idx ON reader_registration_requests(expires_at);
-    CREATE TABLE IF NOT EXISTS reader_profile_requests (
-      id TEXT PRIMARY KEY, reader_id TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('avatar','signature')),
-      proposed_value TEXT NOT NULL, created_at TEXT NOT NULL,
-      UNIQUE(reader_id, kind)
-    );
-    CREATE INDEX IF NOT EXISTS reader_profile_created_idx ON reader_profile_requests(created_at);
     CREATE TABLE IF NOT EXISTS reader_file_cleanup (
       id TEXT PRIMARY KEY, filename TEXT NOT NULL UNIQUE, reason TEXT NOT NULL,
       created_at TEXT NOT NULL, last_error TEXT
@@ -52,6 +55,7 @@ export function createReaderWorkflow(directory: string, secret: string) {
     );
     CREATE INDEX IF NOT EXISTS reader_auth_attempts_key_time_idx ON reader_auth_attempts(attempt_key,happened_at);
   `);
+    if (!hadProfiles) db.exec(readerProfileRequestSchema + readerProfileAdviceSchema);
     if (!db.prepare('PRAGMA table_info(reader_registration_requests)').all().some(row => row.name === 'failed_attempts'))
       db.exec('ALTER TABLE reader_registration_requests ADD COLUMN failed_attempts INTEGER NOT NULL DEFAULT 0');
   });
@@ -137,14 +141,16 @@ export function createReaderWorkflow(directory: string, secret: string) {
       return expired.map(row => ({ ...row, deleted: this.removeRegistration(row.id) }));
     },
     putProfile(readerId: string, kind: ProfileKind, proposedValue: string) {
-      if (!['avatar', 'signature'].includes(kind)) throw Error('Invalid profile review kind');
+      if (!['avatar', 'signature', 'nickname'].includes(kind)) throw Error('Invalid profile review kind');
       if (kind === 'avatar' && !avatarIdPattern.test(proposedValue)) throw Error('Invalid pending avatar');
-      return withDb(db => {
+      return profileMutation(db => {
+        if (kind === 'nickname' && !readerProfileWorkflowReady(db)) throw Object.assign(Error('资料审核尚未迁移，请联系站长。'), { status: 503 });
         const previous = db.prepare('SELECT * FROM reader_profile_requests WHERE reader_id=? AND kind=?').get(readerId, kind) as ProfileRow | undefined;
         const id = randomUUID();
         db.prepare(`INSERT INTO reader_profile_requests (id,reader_id,kind,proposed_value,created_at) VALUES (?,?,?,?,?)
           ON CONFLICT(reader_id,kind) DO UPDATE SET id=excluded.id,proposed_value=excluded.proposed_value,created_at=excluded.created_at`)
           .run(id, readerId, kind, proposedValue, nowIso());
+        if (previous && readerProfileWorkflowReady(db)) db.prepare('DELETE FROM reader_profile_advice WHERE profile_id=?').run(previous.id);
         return { id, previous };
       });
     },
@@ -152,7 +158,24 @@ export function createReaderWorkflow(directory: string, secret: string) {
     profileFor(readerId: string, kind: ProfileKind) { return withDb(db => (db.prepare('SELECT * FROM reader_profile_requests WHERE reader_id=? AND kind=?').get(readerId, kind) as ProfileRow | undefined) || null); },
     profileByAvatar(avatarId: string) { return withDb(db => (db.prepare("SELECT id FROM reader_profile_requests WHERE kind='avatar' AND proposed_value=? LIMIT 1").get(avatarId) as Pick<ProfileRow, 'id'> | undefined) || null); },
     profiles(limit = 100) { return withDb(db => db.prepare('SELECT * FROM reader_profile_requests ORDER BY created_at LIMIT ?').all(Math.min(1000, Math.max(1, limit))) as ProfileRow[]); },
-    removeProfile(id: string) { return withDb(db => db.prepare('DELETE FROM reader_profile_requests WHERE id=?').run(id).changes === 1); },
+    profileAdvice(id: string): ProfileAdviceRow[] { return withDb(db => readerProfileWorkflowReady(db)
+      ? db.prepare('SELECT * FROM reader_profile_advice WHERE profile_id=? ORDER BY created_at,id').all(id) as ProfileAdviceRow[] : []); },
+    putProfileAdvice(id: string, decision: 'approve'|'reject', reason: string, actor: {kind:'reader'|'owner';id:string}) {
+      return profileMutation(db => {
+        if (!readerProfileWorkflowReady(db)) throw Object.assign(Error('资料审核尚未迁移，请联系站长。'), { status: 503 });
+        const proposal = db.prepare('SELECT * FROM reader_profile_requests WHERE id=?').get(id) as ProfileRow | undefined;
+        if (!proposal) throw Object.assign(Error('申请已被更新或处理。'), { status: 404 });
+        const adviceId = randomUUID(), createdAt = nowIso();
+        db.prepare(`INSERT INTO reader_profile_advice(id,profile_id,reader_id,kind,decision,reason,by_kind,by_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)
+          ON CONFLICT(profile_id,by_kind,by_id) DO UPDATE SET id=excluded.id,decision=excluded.decision,reason=excluded.reason,created_at=excluded.created_at`)
+          .run(adviceId, id, proposal.reader_id, proposal.kind, decision, reason, actor.kind, actor.id, createdAt);
+        return { id: adviceId, decision, reason, by: actor, createdAt };
+      });
+    },
+    removeProfile(id: string) { return profileMutation(db => {
+      if (readerProfileWorkflowReady(db)) db.prepare('DELETE FROM reader_profile_advice WHERE profile_id=?').run(id);
+      return db.prepare('DELETE FROM reader_profile_requests WHERE id=?').run(id).changes === 1;
+    }); },
     removeProfilesFor(readerId: string) { return withDb(db => {
       db.exec('BEGIN IMMEDIATE');
       try {
@@ -162,6 +185,7 @@ export function createReaderWorkflow(directory: string, secret: string) {
             ON CONFLICT(filename) DO NOTHING`).run(randomUUID(), `pending-reader-avatar-${row.proposed_value}.webp`, 'reader-deleted', nowIso());
         }
         db.prepare('DELETE FROM reader_profile_requests WHERE reader_id=?').run(readerId);
+        if (readerProfileWorkflowReady(db)) db.prepare("DELETE FROM reader_profile_advice WHERE reader_id=? OR (by_kind='reader' AND by_id=?)").run(readerId, readerId);
         db.exec('COMMIT'); return rows;
       } catch (error) { db.exec('ROLLBACK'); throw error; }
     }); },

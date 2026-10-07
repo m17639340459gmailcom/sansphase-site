@@ -547,6 +547,7 @@ function acceptContent(query,value) {
 }
 async function render(options={}) {
  const generation=++renderGeneration;
+ contentReader.presentation?.release();
  const hostRoute = communityHostRoute(siteContent, location.hash);
  if (hostRoute.kind === 'main') { location.assign(hostRoute.url); return; }
  if (communityOnly() && hostRoute.hash !== location.hash) history.replaceState(history.state, '', location.pathname + location.search + hostRoute.hash);
@@ -598,13 +599,16 @@ async function render(options={}) {
   activeCategory='all';activeQuery='';catalogPageNumber=1;filterPage=route.page;
  }
  const query=siteContent?.delivery==='paged-v1' ? contentQuery(route,catalogState()) : null;
+ let contentVerified=Boolean(query&&siteContent?.preview?.id!==route.id&&loadedContentKey===query.toString());
  if(query&&siteContent?.preview?.id!==route.id&&loadedContentKey!==query.toString()) {
   remotePage=null;
-  renderView({...options,contentStatus:'loading'});
+  const showLoading=()=>{if(generation===renderGeneration)renderView({...options,contentStatus:'loading'});};
+  const finishLoading=contentReader.presentation?.begin(document.querySelector('#main'),showLoading) ?? (showLoading(),()=>{});
   try {
    const value=await contentReader.read(query);
    if(generation!==renderGeneration) return;
    acceptContent(query,value);
+   contentVerified=true;
   } catch(error) {
    if(generation!==renderGeneration) return;
    if(error.status===404) acceptContent(query,{item:null});
@@ -614,7 +618,7 @@ async function render(options={}) {
     return;
    }
    else {renderView({...options,contentStatus:'error'});return;}
-  }
+  } finally {if(generation!==renderGeneration)finishLoading();}
  } else if(!query) {contentReader.cancel();loadedContentKey='';remotePage=null;}
  if(generation!==renderGeneration) return;
  if(route.page==='admin') {
@@ -638,9 +642,11 @@ async function render(options={}) {
   if (!ready) { renderView({ ...options, contentStatus: 'error' }); return; }
  }
  renderView(options);
+ if(contentVerified)contentReader.presentation?.commit(document.querySelector('#main'),query);
  window.sansphasePageSession?.commit();
 }
 function renderView({preserveScroll=false,contentStatus}={}) {
+  contentReader.presentation?.clear();
   vipBookPrompt=vipBookPrompt?.updateLanguage(language==='en');
   syncContentCollections();
   const position = preserveScroll ? {left:window.scrollX,top:window.scrollY} : null;
@@ -718,7 +724,8 @@ function renderView({preserveScroll=false,contentStatus}={}) {
   cleanReaderAdmin();
   cleanCommunity();
   const pageMarkup = contentStatus ? contentStatus==='auth' ? readerGate(language==='en') : contentStatus==='vip' ? vipBookGate(language==='en') : contentMessage(contentStatus==='error') : (views[page] || notFound)();
-  if (!communityEnabled() || contentStatus || !communityFrame.render(main, pageMarkup, communityUI.frameHTML(communityContext()))) setContentHTML(main, pageMarkup);
+  if (!communityEnabled() || contentStatus || !(communityFrame.render(main, pageMarkup, communityUI.frameHTML(communityContext()))
+    || communityUI.renderManagement(main, pageMarkup, preserveScroll))) setContentHTML(main, pageMarkup);
   readerUI?.route(page,id);
   cleanCommunity=communityEnabled() && !contentStatus && (page==='community'||page==='post') ? communityUI.mount(main,communityContext()) : ()=>{};
   communityReady();
@@ -768,6 +775,7 @@ function renderView({preserveScroll=false,contentStatus}={}) {
   }
 }
 async function refreshResults() {
+  contentReader.presentation?.release();
   if(siteContent?.delivery==='paged-v1') {
     const query=contentQuery(parseRoute(location.hash),catalogState());
     if(query&&loadedContentKey!==query.toString()) {
@@ -1110,7 +1118,8 @@ window.addEventListener("hashchange", (event) => {
   const update = () => {
     const rendering = render(preserveManagementScroll ? { preserveScroll: true } : undefined);
     // The community frame resets its active desktop/mobile scroll host itself.
-    if ((!communityEnabled() || !communityFrame.enabled()) && !preserveManagementScroll) window.scrollTo({ top: 0, behavior: "instant" });
+    if ((!communityEnabled() || !communityFrame.enabled()) && !preserveManagementScroll
+      && !main.querySelector('.community-management-page[data-community-pending-route="true"]')) window.scrollTo({ top: 0, behavior: "instant" });
     ((communityEnabled() && communityFrame.center()) || (to === "home"
       ? homeRoot?.querySelector(".universe-stage") || main
       : main
@@ -1162,6 +1171,7 @@ readerUI=mountReaderUI({render,readIdentity:()=>siteContent?.reader || null,onId
 } : undefined});
 vipBookPrompt=mountVipBookPrompt({english:language==='en'});
 window.addEventListener('author:content',async event=>{
+  ++renderGeneration;
   contentReader.clear();
   const y=scrollY;
   siteContent=event.detail;resourceCenter=siteContent['resource-center']||[];notes=siteContent.notes;resources=siteContent.resources;software=siteContent.software;works=siteContent.works||[];

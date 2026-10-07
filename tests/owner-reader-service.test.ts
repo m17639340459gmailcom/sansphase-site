@@ -28,7 +28,7 @@ test('owner personal account reuses profile and frame endpoints while ordinary b
   const personal=await service.ownerReaderIdentity(req);assert.equal(personal?.id,id);assert.equal(personal?.avatar,null);
   let response=await fetch(origin+'/api/reader/session',{headers:{cookie}}),state=await response.json();assert.equal(state.id,id);assert.equal(state.nickname,'个人读者');assert.equal(state.frame,'gold');
   const post=(path:string,body:unknown)=>fetch(origin+'/api/reader/'+path,{method:'POST',headers:{cookie,Origin:origin,'X-Reader-Request':'1','Content-Type':'application/json'},body:JSON.stringify(body)});
-  response=await post('profile',{nickname:'个人新昵称',signature:'待审个人签名',readerId:otherId});assert.equal(response.status,200);state=await response.json();assert.equal(state.id,id);assert.equal(state.signature,'已批准个人签名');assert.equal(state.pendingSignature,'待审个人签名');assert.equal(row.nickname,'个人新昵称');
+  response=await post('profile',{nickname:'个人新昵称',signature:'待审个人签名',readerId:otherId});assert.equal(response.status,200);state=await response.json();assert.equal(state.id,id);assert.equal(state.signature,'已批准个人签名');assert.equal(state.pendingSignature,'待审个人签名');assert.equal(state.pendingNickname,'个人新昵称');assert.equal(row.nickname,'个人读者');
   response=await post('frame',{ref:null});assert.equal(response.status,200);assert.equal(frame,null);
   ownerActive=false;assert.equal((await post('profile',{nickname:'不能写入'})).status,401);assert.equal((await fetch(origin+'/api/reader/session',{headers:{cookie}})).status,200);assert.equal(await service.ownerReaderIdentity(req),null);
   ownerActive=true;row.disabled=true;assert.equal(await service.ownerReaderIdentity(req),null);assert.equal((await post('avatar/remove',{})).status,401);

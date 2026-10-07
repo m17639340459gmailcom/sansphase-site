@@ -101,7 +101,7 @@ test('banner editor spacing belongs to the management stylesheet and follows sha
   assert.match(css, /\.community-banner-preview\s*\{[^}]*color: #f7f4ee/);
   assert.doesNotMatch(css, /\.community-banner[^}]*!important/);
   assert.match(css, /\.community-banner-preview\.is-image > img\s*\{[^}]*object-fit: contain/);
-  assert.match(css, /\.community-banner-preview\.is-image::before\s*\{[^}]*content: none/);
+  assert.doesNotMatch(css, /\.community-banner-preview[^{}]*::(?:before|after)\s*\{[^}]*background:/, 'all banner previews must preserve the artwork without a painted overlay');
 });
 
 test('an empty scope exposes independent image upload without an available post', () => {

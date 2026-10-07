@@ -25,9 +25,14 @@ import type { CommunityGrowthState, CommunityVIPGrowthState } from './community-
 import { createCommunityWriteRequest } from './community-write-request.mjs';
 import { createCommunityProfileDialog } from './community-profile-dialog.mjs';
 import type { CommunityProfile } from './community-profile.ts';
+import { validReaderNickname } from './reader-policy.mjs';
+import { communityStaffCapabilities, communityStaffNextRole } from './community-staff.mjs';
+import type { CommunityStaffState, CommunityStaffPermission } from './community-staff.ts';
 import { communityFrameBannersHTML } from './community-frame-banners.mjs';
 import type { CommunityBannerConfig } from './community-banners.ts';
 import type { CommunityComposeEditor } from './community-compose-editor.ts';
+import { createCommunityPassiveRefresh } from './community-passive-refresh.mjs';
+import { communityPageCacheLimits, createCommunityPageCache } from './community-page-cache.mjs';
 import {
   communityCheckinHTML, communityStardustHTML, communityShopHTML, communityShopMineHTML, communityRankHTML, communityMemberHTML,
   communityInboxHTML, communityRulesHTML, communityManageHTML, communityConventionBodyHTML,
@@ -68,6 +73,8 @@ const message = (error: unknown) => error instanceof Error ? error.message : Str
 // Attribute values in selectors (ids are server UUIDs, but stay safe).
 const quoted = (value: string) => `"${value.replace(/["\\]/g, '\\$&')}"`;
 const enc = encodeURIComponent;
+const staffFingerprint = (staff: CommunityStaffState | null | undefined) => staff === undefined ? 'legacy' : !staff ? 'none' : JSON.stringify({ role: staff.role, boards: [...staff.boards].sort(), permissions: [...staff.permissions].sort(), delegable: [...staff.delegable].sort(), parent: staff.parent });
+const permissionFingerprint = (person: CommunityMe) => [person.staffRole ?? '', staffFingerprint(person.staff), person.management?.role ?? '', staffFingerprint(person.management?.staff)].join('|');
 
 // Markdown buttons wrap the selection (or insert a placeholder) and keep the caret sensible.
 function applyMarkdown(field: HTMLTextAreaElement, kind: string, tr: Translate) {
@@ -141,7 +148,11 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     data: () => readyData(stardusts.get(flow)),
     common: () => mounted?.ctx || null,
   });
-  const memberPages = new Map<string, CommunityLoad<CommunityMember>>();
+  const memberPages = createCommunityPageCache<CommunityLoad<CommunityMember>>(communityPageCacheLimits.members, () => {
+    const current = route();
+    return current.view === 'member' ? memberKey(current.id, current.tab)
+      : current.view === 'profile' ? memberKey(readyData(me)?.uid || '', 'topics') : null;
+  });
   const memberProfileEpochs = new Map<string, number>();
   const badgeExplorer = createCommunityBadgeExplorer({
     root: () => route().view === 'member' && route().tab === 'badges' ? mounted?.main.querySelector<HTMLElement>('[data-badge-explorer]') || null : null,
@@ -151,8 +162,10 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   const inboxes = new Map<string, CommunityLoad<CommunityInbox>>();
   const manages = new Map<string, CommunityLoad<CommunityManage>>();
   const manageRequests = new Map<string, number>();
-  const lists = new Map<string, CommunityLoad<CommunityListing>>();
-  const threads = new Map<string, CommunityLoad<CommunityThread>>();
+  const lists = createCommunityPageCache<CommunityLoad<CommunityListing>>(communityPageCacheLimits.lists, () =>
+    ['home', 'board', 'tag'].includes(route().view) ? listKey(scopeOf()) : null);
+  const threads = createCommunityPageCache<CommunityLoad<CommunityThread>>(communityPageCacheLimits.threads, () =>
+    ['post', 'edit'].includes(route().view) ? route().id : null);
   // Search terms per list scope: '' is the home page, a board id, or `tag:<tag>`.
   const queries = new Map<string, string>();
   // Page-local state, reset on every new page.
@@ -178,7 +191,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   let stewardLookupRequest = 0;
   let stewardBusy = false;
   let stewardEditingUid: string | null = null;
-  let stewardScopeDraft: { uid: string; boards: string[] } | null = null;
+  let stewardScopeDraft: { uid: string; boards: string[]; role?: string; permissions?: CommunityStaffPermission[]; delegable?: CommunityStaffPermission[] } | null = null;
   let managementOpener: { action: string; id: string } | null = null;
   const managementBackground = new Map<HTMLElement, boolean>();
   // The board picked in the compose form (null: the one in the address).
@@ -203,6 +216,15 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   let headerKey = '';
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
   let equipmentDragDepth = 0;
+  let passiveRefresh: ReturnType<typeof createCommunityPassiveRefresh> | null = null;
+  let passiveRecovery: { hash: string; frame: number; revision: number } | null = null;
+  let foregroundRevision = 0;
+  let writeRevision = 0;
+  let editingRevision = 0;
+  let composing = false;
+  const foregroundReads = new Map<object, { hash: string; frame: number }>();
+  const resourceReads = new Map<string, object>();
+  const interactionWorks = new Map<object, number>();
 
   // Drafts are deliberately text-only. Storage can be disabled or quota-limited in
   // private browsing, so every access is best-effort and never blocks the editor.
@@ -225,11 +247,13 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   const removeDraft = (key: string | null) => { if (!key) return; memoryDrafts.delete(key); try { storage()?.removeItem(key); } catch { /* storage is optional */ } };
   type SavedComposeDraft = { board: string; title: string; body: string; tags: string[]; bounty: number };
   const draftHasText = (value: SavedComposeDraft | { body: string } | null) => Boolean(value && (value.body.trim() || ('title' in value && value.title.trim()) || ('tags' in value && value.tags.length) || ('bounty' in value && value.bounty)));
+  const staffFormDirty = () => Boolean([...mounted?.main.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-community-form="steward-scope"] input, [data-community-form="steward-scope"] select') || []].some(field => field instanceof HTMLInputElement ? field.type === 'checkbox' ? field.checked !== field.defaultChecked : field.value !== field.defaultValue : [...field.options].some(option => option.selected !== option.defaultSelected)));
   const hasUnsavedDraft = (hash = location.hash) => {
     const current = communityRoute(hash);
     if (profileDialog.opened()) return Boolean(profileWrite || profileDialog.dirty());
     if (current.view === 'new') return draftHasText(readDraft<SavedComposeDraft>(draftKey('compose', hash)));
     if (current.view === 'post') return draftHasText(readDraft<{ body: string }>(draftKey('reply', current.id)));
+    if (current.view === 'manage' && current.tab === 'stewards') return stewardBusy || staffFormDirty();
     return false;
   };
   const draftTags = (form: Form) => [...form.querySelectorAll<HTMLInputElement>('input[name="tags"]:checked')].map(item => item.value).slice(0, communityRules.tagMax);
@@ -241,13 +265,17 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     const writing = init.method === 'POST' && path !== 'browse-mode';
     const operation = {};
+    foregroundRevision++;
+    passiveRefresh?.invalidate();
+    foregroundReads.set(operation, { hash: location.hash, frame: frameIdentity });
+    if (init.method === 'POST') writeRevision++;
     if (writing) businessWrites.set(operation, frameIdentity);
     try {
       const viewer = readyData(me);
       if (writing && /^manage(?:\/|\?|$)/.test(path) && (!(viewer?.owner || viewer?.mod) || viewer.management?.browsingAsReader))
         throw Object.assign(Error(tr('请先返回管理身份。', 'Restore management first.')), { status: 403 });
       return await requestAPI<T>(path, init);
-    } finally { businessWrites.delete(operation); }
+    } finally { businessWrites.delete(operation); foregroundReads.delete(operation); }
   }
   async function requestAPI<T>(path: string, init: RequestInit): Promise<T> {
     let response: Response;
@@ -376,7 +404,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const uid = updated.person.uid;
     if (!uid) return;
     memberProfileEpochs.set(uid, (memberProfileEpochs.get(uid) || 0) + 1);
-    for (const [key, value] of memberPages) if (key.startsWith(`${uid}|`) && value.state === 'ready') {
+    for (const [key, value] of [...memberPages]) if (key.startsWith(`${uid}|`) && value.state === 'ready') {
       memberPages.set(key, { ...value, data: { ...value.data, person: updated.person, bio: updated.signature,
         background: updated.background.approved, cover: updated.cover ?? null, coverImage: updated.coverImage ?? null, coverName: updated.coverName ?? null } });
     }
@@ -384,14 +412,19 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   function invalidateMemberProfile(uid: string | null | undefined) {
     if (!uid) return;
     memberProfileEpochs.set(uid, (memberProfileEpochs.get(uid) || 0) + 1);
-    for (const key of memberPages.keys()) if (key.startsWith(`${uid}|`)) memberPages.delete(key);
+    for (const key of [...memberPages.keys()]) if (key.startsWith(`${uid}|`)) memberPages.delete(key);
     if (readyData(profile)?.person.uid === uid) { profile = null; profileRequest++; }
   }
 
   async function assignLoad<T>(path: string, current: CommunityLoad<T> | null | undefined, assign: (value: CommunityLoad<T>) => void) {
-    const identity = frameIdentity, revision = permissionRevision;
-    const value = await load<T>(path, current);
-    if (identity === frameIdentity && revision === permissionRevision) assign(value);
+    const identity = frameIdentity, revision = permissionRevision, token = {};
+    resourceReads.set(path, token);
+    try {
+      const value = await load<T>(path, current);
+      if (identity === frameIdentity && revision === permissionRevision && resourceReads.get(path) === token) assign(value);
+    } finally {
+      if (resourceReads.get(path) === token) resourceReads.delete(path);
+    }
   }
   async function loadSummary() { await assignLoad('summary', summary, value => { summary = value; }); }
   async function loadModerationContacts() { await assignLoad('moderation-contacts', moderationContacts, value => { moderationContacts = value; }); }
@@ -418,6 +451,37 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     bannerRequests.set(scope, pending);
     return pending;
   }
+  function identityChange(next: CommunityMe) {
+    const previous = readyData(me);
+    const changedAccount = Boolean(previous && (previous.uid !== next.uid || previous.role !== next.role));
+    const lostPermission = Boolean(previous && !changedAccount && (previous.vip === true && next.vip !== true
+      || previous.owner && !next.owner || previous.mod && !next.mod
+      || Boolean(previous.management && !next.management)
+      || (previous.moderationBoards || []).some(board => !(next.moderationBoards || []).includes(board))
+      || permissionFingerprint(previous) !== permissionFingerprint(next)));
+    return { changedAccount, lostPermission };
+  }
+  function commitMe(next: CommunityMe, hash: string) {
+    const { changedAccount, lostPermission } = identityChange(next);
+    if (changedAccount) clearData(false);
+    else if (lostPermission) {
+      permissionRevision++; confirmedPage = null; pendingRoute = null; coreRoute = null;
+      summary = null; lists.clear(); listRequests.clear(); threads.clear(); manages.clear(); manageRequests.clear();
+      memberPages.clear(); frameHighlights.clear(); frameHighlightsPending.clear(); banners.clear(); bannerRequests.clear();
+      shop = null; shopMine = null; bookmarks = null; rank = null; stardusts.clear(); stardustRequest++;
+      reviewSelection.clear(); managementBoard = ''; stewardCandidate = null; stewardLookupRequest++;
+    }
+    me = { state: 'ready', data: next }; viewerFailure = null; viewerVerified = true; viewerHash = hash;
+    const key = [next.name, next.uid, next.role, next.owner, next.vip, next.avatar, next.frame, next.color, JSON.stringify(next.nameEffect), next.level, JSON.stringify(next.growth), JSON.stringify(next.vipGrowth), next.steward, next.mod, JSON.stringify(next.management), permissionFingerprint(next), JSON.stringify(next.moderationBoards), next.balance, next.checkedIn, next.unread.all].join('|');
+    if (key !== headerKey) { headerKey = key; mounted?.ctx.headerChanged?.(); }
+    syncConvention();
+    return { changedAccount, lostPermission };
+  }
+  function rejectViewer(error: ReturnType<typeof failure>) {
+    clearData(false);
+    me = error; viewerFailure = error;
+    mounted?.ctx.headerChanged?.(); paint();
+  }
   async function loadMe() {
     const identity = frameIdentity, requestId = ++meRequest, hash = location.hash;
     viewerVerified = false;
@@ -429,9 +493,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       if (rejected.status === 401 || rejected.status === 403) {
         // A definite authority rejection retires every cached permission and
         // outstanding read. Keep unconfirmed writes owned by their account.
-        clearData(false);
-        me = rejected; viewerFailure = rejected;
-        mounted?.ctx.headerChanged?.(); paint();
+        rejectViewer(rejected);
       } else if (rejected.status || !readyData(me) || viewerHash !== hash) {
         // Unavailability is not logout. Keep the last account for the header,
         // but show the existing error page instead of protected controls.
@@ -442,27 +504,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       return;
     }
     if (identity !== frameIdentity || requestId !== meRequest) return;
-    const previous = readyData(me);
-    const changedAccount = previous && (previous.uid !== next.uid || previous.role !== next.role);
-    const lostPermission = previous && !changedAccount && (previous.vip === true && next.vip !== true
-      || previous.owner && !next.owner || previous.mod && !next.mod
-      || Boolean(previous.management && !next.management)
-      || (previous.moderationBoards || []).some(board => !(next.moderationBoards || []).includes(board)));
-    if (changedAccount) clearData(false);
-    else if (lostPermission) {
-      // Retire permission-bearing reads, including responses still in flight.
-      // This same-account change leaves personal dialog drafts and writes alone.
-      permissionRevision++; confirmedPage = null; pendingRoute = null; coreRoute = null;
-      summary = null; lists.clear(); listRequests.clear(); threads.clear(); manages.clear(); manageRequests.clear();
-      memberPages.clear(); frameHighlights.clear(); frameHighlightsPending.clear(); banners.clear(); bannerRequests.clear();
-      shop = null; shopMine = null; bookmarks = null; rank = null; stardusts.clear(); stardustRequest++;
-      reviewSelection.clear(); managementBoard = ''; stewardCandidate = null; stewardLookupRequest++;
-    }
-    me = { state: 'ready', data: next }; viewerFailure = null; viewerVerified = true; viewerHash = hash;
-    const data = readyData(me);
-    const key = data ? [data.name, data.uid, data.role, data.owner, data.vip, data.avatar, data.frame, data.color, JSON.stringify(data.nameEffect), data.level, JSON.stringify(data.growth), JSON.stringify(data.vipGrowth), data.steward, data.mod, JSON.stringify(data.management), JSON.stringify(data.moderationBoards), data.balance, data.checkedIn, data.unread.all].join('|') : '';
-    if (key !== headerKey) { headerKey = key; mounted?.ctx.headerChanged?.(); }
-    syncConvention();
+    const { changedAccount, lostPermission } = commitMe(next, hash);
     const verifiedFrame = frameIdentity, verifiedRequest = meRequest;
     // A real entrance is recorded as soon as identity is confirmed, even if
     // supporting cards are slow or the reader leaves before they finish.
@@ -532,14 +574,20 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   // The latest request per list wins: a refresh that finishes after "load
   // more" must not replace the longer list with its first page.
   const listRequests = new Map<string, object>();
-  const claim = (key: string) => { const token = {}; listRequests.set(key, token); return () => listRequests.get(key) === token; };
+  const claim = (key: string) => {
+    const token = {}; listRequests.set(key, token);
+    const current = () => listRequests.get(key) === token;
+    return Object.assign(current, { release: () => { if (current()) listRequests.delete(key); } });
+  };
   async function loadList(scope: string) {
     const key = listKey(scope), current = claim(key);
     // Reuse the normal active list for the frame's supporting content.
     const suppliesHighlights = Boolean(mounted?.ctx.painted) && sort === 'active' && !queryOf(scope) && !scope.startsWith('tag:');
-    try { const data = await api<CommunityListing>(listPath(scope, 1)); if (current()) lists.set(key, { state: 'ready', data }); }
-    catch (error) { if (current()) lists.set(key, settle(lists.get(key), error)); }
-    if (current() && suppliesHighlights) frameHighlights.set(scope, lists.get(key)!);
+    try {
+      try { const data = await api<CommunityListing>(listPath(scope, 1)); if (current()) lists.set(key, { state: 'ready', data }); }
+      catch (error) { if (current()) lists.set(key, settle(lists.get(key), error)); }
+      if (current() && suppliesHighlights) frameHighlights.set(scope, lists.get(key)!);
+    } finally { current.release(); }
   }
   async function loadThread(id: string) { await assignLoad(`topics/${enc(id)}`, threads.get(id), value => { threads.set(id, value); }); }
   const members = (ctx = mounted?.ctx) => {
@@ -556,7 +604,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       case 'post': case 'edit': return [() => loadThread(current.id)];
       case 'checkin': return [async () => { await loadCheckin(); }];
       case 'bookmarks': return [loadBookmarks];
-      case 'manage': return [() => loadManage(['contact', 'convention'].includes(current.tab) ? 'queue' : current.tab), ...(current.tab === 'convention' ? [loadConvention] : [])];
+      case 'manage': return [() => loadManage(current.tab === 'convention' ? 'queue' : current.tab), ...(current.tab === 'convention' ? [loadConvention] : [])];
       case 'rules': return [loadModerationContacts, loadConvention];
       case 'member': return [() => loadMember(current.id, current.tab)];
       case 'profile': return [loadProfile];
@@ -619,10 +667,156 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   }
   // Reloads what the current page shows, then repaints.
   async function reload(...extra: Array<() => Promise<void>>) {
+    // A write submitted on the old management pane may settle during a route
+    // handoff. Its refresh must confirm the new core together with its own me
+    // request; otherwise it supersedes meRequest but never releases that gate.
+    if (routeHandoffPending() && route().view === 'manage') {
+      await Promise.all([refresh(), ...extra.map(run => run())]);
+      return;
+    }
     const identity = frameIdentity;
     await Promise.all([...loadsFor(route()), ...extra].map(run => run()));
     if (identity === frameIdentity && viewerVerified && viewerHash === location.hash) paint();
   }
+
+  // Passive reads never call loadMe/refresh: those are real entrances and may
+  // award a daily visit. DTOs stay local until the entire selected batch is safe.
+  function passiveSelection() {
+    const current = route();
+    return JSON.stringify([location.hash, sort, queryOf(scopeOf(current)), flow, checkinMonth, replySort,
+      managementBoard, bannerEditor.state().scope, levelExplorer.state(), badgeExplorer.state()]);
+  }
+  function passiveAllowed(confirmed = true) {
+    if (!mounted || document.visibilityState !== 'visible' || !viewerVerified || viewerFailure || viewerHash !== location.hash
+      || confirmed && (coreRoute?.hash !== location.hash || coreRoute.frame !== frameIdentity)
+        && !(passiveRecovery?.hash === location.hash && passiveRecovery.frame === frameIdentity && passiveRecovery.revision === permissionRevision)
+      || routeHandoffPending()
+      || [...foregroundReads.values()].some(read => read.frame === frameIdentity && read.hash === location.hash)
+      || [...businessWrites.values(), ...interactionWorks.values()].includes(frameIdentity)
+      || writeRequests.hasPending() || profileWrite || switchingBrowseMode || composing || profileDialog.opened()
+      || bannerEditor.dirty() || bannerEditor.state().busy || hasUnsavedDraft()) return false;
+    const current = route();
+    if (['unknown', 'landing', 'new', 'edit', 'profile'].includes(current.view)
+      || reporting || editingReply || quoting || postMenu || deleting || moving || retagging || redeeming || delivery
+      || muting || itemEditing || shippingOrder || rejecting || reviewSelection.size || reviewBusy || stewardBusy) return false;
+    if (document.querySelector('[role="dialog"][aria-modal="true"], .community-select-menu')
+      || mounted.main.querySelector('[data-uploading="true"], [data-community-form="reply-edit"]')
+      || uploads.some(upload => upload.state === 'uploading') || [...editors.values()].some(editor => editor.state().pending)) return false;
+    if (current.view === 'manage' && mounted.main.querySelector('form[data-community-form]')) return false;
+    const active = document.activeElement;
+    if (active instanceof Element && active.matches('input, textarea, select, [contenteditable="true"], [role="textbox"], [role="combobox"], .community-select-trigger')) return false;
+    const selection = window.getSelection();
+    return !selection || selection.isCollapsed;
+  }
+  async function passiveResources(current: CommunityRoute, init: RequestInit, deny: (apply: () => void) => void): Promise<() => void> {
+    const stages: Array<Promise<() => void>> = [];
+    const stage = <T>(path: string, apply: (value: CommunityLoad<T>) => void, core = true) => {
+      const commit = (value: CommunityLoad<T>) => { resourceReads.delete(path); apply(value); };
+      stages.push(requestAPI<T>(path, init).then(data => () => commit({ state: 'ready', data }), error => {
+        const rejected = failure(error);
+        // These are decisions about this resource, not the viewer's login.
+        // A hidden or deleted thread must stop displaying its previous pixels.
+        if ([403, 404, 410].includes(rejected.status)) {
+          const retire = () => commit(rejected);
+          if (core) deny(retire);
+          return retire;
+        }
+        throw error;
+      }));
+    };
+    stage<CommunitySummary>('summary', value => { summary = value; }, current.view === 'boards');
+    switch (current.view) {
+      case 'home': case 'board': case 'tag': {
+        const scope = scopeOf(current), key = listKey(scope), saved = readyData(lists.get(key));
+        // An accumulated list is deliberately left intact; never reset it to page 1.
+        if ((!saved || saved.page <= 1 && saved.items.length <= saved.pageSize) && (current.board !== 'vip' || members()))
+          stage<CommunityListing>(listPath(scope, 1), value => {
+            listRequests.delete(key);
+            lists.set(key, value);
+            if (sort === 'active' && !queryOf(scope) && !scope.startsWith('tag:')) frameHighlights.set(scope, value);
+          });
+        if (mounted?.ctx.painted && current.view !== 'tag' && (current.board !== 'vip' || members())) {
+          const scope = current.view === 'board' ? current.board : 'home';
+          stage<CommunityBannerConfig>(`banners?scope=${enc(scope)}`, value => { banners.set(scope, value); }, false);
+        }
+        break;
+      }
+      case 'post': stage<CommunityThread>(`topics/${enc(current.id)}`, value => { threads.set(current.id, value); }); break;
+      case 'checkin': stage<CommunityCheckin>(`checkin${checkinMonth ? `?month=${checkinMonth}` : ''}`, value => { checkin = value; }); break;
+      case 'bookmarks': stage<CommunityListing>('bookmarks', value => { bookmarks = value; }); break;
+      case 'manage': {
+        if (!(readyData(me)?.owner || readyData(me)?.mod) || readyData(me)?.management?.browsingAsReader) break;
+        const tab = current.tab === 'convention' ? 'queue' : current.tab;
+        stage<CommunityManage>(`manage?tab=${enc(tab)}`, value => { manages.set(tab, value); }); break;
+      }
+      case 'member': {
+        const key = memberKey(current.id, current.tab);
+        stage<CommunityMember>(`members/${enc(current.id)}?tab=${enc(current.tab)}`, value => { memberPages.set(key, value); }); break;
+      }
+      case 'stardust': {
+        const selected = flow;
+        stage<CommunityStardust>(`stardust${selected === 'all' ? '' : `?flow=${selected}`}`, value => { stardusts.set(selected, value); }); break;
+      }
+      case 'inbox': stage<CommunityInbox>(`inbox?tab=${enc(current.tab)}`, value => { inboxes.set(current.tab, value); }); break;
+      case 'shop':
+        if (current.tab === 'mine') stage<CommunityShopMine>('shop/mine', value => { shopMine = value; });
+        else stage<CommunityShop>('shop', value => { shop = value; });
+        break;
+      case 'rank': stage<CommunityRank>('rank', value => { rank = value; }); break;
+      case 'rules':
+        stage<CommunityModerationContacts>('moderation-contacts', value => { moderationContacts = value; });
+        stage<CommunityConvention>('convention', value => { convention = value; }); break;
+    }
+    const apply = await Promise.all(stages);
+    return () => { for (const commit of apply) commit(); };
+  }
+  async function readPassive(signal: AbortSignal) {
+    if (!passiveAllowed()) return false;
+    const hash = location.hash, reads = foregroundRevision, writes = writeRevision, edits = editingRevision;
+    let selected = passiveSelection();
+    let identity = frameIdentity, revision = permissionRevision, authority = meRequest;
+    const valid = () => !signal.aborted && Boolean(mounted) && location.hash === hash && selected === passiveSelection()
+      && identity === frameIdentity && revision === permissionRevision && authority === meRequest
+      && reads === foregroundRevision && writes === writeRevision && edits === editingRevision;
+    const init: RequestInit = { headers: { 'X-Community-Passive': '1' }, signal };
+    try {
+      const next = await requestAPI<CommunityMe>('me', init);
+      if (!valid() || !passiveAllowed()) return false;
+      const { changedAccount, lostPermission } = identityChange(next);
+      const changed = changedAccount || lostPermission;
+      if (changed) {
+        // Permission-bearing pixels retire immediately. The following reads
+        // still use the passive contract and the newly confirmed authority.
+        commitMe(next, hash); paint();
+        identity = frameIdentity; revision = permissionRevision; authority = meRequest;
+        selected = passiveSelection();
+        passiveRecovery = { hash, frame: identity, revision };
+      }
+      const apply = await passiveResources(route(), init, retire => {
+        if (!valid() || !passiveAllowed(!changed)) return;
+        if (!changed) commitMe(next, hash);
+        retire(); coreRoute = { hash, frame: frameIdentity, request: meRequest }; passiveRecovery = null;
+        paint(true);
+        // A definite resource decision retires pixels before slow support, but
+        // the same timed batch still owns support failure/backoff. Its staged
+        // core is this failure, so it cannot put the retired body back.
+      });
+      if (!valid() || !passiveAllowed(!changed)) return false;
+      if (!changed) commitMe(next, hash);
+      apply(); coreRoute = { hash, frame: frameIdentity, request: meRequest };
+      passiveRecovery = null;
+      paint(true); return true;
+    } catch (error) {
+      if (!valid()) return false;
+      const rejected = failure(error);
+      if (rejected.status === 401 || rejected.status === 403) { rejectViewer(rejected); return true; }
+      // An outage is not a sign-out and never erases the confirmed readable page.
+      throw error;
+    }
+  }
+  const onPassiveEditing = () => { editingRevision++; passiveRefresh?.invalidate(); };
+  const onCompositionStart = () => { composing = true; onPassiveEditing(); };
+  const onCompositionEnd = () => { composing = false; onPassiveEditing(); };
 
   // Compose images belong to one page: a new post starts empty, editing starts with the post's images.
   function composeUploads(current: CommunityRoute, thread: CommunityThread | null) {
@@ -656,10 +850,11 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const identityFailure = displayedViewerFailure(ctx.t);
     if (identityFailure && current.view !== 'unknown' && current.view !== 'landing')
       return `<section class="page community-page" data-community="${current.view}">${communityStatusHTML(identityFailure, common)}</section>`;
+    if (current.view === 'manage' && viewerVerified && viewerHash === location.hash
+      && (!(identity?.owner || identity?.mod) || identity.management?.browsingAsReader))
+      return `<section class="page community-page" data-community="manage">${communityStatusHTML({ state: 'error', status: 403, message: '' }, common)}</section>`;
     if ((viewerHash !== location.hash || !coreRoute && confirmedPage?.hash !== location.hash) && current.view !== 'unknown' && current.view !== 'landing')
       return `<section class="page community-page" data-community="${current.view}">${communityStatusHTML(loading, common)}</section>`;
-    if (current.view === 'manage' && (!(identity?.owner || identity?.mod) || identity.management?.browsingAsReader))
-      return `<section class="page community-page" data-community="manage">${communityStatusHTML({ state: 'error', status: 403, message: '' }, common)}</section>`;
     const viewer = readyData(me);
     const savedCompose = draftComposeValues(current);
     if (!ctx.simpleCompose && current.view === 'new' && composeBoard === null && !current.board && savedCompose?.board) composeBoard = savedCompose.board;
@@ -680,7 +875,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       case 'post': return communityPostHTML({ ...common, thread: threads.get(current.id) || loading, me: viewer, reporting, editingReply, menuOpen: postMenu, deleting, moving, retagging, quoting, replySort });
       case 'checkin': return communityCheckinHTML({ ...common, checkin: checkin || loading, me: viewer });
       case 'bookmarks': return communityBookmarksHTML({ ...common, list: bookmarks || loading });
-      case 'manage': return communityManageHTML({ ...common, manage: manages.get(['contact', 'convention'].includes(current.tab) ? 'queue' : current.tab) || loading, tab: current.tab, itemEditing, shippingOrder, rejecting, deleting, me: viewer, selectedReviews: [...reviewSelection], managementBoard, stewardCandidate, stewardEditingUid, bannerEditor: bannerEditor.state(), convention });
+      case 'manage': return communityManageHTML({ ...common, manage: manages.get(current.tab === 'convention' ? 'queue' : current.tab) || loading, tab: current.tab, itemEditing, shippingOrder, rejecting, deleting, me: viewer, selectedReviews: [...reviewSelection], managementBoard, stewardCandidate, stewardEditingUid, bannerEditor: bannerEditor.state(), convention });
       case 'member': return communityMemberHTML({ ...common, member: memberPages.get(memberKey(current.id, current.tab)) || loading, me: viewer, muting, badgeSelection: badgeExplorer.state() });
       case 'profile': return communityMemberHTML({ ...common, member: memberPages.get(memberKey(viewer?.uid || readyData(profile)?.person.uid || '', 'topics')) || loading, me: viewer });
       case 'stardust': return communityStardustHTML({ ...common, stardust: stardusts.get(flow) || loading, tab: current.tab, levelSelection: levelExplorer.state() });
@@ -696,7 +891,10 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   function html(ctx: CommunityContext) {
     const hash = location.hash, account = draftIdentity(), current = route();
     if (renderedHash !== hash) { renderedHash = hash; coreRoute = null; }
-    if (['unknown', 'landing', 'manage'].includes(current.view) || viewerFailure) {
+    // Management has its own workspace rather than the public feed shell.
+    // Hold only within that workspace; crossing either boundary retires it.
+    const managementBoundary = confirmedPage && (current.view === 'manage') !== (communityRoute(confirmedPage.hash).view === 'manage');
+    if (['unknown', 'landing'].includes(current.view) || managementBoundary || viewerFailure) {
       confirmedPage = null; pendingRoute = null;
     }
     const previous = confirmedPage;
@@ -705,12 +903,61 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (previous && previous.account === account && previous.frame === frameIdentity && previous.revision === permissionRevision
       && (pendingRoute || previous.hash !== hash) && !ready) {
       pendingRoute = { hash, frame: frameIdentity, account: previous.account };
+      if (current.view === 'manage') return previous.markup.replace('<section ', '<section data-community-pending-route="true" aria-busy="true" ')
+        .replace('class="community-management-content"', 'class="community-management-content" inert aria-busy="true"');
       return previous.markup.replace('<section ', '<section data-community-pending-route="true" aria-busy="true" inert ');
     }
     pendingRoute = null;
     return pageHTML(ctx);
   }
   const routeHandoffPending = () => pendingRoute?.hash === location.hash && pendingRoute.frame === frameIdentity && pendingRoute.account === draftIdentity();
+
+  // app.mjs calls this before its replaceChildren fallback. Retain actual DOM,
+  // not the serialized snapshot: the sidebar can still navigate while every
+  // old business control is inert and delegated handlers reject its events.
+  function renderManagement(main: HTMLElement, markup: string, preserveScroll = false) {
+    if (route().view !== 'manage' || !routeHandoffPending() || !markup.includes('data-community-pending-route="true"')) return false;
+    const section = main.querySelector<HTMLElement>('.community-management-page[data-community="manage"]');
+    const content = section?.querySelector<HTMLElement>(':scope > .community-management-content');
+    if (!section?.querySelector(':scope > .community-management-nav') || !content) return false;
+    section.setAttribute('data-community-pending-route', 'true'); section.setAttribute('aria-busy', 'true');
+    section.dataset.managementPreserveScroll = String(preserveScroll);
+    content.setAttribute('inert', ''); content.setAttribute('aria-busy', 'true');
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && content.contains(active)) active.blur();
+    return true;
+  }
+
+  function installManagementPage(section: HTMLElement, next: HTMLElement) {
+    const sidebar = section.querySelector<HTMLElement>(':scope > .community-management-nav');
+    const replacement = next.querySelector<HTMLElement>(':scope > .community-management-nav');
+    const content = section.querySelector(':scope > .community-management-content');
+    const nextContent = next.querySelector(':scope > .community-management-content');
+    if (!sidebar || !replacement || !content || !nextContent) return false;
+    const navigation = sidebar.querySelector('nav'), nextNavigation = replacement.querySelector('nav');
+    if (!navigation || !nextNavigation) return false;
+    const links = new Map([...navigation.querySelectorAll<HTMLAnchorElement>(':scope > a')].map(link => [link.getAttribute('href'), link]));
+    const retained = new Set<Element>();
+    [...nextNavigation.children].forEach((link, index) => {
+      const current = links.get(link.getAttribute('href')) || link;
+      if (current !== link) {
+        if (current.innerHTML !== link.innerHTML) current.innerHTML = link.innerHTML;
+        if (link.hasAttribute('aria-current')) current.setAttribute('aria-current', 'page'); else current.removeAttribute('aria-current');
+      }
+      retained.add(current);
+      if (navigation.children[index] !== current) navigation.insertBefore(current, navigation.children[index] || null);
+    });
+    for (const link of [...navigation.children]) if (!retained.has(link)) link.remove();
+    navigation.setAttribute('aria-label', nextNavigation.getAttribute('aria-label') || '');
+    for (const selector of ['.community-management-role', '.community-management-exits']) {
+      const current = sidebar.querySelector(selector), source = replacement.querySelector(selector);
+      if (current && source && current.innerHTML !== source.innerHTML) current.replaceChildren(...source.childNodes);
+    }
+    content.replaceWith(nextContent);
+    for (const attribute of [...section.attributes]) if (!next.hasAttribute(attribute.name)) section.removeAttribute(attribute.name);
+    for (const attribute of [...next.attributes]) section.setAttribute(attribute.name, attribute.value);
+    return true;
+  }
 
   function renderedPage(): HTMLElement | null {
     if (!mounted) return null;
@@ -901,11 +1148,13 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (routeHandoffPending()) return;
     const template = document.createElement('template');
     template.innerHTML = markup;
-    const next = template.content.firstElementChild as HTMLElement;
+    let next = template.content.firstElementChild as HTMLElement;
     const currentAccount = draftIdentity();
     const sameAccount = currentAccount !== null && paintedAccount === currentAccount;
     const preserveControls = sameAccount && !section.hasAttribute('data-community-pending-route');
     const samePage = paintedPage?.hash === location.hash && paintedPage.frame === frameIdentity;
+    const resetManagementScroll = section.matches('.community-management-page[data-community-pending-route="true"]')
+      && section.dataset.managementPreserveScroll !== 'true';
     if (staged && sameAccount && samePage && paintedPage) {
       if (paintedPage.markup === markup) {
         // Supporting frame reads do not recreate an unchanged readable page.
@@ -930,7 +1179,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       }
     }
     const restoreView = mounted.ctx.beforePaint?.();
-    const documentPosition = restoreView ? null : preserveDocumentReading(section);
+    if (resetManagementScroll) releaseDocumentReading();
+    const documentPosition = restoreView || resetManagementScroll ? null : preserveDocumentReading(section);
     // Keep the template's generated snapshot, rather than enhanced DOM or
     // editor drafts, for the next supporting-only comparison.
     rememberPaint(markup, next);
@@ -1006,7 +1256,9 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       documentPosition.node = next; documentPosition.minHeight = next.style.minHeight;
       next.style.minHeight = `${Math.ceil(documentPosition.height)}px`;
     }
-    section.replaceWith(next);
+    if (sameAccount && section.hasAttribute('data-community-pending-route') && viewerVerified && viewerHash === location.hash && route().view === 'manage'
+      && next.matches('.community-management-page[data-community="manage"]') && installManagementPage(section, next)) next = section;
+    else section.replaceWith(next);
     paintedAccount = currentAccount;
     for (const field of next.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input[name], textarea[name]')) { count(field); autosize(field); }
     for (const id of previews) { const button = next.querySelector<HTMLButtonElement>(`[data-action="community-md-preview"][data-for=${quoted(id)}]`); if (button) togglePreview(button, true); }
@@ -1039,6 +1291,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     mounted?.ctx.painted?.();
     restoreView?.();
     if (documentPosition) restoreDocumentReading(next, documentPosition);
+    if (resetManagementScroll) window.scrollTo({ top: 0, behavior: 'instant' });
     const itemForm = next.querySelector<Form>('form[data-community-form="item"]');
     if (itemForm) updateProductPreview(itemForm, valueOf(itemForm, 'image'));
     syncConvention();
@@ -1150,6 +1403,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (editor) editor.focus(); else field?.focus({ preventScroll: true });
   }
   async function busy(form: Form, text: string, work: () => Promise<void>) {
+    const operation = {};
+    interactionWorks.set(operation, frameIdentity); passiveRefresh?.invalidate();
     const button = form.querySelector<HTMLButtonElement>('button[type="submit"]');
     const label = button?.innerHTML || '';
     form.querySelectorAll('[aria-invalid]').forEach(item => item.removeAttribute('aria-invalid'));
@@ -1160,7 +1415,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       status(form, message(error));
       if ((error as ApiError).status === 428) void loadMe();
     }
-    finally { if (button?.isConnected) { button.disabled = false; button.innerHTML = label; } }
+    finally { interactionWorks.delete(operation); if (button?.isConnected) { button.disabled = false; button.innerHTML = label; } }
   }
   function otherProfileImageDraft(form: Form) {
     return [...(profileDialog.root()?.querySelectorAll<HTMLInputElement>('input[type="file"]') || [])].some(field => field.closest('form') !== form && Boolean(field.files?.length));
@@ -1168,10 +1423,11 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   function lockProfileControls(disabled: boolean) {
     profileDialog.root()?.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLButtonElement>('input, textarea, button').forEach(field => { field.disabled = disabled; });
   }
-  async function submitProfile(form: Form, kind: 'signature' | 'avatar' | 'background') {
+  async function submitProfile(form: Form, kind: 'nickname' | 'signature' | 'avatar' | 'background') {
     if (profileWrite || !readyData(profile)?.canEditProfile) return;
     if (otherProfileImageDraft(form)) return status(form, tr('请先提交另一项已选择的图片，或取消选择。', 'Submit the other selected image first, or clear that selection.'));
     if (kind === 'signature' && !checkText(form, 'signature', [0, 100], ['个签', 'Signature'])) return;
+    if (kind === 'nickname' && !validReaderNickname(valueOf(form, 'nickname').trim())) return invalid(form, fieldOf(form, 'nickname'), tr('昵称请填写 2–8 个可见字符。', 'Use 2–8 visible characters for your nickname.'));
     let body: FormData | undefined;
     if (kind === 'avatar' || kind === 'background') {
       const file = profileDialog.file(kind);
@@ -1189,7 +1445,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     await busy(form, tr('正在保存…', 'Saving…'), async () => {
       let updated: CommunityProfile;
       if (body) updated = await api<CommunityProfile>(`profile/${kind}`, { method: 'POST', headers: { 'X-Reader-Request': '1' }, body });
-      else updated = await send<CommunityProfile>('profile', { signature: valueOf(form, 'signature') });
+      else updated = await send<CommunityProfile>('profile', kind === 'nickname' ? { nickname: valueOf(form, 'nickname').trim() } : { signature: valueOf(form, 'signature') });
       if (identity !== frameIdentity || profileWrite !== token) return;
       profile = { state: 'ready', data: updated };
       updateCachedProfile(updated);
@@ -1249,15 +1505,22 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   async function reviewProfile(target: HTMLButtonElement) {
     const { id, decision } = target.dataset;
     if (!id || !['approve', 'reject'].includes(decision || '') || profileReviewWrites.has(id)) return;
+    const item = readyData(manages.get('profiles'))?.profiles?.find(value => value.id === id);
+    const action = target.dataset.reviewAction === 'advise' ? 'advise' : 'decide';
+    const form = target.closest<Form>('form');
+    if (!item || !form || !(action === 'advise' ? item.canAdvise === true : item.canDecide ?? (readyData(me)?.owner || item.kind === 'avatar'))) return;
+    const reason = valueOf(form, 'reason').trim();
+    if (decision === 'reject' && !reason) return invalid(form, fieldOf(form, 'reason'), tr('请填写驳回理由。', 'Give a rejection reason.'));
+    if (length(reason) > 200) return invalid(form, fieldOf(form, 'reason'), tr('审核理由最多 200 个字符。', 'The review reason is limited to 200 characters.'));
     profileReviewWrites.add(id);
-    const controls = [...(target.closest('[data-profile-review]')?.querySelectorAll<HTMLButtonElement>('button') || [])];
+    const controls = [...form.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button, input')];
     controls.forEach(button => { button.disabled = true; });
     const identity = frameIdentity;
     try {
       await act(target, async () => {
         try {
-          await send(`manage/profiles/${enc(id)}/${decision}`);
-          if (identity === frameIdentity) notify(tr('审核已处理。', 'Review processed.'));
+          await send(`manage/profiles/${enc(id)}/${action === 'advise' ? 'advise' : decision}`, action === 'advise' ? { decision, reason } : { reason });
+          if (identity === frameIdentity) notify(action === 'advise' ? tr('建议已提交，资料仍待最终审批。', 'Advice submitted; the profile is still awaiting a final decision.') : tr('审核已处理。', 'Review processed.'));
         } finally {
           if (identity === frameIdentity) { await loadManage('profiles'); paint(); }
         }
@@ -1268,20 +1531,47 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const submitter = (event as SubmitEvent).submitter;
     const decision = submitter instanceof HTMLButtonElement ? submitter.value : '';
     if (!['approve', 'reject'].includes(decision)) return;
+    const action = submitter instanceof HTMLButtonElement && submitter.dataset.reviewAction === 'advise' ? 'advise' : 'decide';
+    const item = readyData(manages.get('profiles'))?.backgrounds?.find(value => value.memberUid === form.dataset.uid && value.imageId === form.dataset.image);
+    if (!item || !(action === 'advise' ? item.canAdvise === true : item.canDecide ?? readyData(me)?.owner)) return;
     const key = `background:${form.dataset.uid}:${form.dataset.image}`;
     if (profileReviewWrites.has(key)) return;
     const reason = valueOf(form, 'reason').trim();
     if (decision === 'reject' && !reason) return invalid(form, fieldOf(form, 'reason'), tr('请填写驳回理由。', 'Give a rejection reason.'));
+    if (length(reason) > 200) return invalid(form, fieldOf(form, 'reason'), tr('审核理由最多 200 个字符。', 'The review reason is limited to 200 characters.'));
     const identity = frameIdentity;
     const controls = [...form.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input, button')];
     profileReviewWrites.add(key); controls.forEach(field => { field.disabled = true; });
     try {
       await busy(form, tr('正在处理…', 'Processing…'), async () => {
-        try { await send('manage/profile-background', { memberUid: form.dataset.uid, imageId: form.dataset.image, approve: decision === 'approve', reason }); }
+        try { await send('manage/profile-background', { memberUid: form.dataset.uid, imageId: form.dataset.image, approve: decision === 'approve', reason, action }); }
         catch (error) { if (identity === frameIdentity) notify(message(error)); }
         finally { if (identity === frameIdentity) { await loadManage('profiles'); paint(); } }
       });
     } finally { profileReviewWrites.delete(key); controls.forEach(field => { if (field.isConnected) field.disabled = false; }); }
+  }
+  async function reviewFeature(form: Form, event: Event) {
+    const button = (event as SubmitEvent).submitter;
+    if (!(button instanceof HTMLButtonElement) || !['approve', 'reject'].includes(button.value)) return;
+    const item = readyData(manages.get('features'))?.features?.find(item => item.id === form.dataset.id);
+    if (!item) return;
+    const key = `feature:${item.id}`;
+    if (profileReviewWrites.has(key)) return;
+    const reason = valueOf(form, 'reason').trim();
+    if (button.value === 'reject' && !reason) return invalid(form, fieldOf(form, 'reason'), tr('请填写驳回理由。', 'Give a rejection reason.'));
+    if (length(reason) > 200) return invalid(form, fieldOf(form, 'reason'), tr('审批理由最多 200 个字符。', 'The decision reason is limited to 200 characters.'));
+    const identity = frameIdentity, hash = location.hash;
+    const controls = [...form.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input, button')];
+    profileReviewWrites.add(key); controls.forEach(control => { control.disabled = true; });
+    try {
+      await busy(form, tr('正在处理…', 'Processing…'), async () => {
+        await send(`manage/feature-recommendations/${enc(item.id)}/${button.value}`, { reason });
+        if (identity !== frameIdentity) return;
+        notify(tr('精选推荐已处理。', 'Featured recommendation processed.'));
+        await loadManage('features');
+        if (identity === frameIdentity && hash === location.hash) paint();
+      });
+    } finally { profileReviewWrites.delete(key); controls.forEach(control => { if (control.isConnected) control.disabled = false; }); }
   }
   const earned = (amount?: number) => { if (amount) notify(tr(`+${amount} 星尘`, `+${amount} stardust`)); };
   async function submitConvention(form: Form) {
@@ -1382,7 +1672,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       removeDraft(draftKey('reply', topic));
       quoting = null;
       earned(result.earned);
-      await loadThread(topic);
+      await Promise.all([loadThread(topic), loadMe(), loadSummary()]);
       paint();
       const reply = mounted?.main.querySelector<HTMLElement>(`[id=${quoted(`reply-${result.id}`)}]`);
       reply?.focus({ preventScroll: true });
@@ -1417,7 +1707,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const kind = form.dataset.kind === 'reply' ? 'reply' : 'topic', id = form.dataset.id || '';
     const topic = readyData(threads.get(currentThreadId()));
     await busy(form, tr('正在删除…', 'Deleting…'), async () => {
-      if (form.dataset.report) await send(`manage/reports/${enc(form.dataset.report)}`, { uphold: true, reason });
+      if (form.dataset.report) await send(`manage/reports/${enc(form.dataset.report)}`, { uphold: true, reason, penalty: Boolean(fieldOf(form, 'violation')?.checked) });
       else await send(`${kind === 'topic' ? 'topics' : 'replies'}/${enc(id)}/delete`, { reason, violation: Boolean(fieldOf(form, 'violation')?.checked), mute: Number(checkedOf(form, 'mute') || 0) });
       deleting = null;
       notify(tr('已删除。', 'Deleted.'));
@@ -1525,6 +1815,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const id = form.dataset.id || '';
     const reason = checkedOf(form, 'reason');
     if (!reason) return invalid(form, form.querySelector('input[name="reason"]'), tr('请选择审核不通过的理由。', 'Choose a rejection reason.'));
+    if (form.dataset.batch && !canReviewSelection('reject')) return status(form, tr('所选内容不能批量驳回，请重新选择。', 'The selected posts cannot all be rejected. Select again.'));
     await reviewTask(() => busy(form, tr('正在处理…', 'Processing…'), async () => {
       if (form.dataset.batch) {
         if (!reviewSelection.size) throw new Error(tr('请选择待审帖子。', 'Select pending posts.'));
@@ -1544,7 +1835,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     paint();
   }
   async function submitStewardLookup(form: Form) {
-    if (!readyData(me)?.owner || route().view !== 'manage' || route().tab !== 'stewards') return;
+    if (!canAppointStaff() || route().view !== 'manage' || route().tab !== 'stewards') return;
     const uid = valueOf(form, 'uid').trim();
     if (!uid || uid.length > 64) return invalid(form, fieldOf(form, 'uid'), tr('请输入有效的读者 UID。', 'Enter a valid reader UID.'));
     if (stewardBusy || (stewardCandidate?.state === 'loading' && stewardLookupUid === uid)) return;
@@ -1564,15 +1855,16 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   function syncStewardTools(root: ParentNode) {
     const scopeDraft = stewardScopeDraft;
     root.querySelectorAll<HTMLButtonElement>('[data-action="community-steward"], [data-action="community-steward-edit"], [data-action="community-steward-edit-cancel"], [data-community-form="steward-scope"] button[type="submit"]').forEach(control => { control.disabled = stewardBusy; });
-    root.querySelectorAll<HTMLInputElement>('[data-community-form="steward-scope"] input[name="boards"]').forEach(control => {
+    root.querySelectorAll<HTMLInputElement>('[data-community-form="steward-scope"] input[type="checkbox"]').forEach(control => {
       control.disabled = stewardBusy;
-      if (stewardBusy && scopeDraft && control.form?.dataset.uid === scopeDraft.uid) control.checked = scopeDraft.boards.includes(control.value);
+      if (stewardBusy && scopeDraft && control.form?.dataset.uid === scopeDraft.uid) control.checked = (control.name === 'boards' ? scopeDraft.boards : control.name === 'permissions' ? scopeDraft.permissions : scopeDraft.delegable)?.includes(control.value as CommunityStaffPermission) ?? control.checked;
     });
+    root.querySelectorAll<HTMLSelectElement>('[data-community-form="steward-scope"] select').forEach(control => { control.disabled = stewardBusy; if (stewardBusy && scopeDraft?.role && control.form?.dataset.uid === scopeDraft.uid) control.value = scopeDraft.role; });
     const lookup = root.querySelector<HTMLButtonElement>('[data-community-form="steward-lookup"] button[type="submit"]');
     if (lookup) lookup.disabled = stewardBusy || stewardCandidate?.state === 'loading';
   }
   async function submitStewardScope(form: Form) {
-    if (stewardBusy || !readyData(me)?.owner || route().view !== 'manage' || route().tab !== 'stewards') return;
+    if (stewardBusy || !canAppointStaff() || route().view !== 'manage' || route().tab !== 'stewards') return;
     const uid = form.dataset.uid || '';
     const existing = form.dataset.existing === 'true';
     if (existing) {
@@ -1585,25 +1877,45 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const boards = [...form.querySelectorAll<HTMLInputElement>('input[name="boards"]:checked')].map(input => input.value);
     if (!boards.length) return invalid(form, form.querySelector('input[name="boards"]'), tr('请至少选择一个负责板块。', 'Select at least one assigned board.'));
     if (new Set(boards).size !== boards.length || boards.some(id => !communityBoards.some(board => board.id === id))) return status(form, tr('板块选择无效，请重新选择。', 'Invalid board selection. Select again.'));
-    stewardScopeDraft = { uid, boards };
-    await saveSteward(uid, true, boards);
+    const staff = readyData(me)?.staff;
+    if (staff !== undefined) {
+      const target = existing ? readyData(manages.get('stewards'))?.stewards?.find(person => person.uid === uid) : null;
+      const legacyModerator = staff?.role === 'owner' && target?.canAppoint === true
+        && target.staff?.role === 'moderator' && target.staff.parent?.kind === 'owner';
+      const role = legacyModerator ? 'moderator' : staff && communityStaffNextRole(staff.role);
+      if (!staff || !role || valueOf(form, 'role') !== role || boards.some(board => !staff.boards.includes(board))) return status(form, tr('管理身份或板块授权已改变，请重新读取后配置。', 'Management authority or board scope changed; reload before configuring.'));
+      const selected = (name: string) => [...form.querySelectorAll<HTMLInputElement>(`input[name="${name}"]:checked`)].map(input => input.value);
+      const requested = selected('permissions'), delegated = selected('delegable');
+      const validCapability = (value: string): value is CommunityStaffPermission => communityStaffCapabilities.some(cap => cap.id === value);
+      if (!requested.every(validCapability) || !delegated.every(validCapability) || requested.some(cap => !staff.delegable.includes(cap)) || delegated.some(cap => !requested.includes(cap))) return status(form, tr('只可下发上级允许的能力；可继续下发的能力必须同时设为可执行。', 'Grant only capabilities your superior permits; delegable capabilities must also be granted.'));
+      const configuration = { role, boards, permissions: requested, delegable: delegated };
+      stewardScopeDraft = { uid, ...configuration };
+      await saveSteward(uid, true, configuration);
+    } else {
+      stewardScopeDraft = { uid, boards };
+      await saveSteward(uid, true, { boards });
+    }
+  }
+  function canAppointStaff() {
+    const viewer = readyData(me);
+    return Boolean(viewer && !viewer.management?.browsingAsReader && (viewer.staff === undefined ? viewer.owner : viewer.staff?.permissions.includes('staff.appoint')));
   }
   async function updateSteward(button: HTMLButtonElement) {
-    if (stewardBusy || !readyData(me)?.owner) return;
+    if (stewardBusy || !canAppointStaff()) return;
     const uid = button.dataset.uid || '';
     if (!uid || button.dataset.on !== 'false') return;
     if (!confirmed(button, tr('确认撤销', 'Confirm removal'))) return;
     await saveSteward(uid, false);
   }
-  async function saveSteward(uid: string, on: boolean, boards?: string[]) {
+  async function saveSteward(uid: string, on: boolean, configuration?: { boards: string[]; role?: string; permissions?: CommunityStaffPermission[]; delegable?: CommunityStaffPermission[] }) {
     const roster = route().view === 'manage' && route().tab === 'stewards';
     const requestId = stewardLookupRequest, identity = frameIdentity, hash = location.hash;
     stewardBusy = true;
     if (mounted) syncStewardTools(mounted.main);
     try {
-      await send(`members/${enc(uid)}/steward`, { on, ...(on ? { boards } : {}) });
+      await send(`members/${enc(uid)}/steward`, { on, ...(on ? configuration : {}) });
       if (identity !== frameIdentity) return;
-      notify(tr('版主已更新。', 'Moderator updated.'));
+      notify(tr('管理成员已更新。', 'Staff member updated.'));
       if (stewardEditingUid === uid) stewardEditingUid = null;
       stewardScopeDraft = null;
       if (!roster) { await reload(); return; }
@@ -1640,6 +1952,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   }
   // Runs a button's request; problems go to the toast (or the reply form when there is no toast).
   async function act(button: HTMLButtonElement, work: () => Promise<void>) {
+    const operation = {};
+    interactionWorks.set(operation, frameIdentity); passiveRefresh?.invalidate();
     button.disabled = true;
     try { await work(); }
     catch (error) {
@@ -1648,11 +1962,14 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       if (mounted?.ctx.notify) notify(message(error));
       else { const form = mounted?.main.querySelector<Form>('.community-reply-form'); if (form) status(form, message(error)); }
     }
+    finally { interactionWorks.delete(operation); }
   }
   async function remove(button: HTMLButtonElement) {
     const isTopic = button.dataset.action === 'community-delete-topic';
     if (button.dataset.panel === 'true') {
-      deleting = { kind: isTopic ? 'topic' : 'reply', id: button.dataset.id || '' };
+      const thread = readyData(threads.get(currentThreadId()));
+      const item = isTopic ? thread?.topic : thread?.replies.find(item => item.id === button.dataset.id);
+      deleting = { kind: isTopic ? 'topic' : 'reply', id: button.dataset.id || '', mine: item?.mine, canPenalty: item?.canPenalty, canMute: item?.canMute };
       postMenu = false;
       paint();
       mounted?.main.querySelector<HTMLElement>('form[data-community-form="delete"] textarea')?.focus({ preventScroll: true });
@@ -1696,6 +2013,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         if (label) button.setAttribute('aria-label', label);
       }
       button.disabled = false;
+      await Promise.all([loadMe(), loadSummary(), threadId ? loadThread(threadId) : Promise.resolve()]);
+      if (currentThreadId() === threadId) paint(true);
     });
   }
   async function thank(button: HTMLButtonElement) {
@@ -1711,7 +2030,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     await act(button, async () => {
       const result = await send<{ reward: number; bonus: number; streak: number }>('checkin');
       notify(tr(`签到成功，连签 ${result.streak} 天，+${result.reward} 星尘${result.bonus ? `（含自然月满勤奖励 ${result.bonus}）` : ''}`, `Checked in: ${result.streak}-day streak, +${result.reward} stardust${result.bonus ? ` (including ${result.bonus} full-month bonus)` : ''}`));
-      await Promise.all([loadMe(), route().view === 'checkin' ? loadCheckin() : loadSummary()]);
+      await Promise.all([loadMe(), loadSummary(), ...(route().view === 'checkin' ? [loadCheckin()] : [])]);
       paint();
     });
   }
@@ -1824,7 +2143,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       if (!latest()) return;
       lists.set(key, current);
       if (visible()) paintList(true);
-    }
+    } finally { latest.release(); }
   }
 
   // Opens a page-local panel and puts focus in it.
@@ -1847,7 +2166,12 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
 
   function onClick(event: Event) {
     if (routeHandoffPending()) {
-      if ((event.target as Element).closest?.('[data-community-pending-route], [data-action^="community-"]')) event.preventDefault();
+      const target = event.target as Element;
+      // The retained management sidebar is outside the inert content pane.
+      // Its links stay navigable; identity switches and old business actions do not.
+      const navigation = target.closest?.<HTMLAnchorElement>('.community-management-nav a[href]');
+      if (navigation && !navigation.closest('[inert]')) return;
+      if (target.closest?.('[data-community-pending-route], [data-action^="community-"]')) event.preventDefault();
       return;
     }
     const target = (event.target as Element).closest<HTMLButtonElement>('[data-action^="community-"]');
@@ -1939,13 +2263,14 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       case 'community-post-menu': setPostMenu(!postMenu); return;
       case 'community-pin': void topicAction(target, 'pin', { on: target.getAttribute('aria-pressed') !== 'true' }); return;
       case 'community-feature': void topicAction(target, 'feature', { on: target.getAttribute('aria-pressed') !== 'true' }); return;
+      case 'community-feature-recommend': void topicAction(target, 'feature-recommend', {}, tr('已推荐给所属版主，等待审批。', 'Recommended to the assigned moderator; awaiting a decision.')); return;
       case 'community-lock': void topicAction(target, 'lock', { on: target.getAttribute('aria-pressed') !== 'true' }, target.getAttribute('aria-pressed') === 'true' ? tr('已解除锁定。', 'Unlocked.') : tr('已锁定。', 'Locked.')); return;
       case 'community-approve': void reviewTask(() => topicAction(target, 'approve', {}, tr('已通过审核。', 'Approved.'))); return;
       case 'community-batch-approve':
-        if (!reviewSelection.size) return;
+        if (!canReviewSelection('approve')) return;
         void reviewTask(() => act(target, async () => { const ids = [...reviewSelection]; await send('manage/review', { action: 'approve', ids }); reviewSelection.clear(); notify(tr(`已通过 ${ids.length} 个帖子。`, `Approved ${ids.length} posts.`)); await reload(); })); return;
       case 'community-batch-reject':
-        if (!reviewBusy && reviewSelection.size) { rejecting = 'batch'; openPanel('form[data-community-form="reject"]'); } return;
+        if (!reviewBusy && canReviewSelection('reject')) { rejecting = 'batch'; openPanel('form[data-community-form="reject"]'); } return;
       case 'community-paid-pin':
         if (!confirmed(target, tr('确认推荐 24 小时', 'Confirm the recommendation'))) return;
         void topicAction(target, 'paid-pin', {}, tr('已推荐 24 小时。', 'Recommended for 24 hours.'));
@@ -1957,8 +2282,13 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         return;
       case 'community-queue-delete':
         { const data = readyData(manages.get(route().tab));
-          const author = kind === 'reply' ? data?.queue.replies.find(reply => reply.id === id)?.author : [...(data?.content || []), ...(data?.queue.topics || [])].find(topic => topic.id === id)?.author;
-          deleting = { kind: kind === 'reply' ? 'reply' : 'topic', id, mine: Boolean(author?.uid && author.uid === readyData(me)?.uid) };
+          const item = kind === 'reply' ? data?.queue.replies.find(reply => reply.id === id) : [...(data?.content || []), ...(data?.queue.topics || [])].find(topic => topic.id === id);
+          if (!item || item.canDelete === false) return;
+          const author = item?.author, staff = readyData(me)?.staff;
+          const capability = kind === 'reply' ? 'reply.penalty' : 'topic.penalty';
+          deleting = { kind: kind === 'reply' ? 'reply' : 'topic', id, mine: Boolean(author?.uid && author.uid === readyData(me)?.uid),
+            canPenalty: item.canPenalty ?? (staff !== undefined ? Boolean(staff?.permissions.includes(capability) && item.board && staff.boards.includes(item.board)) : undefined),
+            canMute: item.canMute ?? (staff !== undefined ? Boolean(staff?.permissions.includes('member.mute')) : undefined) };
           openPanel('form[data-community-form="delete"]'); }
         return;
       case 'community-move': postMenu = false; moving = true; retagging = false; openPanel('form[data-community-form="move"]'); return;
@@ -2073,7 +2403,9 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         void updateSteward(target);
         return;
       case 'community-steward-edit':
-        if (stewardBusy || !readyData(me)?.owner || route().view !== 'manage' || route().tab !== 'stewards' || !readyData(manages.get('stewards'))?.stewards?.some(person => person.uid === target.dataset.uid)) return;
+        if (stewardBusy || !canAppointStaff() || route().view !== 'manage' || route().tab !== 'stewards' || !readyData(manages.get('stewards'))?.stewards?.some(person => person.uid === target.dataset.uid)) return;
+        if (readyData(me)?.staff !== undefined && stewardEditingUid !== target.dataset.uid && staffFormDirty()
+          && !window.confirm(tr('管理配置尚未保存，确定切换成员吗？', 'The management configuration is unsaved. Switch members?'))) return;
         stewardEditingUid = target.dataset.uid || null; paint();
         return;
       case 'community-steward-edit-cancel':
@@ -2105,7 +2437,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       }
       case 'community-uphold': {
         const report = readyData(manages.get(route().tab))?.reports.find(report => report.id === id);
-        if (report) { deleting = { kind: report.target.kind, id: report.target.id || report.target.topicId || '', reportId: id }; openPanel('form[data-community-form="delete"]'); }
+        if (report && report.canUphold !== false) { deleting = { kind: report.target.kind, id: report.target.id || report.target.topicId || '', reportId: id, canPenalty: report.canPenalty, canMute: false }; openPanel('form[data-community-form="delete"]'); }
         return;
       }
       case 'community-dismiss': void dismissReport(target); return;
@@ -2118,7 +2450,13 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   }
   // Ctrl+Enter (⌘+Enter on Mac) sends a reply or publishes a post; Escape closes the post menu.
   function onKeydown(event: KeyboardEvent) {
-    if (routeHandoffPending()) { if ((event.target as Element).closest?.('[data-community-pending-route]')) event.preventDefault(); return; }
+    if (routeHandoffPending()) {
+      const target = event.target as Element;
+      const navigation = target.closest?.<HTMLAnchorElement>('.community-management-nav a[href]');
+      if (navigation && !navigation.closest('[inert]')) return;
+      if (target.closest?.('[data-community-pending-route]')) event.preventDefault();
+      return;
+    }
     if (event.defaultPrevented) return;
     levelExplorer.keydown(event);
     if (event.defaultPrevented) return;
@@ -2187,9 +2525,10 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (form.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled) return;
     if (bannerEditor.submit(form)) return;
     const handlers: Record<string, (form: Form) => unknown> = {
-      'profile-signature': item => submitProfile(item, 'signature'), 'profile-avatar': item => submitProfile(item, 'avatar'),
+      'profile-nickname': item => submitProfile(item, 'nickname'), 'profile-signature': item => submitProfile(item, 'signature'), 'profile-avatar': item => submitProfile(item, 'avatar'),
       'profile-background': item => submitProfile(item, 'background'),
       'profile-background-review': item => reviewBackground(item, event),
+      'feature-review': item => reviewFeature(item, event),
       search: item => search((item.elements.namedItem('q') as HTMLInputElement).value),
       topic: submitTopic, reply: submitReply, 'reply-edit': submitReplyEdit, report: submitReport, delete: submitDelete,
       move: submitMove, retag: submitRetag, redeem: submitRedeem, mute: submitMute, item: submitItem, category: submitCategory, ship: submitShip, reject: submitReject, 'steward-lookup': submitStewardLookup, 'steward-scope': submitStewardScope, 'moderation-contact': submitModerationContact, convention: submitConvention,
@@ -2328,6 +2667,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     return event.dataTransfer && (Array.from(event.dataTransfer.types).includes('Files') || event.dataTransfer.files.length > 0);
   }
   function onEquipmentDrag(event: DragEvent) {
+    if (routeHandoffPending()) { if (fileTransfer(event)) event.preventDefault(); return; }
     if (bannerEditor.drag(event)) return;
     const form = equipmentForm();
     if (!form || !fileTransfer(event)) return;
@@ -2341,12 +2681,14 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     }
   }
   function onEquipmentLeave(event: DragEvent) {
+    if (routeHandoffPending()) return;
     if (bannerEditor.drag(event)) return;
     if (!equipmentForm() || !fileTransfer(event)) return;
     equipmentDragDepth = Math.max(0, equipmentDragDepth - 1);
     if (equipmentDragDepth === 0) clearEquipmentDrag();
   }
   function onEquipmentDrop(event: DragEvent) {
+    if (routeHandoffPending()) { if (fileTransfer(event)) event.preventDefault(); return; }
     if (bannerEditor.drag(event)) return;
     const form = equipmentForm();
     if (!form || !fileTransfer(event)) return;
@@ -2366,6 +2708,16 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     reviewBusy = true; syncReviewTools();
     try { await work(); } finally { reviewBusy = false; syncReviewTools(); }
   }
+  function canReviewSelection(action: 'approve' | 'reject') {
+    const data = readyData(manages.get('queue'));
+    return Boolean(data && reviewSelection.size && [...reviewSelection].every(id => {
+      const topic = data.queue.topics.find(topic => topic.id === id && topic.pending);
+      if (!topic) return false;
+      const proof = action === 'approve' ? topic.canApprove : topic.canDelete;
+      if (proof !== undefined) return proof;
+      return data.actorStaff === undefined || Boolean(data.actorStaff?.permissions.includes(action === 'approve' ? 'topic.approve' : 'topic.reject') && data.actorStaff.boards.includes(topic.board));
+    }));
+  }
   function syncReviewTools(root: ParentNode | undefined = mounted?.main) {
     if (!root) return;
     const boxes = [...root.querySelectorAll<HTMLInputElement>('[data-community-review-select]')];
@@ -2374,7 +2726,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (all) { all.checked = Boolean(boxes.length) && boxes.slice(0, 50).every(box => box.checked); all.indeterminate = reviewSelection.size > 0 && !all.checked; }
     const count = root.querySelector('[data-review-count]');
     if (count) count.textContent = tr(`已选 ${reviewSelection.size} 个 · 每批最多 50 个`, `${reviewSelection.size} selected · up to 50`);
-    root.querySelectorAll<HTMLButtonElement>('[data-action="community-batch-approve"], [data-action="community-batch-reject"]').forEach(button => { button.disabled = reviewBusy || !reviewSelection.size; });
+    root.querySelectorAll<HTMLButtonElement>('[data-action="community-batch-approve"], [data-action="community-batch-reject"]').forEach(button => { button.disabled = reviewBusy || !canReviewSelection(button.dataset.action === 'community-batch-approve' ? 'approve' : 'reject'); });
     root.querySelectorAll<HTMLInputElement>('[data-community-review-select], [data-community-review-all]').forEach(field => { field.disabled = reviewBusy; });
     root.querySelectorAll<HTMLButtonElement>('[data-action="community-approve"], [data-action="community-reject"]').forEach(button => { button.disabled = reviewBusy; });
     root.querySelectorAll<HTMLButtonElement>('[data-action="community-management-board"]').forEach(button => { button.disabled = reviewBusy; });
@@ -2429,6 +2781,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (!link || link.getAttribute('href') === location.hash || link.target === '_blank' || link.hasAttribute('download')) return;
     event.preventDefault(); event.stopPropagation();
     if (profileWrite) { notify(tr('正在提交资料，请稍候。', 'Profile submission in progress. Please wait.')); return; }
+    if (stewardBusy) { notify(tr('正在提交管理配置，请先等待结果。', 'Management configuration is being submitted; wait for the result.')); return; }
     const href = link.getAttribute('href') || '';
     if (typeof window.confirm === 'function' && !window.confirm(tr('还有未发布的内容，确定离开吗？', 'You have an unsent draft. Leave this page?'))) return;
     approvedNavigation = href;
@@ -2460,6 +2813,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   };
 
   function clearData(clearWrites = true) {
+    passiveRecovery = null;
+    resourceReads.clear();
     profileReviewWrites.clear();
     activeVisitDone = ''; activeVisitPending = null; activeVisitRetryAt = 0;
     conventionConsent.close();
@@ -2496,7 +2851,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     }
     // Existing-content edits and product forms have no independent saved
     // draft. Do not discard them when their write permissions disappear.
-    if (profileDialog.opened() && hasUnsavedDraft() || reader && (bannerEditor.dirty() || bannerEditor.state().busy || mounted?.main.querySelector('form[data-community-form="topic"][data-edit], form[data-community-form="reply-edit"], form[data-community-form="item"]'))) {
+    if (profileDialog.opened() && hasUnsavedDraft() || reader && (staffFormDirty() || bannerEditor.dirty() || bannerEditor.state().busy || mounted?.main.querySelector('form[data-community-form="topic"][data-edit], form[data-community-form="reply-edit"], form[data-community-form="item"]'))) {
       notify(tr('请先完成或取消当前编辑，再切换浏览身份。', 'Finish or cancel the current edit before switching perspectives.'));
       return;
     }
@@ -2548,15 +2903,26 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     },
     // What the header needs (bell, account menu, check-in dot); null until it is read.
     me: () => readyData(me),
+    renderManagement,
     // Called after each render of a community page; returns the cleanup for the next render.
     mount(main: HTMLElement, ctx: CommunityContext) {
+      passiveRefresh?.stop();
       mounted = { main, ctx };
+      composing = false;
+      passiveRefresh = createCommunityPassiveRefresh({ document: main.ownerDocument, window: main.ownerDocument.defaultView!, run: readPassive, allowed: passiveAllowed });
+      passiveRefresh.start();
       paintedAccount = draftIdentity();
       paintedPage = null;
       main.addEventListener('click', onClick);
       main.addEventListener('submit', onSubmit);
       main.addEventListener('input', onInput);
       main.addEventListener('change', onChange);
+      main.addEventListener('input', onPassiveEditing);
+      main.addEventListener('change', onPassiveEditing);
+      main.addEventListener('focusin', onPassiveEditing);
+      main.addEventListener('compositionstart', onCompositionStart);
+      main.addEventListener('compositionend', onCompositionEnd);
+      document.addEventListener('selectionchange', onPassiveEditing);
       main.addEventListener('keydown', onKeydown);
       main.addEventListener('pointermove', onPointer);
       main.addEventListener('pointerdown', onActiveInteraction, { passive: true });
@@ -2590,6 +2956,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         void refresh();
       }
       return () => {
+        passiveRefresh?.stop(); passiveRefresh = null;
         conventionConsent.close();
         profileDialog.close();
         releaseDocumentReading();
@@ -2602,6 +2969,12 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         main.removeEventListener('submit', onSubmit);
         main.removeEventListener('input', onInput);
         main.removeEventListener('change', onChange);
+        main.removeEventListener('input', onPassiveEditing);
+        main.removeEventListener('change', onPassiveEditing);
+        main.removeEventListener('focusin', onPassiveEditing);
+        main.removeEventListener('compositionstart', onCompositionStart);
+        main.removeEventListener('compositionend', onCompositionEnd);
+        document.removeEventListener('selectionchange', onPassiveEditing);
         main.removeEventListener('keydown', onKeydown);
         main.removeEventListener('pointermove', onPointer);
         main.removeEventListener('pointerdown', onActiveInteraction);
@@ -2628,7 +3001,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         // Leaving for another page: coming back to this one refreshes it.
         if (location.hash !== lastHash) {
           const previous = communityRoute(lastHash), current = route();
-          if (['unknown', 'landing', 'manage'].includes(current.view)) { confirmedPage = null; pendingRoute = null; coreRoute = null; }
+          if (['unknown', 'landing'].includes(current.view) || (previous.view === 'manage') !== (current.view === 'manage')) { confirmedPage = null; pendingRoute = null; coreRoute = null; }
           if (previous.view !== 'manage' || current.view !== 'manage' || !['queue', 'reports'].includes(previous.tab) || !['queue', 'reports'].includes(current.tab)) managementBoard = '';
           stewardCandidate = null; stewardLookupUid = ''; stewardLookupRequest++; stewardEditingUid = null; stewardScopeDraft = null;
           reviewSelection.clear();
@@ -2637,6 +3010,6 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       };
     },
     // Signing in or out changes what the community shows.
-    clear: clearData,
+    clear: () => { passiveRefresh?.stop(); clearData(); },
   };
 }

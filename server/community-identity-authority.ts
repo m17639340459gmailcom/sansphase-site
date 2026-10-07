@@ -10,6 +10,10 @@ import { normalizeReaderAvatar, readerProfileAvatarBytes } from './reader-profil
 import type { ReaderProfileCommands } from './reader-profile-commands.ts';
 import type { ProfileKind } from './reader-workflow.ts';
 import type { CommunityProfileReviewerCheck } from './community-profile-reviewer.ts';
+import type { CommunityProfileReviewOperation } from './community-profile-reviewer.ts';
+import { communityStaffRoles } from '../src/community-staff.mjs';
+import type { CommunityProfileReviewerRole } from './community-profile-reviewer.ts';
+import { readerProfileReason } from './reader-profile-commands.ts';
 
 type ReaderSource = { id: string; uid?: string | null; nickname: string; signature?: string | null; avatar?: string | null; vip?: boolean; vipStartedAt?: string | null; vipUntil?: string | null };
 export type IdentityAuthorityOptions = {
@@ -47,7 +51,7 @@ async function bodyOf(req: IncomingMessage, limit = identityRequestBytes) {
   for await (const chunk of req) { size += chunk.length; if (size > limit) throw new IdentityBridgeError('身份请求内容过大。', 413); chunks.push(chunk); }
   return Buffer.concat(chunks);
 }
-const statusOf = (error: unknown) => error instanceof IdentityBridgeError ? error.status : 503;
+const statusOf = (error: unknown) => error && typeof error === 'object' && 'status' in error && typeof error.status === 'number' && error.status >= 400 && error.status <= 599 ? error.status : 503;
 export function createIdentityAuthority(options: IdentityAuthorityOptions) {
   const siteOrigin = identityPeerOrigin(options.siteOrigin), communityOrigin = identityPeerOrigin(options.communityOrigin);
   if (siteOrigin !== 'https://www.sansphase.com' || communityOrigin !== 'https://community.sansphase.com' || !options.ownerId || Buffer.byteLength(options.secret || '') < 32 || options.secret === options.stateEncryptionKey) throw Error('Identity authority requires the approved origins, fixed owner and separate private keys.');
@@ -109,38 +113,49 @@ export function createIdentityAuthority(options: IdentityAuthorityOptions) {
           if (!sessionRef) throw invalidSession();
           send(res, { sessionRef, identity: dto }); return;
         }
-        const profileOperation = typeof value.operation === 'string' && ['profile', 'profile-signature', 'profile-avatar', 'profile-avatar-remove', 'profile-avatar-pending', 'profile-reviews', 'profile-review-image', 'profile-review'].includes(value.operation);
+        const profileOperation = typeof value.operation === 'string' && ['profile', 'profile-signature', 'profile-nickname', 'profile-avatar', 'profile-avatar-remove', 'profile-avatar-pending', 'profile-reviews', 'profile-review-image', 'profile-review', 'profile-advise'].includes(value.operation);
         if (!profileOperation && !['session', 'people', 'member', 'names', 'avatar'].includes(String(value.operation))) throw invalidInput();
         const dto = await validateSession(req, input);
         if (profileOperation) {
           const profiles = options.profiles;
           if (!profiles) throw new IdentityBridgeError('资料服务尚未配置。', 404);
           const check = async () => { const current = await validateSession(req, input); if (current.viewer.kind !== dto.viewer.kind || current.viewer.id !== dto.viewer.id) throw invalidSession(); };
-          const reviewOperation = ['profile-reviews', 'profile-review-image', 'profile-review'].includes(String(value.operation));
+          const reviewOperation = ['profile-reviews', 'profile-review-image', 'profile-review', 'profile-advise'].includes(String(value.operation));
           if (reviewOperation) {
-            exactKeys(input, ['sessionRef', 'moderation', ...(value.operation === 'profile-reviews' ? [] : ['id']), ...(value.operation === 'profile-review' ? ['decision'] : [])]);
+            exactKeys(input, ['sessionRef', 'moderation', ...(value.operation === 'profile-reviews' ? [] : ['id']), ...(['profile-review','profile-advise'].includes(String(value.operation)) ? ['decision','reason'] : [])]);
             const assertion = objectValue(input.moderation); exactKeys(assertion, ['role', 'actor']);
             const actor = memberValue(assertion.actor); exactKeys(objectValue(assertion.actor), ['kind', 'id']);
             if (actor.kind !== dto.viewer.kind || actor.id !== dto.viewer.id
               || dto.viewer.kind === 'owner' && assertion.role !== 'owner'
-              || dto.viewer.kind === 'reader' && assertion.role !== 'steward') throw new IdentityBridgeError('没有审核资料的权限。', 403);
+              || dto.viewer.kind === 'reader' && (!communityStaffRoles.some(role => role.id === assertion.role) || assertion.role === 'owner')) throw new IdentityBridgeError('没有审核资料的权限。', 403);
             // HK alone owns moderator appointments. The signed assertion binds
             // the actor; a finite callback rechecks the current appointment
             // inside the account command's queue, immediately before approval.
-            const reviewCheck = async () => {
+            const reviewCheck = async (operation: CommunityProfileReviewOperation) => {
               await check();
               if (!options.profileReviewer) throw new IdentityBridgeError('资料审核服务尚未配置。', 503);
-              await options.profileReviewer(actor, assertion.role as 'owner'|'steward');
+              const kinds = await options.profileReviewer(actor, assertion.role as CommunityProfileReviewerRole, operation);
+              await check();
+              return kinds;
             };
-            const kinds: readonly ProfileKind[] = dto.viewer.kind === 'owner' ? ['avatar', 'signature'] : ['avatar'];
-            if (value.operation === 'profile-reviews') { await reviewCheck(); const rows = await profiles.reviews(kinds); await reviewCheck(); send(res, rows); return; }
+            if (value.operation === 'profile-reviews') {
+              const kinds = (await reviewCheck({action:'inspect'})).filter((kind): kind is ProfileKind => kind !== 'background');
+              const rows = await profiles.reviews(kinds), allowed = await reviewCheck({action:'inspect'}); send(res, rows.filter(row => allowed.includes(row.kind))); return;
+            }
             if (typeof input.id !== 'string') throw invalidInput();
-            if (value.operation === 'profile-review-image') { const image = await profiles.reviewImage(input.id, reviewCheck); send(res, { base64: image.toString('base64') }); return; }
+            if (value.operation === 'profile-review-image') { const image = await profiles.reviewImage(input.id, async () => { await reviewCheck({action:'inspect',kind:'avatar'}); }); send(res, { base64: image.toString('base64') }); return; }
             if (input.decision !== 'approve' && input.decision !== 'reject') throw invalidInput();
             if (!store.limit(`profile-review:${dto.viewer.kind}:${dto.viewer.id}`, 60, 60_000, now())) throw new IdentityBridgeError('操作过于频繁，请稍后再试。', 429);
-            send(res, await profiles.review(input.id, input.decision, { ...actor, source: 'community' }, kinds, reviewCheck)); return;
+            const reason = readerProfileReason(input.reason, input.decision);
+            const checkProposal = async (kind?: ProfileKind, action?: 'inspect'|'advise'|'decide') => {
+              if (!kind || action !== 'advise' && action !== 'decide') throw invalidInput(); await reviewCheck({action,kind});
+            };
+            const result = value.operation === 'profile-advise'
+              ? await profiles.advise(input.id, input.decision, reason, { ...actor, source:'community' }, ['avatar','signature','nickname'], checkProposal)
+              : await profiles.review(input.id, input.decision, { ...actor, source:'community' }, ['avatar','signature','nickname'], checkProposal, reason);
+            send(res, result); return;
           }
-          exactKeys(input, ['sessionRef', 'asReader', ...(value.operation === 'profile-signature' ? ['signature'] : value.operation === 'profile-avatar' ? ['base64'] : [])]);
+          exactKeys(input, ['sessionRef', 'asReader', ...(value.operation === 'profile-signature' ? ['signature'] : value.operation === 'profile-nickname' ? ['nickname'] : value.operation === 'profile-avatar' ? ['base64'] : [])]);
           const asReader = Object.hasOwn(input, 'asReader');
           if (asReader && (input.asReader !== true || dto.viewer.kind !== 'owner')) throw invalidInput();
           if (dto.viewer.kind !== 'reader' && !asReader) throw new IdentityBridgeError('当前身份不能修改读者资料。', 403);
@@ -154,6 +169,7 @@ export function createIdentityAuthority(options: IdentityAuthorityOptions) {
           if (value.operation === 'profile-avatar-pending') { const image = await profiles.pendingAvatar(target, personalCheck); send(res, { base64: image.toString('base64') }); return; }
           if (!store.limit(`profile-write:${target}`, 30, 60_000, now())) throw new IdentityBridgeError('操作过于频繁，请稍后再试。', 429);
           if (value.operation === 'profile-signature') { send(res, await profiles.submitSignature(target, input.signature, personalCheck)); return; }
+          if (value.operation === 'profile-nickname') { send(res, await profiles.submitNickname(target, input.nickname, personalCheck)); return; }
           if (value.operation === 'profile-avatar-remove') { send(res, await profiles.removeAvatar(target, personalCheck)); return; }
           if (typeof input.base64 !== 'string' || input.base64.length > Math.ceil(readerProfileAvatarBytes / 3) * 4 || !/^[A-Za-z0-9+/]+={0,2}$/.test(input.base64)) throw invalidInput();
           const bytes = Buffer.from(input.base64, 'base64');
@@ -166,13 +182,15 @@ export function createIdentityAuthority(options: IdentityAuthorityOptions) {
           if (!Array.isArray(input.authors) || input.authors.length > 100) throw invalidInput();
           const authors = input.authors.map(memberValue), map = await options.people(authors);
           const requested = new Set(authors.map(author => `${author.kind}:${author.id}`));
-          send(res, [...map].filter(([key]) => requested.has(key)).map(([key, info]) => [key, { name: info.name, uid: info.uid, avatar: info.avatar, vip: info.vip === true, joinedAt: info.joinedAt, bio: info.bio,
+          send(res, [...map].filter(([key]) => requested.has(key)).map(([key, info]) => [key, { name: info.name, uid: info.uid, avatar: info.avatar, vip: info.vip === true, joinedAt: info.joinedAt, bio: info.bio, active: info.active === true,
             ...(info.ownerReader === true ? { ownerReader: true } : {}) }])); return;
         }
         if (value.operation === 'member' || value.operation === 'avatar') {
           if (typeof input.uid !== 'string' || !/^[0-9a-z]{1,15}$/.test(input.uid)) throw invalidInput();
           if (value.operation === 'member') { const member = await options.findMember(input.uid); send(res, member ? memberValue(member) : null); return; }
           const avatar = await options.avatar(input.uid);
+          const current = await validateSession(req, input);
+          if (current.viewer.kind !== dto.viewer.kind || current.viewer.id !== dto.viewer.id) throw invalidSession();
           if (avatar && avatar.length > 1_500_000) throw new IdentityBridgeError('头像服务暂不可用。');
           send(res, avatar ? { base64: avatar.toString('base64') } : null); return;
         }

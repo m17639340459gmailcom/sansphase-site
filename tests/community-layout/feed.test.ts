@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
+import { readFile } from "node:fs/promises";
 import { test, type TestContext } from "node:test";
+import postcss from "postcss";
 import { createFeedLayout } from "../../src/community-layout/feed.ts";
 import { startCommunityLayout } from "../../src/community-layout/runtime.ts";
 
@@ -17,6 +19,31 @@ const topicMarkup = `<article class="community-topic"><a class="community-av" hr
 const bannerMarkup = `<header class="community-banner"><div class="community-banner-text"><h1>社区</h1><p>原有社区说明</p></div><div class="community-banner-side"><dl class="community-stats"><dt>主题</dt><dd>12</dd></dl><button data-action="community-checkin">签到</button></div></header>`;
 const hostMarkup = `<section class="community-page" data-community="home">${bannerMarkup}<div class="community-layout"><aside class="community-aside"><a href="#/post/hot">热门讨论</a></aside> <div class="community-main"><div class="community-topics">${topicMarkup}</div></div></div></section>`;
 const settle = () => new Promise<void>(resolve => setImmediate(resolve));
+
+test('one image fits the preview without clipping while two, three and four keep their established grid', async () => {
+  const css = postcss.parse(await readFile(new URL('../../src/community-layout/feed.css', import.meta.url), 'utf8'));
+  const { window } = new JSDOM('<section data-community-frame="stable"></section>', { url: 'http://localhost/' });
+  try {
+    const host = window.document.querySelector('section')!;
+    for (const count of [1, 2, 3, 4]) {
+      host.innerHTML = `<a class="community-topic-thumbs">${'<img>'.repeat(count)}</a>`;
+      const container = host.firstElementChild!, image = container.firstElementChild!;
+      const declarationsFor = (node: Element) => {
+        const declarations = new Map<string, string>();
+        css.walkRules(rule => {
+          if (rule.parent?.type !== 'root' || !rule.selector.includes('.community-topic-thumbs') || !node.matches(rule.selector)) return;
+          rule.walkDecls(declaration => { declarations.set(declaration.prop, declaration.value); });
+        });
+        return declarations;
+      };
+      const frame = declarationsFor(container), picture = declarationsFor(image);
+      assert.equal(picture.get('object-fit'), count === 1 ? 'contain' : 'cover', `preview with ${count} image(s)`);
+      assert.equal(picture.get('width'), '100%');
+      assert.equal(picture.get('height'), '100%');
+      assert.equal(frame.get('aspect-ratio'), ['16 / 9', '2 / 1', '3 / 1', '1'][count - 1]);
+    }
+  } finally { window.close(); }
+});
 function fixture(t: TestContext, start = false) {
   const { window } = new JSDOM(`<main id="main">${hostMarkup}</main>`, { url: "http://localhost/?interior=feed#/community/home" });
   const stop = start ? startCommunityLayout(window.document, window) : () => {};

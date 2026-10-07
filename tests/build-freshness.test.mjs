@@ -44,6 +44,8 @@ const canonicalFiles = [
   "community-growth.mjs",
   "community-pages.mjs",
   "community-ui.mjs",
+  "community-passive-refresh.mjs",
+  "community-staff.mjs",
   "community-profile.mjs",
   "reader-frames.mjs",
   "community-level-explorer.mjs",
@@ -89,4 +91,46 @@ test('a typed browser module is emitted as runnable JavaScript', async () => {
   assert.equal(publicRoute('resource-center'), false);
   assert.equal(publicKind('notes'), true);
   assert.equal(publicKind('books'), false);
+});
+
+test('passive refresh ships as compiled JavaScript at its browser import path', async () => {
+  const file = 'community-passive-refresh.mjs';
+  assert.ok(typedBrowserModules.has(file), 'the scheduler must use the typed browser emitter');
+  const adapter = await readFile(`src/${file}`, 'utf8');
+  assert.equal(adapter.trim(), "// Source adapter for Node tests while the browser receives compiled output.\nexport * from './community-passive-refresh.ts';");
+  const source = await readFile('src/community-passive-refresh.ts', 'utf8');
+  const output = await readFile(`dist/${file}`, 'utf8');
+  assert.equal(output, (await transform(source, { loader: 'ts', format: 'esm', target: 'es2022' })).code);
+  assert.doesNotMatch(output, /(?:from\s*|import\s*\()["'][^"']*\.ts["']/);
+  const { createCommunityPassiveRefresh } = await import('../dist/community-passive-refresh.mjs');
+  assert.equal(typeof createCommunityPassiveRefresh, 'function');
+  await verifySite('dist');
+});
+
+test('page DTO cache bundles its dependency at the stable browser module path', async () => {
+  const file = 'community-page-cache.mjs';
+  assert.equal(typedBrowserModules.has(file), false, 'a bare dependency requires the bundled entry, not the source-copy emitter');
+  const output = await readFile(`dist/${file}`, 'utf8');
+  assert.doesNotMatch(output, /(?:from\s*|import\s*\()["'](?:lru-cache|[^"']*\.ts)["']/);
+  const { createCommunityPageCache, communityPageCacheLimits } = await import('../dist/community-page-cache.mjs');
+  assert.deepEqual(communityPageCacheLimits, { threads: 24, members: 48, lists: 64 });
+  const cache = createCommunityPageCache(2);
+  cache.set('old', { title: 'old' }).set('recent', { title: 'recent' }).set('current', { title: 'current' });
+  assert.equal(cache.size, 2);
+  assert.equal(cache.has('old'), false);
+  assert.equal(cache.get('current').title, 'current');
+  await verifySite('dist');
+});
+
+test('shared staff catalogs ship at the compiled browser path without TypeScript imports', async () => {
+  const file = 'community-staff.mjs';
+  assert.ok(typedBrowserModules.has(file));
+  const output = await readFile(`dist/${file}`, 'utf8');
+  assert.doesNotMatch(output, /(?:from\s*|import\s*\()["'][^"']*\.ts["']/);
+  const { communityStaffRoles, communityStaffNextRole, communityStaffCapabilities } = await import('../dist/community-staff.mjs');
+  assert.deepEqual(communityStaffRoles.map(item => item.id), ['owner', 'general', 'moderator', 'assistant']);
+  assert.equal(communityStaffNextRole('moderator'), 'assistant');
+  assert.ok(communityStaffCapabilities.some(item => item.id === 'profile.nickname.advise'));
+  for (const name of ['community', 'community-ui', 'community-pages', 'community-management', 'community-stewards', 'community-level-explorer'])
+    assert.doesNotMatch(await readFile(`dist/${name}.mjs`, 'utf8'), /(?:from\s*|import\s*\()["'][^"']*\.ts["']/);
 });

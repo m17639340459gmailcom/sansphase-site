@@ -10,8 +10,8 @@ export const identityRequestBytes = 64 * 1024;
 export const identityAvatarRequestBytes = 704 * 1024;
 export const identityResponseBytes = 2 * 1024 * 1024;
 export type IdentityOperation = 'exchange' | 'session' | 'people' | 'member' | 'names' | 'avatar'
-  | 'profile' | 'profile-signature' | 'profile-avatar' | 'profile-avatar-remove' | 'profile-avatar-pending'
-  | 'profile-reviews' | 'profile-review-image' | 'profile-review';
+  | 'profile' | 'profile-signature' | 'profile-nickname' | 'profile-avatar' | 'profile-avatar-remove' | 'profile-avatar-pending'
+  | 'profile-reviews' | 'profile-review-image' | 'profile-review' | 'profile-advise';
 export type IdentityReader = { id: string; uid: string | null; nickname: string; signature: string; avatar: string | null; role: 'reader'; vip: boolean; vipStartedAt: string | null; vipUntil: string | null };
 export type IdentityDTO = { viewer: CommunityViewer; reader: IdentityReader | null; author: { name: string } | null; ownerReader?: IdentityReader };
 export class IdentityBridgeError extends Error {

@@ -33,7 +33,7 @@ export function createCommunityProfileDialog(options: Options) {
   const previews = new Map<string, ImagePreview>();
   const createCrop: CropFactory = options.crop || (async settings => (await import('./community-profile-crop.mjs')).createCommunityProfileCrop(settings));
   const root = () => layer?.querySelector<HTMLElement>('[data-profile-content]') || null;
-  const dirty = () => Boolean(root()?.querySelector<HTMLTextAreaElement>('[name="signature"]')?.value !== root()?.querySelector<HTMLTextAreaElement>('[name="signature"]')?.defaultValue
+  const dirty = () => Boolean([...(root()?.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('[name="nickname"], [name="signature"]') || [])].some(field => field.value !== field.defaultValue)
     || [...(root()?.querySelectorAll<HTMLInputElement>('[data-profile-file]') || [])].some(field => field.files?.length));
   function releasePreview(kind: string) {
     const value = previews.get(kind);

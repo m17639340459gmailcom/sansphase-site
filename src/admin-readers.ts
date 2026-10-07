@@ -2,7 +2,8 @@ import { escapeHTML as esc } from './core.mjs';
 type AdminUser = {id: string; uid: string; nickname: string; email: string; phone?: string; disabled: boolean; vip: boolean; vipUntil?: string | null; lastLoginIp?: string | null; lastLoginAt?: string | null; createdAt: string};
 type ReaderList = {users: AdminUser[]; page: number; totalPages: number; total: number; summary: {total: number; active: number; disabled: number; vip: number; expiredVip: number}};
 type AuditEvent = {action: string; readerId?: string; days?: number; until?: string; from?: string; to?: string; at: string; ip?: string};
-type ReviewRow = {id: string; nickname?: string; kind?: string; createdAt?: string; avatarUrl?: string; proposedValue?: string; email?: string; expiresAt?: string; reason?: string; filename?: string; last_error?: string; collection?: string; parent_id?: string; media_id?: string};
+type ProfileAdvice = {id: string; decision: 'approve' | 'reject'; reason: string; by: {kind: 'owner' | 'reader'; id: string}; createdAt: string};
+type ReviewRow = {id: string; nickname?: string; kind?: string; createdAt?: string; avatarUrl?: string; proposedValue?: string; advice?: ProfileAdvice[]; email?: string; expiresAt?: string; reason?: string; filename?: string; last_error?: string; collection?: string; parent_id?: string; media_id?: string};
 type ReviewResult = {profiles: ReviewRow[]; expired: ReviewRow[]; files: ReviewRow[]; versions: ReviewRow[]; media: ReviewRow[]};
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
@@ -97,6 +98,20 @@ export function mountReaderAdmin(root: HTMLElement | null, { english = false }: 
   const notice = root.querySelector<HTMLElement>('.reader-admin-notice')!;
   let query = '', status = 'all', page = 1, totalPages = 1, memberQuery = '', memberFilter = 'all', memberPage = 1, memberTotalPages = 1, selected: AdminUser | null = null, view = 'accounts', generation = 0, loginHistory: AuditEvent[] | false | null = null;
   let users = new Map<string, AdminUser>();
+  let reviewGeneration = 0;
+  const pendingReviews = new Set<string>();
+  const profileReasons = new Map<string, string>();
+  const reviewRegions = [reviewProfiles, reviewExpired, reviewFiles, reviewVersions, reviewMedia];
+  const captureProfileReasons = () => reviewProfiles.querySelectorAll<HTMLInputElement>('[data-admin-review-reason]').forEach(input => {
+    const id = input.closest('.reader-admin-review-item')?.querySelector<HTMLButtonElement>('[data-admin-review-action]')?.dataset.id;
+    if (id) profileReasons.set(id, input.value);
+  });
+  const syncReviewLock = (id: string) => reviewProfiles.querySelectorAll<HTMLButtonElement>('[data-admin-review-action]').forEach(button => {
+    if (button.dataset.id !== id) return;
+    button.disabled = pendingReviews.has(id);
+    const input = button.closest('.reader-admin-review-item')?.querySelector<HTMLInputElement>('[data-admin-review-reason]');
+    if (input) input.readOnly = pendingReviews.has(id);
+  });
   const message = (value: string, error = false) => { notice.textContent = value; notice.hidden = !value; notice.classList.toggle('is-error', error); };
   const request = async <T = unknown>(path: string, options: RequestInit = {}): Promise<T> => {
     const response = await fetch('/api/manage/' + path, { credentials: 'same-origin', signal: controller.signal, ...options });
@@ -150,16 +165,30 @@ export function mountReaderAdmin(root: HTMLElement | null, { english = false }: 
     } catch (error) { if (!controller.signal.aborted) audit.innerHTML = empty(tr('记录暂时无法读取', 'Activity unavailable'), esc(errorMessage(error))); }
   };
   const renderReview = async () => {
-    reviewProfiles.innerHTML = reviewExpired.innerHTML = reviewFiles.innerHTML = reviewVersions.innerHTML = reviewMedia.innerHTML = `<p class="reader-admin-loading">${tr('正在读取…', 'Loading…')}</p>`;
+    const current = ++reviewGeneration;
+    captureProfileReasons();
+    for (const region of reviewRegions) {
+      region.setAttribute('aria-busy', 'true'); region.setAttribute('inert', '');
+      if (!region.hasChildNodes()) region.innerHTML = `<p class="reader-admin-loading">${tr('正在读取…', 'Loading…')}</p>`;
+    }
     try {
       const value = await request<ReviewResult>('review');
-      if (controller.signal.aborted) return;
-      reviewProfiles.innerHTML = value.profiles.length ? `<div class="reader-admin-review-list">${value.profiles.map(row => `<article class="reader-admin-review-item"><div><strong>${esc(row.nickname)}</strong><small>${row.kind === 'avatar' ? tr('头像', 'Avatar') : tr('个性签名', 'Signature')} · ${esc(dateLabel(row.createdAt, english))}</small>${row.kind === 'avatar' ? `<img src="${esc(row.avatarUrl)}" alt="${tr('待审核头像', 'Pending avatar')}" width="80" height="80">` : `<p>${esc(row.proposedValue)}</p>`}</div><div class="reader-admin-review-actions"><button type="button" data-admin-review-action="approve" data-id="${esc(row.id)}">${tr('通过', 'Approve')}</button><button type="button" data-admin-review-action="reject" data-id="${esc(row.id)}">${tr('驳回', 'Reject')}</button></div></article>`).join('')}</div>` : empty(tr('没有待审核资料', 'No pending profiles'), tr('新头像或个签提交后会显示在这里。', 'New avatar and signature requests will appear here.'));
+      if (controller.signal.aborted || current !== reviewGeneration) return;
+      captureProfileReasons();
+      const visibleIds = new Set(value.profiles.map(row => row.id));
+      for (const id of profileReasons.keys()) if (!visibleIds.has(id) && !pendingReviews.has(id)) profileReasons.delete(id);
+      reviewProfiles.innerHTML = value.profiles.length ? `<div class="reader-admin-review-list">${value.profiles.map(row => {
+        const label = row.kind === 'avatar' ? tr('头像', 'Avatar') : row.kind === 'signature' ? tr('个性签名', 'Signature') : row.kind === 'nickname' ? tr('昵称', 'Nickname') : tr('资料', 'Profile');
+        const advice = row.advice?.length ? `<div class="reader-admin-review-advice"><small>${tr('审核建议（尚未决定）', 'Review advice (not a final decision)')}</small>${row.advice.map(item => `<p>${item.decision === 'approve' ? tr('建议通过', 'Suggested approval') : tr('建议驳回', 'Suggested rejection')} · ${item.by.kind === 'owner' ? tr('站长', 'Owner') : tr('社区审核人员', 'Community reviewer')} · ${esc(dateLabel(item.createdAt, english))}${item.reason ? `<br>${esc(item.reason)}` : ''}</p>`).join('')}</div>` : '';
+        const busy = pendingReviews.has(row.id);
+        return `<article class="reader-admin-review-item"><div class="reader-admin-review-content"><strong>${esc(row.nickname)}</strong><small>${label} · ${esc(dateLabel(row.createdAt, english))}</small>${row.kind === 'avatar' ? `<img src="${esc(row.avatarUrl)}" alt="${tr('待审核头像', 'Pending avatar')}" width="80" height="80">` : `<p>${esc(row.proposedValue)}</p>`}${advice}<label class="reader-admin-review-reason"><span>${tr('审核说明（驳回必填）', 'Review reason (required for rejection)')}</span><input type="text" data-admin-review-reason maxlength="200" autocomplete="off" value="${esc(profileReasons.get(row.id) || '')}"${busy ? ' readonly' : ''}></label></div><div class="reader-admin-review-actions"><button type="button" data-admin-review-action="approve" data-id="${esc(row.id)}"${busy ? ' disabled' : ''}>${tr('通过', 'Approve')}</button><button type="button" data-admin-review-action="reject" data-id="${esc(row.id)}"${busy ? ' disabled' : ''}>${tr('驳回', 'Reject')}</button></div></article>`;
+      }).join('')}</div>` : empty(tr('没有待审核资料', 'No pending profiles'), tr('新头像、个签或昵称提交后会显示在这里。', 'New avatar, signature and nickname requests will appear here.'));
       reviewExpired.innerHTML = value.expired.length ? `<div class="reader-admin-review-list"><label class="reader-admin-review-select"><input type="checkbox" data-admin-select-all="expired"> ${tr('全选过期申请', 'Select all expired requests')}</label>${value.expired.map(row => `<label class="reader-admin-review-item"><input type="checkbox" data-admin-select="expired" value="${esc(row.id)}"><span><strong>${esc(row.email)}</strong><small>${tr('到期', 'Expired')} ${esc(dateLabel(row.expiresAt, english))}</small></span></label>`).join('')}<button type="button" data-admin-bulk-clean="expired">${tr('清理所选', 'Clean selected')}</button></div>` : empty(tr('没有过期申请', 'No expired requests'), tr('系统会自动清理；清理失败的申请可在这里重试。', 'Automatic cleanup handles expired requests; retry failures here.'));
       reviewFiles.innerHTML = value.files.length ? `<div class="reader-admin-review-list"><label class="reader-admin-review-select"><input type="checkbox" data-admin-select-all="files"> ${tr('全选待清理文件', 'Select all files')}</label>${value.files.map(row => `<label class="reader-admin-review-item"><input type="checkbox" data-admin-select="files" value="${esc(row.id)}"><span><strong>${esc(row.reason)}</strong><small>${esc(row.filename)}${row.last_error ? ` · ${esc(row.last_error)}` : ''}</small></span></label>`).join('')}<button type="button" data-admin-bulk-clean="files">${tr('清理所选', 'Clean selected')}</button></div>` : empty(tr('没有待清理文件', 'No files to clean'), tr('已替换的头像会自动删除。', 'Replaced avatars are deleted automatically.'));
       reviewVersions.innerHTML = value.versions.length ? `<div class="reader-admin-review-list"><label class="reader-admin-review-select"><input type="checkbox" data-admin-select-all="versions"> ${tr('全选待清理版本', 'Select all versions')}</label>${value.versions.map(row => `<label class="reader-admin-review-item"><input type="checkbox" data-admin-select="versions" value="${esc(row.id)}"><span><strong>${esc(row.collection)}</strong><small>${esc(row.parent_id)}${row.last_error ? ` · ${esc(row.last_error)}` : ''}</small></span></label>`).join('')}<button type="button" data-admin-bulk-clean="versions">${tr('清理所选', 'Clean selected')}</button></div>` : empty(tr('没有待清理版本', 'No versions to clean'), tr('删除内容后的历史版本会自动清理。', 'Historical versions are cleaned automatically.'));
       reviewMedia.innerHTML = value.media.length ? `<div class="reader-admin-review-list"><label class="reader-admin-review-select"><input type="checkbox" data-admin-select-all="media"> ${tr('全选待清理附件', 'Select all media')}</label>${value.media.map(row => `<label class="reader-admin-review-item"><input type="checkbox" data-admin-select="media" value="${esc(row.id)}"><span><strong>${esc(row.media_id)}</strong><small>${row.last_error ? esc(row.last_error) : tr('等待再次检查引用', 'Awaiting reference check')}</small></span></label>`).join('')}<button type="button" data-admin-bulk-clean="media">${tr('清理所选', 'Clean selected')}</button></div>` : empty(tr('没有待清理附件', 'No media to clean'), tr('未被其他内容引用的附件会自动清理。', 'Unreferenced media is cleaned automatically.'));
-    } catch (error) { if (!controller.signal.aborted) reviewProfiles.innerHTML = reviewExpired.innerHTML = reviewFiles.innerHTML = reviewVersions.innerHTML = reviewMedia.innerHTML = empty(tr('暂时无法读取', 'Unavailable'), esc(errorMessage(error))); }
+    } catch (error) { if (!controller.signal.aborted && current === reviewGeneration) for (const region of reviewRegions) region.innerHTML = empty(tr('暂时无法读取', 'Unavailable'), esc(errorMessage(error))); }
+    finally { if (!controller.signal.aborted && current === reviewGeneration) for (const region of reviewRegions) { region.setAttribute('aria-busy', 'false'); region.removeAttribute('inert'); } }
   };
   const loginHistoryMarkup = () => loginHistory === null
     ? tr('正在读取…', 'Loading…')
@@ -218,15 +247,34 @@ export function mountReaderAdmin(root: HTMLElement | null, { english = false }: 
     if (selectAll) { root.querySelectorAll<HTMLInputElement>(`[data-admin-select="${selectAll.dataset.adminSelectAll}"]`).forEach(box => { box.checked = selectAll.checked; }); return; }
     const reviewAction = target.closest<HTMLButtonElement>('[data-admin-review-action]');
     if (reviewAction) {
-      reviewAction.disabled = true;
+      const card = reviewAction.closest<HTMLElement>('.reader-admin-review-item');
+      const reasonInput = card?.querySelector<HTMLInputElement>('[data-admin-review-reason]');
+      const buttons = card?.querySelectorAll<HTMLButtonElement>('[data-admin-review-action]');
+      if (!reasonInput || !buttons || reviewProfiles.hasAttribute('inert') || pendingReviews.has(reviewAction.dataset.id || '') || [...buttons].some(button => button.disabled)) return;
+      const reason = reasonInput.value.trim();
+      const decision = reviewAction.dataset.adminReviewAction;
+      if ((decision !== 'approve' && decision !== 'reject') || !reviewAction.dataset.id) return;
+      if ((decision === 'reject' && !reason) || [...reason].length > 200 || /[\u0000-\u001f\u007f<>]/u.test(reason)) {
+        reasonInput.setAttribute('aria-invalid', 'true');
+        message(tr('请填写审核说明，驳回原因不能为空；最多 200 字，不含控制字符或尖括号。', 'Enter a review reason: rejection requires it, with at most 200 characters and no control characters or angle brackets.'), true);
+        reasonInput.focus(); return;
+      }
+      reasonInput.removeAttribute('aria-invalid');
+      const id = reviewAction.dataset.id;
+      profileReasons.set(id, reasonInput.value);
+      pendingReviews.add(id); syncReviewLock(id);
       try {
-        await request(`review/profile/${encodeURIComponent(reviewAction.dataset.id!)}/${reviewAction.dataset.adminReviewAction}`, { method: 'POST', headers: { Origin: window.location.origin, 'X-Author-Request': '1', 'Content-Type': 'application/json' }, body: '{}' });
+        await request(`review/profile/${encodeURIComponent(id)}/${decision}`, { method: 'POST', headers: { Origin: window.location.origin, 'X-Author-Request': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ reason }) });
+        if (controller.signal.aborted) return;
+        profileReasons.delete(id);
         message(tr('审核已完成。', 'Review completed.')); await renderReview();
-      } catch (error) { message(errorMessage(error), true); reviewAction.disabled = false; }
+      } catch (error) { if (!controller.signal.aborted) message(errorMessage(error), true); }
+      finally { pendingReviews.delete(id); if (!controller.signal.aborted) syncReviewLock(id); }
       return;
     }
     const bulk = target.closest<HTMLButtonElement>('[data-admin-bulk-clean]');
     if (bulk) {
+      if (bulk.closest('[inert]')) return;
       const kind = bulk.dataset.adminBulkClean;
       const ids = [...root.querySelectorAll<HTMLInputElement>(`[data-admin-select="${kind}"]:checked`)].map(box => box.value);
       if (!ids.length) { message(tr('请先勾选要清理的项目。', 'Select items to clean first.'), true); return; }
@@ -308,5 +356,5 @@ export function mountReaderAdmin(root: HTMLElement | null, { english = false }: 
   detail.addEventListener('submit', saveUid);
   detail.addEventListener('click', outside);
   renderAccounts();
-  return () => { controller.abort(); clearInterval(timer); ++generation; root.removeEventListener('click', click); root.querySelector('#reader-admin-search')?.removeEventListener('submit', search); root.querySelector('#reader-admin-member-search')?.removeEventListener('submit', memberSearch); detail.removeEventListener('submit', saveUid); detail.removeEventListener('click', outside); detail.close(); };
+  return () => { controller.abort(); clearInterval(timer); ++generation; ++reviewGeneration; pendingReviews.clear(); profileReasons.clear(); root.removeEventListener('click', click); root.querySelector('#reader-admin-search')?.removeEventListener('submit', search); root.querySelector('#reader-admin-member-search')?.removeEventListener('submit', memberSearch); detail.removeEventListener('submit', saveUid); detail.removeEventListener('click', outside); detail.close(); };
 }

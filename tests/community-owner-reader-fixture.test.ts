@@ -4,6 +4,8 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import sharp from 'sharp';
 import { createCommunityDemo } from '../scripts/fixtures/community-demo.mjs';
+import { communityBoards } from '../src/community.ts';
+import { communityStaffCapabilities } from '../src/community-staff.ts';
 
 test('local preview performs owner personal editing and approval through real services while preserving the public brand', { timeout: 40000 }, async t => {
   const demo = await createCommunityDemo();
@@ -25,7 +27,12 @@ test('local preview performs owner personal editing and approval through real se
   assert.equal(response.status, 200); assert.match(response.headers.get('set-cookie') || '', /community_browse=reader/);
   const me = await (await get('/api/community/me')).json();
   assert.equal(me.uid, '10008'); assert.equal(me.role, 'reader'); assert.equal(me.owner, false); assert.equal(me.mod, false);
-  assert.deepEqual(me.management, { role: 'owner', browsingAsReader: true, interactive: true });
+  assert.deepEqual(me.management, { role: 'owner', browsingAsReader: true, interactive: true, staff: {
+    role: 'owner', boards: communityBoards.map(board => board.id), permissions: communityStaffCapabilities.map(capability => capability.id),
+    delegable: communityStaffCapabilities.map(capability => capability.id), parent: null,
+  } }, 'the switch-back management metadata does not grant reader-mode authority');
+  assert.equal(me.staff, null);
+  assert.deepEqual(me.moderationBoards, []);
   assert.equal(me.balance, 0); assert.deepEqual(me.inventory, { makeup: 0, pin: 0, highlight: 0 });
   const stardust = await (await get('/api/community/stardust')).json(); assert.equal(stardust.balance, 0); assert.deepEqual(stardust.ledger, []);
   assert.equal((await get('/api/community/manage?tab=profiles')).status, 403);

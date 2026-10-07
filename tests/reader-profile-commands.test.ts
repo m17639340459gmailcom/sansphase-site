@@ -47,6 +47,44 @@ test('signature submission reuses the main pending proposal and leaves approved 
   assert.equal(cancelled.pendingSignature,null);
 });
 
+test('nickname edits reuse pending profile review, preserve approved names and normalize the existing nickname policy', async t => {
+  const f = await fixture(t);
+  const state = await f.commands.submitNickname(f.readerId, ' 新昵称 ');
+  assert.equal(state.nickname, '测试读者'); assert.equal(state.pendingNickname, '新昵称');
+  const [proposal] = await f.commands.reviews(['nickname']); assert.equal(proposal.proposedValue, '新昵称');
+  await assert.rejects(f.commands.submitNickname(f.readerId, '一'), { status: 400 });
+  await assert.rejects(f.commands.submitNickname(f.readerId, '<bad>'), { status: 400 });
+  await f.commands.review(proposal.id, 'approve', { kind: 'owner', id: randomUUID(), source: 'main' }, ['nickname']);
+  assert.equal(f.row.nickname, '新昵称'); assert.equal((await f.commands.state(f.readerId)).pendingNickname, null);
+});
+
+test('profile advice records the actual actor and reason without publishing or consuming the proposal', async t => {
+  const f = await fixture(t), actor = { kind: 'reader' as const, id: randomUUID(), source: 'community' as const };
+  await f.commands.submitSignature(f.readerId, '新提案'); const row = f.workflow.profileFor(f.readerId, 'signature')!;
+  await assert.rejects(f.commands.advise(row.id, 'reject', '', actor, ['signature']), { status: 400 });
+  const receipt = await f.commands.advise(row.id, 'reject', '请调整用语', actor, ['signature']);
+  assert.equal(receipt.action, 'advise'); assert.equal(f.row.signature, '已通过签名');
+  assert.equal(f.workflow.profileFor(f.readerId, 'signature')?.id, row.id);
+  const [review] = await f.commands.reviews(['signature']);
+  assert.deepEqual(review.advice[0].by, { kind: 'reader', id: actor.id }); assert.equal(review.advice[0].reason, '请调整用语');
+  await f.commands.submitSignature(f.readerId, '替换提案');
+  assert.equal((await f.commands.reviews(['signature']))[0].advice.length, 0);
+  await assert.rejects(f.commands.advise(row.id, 'approve', '', actor, ['signature']), { status: 404 });
+});
+
+test('community rejection requires a reason, records it and rechecks approval after the last account lookup', async t => {
+  const f = await fixture(t), actor = { kind: 'reader' as const, id: randomUUID(), source: 'community' as const };
+  await f.commands.submitSignature(f.readerId, '拒绝提案'); const proposal = f.workflow.profileFor(f.readerId, 'signature')!;
+  await assert.rejects(f.commands.review(proposal.id, 'reject', actor, ['signature'], undefined, ''), { status: 400 });
+  await f.commands.review(proposal.id, 'reject', actor, ['signature'], undefined, '理由清楚');
+  const audit = (await readFile(resolve(f.directory, 'reader-admin-audit.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(audit.at(-1).reason, '理由清楚');
+  await f.commands.submitNickname(f.readerId, '新名字'); const name = f.workflow.profileFor(f.readerId, 'nickname')!;
+  let checks = 0;
+  await assert.rejects(f.commands.review(name.id, 'approve', actor, ['nickname'], async () => { if (++checks >= 3) throw Object.assign(Error('revoked'), { status: 403 }); }), { status: 403 });
+  assert.equal(f.row.nickname, '测试读者'); assert.equal(f.workflow.profileFor(f.readerId, 'nickname')?.id, name.id);
+});
+
 test('avatars remain pending, share review with main, and record the actual community reviewer',async t=>{
   const f=await fixture(t);
   const png=await sharp({create:{width:128,height:128,channels:4,background:'#aabbff'}}).png().toBuffer();
@@ -63,7 +101,7 @@ test('avatars remain pending, share review with main, and record the actual comm
   const entry=JSON.parse((await readFile(resolve(f.directory,'reader-admin-audit.jsonl'),'utf8')).trim());
   assert.equal(entry.actorId,'moderator-a');assert.equal(entry.actorKind,'reader');assert.equal(entry.source,'community');
   assert.equal(entry.readerId,f.readerId);assert.equal(entry.reviewId,proposal.id);
-  await assert.rejects(f.commands.review(proposal.id,'reject',moderator,['avatar']),{status:404});
+  await assert.rejects(f.commands.review(proposal.id,'reject',moderator,['avatar'],undefined,'已经处理'),{status:404});
 });
 
 test('replaced review IDs and avatar-only reviewers cannot affect a newer proposal or a signature',async t=>{

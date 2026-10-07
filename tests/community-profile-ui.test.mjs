@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
+import { readFile } from 'node:fs/promises';
+import postcss from 'postcss';
 import { communityRoute, inCommunityArea } from '../src/community.ts';
 import { communityProfileHTML, communityProfileDialogHTML, communityProfileReviewsHTML } from '../src/community-profile.ts';
 import { communityMemberHTML } from '../src/community-pages.ts';
@@ -9,6 +11,41 @@ import { createCommunityUI } from '../src/community-ui.ts';
 const common = { t: zh => zh, esc: v => String(v ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;'), icons: {} };
 const person = { name: '读者', uid: '10001', role: 'reader', avatar: null };
 const profile = { person, signature: '已通过', pendingSignature: '待审<签名>', pendingAvatar: true, canEditProfile: true, frames: [], background: { approved: null, pending: null } };
+
+test('member cover applies default artwork only without an approved or equipped cover', async () => {
+  const css = postcss.parse(await readFile(new URL('../src/community.css', import.meta.url), 'utf8'));
+  const member = { person, bio: '', joinedAt: null, cover: null, self: true, streak: 0, stats: {}, follows: {}, badges: [], topics: [], replies: [], bookmarks: [], counts: {}, tab: 'topics' };
+  const approved = '/api/community/profile/background/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.webp';
+  const equipped = '/api/community/images/bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.webp';
+  const cases = [
+    { data: {}, image: null, defaultArt: true },
+    { data: { cover: 'aurora' }, image: null, defaultArt: false },
+    { data: { cover: 'abyss' }, image: null, defaultArt: false },
+    { data: { coverImage: equipped }, image: equipped, defaultArt: false },
+    { data: { background: { url: approved }, coverImage: equipped, cover: 'aurora' }, image: approved, defaultArt: false },
+    { data: { background: { pending: { url: approved } } }, image: null, defaultArt: true }
+  ];
+  for (const entry of cases) {
+    const dom = new JSDOM(communityMemberHTML({ ...common, member: { state: 'ready', data: { ...member, ...entry.data } } }));
+    try {
+      const cover = dom.window.document.querySelector('.community-m-cover');
+      assert.equal(cover.querySelectorAll('img').length, entry.image ? 1 : 0);
+      assert.equal(cover.querySelector('img')?.getAttribute('src') || null, entry.image);
+      assert.equal(cover.querySelectorAll('i').length, entry.image ? 0 : 2);
+      const defaultLayers = [];
+      css.walkRules(rule => {
+        if (rule.parent?.type !== 'root') return;
+        for (const selector of rule.selectors) {
+          if (!selector.includes('.community-m-cover') || !cover.matches(selector.replace(/::after$/, ''))) continue;
+          rule.walkDecls('background', declaration => {
+            if (entry.image || selector.endsWith('::after') || declaration.value.includes('hsl(var(--h)')) defaultLayers.push(declaration.value);
+          });
+        }
+      });
+      assert.equal(defaultLayers.length, entry.defaultArt ? 2 : 0, `cover ${JSON.stringify(entry.data)}`);
+    } finally { dom.window.close(); }
+  }
+});
 
 test('the editor and member page show one equipped author background and a pending replacement takes preview priority', () => {
   const image = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -42,7 +79,8 @@ test('profile editor keeps the legacy route but presents a compact modal body wi
   assert.equal(doc.querySelector('[data-profile-approved-signature]').textContent, profile.signature);
   assert.ok(doc.querySelector('[data-profile-file="avatar"]'));
   assert.ok(doc.querySelector('[data-profile-file="background"]'));
-  assert.equal(doc.querySelector('[name="email"], [name="phone"], [name="id"], [name="nickname"]'), null);
+  assert.equal(doc.querySelector('[name="email"], [name="phone"], [name="id"]'), null);
+  assert.equal(doc.querySelector('[name="nickname"]').value, person.name);
   assert.equal(doc.querySelector('a[href="#/account"]'), null);
   assert.equal(doc.querySelector('[data-community-form="profile-frame"]'), null);
   const shell = new JSDOM(communityProfileDialogHTML(common)).window.document;
@@ -80,7 +118,7 @@ test('self profile edit opens a dialog instead of navigating to another page', (
 });
 
 const settle = async () => { for (let n = 0; n < 7; n++) await new Promise(resolve => setTimeout(resolve, 0)); };
-async function controller(t, { delayed = false, rejected = false, preview = false, interactive = false, moderator = false, manage = false, member = false, updatedConvention = false, unagreed = false } = {}) {
+async function controller(t, { delayed = false, rejected = false, preview = false, interactive = false, moderator = false, manage = false, advice = false, member = false, updatedConvention = false, unagreed = false } = {}) {
   const dom = new JSDOM('<header id="site-header"><button>导航</button></header><main id="main"></main>', { url: `http://localhost/#/community/${manage ? 'manage/profiles' : member ? 'u/10001' : 'profile'}`, pretendToBeVisual: true });
   const w = dom.window;
   const names = ['window', 'document', 'location', 'HTMLElement', 'Element', 'Node', 'HTMLInputElement', 'HTMLTextAreaElement', 'HTMLSelectElement', 'HTMLButtonElement', 'HTMLFormElement', 'HTMLAnchorElement', 'FormData', 'File', 'Event', 'CustomEvent', 'getComputedStyle'];
@@ -95,15 +133,17 @@ async function controller(t, { delayed = false, rejected = false, preview = fals
     if (url.endsWith('/me')) return response({ ...person, agreed: !needsConvention, owner: false, mod: moderator || manage, unread: { all: 0 }, ...(updatedConvention || unagreed ? { convention: { version: 'new', agreed: !needsConvention } } : {}), management: preview ? { role: 'owner', browsingAsReader: true, ...(interactive ? { interactive: true } : {}) } : moderator || manage ? { role: 'steward', browsingAsReader: false } : undefined });
     if (url.endsWith('/convention')) return response({ version: 'new', body: '请阅读新的公约' });
     if (url.endsWith('/convention/read')) return response({ version: 'new', eligibleAt: new Date(Date.now() + 10000).toISOString() });
-    if (url.endsWith('/manage?tab=profiles')) return response({ owner: false, tab: 'profiles', counts: { queue: 0, reports: 0, orders: 0, sanctions: 0 }, kpis: { topics24h: 0, replies24h: 0 }, profiles: [{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', kind: 'avatar', nickname: '读者', uid: '10001', proposedValue: null, avatarUrl: null, createdAt: '2026-10-07T00:00:00Z' }], backgrounds: [] });
-    if (/\/manage\/profiles\/[^/]+\/(approve|reject)$/.test(url)) { if (delayed) await new Promise(resolve => { release = resolve; }); return response({ ok: true }); }
+    if (url.endsWith('/manage?tab=profiles')) return response({ owner: false, tab: 'profiles', counts: { queue: 0, reports: 0, orders: 0, sanctions: 0 }, kpis: { topics24h: 0, replies24h: 0 }, profiles: [{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', kind: advice ? 'nickname' : 'avatar', nickname: '读者', uid: '10001', proposedValue: advice ? '新名字' : null, avatarUrl: null, createdAt: '2026-10-07T00:00:00Z', ...(advice ? { canAdvise: true, canDecide: false, advice: [] } : {}) }], backgrounds: [] });
+    if (/\/manage\/profiles\/[^/]+\/(approve|reject|advise)$/.test(url)) { if (delayed) await new Promise(resolve => { release = resolve; }); return response({ ok: true }); }
     if (url.endsWith('/profile') && !init.method) return response(value);
     if (url.includes('/members/10001?')) return response({ person, bio: value.signature, joinedAt: null, cover: null, streak: 0, stats: { topics: 0, replies: 0, likes: 0, accepted: 0, featured: 0 }, follows: { followers: 0, following: 0 }, following: false, self: true, badges: [], muted: null, canMute: false, canAppoint: false, steward: false, tab: 'topics', topics: [], replies: [], bookmarks: [], counts: { topics: 0, replies: 0, bookmarks: 0 }, quick: null });
     if (url.endsWith('/profile') && init.method === 'POST') {
       if (delayed) await new Promise(resolve => { release = resolve; });
       if (updatedConvention) { needsConvention = true; return response({ error: '请同意新公约。' }, 428); }
       if (rejected) return response({ error: '审核通道暂不可用。' }, 503);
-      value.pendingSignature = JSON.parse(init.body).signature;
+      const submitted = JSON.parse(init.body);
+      if ('signature' in submitted) value.pendingSignature = submitted.signature;
+      if ('nickname' in submitted) value.pendingNickname = submitted.nickname;
       return response(value);
     }
     if (url.endsWith('/shop/equip')) { value.person.frame = JSON.parse(init.body).ref; return response({ ok: true }); }
@@ -150,6 +190,34 @@ test('community signature submission stays on the page and sends only the signat
   assert.equal(main.querySelector('[name="signature"]').value, '新个签');
   assert.equal(w.location.hash, '#/community/profile');
   assert.equal(calls.some(call => call.url.startsWith('/api/reader/')), false);
+});
+
+test('community nickname submission stages only the new name and never changes the approved identity', async t => {
+  const { main, calls, w } = await controller(t);
+  const form = main.querySelector('[data-community-form="profile-nickname"]');
+  form.elements.namedItem('nickname').value = '新的昵称';
+  form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await settle();
+  const write = calls.find(call => call.init.method === 'POST'); assert.ok(write);
+  assert.equal(write.url, '/api/community/profile');
+  assert.deepEqual(JSON.parse(write.init.body), { nickname: '新的昵称' });
+  assert.equal(main.querySelector('.community-profile-identity-text strong').textContent, person.name);
+  assert.equal(main.querySelector('[name="nickname"]').value, '新的昵称');
+  assert.match(main.querySelector('#community-profile-nickname-hint').textContent, /待审核/);
+});
+
+test('nickname drafts keep Escape, close, navigation and perspective switches guarded', async t => {
+  const { main, w, ui, calls } = await controller(t, { moderator: true });
+  const input = main.querySelector('[name="nickname"]'); input.value = '未提交昵称';
+  let prompts = 0; w.confirm = () => { prompts++; return false; };
+  input.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await settle();
+  assert.ok(main.querySelector('[role="dialog"]')); assert.equal(prompts, 1);
+  main.querySelector('[data-profile-close]').click(); await settle();
+  assert.equal(prompts, 2); assert.equal(main.querySelector('[name="nickname"]'), input);
+  const link = w.document.createElement('a'); link.href = '#/community/home'; main.append(link); link.click(); await settle();
+  assert.equal(w.location.hash, '#/community/profile'); assert.equal(prompts, 3);
+  await ui.setBrowsing(true); await settle();
+  assert.equal(calls.some(call => call.url.endsWith('/browse-mode')), false);
+  assert.equal(main.querySelector('[name="nickname"]').value, '未提交昵称');
 });
 
 test('failed writes retain the signature draft and reenable controls', async t => {
@@ -211,6 +279,20 @@ test('opposite decisions for one profile cannot be submitted concurrently', asyn
   reject.dispatchEvent(new w.Event('click', { bubbles: true })); await settle();
   assert.equal(calls.filter(call => call.init.method === 'POST').length, 1);
   release(); await settle();
+});
+
+test('profile advice uses the existing advisory route, and a rejection requires a reason', async t => {
+  const { main, calls } = await controller(t, { manage: true, advice: true });
+  const reject = main.querySelector('[data-decision="reject"]');
+  reject.click(); await settle();
+  assert.equal(calls.some(call => call.init.method === 'POST'), false);
+  assert.match(main.querySelector('.community-form-status').textContent, /驳回理由/);
+  main.querySelector('[name="reason"]').value = '请换成可识别的名字';
+  reject.click(); await settle();
+  const write = calls.find(call => call.init.method === 'POST');
+  assert.ok(write.url.endsWith('/manage/profiles/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/advise'));
+  assert.deepEqual(JSON.parse(write.init.body), { decision: 'reject', reason: '请换成可识别的名字' });
+  assert.equal(main.querySelector('[data-review-action="decide"]'), null);
 });
 
 test('late profile responses cannot restore data after the identity is cleared', async t => {

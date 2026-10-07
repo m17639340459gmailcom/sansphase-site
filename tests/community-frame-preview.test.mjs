@@ -16,7 +16,7 @@ const thread = { topic: { ...topic('p1'), body: '正在阅读的帖子正文', i
 const response = data => ({ ok: true, json: async () => structuredClone(data) });
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 
-async function setup(t, firstHash = '#/community/home', intercept = () => null) {
+async function setup(t, firstHash = '#/community/home', intercept = () => null, simpleCompose = true) {
   const dom = new JSDOM('<html lang="zh"><header id="site-header" class="community-header"></header><main id="main"></main></html>', { url: `http://localhost:4212/?interior=feed&layout=stable${firstHash}`, pretendToBeVisual: true });
   const w = dom.window;
   w.Range.prototype.getClientRects = () => [];
@@ -65,7 +65,7 @@ async function setup(t, firstHash = '#/community/home', intercept = () => null) 
   const ui = createCommunityUI({ request });
   const frame = createStableCommunityFrame(w.document, w, request);
   const main = w.document.getElementById('main');
-  const ctx = { t: zh => zh, esc: value => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;'), icons: {}, members: true, showPostingTips: false, showActiveMembers: false, showHomeCompose: false, simpleCompose: true,
+  const ctx = { t: zh => zh, esc: value => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;'), icons: {}, members: true, showPostingTips: false, showActiveMembers: false, showHomeCompose: false, simpleCompose,
     painted: () => frame.sync(ui.frameHTML(ctx)), beforePaint: () => frame.preserveReadingPosition(), headerChanged: () => header() };
   function header() {
     const html = communityHeaderHTML({ view: communityRoute(w.location.hash).view, t: ctx.t, actionsHTML: '<button>账号</button>', unchecked: !ui.me()?.checkedIn });
@@ -220,7 +220,7 @@ for (const change of ['account', 'permission']) test(`a confirmed ${change} chan
   assert.ok(main.querySelector('.community-thread'));
 });
 
-for (const outcome of ['ready', 'abort', 'denied']) test(`real hashchange keeps the held feed enhancement and releases it once after ${outcome}`, async t => {
+for (const count of [1, 2]) for (const outcome of ['ready', 'abort', 'denied']) test(`real hashchange keeps the held ${count}-image feed enhancement and releases it once after ${outcome}`, async t => {
   const imageId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   let navigating = false;
   const identity = deferred(), content = deferred();
@@ -228,9 +228,9 @@ for (const outcome of ['ready', 'abort', 'denied']) test(`real hashchange keeps 
     if (navigating && url.endsWith('/me')) return identity.promise;
     if (navigating && url.endsWith('/topics/p1')) return content.promise;
     if (url.includes('/topics?') && !new URL(url, 'http://localhost').searchParams.get('board'))
-      return response({ ...listing, items: [{ ...topic('p1'), thumbs: [imageId] }] });
+      return response({ ...listing, items: [{ ...topic('p1'), board: count === 2 ? 'showcase' : 'qa', thumbs: Array(count).fill(imageId) }] });
     return null;
-  });
+  }, count === 1);
   const source = main.querySelector('[data-community="home"]'), image = source.querySelector('.community-topic-thumbs img');
   assert.ok(image); assert.equal(image.getAttribute('src'), `/api/community/images/${imageId}.webp`);
   let releases = 0; const setAttribute = image.setAttribute.bind(image);
@@ -247,7 +247,7 @@ for (const outcome of ['ready', 'abort', 'denied']) test(`real hashchange keeps 
   if (outcome === 'abort') { changeRoute('#/community/boards/tools'); await turn(); }
   identity.resolve(outcome === 'denied' ? { ok: false, status: 401, json: async () => ({ error: 'signed out' }) } : response(person));
   content.resolve(response(thread)); await turn();
-  assert.equal(source.isConnected, false); assert.equal(releases, 1);
+  assert.equal(source.isConnected, false); assert.equal(releases, count === 1 ? 0 : 1, 'single previews stay complete; converted multi-image sources restore exactly once after the held page retires');
   assert.equal(source.hasAttribute('data-home-design'), false);
   if (outcome === 'ready') assert.equal(main.querySelector('[data-community="post"]').dataset.threadDesign, 'feed');
   if (outcome === 'abort') assert.equal(main.querySelector('[data-community="board"]').dataset.homeDesign, 'feed');

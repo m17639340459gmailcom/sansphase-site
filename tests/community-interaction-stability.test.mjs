@@ -316,6 +316,140 @@ test('looking up a previously appointed member refreshes a stale roster before e
 
 const moderatorCandidate = steward => ({ person: { ...person, uid: '10002', name: '星海', steward }, self: false, canAppoint: true, steward });
 
+test('modern moderators appoint an assistant with explicit capabilities and cannot delegate an ungranted capability', async t => {
+  const staff = { role: 'moderator', boards: ['qa'], permissions: ['staff.appoint', 'content.inspect', 'topic.approve'], delegable: ['topic.approve', 'profile.avatar.advise'], parent: { kind: 'reader', id: 'superior' } };
+  const viewer = { ...person, mod: true, staffRole: staff.role, staff, management: { role: staff.role, browsingAsReader: false, staff } };
+  const { main, w, requests } = await setup(t, '#/community/manage/stewards', (url, init) => {
+    if (url.endsWith('/me')) return response(viewer);
+    if (url.includes('/manage?')) return response({ ...managementData, owner: false, actorStaff: staff, stewards: [] });
+    if (url.endsWith('/members/10002?tab=topics')) return response(moderatorCandidate(false));
+    if (url.endsWith('/members/10002/steward')) return response({ ok: true });
+    return null;
+  });
+  const lookup = main.querySelector('[data-community-form="steward-lookup"]');
+  lookup.elements.namedItem('uid').value = '10002';
+  lookup.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await turn();
+  const form = main.querySelector('[data-community-form="steward-scope"]'); assert.ok(form);
+  form.querySelector('[name="boards"][value="qa"]').checked = true;
+  form.querySelector('[name="permissions"][value="topic.approve"]').checked = false;
+  form.querySelector('[name="delegable"][value="topic.approve"]').checked = true;
+  form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await turn();
+  assert.equal(requests.some(entry => entry.url.endsWith('/steward')), false);
+  assert.match(form.querySelector('.community-form-status').textContent, /同时.*可执行/);
+  form.querySelector('[name="permissions"][value="topic.approve"]').checked = true;
+  form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await turn(); await turn();
+  const write = requests.find(entry => entry.url.endsWith('/steward')); assert.ok(write);
+  assert.deepEqual(JSON.parse(write.init.body), { on: true, role: 'assistant', boards: ['qa'], permissions: ['topic.approve', 'profile.avatar.advise'], delegable: ['topic.approve'] });
+});
+
+test('modern staff configuration remains intact when navigation or reader identity switching is cancelled', async t => {
+  const staff = { role: 'moderator', boards: ['qa'], permissions: ['staff.appoint', 'content.inspect'], delegable: ['topic.approve'], parent: { kind: 'reader', id: 'superior' } };
+  const { main, ui, w, requests } = await setup(t, '#/community/manage/stewards', url => {
+    if (url.endsWith('/me')) return response({ ...person, mod: true, staff, staffRole: staff.role, management: { role: staff.role, browsingAsReader: false, staff } });
+    if (url.includes('/manage?')) return response({ ...managementData, owner: false, actorStaff: staff, stewards: [{ ...moderatorCandidate(true).person, staff: { ...staff, role: 'assistant', boards: ['qa'], permissions: ['topic.approve'], delegable: [] }, canAppoint: true }] });
+    return null;
+  });
+  main.querySelector('[data-action="community-steward-edit"]').click();
+  const form = main.querySelector('[data-community-form="steward-scope"]');
+  form.querySelector('[name="delegable"]').checked = true;
+  let confirmations = 0; w.confirm = () => { confirmations++; return false; };
+  main.querySelector('a[href="#/community/manage/content"]').click(); await turn();
+  assert.equal(confirmations, 1); assert.equal(w.location.hash, '#/community/manage/stewards');
+  assert.equal(main.querySelector('[data-community-form="steward-scope"]'), form);
+  assert.equal(form.querySelector('[name="delegable"]').checked, true);
+  await ui.setBrowsing(true); await turn();
+  assert.equal(requests.some(entry => entry.url.endsWith('/browse-mode')), false);
+  assert.equal(main.querySelector('[data-community-form="steward-scope"]'), form);
+});
+
+test('switching modern staff roster editors asks before discarding an edited configuration', async t => {
+  const staff = { role: 'moderator', boards: ['qa'], permissions: ['staff.appoint', 'content.inspect'], delegable: ['topic.approve'], parent: { kind: 'reader', id: 'superior' } };
+  const { main, w, requests } = await setup(t, '#/community/manage/stewards', url => {
+    if (url.endsWith('/me')) return response({ ...person, mod: true, staff, staffRole: staff.role, management: { role: staff.role, browsingAsReader: false, staff } });
+    if (url.includes('/manage?')) return response({ ...managementData, owner: false, actorStaff: staff, stewards: ['10002', '10003'].map(uid => ({ ...moderatorCandidate(true).person, uid, staff: { ...staff, role: 'assistant', permissions: ['topic.approve'], delegable: [] }, canAppoint: true })) });
+    return null;
+  });
+  main.querySelector('[data-action="community-steward-edit"][data-uid="10002"]').click();
+  const form = main.querySelector('[data-community-form="steward-scope"]');
+  form.querySelector('[name="delegable"]').checked = true;
+  let confirmations = 0; w.confirm = () => { confirmations++; return false; };
+  main.querySelector('[data-action="community-steward-edit"][data-uid="10003"]').click();
+  assert.equal(confirmations, 1);
+  assert.equal(main.querySelector('[data-community-form="steward-scope"]'), form);
+  assert.equal(form.querySelector('[name="delegable"]').checked, true);
+  assert.equal(requests.some(entry => entry.init.method === 'POST'), false);
+});
+
+test('management deletion keeps target-specific penalty and mute refusals despite broader staff capabilities', async t => {
+  const staff = { role: 'moderator', boards: ['qa'], permissions: ['content.inspect', 'topic.delete', 'topic.penalty', 'member.mute'], delegable: [], parent: { kind: 'reader', id: 'superior' } };
+  const { main } = await setup(t, '#/community/manage/content', url => {
+    if (url.endsWith('/me')) return response({ ...person, mod: true, staff, staffRole: staff.role, management: { role: staff.role, browsingAsReader: false, staff } });
+    if (url.includes('/manage?')) return response({ ...managementData, owner: false, actorStaff: staff, content: [{ ...topic('p1'), author: { ...person, uid: 'other' }, canDelete: true, canPenalty: false, canMute: false }] });
+    return null;
+  });
+  main.querySelector('[data-action="community-queue-delete"]').click();
+  assert.ok(main.querySelector('[data-community-form="delete"]'));
+  assert.equal(main.querySelector('[name="violation"], [name="mute"]'), null);
+});
+
+test('a protected pending target may be approved but is not offered for single or batch rejection', async t => {
+  const staff = { role: 'moderator', boards: ['qa'], permissions: ['content.inspect', 'topic.approve', 'topic.reject'], delegable: [], parent: { kind: 'reader', id: 'superior' } };
+  const { main, w, requests } = await setup(t, '#/community/manage', url => {
+    if (url.endsWith('/me')) return response({ ...person, mod: true, staff, staffRole: staff.role, management: { role: staff.role, browsingAsReader: false, staff } });
+    if (url.includes('/manage?')) return response({ ...managementData, owner: false, actorStaff: staff, queue: { topics: [{ ...topic('p1'), pending: true, body: '待审', canApprove: true, canDelete: false }], replies: [] } });
+    return null;
+  });
+  assert.ok(main.querySelector('[data-action="community-approve"]'));
+  assert.equal(main.querySelector('[data-action="community-reject"]'), null);
+  const selected = main.querySelector('[data-community-review-select]'); selected.checked = true;
+  selected.dispatchEvent(new w.Event('change', { bubbles: true }));
+  assert.equal(main.querySelector('[data-action="community-batch-approve"]').disabled, false);
+  assert.equal(main.querySelector('[data-action="community-batch-reject"]').disabled, true);
+  main.querySelector('[data-action="community-batch-reject"]').click();
+  assert.equal(main.querySelector('[data-community-form="reject"]'), null);
+  assert.equal(requests.some(entry => entry.init.method === 'POST'), false);
+});
+
+test('the fixed owner can configure a verified legacy moderator without promoting the appointment', async t => {
+  const staff = { role: 'owner', boards: ['qa'], permissions: ['staff.appoint', 'content.inspect', 'topic.approve'], delegable: ['topic.approve'], parent: null };
+  const legacy = { ...moderatorCandidate(true).person, uid: '10002', canAppoint: true, staff: { role: 'moderator', boards: ['qa'], permissions: ['topic.approve'], delegable: [], parent: { kind: 'owner', id: 'owner' } } };
+  const { main, w, requests } = await setup(t, '#/community/manage/stewards', url => {
+    if (url.endsWith('/me')) return response({ ...managementViewer, staff, staffRole: 'owner', management: { role: 'owner', browsingAsReader: false, staff } });
+    if (url.includes('/manage?')) return response({ ...managementData, actorStaff: staff, stewards: [legacy] });
+    if (url.endsWith('/members/10002/steward')) return response({ ok: true });
+    return null;
+  });
+  const edit = main.querySelector('[data-action="community-steward-edit"]'); assert.ok(edit); edit.click();
+  const form = main.querySelector('[data-community-form="steward-scope"]');
+  assert.equal(form.querySelector('[name="role"]').value, 'moderator');
+  form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await turn(); await turn();
+  assert.equal(JSON.parse(requests.find(entry => entry.url.endsWith('/steward')).init.body).role, 'moderator');
+});
+
+test('assistant feature recommendation uses its real write route while final review requires a rejection reason', async t => {
+  const notices = [];
+  const staff = { role: 'assistant', boards: ['qa'], permissions: ['feature.recommend'], delegable: [], parent: { kind: 'reader', id: 'moderator' } };
+  const { main, w, requests, remount } = await setup(t, '#/post/p1', (url, init) => {
+    if (url.endsWith('/me')) { const activeStaff = location.hash.endsWith('/features') ? { ...staff, role: 'moderator', permissions: ['feature.decide'] } : staff; return response({ ...person, mod: true, staff: activeStaff, staffRole: activeStaff.role, management: { role: activeStaff.role, browsingAsReader: false, staff: activeStaff } }); }
+    if (url.endsWith('/topics/p1')) return response({ ...thread(), topic: { ...thread().topic, canRecommend: true, canFeature: false } });
+    if (url.endsWith('/topics/p1/feature-recommend')) return response({ ok: true, id: 'recommendation' });
+    if (url.includes('/manage?')) return response({ ...managementData, owner: false, actorStaff: { ...staff, role: 'moderator', permissions: ['feature.decide'] }, features: [{ id: 'recommendation', topic: topic('p1'), by: person, reason: '', createdAt: '2026-10-07T00:00:00Z' }] });
+    if (url.endsWith('/manage/feature-recommendations/recommendation/reject')) return response({ ok: true });
+    return null;
+  }, { notify: text => notices.push(text) });
+  main.querySelector('[data-action="community-feature-recommend"]').click(); await turn(); await turn();
+  assert.equal(requests.filter(entry => entry.url.endsWith('/feature-recommend')).length, 1);
+  assert.ok(notices.some(text => /等待审批/.test(text)));
+  await remount('#/community/manage/features');
+  const form = main.querySelector('[data-community-form="feature-review"]'), reject = form.querySelector('[value="reject"]');
+  form.dispatchEvent(new w.SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: reject })); await turn();
+  assert.equal(requests.some(entry => entry.url.endsWith('/recommendation/reject')), false);
+  assert.match(form.querySelector('.community-form-status').textContent, /驳回理由/);
+  form.elements.namedItem('reason').value = '内容仍需要补充来源';
+  form.dispatchEvent(new w.SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: reject })); await turn();
+  assert.deepEqual(JSON.parse(requests.find(entry => entry.url.endsWith('/recommendation/reject')).init.body), { reason: '内容仍需要补充来源' });
+});
+
 test('owners look up a member before appointment and use existing APIs without duplicate submissions', async t => {
   let appointed = false;
   const pending = deferred();

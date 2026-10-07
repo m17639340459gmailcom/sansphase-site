@@ -8,7 +8,7 @@ import { readerAudit, removeReaderAccount } from './reader-account-removal.ts';
 import type { PurgeCommunity } from './reader-account-removal.ts';
 import { createReaderWorkflow, registrationLifetimeMs } from './reader-workflow.ts';
 import { cleanReaderFiles } from './reader-file-cleanup.ts';
-import { createReaderProfileCommands } from './reader-profile-commands.ts';
+import { createReaderProfileCommands, readerProfileReason } from './reader-profile-commands.ts';
 import type { ReaderProfileCommands } from './reader-profile-commands.ts';
 import { createMediaRetention } from './payload/media-retention.ts';
 import type { createReaderUidStore } from './reader-uids.ts';
@@ -73,8 +73,9 @@ export function createReaderAdminService({ payload, authorService, siteOrigin, d
           for (const row of workflow.profiles()) {
             const user = await findReader(row.reader_id).catch(() => null);
             profiles.push({ id: row.id, readerId: row.reader_id, nickname: user?.nickname || '已删除账号',
-              kind: row.kind, proposedValue: row.kind === 'signature' ? row.proposed_value : null,
-              avatarUrl: row.kind === 'avatar' ? `/api/manage/review/avatar/${row.id}.webp` : null, createdAt: row.created_at });
+              kind: row.kind, proposedValue: row.kind !== 'avatar' ? row.proposed_value : null,
+              avatarUrl: row.kind === 'avatar' ? `/api/manage/review/avatar/${row.id}.webp` : null, createdAt: row.created_at,
+              advice: workflow.profileAdvice(row.id).map(item => ({ id: item.id, decision: item.decision, reason: item.reason, by: { kind: item.by_kind, id: item.by_id }, createdAt: item.created_at })) });
           }
           const legacy = await payload.find({ collection: 'readers', depth: 0, limit: 100,
             where: { and: [{ _verified: { equals: false } }, { createdAt: { less_than_equal: new Date(Date.now() - registrationLifetimeMs).toISOString() } }] } });
@@ -113,7 +114,9 @@ export function createReaderAdminService({ payload, authorService, siteOrigin, d
           send(res, await retention.sweepVersions({ ids: input.ids as string[], limit: 1000 })); return;
         }
         if (req.method === 'POST' && path[0] === 'review' && path[1] === 'profile' && uuidPattern.test(path[2] || '') && ['approve', 'reject'].includes(path[3]) && path.length === 4) {
-          await profiles.review(path[2], path[3] as 'approve'|'reject', { kind: 'owner', id: authorId, source: 'main' }, ['avatar', 'signature'], () => assertOwner(req));
+          const input = await body(req); if (Object.keys(input).some(key => key !== 'reason')) throw fail('审核提交包含不支持的字段。');
+          const decision = path[3] as 'approve'|'reject', reason = readerProfileReason(input.reason, decision);
+          await profiles.review(path[2], decision, { kind: 'owner', id: authorId, source: 'main' }, ['avatar', 'signature', 'nickname'], () => assertOwner(req), reason);
           send(res, { ok: true }); return;
         }
         if (req.method === 'GET' && path[0] === 'readers' && uuidPattern.test(path[1] || '') && path[2] === 'logins' && path.length === 3) {

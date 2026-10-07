@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
+import postcss from 'postcss';
 import {
   communityBoards, communityTabs, communityView, communityRoute, inCommunityArea, sortTopics, hotTopics,
   communityHeaderHTML, communityAccountHTML, communityHomeHTML, communityBoardsHTML, communityBoardHTML, communityTagHTML,
@@ -41,6 +42,27 @@ const listing = (items, total = items.length, extra = {}) => ready({ items, tota
 const stats = (topics, repliesToday = 0, latest = null) => ({ topics, repliesToday, latest });
 const summary = (overrides = {}) => ready({ total: 0, repliesToday: 0, checkinsToday: 0, boards: {}, tags: {}, hot: [], ...overrides });
 const count = (html, pattern) => [...html.matchAll(pattern)].length;
+
+test('published moments use the regular reading font without flattening author emphasis or display titles', () => {
+  const css = postcss.parse(readFileSync(new URL('../src/community.css', import.meta.url), 'utf8'));
+  const bodyRules = [];
+  css.walkRules(rule => {
+    if (rule.selector === '.community-text.is-moment') bodyRules.push(rule);
+  });
+  assert.equal(bodyRules.length, 1, 'repair the original rule rather than stack overrides');
+  const font = bodyRules[0].nodes.find(node => node.type === 'decl' && node.prop === 'font');
+  assert.equal(font.value, 'var(--cm-font-body, 19px)/1.9 var(--font)');
+  assert.equal(css.nodes.some(node => node.type === 'rule' && node.selector === '.community-text strong'
+    && node.nodes.some(decl => decl.prop === 'font-weight' && decl.value === '600')), true);
+  for (const board of ['moments', 'qa']) {
+    const dom = new JSDOM(communityPostHTML({ thread: thread({ topic: { board, body: '普通正文 **作者强调**\n\n第二段', title: '现有标题' } }), me: me(), ...common }));
+    const body = dom.window.document.querySelector('.community-thread > .community-text');
+    assert.equal(body.querySelector('strong').textContent, '作者强调');
+    assert.equal(body.querySelectorAll('p').length, 2);
+    assert.equal(dom.window.document.querySelector('h1').textContent, '现有标题');
+    dom.window.close();
+  }
+});
 
 test('management is a dedicated workspace with role navigation, product artwork and required deletion reasons', () => {
   for (const owner of [true, false]) {
@@ -677,7 +699,7 @@ test("the 星尘 center: the ledger, levels and the rules", () => {
   const trust = (entry = stardust(), level = 2) => communityStardustHTML({ stardust: ready(entry), tab: "levels", levelSelection: { mode: "trust", growth: null, trust: level }, ...common });
   assert.doesNotMatch(trust(), /累计访问天数|升级条件|9 \/ 15/);
   assert.match(trust(), /权限与限制/);
-  assert.match(trust(), /版主由作者任命[\s\S]*VIP 不改变信任等级或管理权/);
+  assert.match(trust(), /社区等级按参与情况获得，不自动给予管理权[\s\S]*管理身份及具体能力[\s\S]*VIP 不改变信任等级或管理权/);
   assert.equal(count(trust(), /role="tab" /g), 0);
   assert.doesNotMatch(trust(stardust(), 3), /收到的赞|精华 ≥|被采纳 ≥|180 天内没有处罚/);
   assert.doesNotMatch(trust(stardust({ progress: { ...stardust().progress, clean: false } })), /30 天内没有违规|未满足/);
@@ -897,8 +919,9 @@ test("moderation: the queue, reports, orders with shipping details, shop items, 
       ["#/community/manage", "#/community/manage/profiles", "#/community/manage/content", "#/community/manage/banners", "#/community/manage/orders", "#/community/manage/items", "#/community/manage/stewards", "#/community/manage/sanctions", "#/community/manage/data", "#/community/manage/contact", "#/community/manage/convention"]);
   } finally { queueDom.window.close(); }
   assert.match(queue, /待审 · 初光等级，帖子带外链[\s\S]*&lt;待审&gt;[\s\S]*链接 https:\/\/a\.example[\s\S]*data-action="community-approve" data-id="p1"[\s\S]*data-action="community-reject" data-kind="topic" data-id="p1"/);
-  assert.match(queue, /已自动隐藏 · 举报：其他[\s\S]*data-action="community-restore" data-kind="topic" data-id="h1"[\s\S]*data-kind="topic" data-id="h1" data-violation="true"/);
-  assert.match(queue, /回复已自动隐藏[\s\S]*data-action="community-restore" data-kind="reply" data-id="hr1"[\s\S]*data-kind="reply" data-id="hr1" data-violation="true"/);
+  assert.match(queue, /已自动隐藏 · 举报：其他[\s\S]*data-action="community-restore" data-kind="topic" data-id="h1"[\s\S]*data-action="community-queue-delete" data-kind="topic" data-id="h1"/);
+  assert.match(queue, /回复已自动隐藏[\s\S]*data-action="community-restore" data-kind="reply" data-id="hr1"[\s\S]*data-action="community-queue-delete" data-kind="reply" data-id="hr1"/);
+  assert.doesNotMatch(queue, /data-violation="true"|按违规删除/, 'deletion does not automatically authorize a penalty');
   const steward = communityManageHTML({ manage: ready(manage({ owner: false })), tab: "queue", ...common });
   assert.doesNotMatch(steward, /manage\/orders|manage\/items|manage\/stewards|manage\/convention/, "shop, appointments and convention editing are the owner's");
   const reports = communityManageHTML({ manage: ready(manage()), tab: "reports", ...common });

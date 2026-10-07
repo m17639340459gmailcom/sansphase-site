@@ -7,22 +7,25 @@ import { uuidPattern } from './content-service.ts';
 import { readerAudit } from './reader-account-removal.ts';
 import { cleanReaderFiles } from './reader-file-cleanup.ts';
 import { contactDetailReason } from './reader-profile-policy.ts';
+import { validReaderNickname } from '../src/reader-policy.ts';
 import type { createReaderWorkflow, ProfileKind } from './reader-workflow.ts';
 
 export const readerProfileAvatarBytes = 512 * 1024;
 export type ReaderProfileState = {
   id: string; uid: string | null; nickname: string; signature: string; avatar: string | null;
-  pendingSignature: string | null; pendingAvatar: boolean;
+  pendingSignature: string | null; pendingAvatar: boolean; pendingNickname: string | null;
 };
 export type ReaderProfileReview = {
   id: string; kind: ProfileKind; nickname: string; uid: string | null;
   proposedValue: string | null; avatarUrl: string | null; createdAt: string;
+  advice: ReaderProfileAdvice[];
 };
+export type ReaderProfileAdvice = { id: string; decision: 'approve'|'reject'; reason: string; by: {kind:'owner'|'reader';id:string}; createdAt: string };
 export type ReaderProfileActor = { kind: 'owner' | 'reader'; id: string; source: 'main' | 'community' };
 export type ReaderProfileDecision = { ok: true; id: string; kind: ProfileKind; decision: 'approve' | 'reject' };
 type ReaderRow = { id: string; nickname: string; signature?: string | null; avatar?: string | null; _verified?: boolean; disabled?: boolean };
 type Options = { payload: Payload; directory: string; workflow: ReturnType<typeof createReaderWorkflow>; uidStore: { get: (id: string) => string | null } };
-type Guard = () => Promise<void>;
+type Guard = (kind?: ProfileKind, action?: 'inspect'|'advise'|'decide') => Promise<void>;
 const fail = (message: string, status = 400) => Object.assign(Error(message), { status });
 const formats: Record<string, string> = { 'image/jpeg': 'jpeg', 'image/png': 'png', 'image/webp': 'webp' };
 // Existing reader HTTP, author review and the private bridge share this lock.
@@ -34,6 +37,18 @@ export function readerSignature(value: unknown) {
   if (text.length > 100 || /[\u0000-\u001f\u007f]/u.test(text)) throw fail('个性签名限 100 字，且不能换行。');
   const contact = contactDetailReason(text); if (contact) throw fail(contact);
   return text;
+}
+export function readerNickname(value: unknown) {
+  if (typeof value !== 'string') throw fail('请填写有效的昵称。');
+  const name = value.trim().normalize('NFC');
+  if (!validReaderNickname(name)) throw fail('昵称需为 2 至 8 个可见字符。');
+  return name;
+}
+export function readerProfileReason(value: unknown, decision: 'approve'|'reject', required = true) {
+  if (value !== undefined && typeof value !== 'string') throw fail('请填写有效的审核理由。');
+  const reason = typeof value === 'string' ? value.trim() : '';
+  if (required && decision === 'reject' && !reason || [...reason].length > 200 || /[\u0000-\u001f\u007f<>]/u.test(reason)) throw fail('驳回需填写理由，最多 200 个字。');
+  return reason;
 }
 export async function normalizeReaderAvatar(input: string | Buffer, mimetype: string): Promise<Buffer> {
   if (!formats[mimetype]) throw fail('头像只支持 JPG、PNG 或 WebP 图片。', 415);
@@ -68,6 +83,7 @@ export function createReaderProfileCommands({ payload, directory, workflow, uidS
     avatar: uuidPattern.test(row.avatar || '') ? row.avatar! : null,
     pendingSignature: workflow.profileFor(String(row.id), 'signature')?.proposed_value ?? null,
     pendingAvatar: Boolean(workflow.profileFor(String(row.id), 'avatar')),
+    pendingNickname: workflow.profileFor(String(row.id), 'nickname')?.proposed_value ?? null,
   });
   const guard = async (check?: Guard) => { await check?.(); };
   const currentReview = (id: string, kinds: readonly ProfileKind[]) => {
@@ -88,6 +104,15 @@ export function createReaderProfileCommands({ payload, directory, workflow, uidS
         await guard(check); const row = await active(readerId); await guard(check);
         if (proposed !== (row.signature || '')) workflow.putProfile(readerId, 'signature', proposed);
         else { const previous = workflow.profileFor(readerId, 'signature'); if (previous) workflow.removeProfile(previous.id); }
+        return project(row);
+      });
+    },
+    async submitNickname(readerId: string, value: unknown, check?: Guard): Promise<ReaderProfileState> {
+      const proposed = readerNickname(value);
+      return serialize(async () => {
+        await guard(check); const row = await active(readerId); await guard(check);
+        if (proposed !== row.nickname) workflow.putProfile(readerId, 'nickname', proposed);
+        else { const previous = workflow.profileFor(readerId, 'nickname'); if (previous) workflow.removeProfile(previous.id); }
         return project(row);
       });
     },
@@ -128,39 +153,52 @@ export function createReaderProfileCommands({ payload, directory, workflow, uidS
         const bytes = await readFile(path(row.proposed_value, true)); await guard(check); return bytes;
       });
     },
-    async reviews(kinds: readonly ProfileKind[] = ['avatar', 'signature']): Promise<ReaderProfileReview[]> {
+    async reviews(kinds: readonly ProfileKind[] = ['avatar', 'signature', 'nickname']): Promise<ReaderProfileReview[]> {
       const output: ReaderProfileReview[] = [];
       for (const row of workflow.profiles(1000).filter(row => kinds.includes(row.kind)).slice(0, 100)) {
         const user = await find(row.reader_id);
         output.push({ id: row.id, kind: row.kind, nickname: user?.nickname || '已删除账号', uid: user ? uidStore.get(row.reader_id) : null,
-          proposedValue: row.kind === 'signature' ? row.proposed_value : null,
-          avatarUrl: row.kind === 'avatar' ? `/api/community/manage/profiles/${row.id}/avatar.webp` : null, createdAt: row.created_at });
+          proposedValue: row.kind !== 'avatar' ? row.proposed_value : null,
+          avatarUrl: row.kind === 'avatar' ? `/api/community/manage/profiles/${row.id}/avatar.webp` : null, createdAt: row.created_at,
+          advice: workflow.profileAdvice(row.id).map(item => ({ id: item.id, decision: item.decision, reason: item.reason, by: { kind: item.by_kind, id: item.by_id }, createdAt: item.created_at })) });
       }
       return output;
     },
     reviewImage(reviewId: string, check?: Guard): Promise<Buffer> {
       return serialize(async () => {
-        await guard(check); const row = currentReview(reviewId, ['avatar']);
+        await check?.('avatar', 'inspect'); const row = currentReview(reviewId, ['avatar']);
         if (!uuidPattern.test(row.proposed_value)) throw fail('待审核头像不存在。', 404);
-        const bytes = await readFile(path(row.proposed_value, true)); await guard(check); return bytes;
+        const bytes = await readFile(path(row.proposed_value, true)); await check?.('avatar', 'inspect'); return bytes;
       });
     },
-    review(reviewId: string, decision: 'approve' | 'reject', actor: ReaderProfileActor, kinds: readonly ProfileKind[] = ['avatar', 'signature'], check?: Guard): Promise<ReaderProfileDecision> {
+    async advise(reviewId: string, decision: 'approve'|'reject', reasonValue: unknown, actor: ReaderProfileActor, kinds: readonly ProfileKind[], check?: Guard) {
+      const reason = readerProfileReason(reasonValue, decision);
       return serialize(async () => {
-        await guard(check); const row = currentReview(reviewId, kinds);
+        const row = currentReview(reviewId, kinds); await check?.(row.kind, 'advise');
+        await active(row.reader_id); await check?.(row.kind, 'advise'); currentReview(reviewId, kinds);
+        const advice = workflow.putProfileAdvice(row.id, decision, reason, { kind: actor.kind, id: actor.id });
+        await readerAudit(directory, actor.id)('profile-advised', row.reader_id, { actorKind: actor.kind, source: actor.source, reviewId: row.id, kind: row.kind, decision, reason });
+        return { ok: true as const, id: row.id, kind: row.kind, action: 'advise' as const, advice };
+      });
+    },
+    async review(reviewId: string, decision: 'approve' | 'reject', actor: ReaderProfileActor, kinds: readonly ProfileKind[] = ['avatar', 'signature', 'nickname'], check?: Guard, reasonValue?: unknown): Promise<ReaderProfileDecision> {
+      const reason = readerProfileReason(reasonValue, decision, actor.source === 'community');
+      return serialize(async () => {
+        const row = currentReview(reviewId, kinds); await check?.(row.kind, 'decide');
         if (decision === 'approve') await active(row.reader_id);
-        await guard(check);
+        await check?.(row.kind, 'decide');
         currentReview(reviewId, kinds);
         if (decision === 'approve') {
           const user = await active(row.reader_id);
-          if (row.kind === 'signature') {
-            const proposed = readerSignature(row.proposed_value);
-            await payload.update({ collection: 'readers', id: user.id, data: { signature: proposed } });
+          if (row.kind === 'signature' || row.kind === 'nickname') {
+            const proposed = row.kind === 'signature' ? readerSignature(row.proposed_value) : readerNickname(row.proposed_value);
+            await check?.(row.kind, 'decide'); currentReview(reviewId, kinds);
+            await payload.update({ collection: 'readers', id: user.id, data: { [row.kind]: proposed } });
           } else {
             if (!uuidPattern.test(row.proposed_value)) throw fail('待审核头像不存在。', 404);
             await rename(path(row.proposed_value, true), path(row.proposed_value));
             try {
-              await guard(check); await active(row.reader_id);
+              await check?.(row.kind, 'decide'); await active(row.reader_id); await check?.(row.kind, 'decide'); currentReview(reviewId, kinds);
               await payload.update({ collection: 'readers', id: user.id, data: { avatar: row.proposed_value } });
             }
             catch (error) { await rename(path(row.proposed_value), path(row.proposed_value, true)); throw error; }
@@ -170,7 +208,7 @@ export function createReaderProfileCommands({ payload, directory, workflow, uidS
         workflow.removeProfile(row.id);
         if (decision === 'reject' && row.kind === 'avatar') workflow.queueFile(`pending-reader-avatar-${row.proposed_value}.webp`, 'avatar-rejected');
         await readerAudit(directory, actor.id)(`profile-${decision === 'approve' ? 'approved' : 'rejected'}`, row.reader_id,
-          { actorKind: actor.kind, source: actor.source, reviewId: row.id, kind: row.kind });
+          { actorKind: actor.kind, source: actor.source, reviewId: row.id, kind: row.kind, decision, reason });
         await clean();
         return { ok: true, id: row.id, kind: row.kind, decision };
       });

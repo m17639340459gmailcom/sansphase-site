@@ -18,7 +18,8 @@ export async function reviewTopics(ctx: Ctx, body: Body) {
     for (const id of ids as string[]) {
       const topic = ctx.live.topic(id);
       if (!topic?.pending) throw fail('选择中有帖子已被处理，请刷新列表后重新选择。', 409);
-      if (!ctx.canModerateBoard(topic.board)) throw fail('选择中有不属于你管理板块的帖子。', 403);
+      ctx.requireStaff(body.action === 'approve' ? 'topic.approve' : 'topic.reject', topic.board);
+      if(body.action==='reject')ctx.live.staff.protect(ctx.me,topic.author);
     }
     for (const id of ids as string[]) {
       if (body.action === 'approve') ctx.live.approveTopic(id, now);

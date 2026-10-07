@@ -4,6 +4,7 @@
 
 - npm 依赖锁定于 pnpm-lock.yaml；浏览器实际打包依赖的许可证由构建收集至 dist/assets/licenses/。
 - 个人资料头像与背景裁剪使用 Cropper.js 2.2.0，Copyright 2015-present Chen Fengyuan，MIT 许可证。库按需加载，沿用其裁剪、拖动、缩放和图片导出能力；完整许可证随构建输出保留。
+- 社区近期页面的内存缓存使用 lru-cache 11.5.2，ISC 许可证；缓存数量有上限，账号与权限校验继续由原有服务执行。完整许可证随浏览器构建输出保留。
 - Three.js、Drei、React、React Bits 等保留原许可证及来源。字体和图标使用各自许可证。
 - ESO 图片保留来源、署名及相应使用条款，见 src/vendor/eso-*/sources.json。
 - 用户提供的博客背景记录在 src/vendor/user-space-assets/sources.json。

@@ -39,7 +39,7 @@ async function fixture(t: test.TestContext) {
     ownerReaderIdentity: async req => String(req.headers.cookie || '').split(';')[0] === 'owner'
       ? { kind: 'reader', id: ownerPersonalId, name: '站长个人', vip: false } : null,
     identify: async req => { const id = String(req.headers.cookie || '').split(';')[0]; return id === 'owner' || [...users.values()].includes(id) ? { kind: id === 'owner' ? 'owner' : 'reader', id, name: id, vip: false } : null; },
-    people: async authors => new Map(authors.map(member => [`${member.kind}:${member.id}`, { name: member.id, uid: member.kind === 'owner' ? 'owner' : [...users].find(([, id]) => id === member.id)?.[0] || null, avatar: null, vip: false, joinedAt: '2026-01-01T00:00:00.000Z', bio: '已审核个签' }])),
+    people: async authors => new Map(authors.map(member => [`${member.kind}:${member.id}`, { name: member.id, uid: member.kind === 'owner' ? 'owner' : [...users].find(([, id]) => id === member.id)?.[0] || null, avatar: null, vip: false, joinedAt: '2026-01-01T00:00:00.000Z', bio: '已审核个签', active: true }])),
     findMember: async uid => users.has(uid) ? { kind: 'reader', id: users.get(uid)! } : null,
     audit: async (action, details) => { audits.push({ action, details }); },
   });

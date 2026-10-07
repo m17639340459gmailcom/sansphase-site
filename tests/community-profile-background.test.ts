@@ -103,6 +103,20 @@ test('background review stores reviewer, decision and reason without awarding st
   } finally { db.close(); }
 });
 
+test('delegated background advice stays pending and final decisions require a current explicit guard', async t => {
+  const { store, add } = await fixture(t);
+  const image = add(); store.profileBackgrounds.submit(reader, image);
+  let allowed = true; const guard = () => { if (!allowed) throw Object.assign(Error('revoked'), { status: 403 }); };
+  assert.throws(() => store.profileBackgrounds.advise(reader,image,false,other,'',guard), {status:400});
+  store.profileBackgrounds.advise(reader,image,false,other,'请调整图片',guard);
+  assert.equal(store.profileBackgrounds.state(reader).approved,null); assert.equal(store.profileBackgrounds.state(reader).pending?.id,image);
+  assert.deepEqual(store.profileBackgrounds.advice(image)[0].by,other);
+  allowed=false; assert.throws(() => store.profileBackgrounds.review(reader,image,true,other,'',undefined,guard), {status:403});
+  assert.equal(store.profileBackgrounds.state(reader).pending?.id,image);
+  allowed=true; store.profileBackgrounds.review(reader,image,true,other,'',undefined,guard);
+  assert.equal(store.profileBackgrounds.state(reader).approved?.id,image); assert.equal(store.profileBackgrounds.advice(image).length,0);
+});
+
 for (const legacy of ["'content','shop'", "'content','shop','banner'"]) test(`profile image migration widens legacy ${legacy} checks once and preserves indexes, triggers and existing references`, async t => {
   const { directory, store } = await fixture(t), image = randomUUID();
   store.addImage({ id: image, uploader: owner, width: 100, height: 100, purpose: 'shop' });

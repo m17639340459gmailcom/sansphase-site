@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
-import { createCommunityHostStore, prepareCommunityHostDirectory } from '../server/community-host-store.ts';
+import { createCommunityHostStore, prepareCommunityHostDirectory, hostSessionIdleMs } from '../server/community-host-store.ts';
 import { createCommunityHostAccess } from '../server/community-host-access.ts';
 import { signIdentityRequest } from '../server/community-identity-protocol.ts';
 import { JSDOM } from 'jsdom';
@@ -123,6 +123,126 @@ test('every protected request rechecks VIP and session revocation, bridge failur
   assert.equal((await fetch(env.url + '/api/community/me', { headers: { cookie } })).status, 401);
   env.setInvalid(false);
   assert.equal((await fetch(env.url + '/api/community/me', { headers: { cookie } })).status, 401);
+});
+
+test('passive community GET keeps fresh authority checks without renewing the host idle session', async t => {
+  const env = await setup(t);
+  let now = Date.now();
+  const enteredAt = now;
+  t.mock.method(Date, 'now', () => now);
+  const entered = await env.exchange('r1');
+  const cookie = entered.headers.getSetCookie().find(value => value.startsWith('sansphase_community_session='))!.split(';')[0];
+  const token = cookie.slice(cookie.indexOf('=') + 1);
+  const headers = { cookie, 'X-Community-Passive': '1' };
+  now += 20 * 60_000;
+  env.setVip(true);
+  assert.equal((await (await fetch(env.url + '/api/community/me', { headers })).json()).viewer.vip, true);
+  assert.equal(env.store.session(token)!.touchedAt, enteredAt);
+  now += 5 * 60_000;
+  env.setVip(false);
+  assert.equal((await (await fetch(env.url + '/api/community/me', { headers })).json()).viewer.vip, false);
+  assert.equal(env.store.session(token)!.touchedAt, enteredAt);
+  assert.equal(env.calls.filter(call => call.operation === 'session').length, 2, 'each passive request must recheck the main-site session');
+  now = enteredAt + hostSessionIdleMs;
+  const expired = await fetch(env.url + '/api/community/me', { headers });
+  assert.equal(expired.status, 401);
+  assert.equal((await expired.json()).code, 'COMMUNITY_ENTRY_REQUIRED');
+  assert.equal(env.store.session(token), null);
+  assert.equal(env.calls.filter(call => call.operation === 'session').length, 2, 'an idle-expired session is rejected locally before any source request');
+});
+
+test('POST, HEAD, normal GET and non-community requests cannot use the passive marker to alter idle behavior', async t => {
+  const env = await setup(t);
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  const entered = await env.exchange('r1');
+  const cookie = entered.headers.getSetCookie().find(value => value.startsWith('sansphase_community_session='))!.split(';')[0];
+  const token = cookie.slice(cookie.indexOf('=') + 1);
+  const cases = [
+    { path: '/api/community/me', method: 'GET', marker: '' },
+    { path: '/api/community/me', method: 'GET', marker: 'true' },
+    { path: '/api/community/me', method: 'GET', marker: '01' },
+    { path: '/api/community/me', method: 'GET', marker: '1, 1' },
+    { path: '/api/community/me', method: 'POST', marker: '1' },
+    { path: '/api/community/me', method: 'HEAD', marker: '1' },
+    { path: '/api/reader/session', method: 'GET', marker: '1' },
+    { path: '/api/content?view=bootstrap', method: 'GET', marker: '1' },
+    { path: '/', method: 'GET', marker: '1' },
+  ];
+  for (const item of cases) {
+    now += 60_000;
+    const response = await fetch(env.url + item.path, { method: item.method, headers: { cookie, 'X-Community-Passive': item.marker } });
+    assert.equal(response.status, 200, `${item.method} ${item.path} ${item.marker}`);
+    assert.equal(env.store.session(token)!.touchedAt, now, `${item.method} ${item.path} is ordinary activity`);
+  }
+  assert.equal(env.calls.filter(call => call.operation === 'session').length, cases.length);
+});
+
+test('passive requests still fail closed after bridge outage, main-site revocation or local purge', async t => {
+  const env = await setup(t);
+  let now = Date.now();
+  const enteredAt = now;
+  t.mock.method(Date, 'now', () => now);
+  const entered = await env.exchange('r1');
+  const cookie = entered.headers.getSetCookie().find(value => value.startsWith('sansphase_community_session='))!.split(';')[0];
+  const token = cookie.slice(cookie.indexOf('=') + 1), headers = { cookie, 'X-Community-Passive': '1' };
+  now += 60_000;
+  env.setUnavailable(true);
+  assert.equal((await fetch(env.url + '/api/community/me', { headers })).status, 503);
+  assert.equal(env.store.session(token)!.touchedAt, enteredAt);
+  env.setUnavailable(false); env.setInvalid(true);
+  assert.equal((await fetch(env.url + '/api/community/me', { headers })).status, 401);
+  env.setInvalid(false);
+  assert.equal((await fetch(env.url + '/api/community/me', { headers })).status, 401);
+  assert.equal(env.store.session(token), null);
+  const replacement = await env.exchange('r1');
+  const newCookie = replacement.headers.getSetCookie().find(value => value.startsWith('sansphase_community_session='))!.split(';')[0];
+  env.store.markReaderDeleted('r1');
+  assert.equal((await fetch(env.url + '/api/community/me', { headers: { cookie: newCookie, 'X-Community-Passive': '1' } })).status, 401);
+});
+
+test('community image and avatar GET never renew idle while uploads and unrecognized webp paths remain active', async t => {
+  const env = await setup(t);
+  let now = Date.now();
+  const enteredAt = now;
+  t.mock.method(Date, 'now', () => now);
+  const entered = await env.exchange('r1');
+  const cookie = entered.headers.getSetCookie().find(value => value.startsWith('sansphase_community_session='))!.split(';')[0];
+  const token = cookie.slice(cookie.indexOf('=') + 1);
+  const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const media = [`images/${id}.webp`, `images/${id}.thumb.webp`, 'avatar/10001.webp?v=new', 'profile/avatar/pending.webp', `manage/profiles/${id}/avatar.webp`];
+  for (const path of media) {
+    now += 60_000;
+    assert.equal((await fetch(env.url + '/api/community/' + path, { headers: { cookie } })).status, 200);
+    assert.equal(env.store.session(token)!.touchedAt, enteredAt, path);
+  }
+  const activity = [
+    { path: 'images', method: 'POST' }, { path: 'profile/avatar', method: 'POST' }, { path: 'profile/background', method: 'POST' },
+    { path: `images/${id}.webp`, method: 'POST' }, { path: 'unrecognized.webp', method: 'GET' },
+    { path: 'images/not-a-uuid.webp', method: 'GET' }, { path: `profile/background/${id}.webp`, method: 'GET' },
+  ];
+  for (const { path, method } of activity) {
+    now += 60_000;
+    assert.equal((await fetch(env.url + '/api/community/' + path, { method, headers: { cookie, ...(method === 'POST' ? { 'X-Community-Passive': '1' } : {}) } })).status, 200);
+    assert.equal(env.store.session(token)!.touchedAt, now, `${method} ${path}`);
+  }
+  assert.equal(env.calls.filter(call => call.operation === 'session').length, media.length + activity.length, 'all media and activity requests still recheck authority');
+});
+
+test('a passive source response cannot resurrect a host session that expired while authorization was pending', async t => {
+  const env = await setup(t);
+  let now = Date.now();
+  const enteredAt = now;
+  t.mock.method(Date, 'now', () => now);
+  const entered = await env.exchange('r1');
+  const cookie = entered.headers.getSetCookie().find(value => value.startsWith('sansphase_community_session='))!.split(';')[0];
+  now += 20 * 60_000;
+  const gate = env.holdNextSessionResponse();
+  const request = fetch(env.url + '/api/community/me', { headers: { cookie, 'X-Community-Passive': '1' } });
+  await gate.waiting;
+  now = enteredAt + hostSessionIdleMs;
+  gate.release();
+  assert.equal((await request).status, 401);
 });
 
 test('concurrent requests cannot share identity context and refresh needs the original session', async t => {

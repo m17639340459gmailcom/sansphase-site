@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash } from 'node:crypto';
+import { isCommunityPassiveRead } from './community-passive-request.ts';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { clientAddress } from './client-ip.ts';
 import { verifyIdentityRequest } from './community-identity-protocol.ts';
@@ -132,7 +133,7 @@ export function createCommunityHostAccess({ store, client, siteOrigin, mainSiteO
       const alive = store.session(token);
       if (!alive || alive.tokenHash !== session.tokenHash || alive.sessionRef !== session.sessionRef || alive.createdAt !== session.createdAt
         || identity.viewer.kind !== session.kind || identity.viewer.id !== session.id) throw Object.assign(Error('Identity changed or revoked.'), { status: 401 });
-      store.touchSession(token);
+      if (!isCommunityPassiveRead(req)) store.touchSession(token);
       await context.run({ req, session, identity, token }, next);
     } catch (error) {
       if (res.headersSent) { res.destroy(); return; }

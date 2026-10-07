@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { createHash } from 'node:crypto';
 import { readFile, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fail, memberKey, same } from './community-db.ts';
@@ -13,6 +14,8 @@ import { manageRoutes } from './community-routes-manage.ts';
 import { publicModerationContacts } from './community-moderation-contact.ts';
 import { createOwnerReaderPreview } from './community-owner-reader-preview.ts';
 import { profileRoutes } from './community-routes-profile.ts';
+import { isCommunityPassiveRead } from './community-passive-request.ts';
+import { communityApprovedAvatarURL } from './community-avatar-url.ts';
 
 export { communityContactReason } from './community-context.ts';
 export type { CommunityViewer, PersonInfo } from './community-context.ts';
@@ -29,6 +32,7 @@ export function createCommunityService(options: ServiceOptions) {
   const { store, siteOrigin, directory, identify, people } = options;
   if (!siteOrigin || !identify || !people) throw Error('Community service requires the site origin, identity and people.');
   const ownerMember: CommunityAuthor = { kind: 'owner', id: options.ownerId || 'owner' };
+  store?.staff.bindOwner(ownerMember.id);
   const uploads = directory ? resolve(directory, 'uploads') : '';
   const words = (options.words || []).map(word => word.normalize('NFKC').toLowerCase().trim()).filter(Boolean);
   let lastUpkeep = 0;
@@ -76,8 +80,8 @@ export function createCommunityService(options: ServiceOptions) {
     const live = store!;
     options.assertActive?.(req);
     const me: CommunityAuthor = { kind: viewer.kind, id: viewer.id };
-    const actualOwner = viewer.kind === 'owner' || viewer.ownerAccountId === ownerMember.id;
-    live.members.visit(me);
+    const actualOwner = viewer.kind === 'owner' && viewer.id === ownerMember.id || viewer.ownerAccountId === ownerMember.id;
+    if (!isCommunityPassiveRead(req)) live.members.visit(me);
     const actualModerationBoards = live.members.moderationBoards(me);
     const actualMod = actualOwner || live.members.steward(me) && actualModerationBoards.length > 0;
     const browsingAsReader = actualMod && /(?:^|;\s*)community_browse=reader(?:;|$)/.test(String(req.headers.cookie || ''));
@@ -87,12 +91,28 @@ export function createCommunityService(options: ServiceOptions) {
     const trustLevel = ownerReaderPreview?.trustLevel ?? (browsingAsReader ? 1 : live.members.trustLevel(me));
     // Appointments grant board moderation, not automatic trust, posting or reward benefits.
     const level = trustLevel;
+    let staffAccountsValid = true;
+    const relatedStaffReaders:CommunityAuthor[]=[];
+    const refreshStaff = async (related:readonly CommunityAuthor[]=[]) => {
+      for(const member of related)if(member.kind==='reader'&&!relatedStaffReaders.some(previous=>same(previous,member)))relatedStaffReaders.push(member);
+      const currentStaff = live.staff.state(me);
+      const ancestors = live.staff.ancestors(me).filter(member => member.kind === 'reader');
+      const readers=[...(currentStaff&&me.kind==='reader'?[me,...ancestors]:[]),...relatedStaffReaders];
+      if(!readers.length){staffAccountsValid=true;return;}
+      const map = await people(readers);
+      options.assertActive?.(req);
+      const current = live.staff.ancestors(me).filter(member => member.kind === 'reader');
+      staffAccountsValid = readers.every(member=>map.get(memberKey(member))?.active===true) && current.length === ancestors.length
+        && current.every(member => ancestors.some(previous => same(member, previous)) && map.get(memberKey(member))?.active === true);
+    };
     // A request body may arrive after an appointment changes; check live authorization at use.
-    const moderationBoards = () => browsingAsReader ? [] : live.members.moderationBoards(me);
+    const moderationBoards = () => browsingAsReader || !staffAccountsValid ? [] : live.members.moderationBoards(me);
     const mod = () => owner || moderationBoards().length > 0;
-    const canModerateBoard = (board: string) => moderationBoards().includes(board);
+    const canStaff: Ctx['canStaff'] = (permission, board) => !browsingAsReader && staffAccountsValid && live.staff.can(me, permission, board);
+    const requireStaff: Ctx['requireStaff'] = (permission, board) => { if (!canStaff(permission, board)) throw fail('管理权限发生变化，或没有这项操作的权限。', 403); };
+    const canModerateBoard = (board: string) => canStaff('content.inspect', board);
     viewer = { ...viewer, vip: ownerReaderPreview !== null || viewer.vip && !browsingAsReader };
-    const canSeeBoard = (board: string) => board !== membersBoard || viewer.vip || owner || canModerateBoard(board);
+    const canSeeBoard = (board: string) => board !== membersBoard || viewer.vip || owner || moderationBoards().includes(board);
     const person = (author: CommunityAuthor, map: Map<string, PersonInfo>) => {
       const info = map.get(memberKey(author));
       if (!info) return { name: '已注销用户', role: author.kind, uid: null, avatar: null, vip: false, level: 0, growth: null, vipGrowth: null, frame: null, color: null };
@@ -106,13 +126,13 @@ export function createCommunityService(options: ServiceOptions) {
         uid: info.uid,
         showUid: canSeeUid,
         growth: preview?.growth ?? live.experience.state(author), vipGrowth: preview?.vipGrowth ?? live.experience.vipState(author, info.vip),
-        avatar: info.avatar && info.uid ? `/api/community/avatar/${encodeURIComponent(info.uid)}.webp?v=${encodeURIComponent(info.avatar.slice(0, 8))}` : null,
+        avatar: communityApprovedAvatarURL(info.uid, info.avatar),
         vip: preview ? true : info.vip, level: preview?.trustLevel ?? live.members.level(author), steward: preview ? false : steward,
+        staffRole: preview ? null : live.staff.state(author)?.role ?? null,
         ...(steward ? { moderationBoards: live.members.moderationBoards(author) } : {}), frame: decorations.frame, color: decorations.color, ...(nameEffect ? { nameEffect } : {}),
       };
     };
     const peopleIn = (topics: StoredTopic[]) => topics.flatMap(topic => topic.lastReply ? [topic.author, topic.lastReply.author] : [topic.author]);
-    // Storage details carry private fields (including the complete paid prompt).
     // Select public summary fields explicitly, even when passed a full thread.
     const topicDTO = (topic: StoredTopic, map: Map<string, PersonInfo>) => ({
       id: topic.id, board: topic.board, title: topic.title, author: person(topic.author, map),
@@ -133,20 +153,31 @@ export function createCommunityService(options: ServiceOptions) {
     };
     return {
       req, res, url: new URL(req.url || '', siteOrigin), path, method: req.method || 'GET',
-      viewer, me, live, options, level, trustLevel, owner, canModerateBoard, ownerMember, actualOwner, actualMod, browsingAsReader, readOnly, ownerReaderPreview,
+      viewer, me, live, options, level, trustLevel, owner, canModerateBoard, ownerMember, actualOwner, browsingAsReader, readOnly, ownerReaderPreview,
+      get actualMod() { return actualOwner || staffAccountsValid && Boolean(live.staff.state(me)); },
       get mod() { return mod(); },
       get moderationBoards() { return moderationBoards(); },
-      canSeeBoard, hiddenBoard: canSeeBoard(membersBoard) ? '' : membersBoard,
+      get staff() { return browsingAsReader || !staffAccountsValid ? null : live.staff.state(me); },
+      canStaff, requireStaff, refreshStaff,
+      canSeeBoard, get hiddenBoard() { return canSeeBoard(membersBoard) ? '' : membersBoard; },
       send: (value, status) => { options.assertActive?.(req); sendTo(res, value, status); },
-      json: async () => { const value = await (body ||= readJson(req)); requireConsent(); return value; },
-      people: async authors => { const map = await people(authors); requireConsent(); return map; }, person, topicDTO,
+      json: async () => { const value = await (body ||= readJson(req)); await refreshStaff(); requireConsent(); return value; },
+      people: async authors => { const map = await people(authors); await refreshStaff(); requireConsent(); return map; }, person, topicDTO,
       requireConsent,
-      topicsDTO: async topics => { const map = await people(peopleIn(topics)); options.assertActive?.(req); return topics.map(topic => topicDTO(topic, map)); },
+      topicsDTO: async topics => {
+        const map = await people(peopleIn(topics)); await refreshStaff(); options.assertActive?.(req);
+        return topics.filter(topic => {
+          const current = live.topic(topic.id);
+          return current && current.board === topic.board && canSeeBoard(current.board)
+            && (!(current.pending || current.hidden) || same(current.author, me) || canModerateBoard(current.board));
+        }).map(topic => topicDTO(topic, map));
+      },
       throttle(kind) {
         requireConsent();
         live.rateLimits.consume(me, kind, level);
       },
       auditMutation: async <T>(action: string, execute: () => T, details: CommunityAuditDetails<T> = {}) => {
+        await refreshStaff();
         const result = live.audit.run(me, `community-${action}`, () => { requireConsent(); return execute(); }, details);
         await drainFiles();
         await live.audit.flush(auditMirror);
@@ -164,13 +195,25 @@ export function createCommunityService(options: ServiceOptions) {
     };
   }
 
+  // Call only after the current request and image visibility were checked.
+  // Browsers may retain bytes, but every reuse returns through those same checks.
+  function sendImage(ctx: Ctx, data: Buffer) {
+    const etag = `"${createHash('sha256').update(data).digest('hex')}"`;
+    const headers = { 'Content-Type': 'image/webp', 'Cache-Control': 'private, no-cache', Vary: 'Cookie', ETag: etag, 'X-Content-Type-Options': 'nosniff' };
+    const validator = ctx.req.headers['if-none-match'];
+    const unchanged = typeof validator === 'string' && validator.split(',').some(value => value.trim() === '*' || value.trim().replace(/^W\//, '') === etag);
+    if (unchanged) { ctx.res.writeHead(304, headers); ctx.res.end(); return; }
+    ctx.res.writeHead(200, { ...headers, 'Content-Length': data.length });
+    ctx.res.end(data);
+  }
+
   async function serveImage(ctx: Ctx, id: string, thumb: boolean) {
     const allowed = () => {
       options.assertActive?.(ctx.req);
       const image = ctx.live.image(id);
       if (!image || image.deleted_at) return false;
-      if (image.purpose === 'profile') return ctx.live.profileBackgrounds.imageVisible(id, ctx.me, ctx.browsingAsReader);
-      if (image.purpose === 'banner') return ctx.live.banners.imageVisible(id, ctx.me, ctx.canSeeBoard);
+      if (image.purpose === 'profile') return ctx.live.profileBackgrounds.imageVisible(id, ctx.me, ctx.browsingAsReader, ctx.canStaff('profile.background.advise') || ctx.canStaff('profile.background.decide'));
+      if (image.purpose === 'banner') return ctx.live.banners.imageVisible(id, ctx.me, ctx.canSeeBoard,scope=>scope==='home'?ctx.owner:ctx.canStaff('banner.manage',scope));
       if (image.topic_id) {
         const topic = ctx.live.topic(image.topic_id);
         const reply = image.reply_id ? ctx.live.reply(image.reply_id) : null;
@@ -182,9 +225,9 @@ export function createCommunityService(options: ServiceOptions) {
     if (!allowed() || !uploads) throw fail('图片不存在。', 404);
     let data: Buffer;
     try { data = await readFile(resolve(uploads, `community-${thumb ? 'thumb' : 'image'}-${id}.webp`)); } catch { throw fail('图片不存在。', 404); }
+    await ctx.refreshStaff();
     if (!allowed()) throw fail('图片不存在。', 404);
-    ctx.res.writeHead(200, { 'Content-Type': 'image/webp', 'Content-Length': data.length, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' });
-    ctx.res.end(data);
+    sendImage(ctx, data);
   }
   // Approved avatars are shown to other signed-in members; pending ones stay private.
   async function serveAvatar(ctx: Ctx, uid: string) {
@@ -196,9 +239,11 @@ export function createCommunityService(options: ServiceOptions) {
       try { data = await readFile(file); } catch { throw fail('头像不存在。', 404); }
     }
     if (!data) throw fail('头像不存在。', 404);
+    const principal = await identify(ctx.req);
+    const expected = ctx.viewer.ownerAccountId ? { kind: 'owner', id: ctx.viewer.ownerAccountId } : ctx.me;
+    if (!principal || principal.kind !== expected.kind || principal.id !== expected.id) throw fail('请重新登录后进入社区。', 401);
     options.assertActive?.(ctx.req);
-    ctx.res.writeHead(200, { 'Content-Type': 'image/webp', 'Content-Length': data.length, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' });
-    ctx.res.end(data);
+    sendImage(ctx, data);
   }
 
   return {
@@ -210,6 +255,7 @@ export function createCommunityService(options: ServiceOptions) {
         const identified = await identify(req);
         options.assertActive?.(req);
         if (!identified) throw fail('请先登录。', 401);
+        if (identified.kind === 'owner' && identified.id !== ownerMember.id) throw fail('作者身份无效。', 401);
         // The management principal stays in its host session. Only this verified
         // resolver chooses a personal execution identity; a cookie is not authority.
         let viewer: CommunityViewer = { kind: identified.kind, id: identified.id, name: identified.name, vip: identified.vip };
@@ -228,6 +274,7 @@ export function createCommunityService(options: ServiceOptions) {
         await upkeep();
         options.assertActive?.(req);
         const ctx = context(req, res, path, viewer);
+        await ctx.refreshStaff();
         if (req.method === 'GET') {
           const image = /^images\/([0-9a-f-]{36})(\.thumb)?\.webp$/.exec(path);
           if (image) { await serveImage(ctx, image[1], Boolean(image[2])); return; }

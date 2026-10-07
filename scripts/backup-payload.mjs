@@ -1,7 +1,8 @@
 import { DatabaseSync, backup } from "node:sqlite";
-import { mkdir, readFile, writeFile, copyFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, copyFile, lstat, unlink } from "node:fs/promises";
 import { resolve, basename } from "node:path";
 import {fileHash} from '../server/file-hash.ts';
+import { createReaderProfileBackupGuard, snapshotReaderProfileWorkflow, verifyReaderProfileWorkflowSnapshot } from '../server/reader-profile-backup.ts';
 const settings = JSON.parse(
   await readFile(
     process.env.PAYLOAD_CONFIG_FILE || ".local/payload-env.json",
@@ -15,12 +16,9 @@ const target = resolve(
 );
 await mkdir(target, { recursive: false });
 await mkdir(resolve(target, "uploads"));
-const db = new DatabaseSync(resolve(source, "content.db"), { readOnly: true });
+const guard=createReaderProfileBackupGuard(source);
 try {
-  await backup(db, resolve(target, "content.db"));
-} finally {
-  db.close();
-}
+await backup(guard.content, resolve(target, "content.db"));
 const snapshot = new DatabaseSync(resolve(target, "content.db"), {
   readOnly: true,
 });
@@ -71,6 +69,20 @@ for (const { avatar } of readerAvatars) {
   await copyFile(resolve(source, 'uploads', filename), resolve(target, 'uploads', filename));
   paths.push(`uploads/${filename}`);
 }
+const pendingReaderAvatars = await snapshotReaderProfileWorkflow(source,target);
+if (pendingReaderAvatars) {
+  paths.push('reader-workflow.db');
+  for (const id of pendingReaderAvatars) {
+    const filename=`pending-reader-avatar-${id}.webp`;
+    await copyFile(resolve(source,'uploads',filename),resolve(target,'uploads',filename)); paths.push(`uploads/${filename}`);
+  }
+  const audit='reader-admin-audit.jsonl';
+  try {
+    const file=await lstat(resolve(source,audit));
+    if(!file.isFile() || file.isSymbolicLink()) throw Error('Profile decision audit must be a regular private file.');
+    await copyFile(resolve(source,audit),resolve(target,audit)); paths.push(audit);
+  } catch(error) {if(error?.code!=='ENOENT')throw error;}
+}
 for (const { id, referenced } of communityImages) {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)) continue;
   for (const filename of [`community-image-${id}.webp`, `community-thumb-${id}.webp`]) {
@@ -84,16 +96,26 @@ const manifest = {
   provider: "payload",
   createdAt: new Date().toISOString(),
   files: [],
+  ...(pendingReaderAvatars ? {profileWorkflow:'durable-v1'} : {}),
 };
 for (const path of paths)
   manifest.files.push({
     path,
     sha256: await fileHash(resolve(target,path)),
   });
+if (pendingReaderAvatars) verifyReaderProfileWorkflowSnapshot(target,manifest.files);
+// Immutable upload bytes and the decision audit must still agree with their
+// copied hashes. Database version checks below cover every source commit.
+for(const file of manifest.files.filter(file=>file.path.startsWith('uploads/') || file.path==='reader-admin-audit.jsonl' || file.path==='migration-complete.json'))
+  if(await fileHash(resolve(source,file.path))!==file.sha256)throw Error('Source files changed during backup; retry in a quiet window.');
+guard.assertUnchanged();
 await writeFile(
   resolve(target, "backup-manifest.json"),
   JSON.stringify(manifest, null, 2),
 );
+try {guard.assertUnchanged();}
+catch(error) {await unlink(resolve(target,'backup-manifest.json'));throw error;}
 console.log(
   `Verified backup created: ${target} (${files.length} media files). Contains private settings; keep outside the public website.`,
 );
+} finally {guard.close();}

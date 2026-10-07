@@ -56,7 +56,7 @@ async function setup(t: TestContext) {
     },
     people: async authors => new Map(authors.flatMap(author => {
       const info = author.kind === 'owner' ? { name: '無相', uid: 'owner' } : accounts.get(author.id);
-      return info ? [[`${author.kind}:${author.id}`, { ...info, avatar: null, vip: author.kind === 'owner', joinedAt: null, bio: '' }]] : [];
+      return info ? [[`${author.kind}:${author.id}`, { ...info, avatar: null, vip: author.kind === 'owner', joinedAt: null, bio: '',active:true }]] : [];
     })),
     findMember: async uid => {
       if (uid === 'owner') return { kind: 'owner', id: 'owner' };
@@ -86,7 +86,7 @@ test('author manages the appointed moderator roster using the existing member ac
   assert.deepEqual(first.stewards.map((person: { uid: string; name: string; steward: boolean }) => [person.uid, person.name, person.steward]), [['10003', '守望', true]]);
   assert.equal(first.stewards[0].showUid, true, 'the author sees the public member UID needed for removal');
 
-  assert.equal((await post('members/10002/steward', { on: true, boards: ['qa', 'tools'] })).status, 200);
+  assert.equal((await post('members/10002/steward', {on:true,role:'general',boards:['qa','tools'],permissions:['content.inspect'],delegable:[]})).status, 200);
   const appointed = await (await get('manage?tab=stewards')).json();
   assert.deepEqual(appointed.stewards.map((person: { uid: string }) => person.uid).sort(), ['10002', '10003']);
   assert.equal(store.members.steward(candidate), true);
@@ -95,7 +95,7 @@ test('author manages the appointed moderator roster using the existing member ac
   assert.deepEqual(removed.stewards.map((person: { uid: string }) => person.uid), ['10003']);
   assert.equal(store.members.steward(candidate), false);
   assert.deepEqual(audits.map(row => [row.action, row.details.member, row.details.on]), [
-    ['community-steward', 'reader:candidate', true], ['community-steward', 'reader:candidate', false],
+    ['community-staff-appointment', 'reader:candidate', true], ['community-staff-appointment', 'reader:candidate', false],
   ]);
 });
 

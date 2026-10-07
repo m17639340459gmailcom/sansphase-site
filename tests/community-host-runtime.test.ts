@@ -19,7 +19,8 @@ const community = 'https://community.sansphase.com';
 const secret = 'test-bridge-secret-with-at-least-32-characters';
 const authorId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const readerId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
-const reader = { id: readerId, uid: '10001', nickname: '测试读者', signature: '', avatar: '/api/reader/avatar/private-id.webp', vip: true, vipStartedAt: '2026-10-01T00:00:00.000Z', vipUntil: '2027-10-01T00:00:00.000Z' };
+const avatarId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+const reader = { id: readerId, uid: '10001', nickname: '测试读者', signature: '', avatar: `/api/reader/avatar/${avatarId}.webp`, vip: true, vipStartedAt: '2026-10-01T00:00:00.000Z', vipUntil: '2027-10-01T00:00:00.000Z' };
 const observer = { ...reader, id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', uid: '10002', nickname: '旁观读者' };
 let template: string;
 test.before(async () => { template = await mkdtemp(resolve(tmpdir(), 'host-runtime-template-')); await prepareCommunityHostDirectory(template); });
@@ -39,7 +40,7 @@ async function fixture(t: test.TestContext) {
   const authority = createIdentityAuthority({ directory: mainDirectory, siteOrigin: main, communityOrigin: community, ownerId: authorId, secret, stateEncryptionKey: 'separate-test-encryption-key-at-least-32-chars',
     readerIdentity: async req => { if (state.unavailable) throw Error('private source failure'); const account = req.headers.cookie === 'sansphase_reader_session=main.token' ? reader : req.headers.cookie === 'sansphase_reader_session=main.observer' ? observer : null; return state.enabled && account ? { ...account, vip: state.vip } : null; },
     ownerIdentity: async () => null,
-    people: async authors => new Map(authors.flatMap(author => { const account = [reader, observer].find(item => item.id === author.id); return account ? [[`${author.kind}:${author.id}`, { name: account.nickname, uid: account.uid, avatar: 'private-id', bio: account.signature, vip: state.vip, joinedAt: '2026-01-01T00:00:00Z' }] as const] : []; })),
+    people: async authors => new Map(authors.flatMap(author => { const account = [reader, observer].find(item => item.id === author.id); return account ? [[`${author.kind}:${author.id}`, { name: account.nickname, uid: account.uid, avatar: avatarId, bio: account.signature, vip: state.vip, joinedAt: '2026-01-01T00:00:00Z' }] as const] : []; })),
     findMember: async uid => { const account = [reader, observer].find(item => item.uid === uid); return account ? { kind: 'reader', id: account.id } : null; },
     findByNames: async names => new Map(names.filter(name => name === reader.nickname).map(name => [name, { kind: 'reader' as const, id: readerId }])),
     avatar: async () => Buffer.from('approved-avatar'),
@@ -93,12 +94,13 @@ test('standalone host exchanges real protocol tickets, boots only community and 
   assert.ok(html.includes('data-community-only="true" data-community-boot="pending"'));
   const bootstrap = await (await fetch(env.local + '/api/content?view=bootstrap', { headers: { cookie } })).json();
   assert.equal(bootstrap.communityOnly, true); assert.equal(bootstrap.mainSiteOrigin, main); assert.equal(bootstrap.communityEnabled, true);
-  assert.equal(bootstrap.reader.avatar, '/api/community/avatar/10001.webp');
+  assert.equal(bootstrap.reader.avatar, `/api/community/avatar/10001.webp?v=${avatarId}`);
   for (const privateValue of ['main.token', 'password', 'email', 'phone']) assert.ok(!JSON.stringify(bootstrap).includes(privateValue));
   assert.equal((await fetch(env.local + '/api/content?view=list&kind=notes', { headers: { cookie } })).status, 404);
   assert.equal((await fetch(env.local + '/api/reader/register', { method: 'POST', headers: { cookie } })).status, 404);
   const me = await (await fetch(env.local + '/api/community/me', { headers: { cookie } })).json();
   assert.equal(me.name, reader.nickname); assert.equal(me.vip, true);
+  assert.equal(me.avatar, bootstrap.reader.avatar);
   assert.equal(await (await fetch(env.local + '/api/community/avatar/10001.webp', { headers: { cookie } })).text(), 'approved-avatar');
   const repeat = await fetch(env.local + '/api/community-entry', { method: 'POST', headers: { Origin: community, 'X-Reader-Request': '1', Cookie: bindingCookie.split(';')[0] }, body: JSON.stringify({ ticket }) });
   assert.equal(repeat.status, 401);

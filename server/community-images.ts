@@ -28,6 +28,8 @@ async function usableFrame(image: Buffer, width: number, height: number) {
 export async function saveCommunityImage(ctx: Ctx, shop = false, bannerScope?: string, profile = false) {
   if (profile && ctx.me.kind !== 'reader') throw fail('作者品牌资料不能通过读者编辑器修改。', 403);
   const bannerAccess = { actor: ctx.me, browsingAsReader: ctx.browsingAsReader, canSeeBoard: ctx.canSeeBoard };
+  const requireBanner = () => { if(bannerScope !== undefined && bannerScope !== 'home')ctx.requireStaff('banner.manage',bannerScope); };
+  requireBanner();
   if (bannerScope !== undefined) ctx.live.banners.authorize(bannerScope, bannerAccess);
   const directory = ctx.options.directory;
   if (!directory) throw fail('图片上传暂未开放。', 503);
@@ -62,6 +64,8 @@ export async function saveCommunityImage(ctx: Ctx, shop = false, bannerScope?: s
       await writeFile(thumbPath, thumb, { flag: 'wx', mode: 0o600 });
       // Re-encoding and disk writes yield; recheck the real appointment before
       // recording a completed upload, and remove the files when access changed.
+      await ctx.refreshStaff();
+      requireBanner();
       if (bannerScope !== undefined) ctx.live.banners.authorize(bannerScope, bannerAccess);
       ctx.requireConsent();
       const register = () => ctx.live.addImage({ id, uploader: ctx.me, width, height, purpose: profile ? 'profile' : bannerScope !== undefined ? 'banner' : shop ? 'shop' : 'content', frameReady, bannerScope: bannerScope ?? null });

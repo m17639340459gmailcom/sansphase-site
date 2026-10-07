@@ -242,6 +242,11 @@ body.admin-open #main { min-height: 0; }
 .reader-admin-review-item small { margin-top: 4px; color: #a9bdd3; font-size: 11px; }
 .reader-admin-review-item p { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .reader-admin-review-item img { display: block; margin-top: 10px; object-fit: cover; border: 1px solid rgba(178, 202, 231, .3); }
+.reader-admin-review-content { flex: 1; min-width: 0; }
+.reader-admin-review-reason { display: block; margin-top: 12px; }
+.reader-admin-review-reason span { display: block; margin-bottom: 6px; color: #a9bdd3; font-size: 11px; }
+.reader-admin-review-reason input { box-sizing: border-box; width: 100%; padding: 9px 11px; border: 1px solid var(--manage-edge); border-radius: 8px; outline: 0; background: var(--manage-inset); color: #eef5ff; font: inherit; }
+.reader-admin-review-reason input:focus-visible { border-color: var(--focus-edge); }
 .reader-admin-review-actions { display: flex; gap: 8px; flex: none; }
 .reader-admin-review-list button { margin: 12px 16px; padding: 8px 14px; border: 1px solid rgba(178, 202, 231, .38); background: #24394e; color: #eef6ff; cursor: pointer; border-radius: 8px; }
 .reader-admin-review-actions button { margin: 0; }

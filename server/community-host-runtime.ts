@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { communityApprovedAvatarURL } from './community-avatar-url.ts';
 import { appendFile, lstat, readFile, realpath, unlink } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, resolve, sep } from 'node:path';
@@ -143,7 +144,7 @@ export function createCommunityHostRuntime(config: CommunityHostConfig, client: 
   const memberAlive = (member: CommunityAuthor) => member.kind !== 'reader' || !hostStore.readerDeleted(member.id);
   const request = async <T>(operation: IdentityOperation, input: Record<string, unknown>): Promise<T> => {
     const sessionRef = current().session.sessionRef;
-    const selfProfile = ['profile', 'profile-signature', 'profile-avatar', 'profile-avatar-remove', 'profile-avatar-pending'].includes(operation);
+    const selfProfile = ['profile', 'profile-signature', 'profile-nickname', 'profile-avatar', 'profile-avatar-remove', 'profile-avatar-pending'].includes(operation);
     const result = await client.request<T>(operation, { ...input, sessionRef,
       ...(selfProfile && current().identity.viewer.kind === 'owner' && readerMode(current().req) ? { asReader: true } : {}) });
     current();
@@ -151,14 +152,15 @@ export function createCommunityHostRuntime(config: CommunityHostConfig, client: 
   };
   const readerIdentity = async (req: IncomingMessage) => {
     const reader = current(req).identity.reader || (readerMode(req) ? ownerReader(req) : null);
-    return reader && { ...reader, avatar: reader.avatar && reader.uid ? `/api/community/avatar/${encodeURIComponent(reader.uid)}.webp` : null };
+    return reader && { ...reader, avatar: communityApprovedAvatarURL(reader.uid, reader.avatar) };
   };
   const authorIdentity = async (req: IncomingMessage) => readerMode(req) && ownerReader(req) ? null : current(req).identity.author;
   const profileState = (value: ReaderProfileState, req: IncomingMessage) => {
     const original = current(req).identity.viewer;
     const actor = original.kind === 'owner' && readerMode(req) ? ownerReader(req) : original;
     if (!actor || ('kind' in actor ? actor.kind !== 'reader' : actor.role !== 'reader') || !value || value.id !== actor.id || typeof value.signature !== 'string'
-      || typeof value.nickname !== 'string' || typeof value.pendingAvatar !== 'boolean' || value.pendingSignature !== null && typeof value.pendingSignature !== 'string')
+      || typeof value.nickname !== 'string' || typeof value.pendingAvatar !== 'boolean' || value.pendingSignature !== null && typeof value.pendingSignature !== 'string'
+      || value.pendingNickname !== null && typeof value.pendingNickname !== 'string')
       throw failure('Profile authority returned an invalid projection.');
     return value;
   };
@@ -172,14 +174,16 @@ export function createCommunityHostRuntime(config: CommunityHostConfig, client: 
   const profile: CommunityProfileAccess = {
     state: async req => profileState(await request<ReaderProfileState>('profile', {}), req),
     signature: async (req, signature) => profileState(await request<ReaderProfileState>('profile-signature', { signature }), req),
+    nickname: async (req, nickname) => profileState(await request<ReaderProfileState>('profile-nickname', { nickname }), req),
     avatar: async (req, image) => profileState(await request<ReaderProfileState>('profile-avatar', { base64: image.toString('base64') }), req),
     removeAvatar: async req => profileState(await request<ReaderProfileState>('profile-avatar-remove', {}), req),
     pendingAvatar: async req => profileImage(await request<{base64:string}>('profile-avatar-pending', {}), req),
-    reviews: async (req, moderation, check) => { current(req); check(); const result = await request<ReaderProfileReview[]>('profile-reviews', { moderation }); check(); return result; },
-    reviewImage: async (req, id, moderation, check) => { current(req); check(); const result = await request<{base64:string}>('profile-review-image', { id, moderation }); check(); return profileImage(result, req); },
+    reviews: async (req, moderation, check) => { current(req); await check({action:'inspect'}); const result = await request<ReaderProfileReview[]>('profile-reviews', { moderation }); const allowed = await check({action:'inspect'}); return result.filter(row => allowed.includes(row.kind)); },
+    reviewImage: async (req, id, moderation, check) => { current(req); await check({action:'inspect',kind:'avatar'}); const result = await request<{base64:string}>('profile-review-image', { id, moderation }); await check({action:'inspect',kind:'avatar'}); return profileImage(result, req); },
     // Main checks the live HK appointment at its commit boundary. Once that
     // decision succeeds, a later role change cannot turn its receipt into 403.
-    review: async (req, id, decision, moderation, check) => { current(req); check(); return request<ReaderProfileDecision>('profile-review', { id, decision, moderation }); },
+    review: async (req, id, decision, moderation, check, reason) => { current(req); await check({action:'inspect'}); return request<ReaderProfileDecision>('profile-review', { id, decision, reason, moderation }); },
+    advise: async (req, id, decision, reason, moderation, check) => { current(req); await check({action:'inspect'}); return request('profile-advise', {id,decision,reason,moderation}); },
   };
   const sessionHandler = (kind: 'reader' | 'author') => async (req: IncomingMessage, res: ServerResponse) => {
     if (req.method === 'GET' && new URL(req.url || '', siteOrigin).pathname === `/api/${kind}/session`) {

@@ -107,7 +107,7 @@ export function createCommunityFrameBridge({ authority, secret, consumeNonce, pr
         if (operation === 'profile-reviewer') {
           if (!validCommunityProfileReviewerInput(input)) throw fail('审核确认参数无效。');
           if (!profileReviewer) throw fail('审核权限确认尚未配置。', 503);
-          profileReviewer(input.actor, input.role); send(res, { ok: true }); return true;
+          const proof = profileReviewer(input.actor, input.role, input.operation); send(res, { ok: true, ...proof }); return true;
         }
         if (!input || typeof input !== 'object' || Array.isArray(input) || !('readerId' in input) || typeof input.readerId !== 'string') throw fail('请求内容无效。');
         const keys = Object.keys(input);

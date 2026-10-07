@@ -13,6 +13,7 @@ import { createPreviewServer } from "../server.mjs";
 import { beijingDay } from "../src/community-rules.mjs";
 import { communityBoards } from '../src/community.mjs';
 import { acceptCommunityConvention } from './fixtures/community-convention-consent.ts';
+import { communityLegacyStaffPermissions } from '../server/community-staff.ts';
 
 // Signed-in members, by cookie `reader=<id>` or `owner=yes`. uid is the public id
 // used by member pages; r1 has an approved avatar.
@@ -39,7 +40,7 @@ test.before(async () => {
 test.after(() => cleanup(template));
 
 // r1, r2, v1 and s1 have agreed to the guidelines and reached 巡天 (L1); r3 is brand new.
-async function setup(t, { store: withStore = true, simplePosting = false, useDefault = false, identifyOverride, avatarBytes } = {}) {
+async function setup(t, { store: withStore = true, simplePosting = false, useDefault = false, identifyOverride, avatarBytes, profile } = {}) {
   const reservation = createServer();
   await new Promise((done) => reservation.listen(0, "127.0.0.1", done));
   const port = reservation.address().port;
@@ -73,11 +74,12 @@ async function setup(t, { store: withStore = true, simplePosting = false, useDef
     ownerReaderIdentity: async req => /(?:^|;\s*)owner=yes(?:;|$)/.test(String(req.headers.cookie || '')) ? {kind:'reader',id:'p1',name:members.p1.name,vip:false} : null,
     people: async (authors) => new Map(authors.flatMap((author) => {
       const info = author.kind === "owner" ? { name: "無相", uid: "owner", vip: true } : members[author.id];
-      return info ? [[`${author.kind}:${author.id}`, { name: info.name, uid: info.uid, avatar: info.avatar || null, vip: info.vip, joinedAt: author.kind === "owner" ? null : "2026-01-01T00:00:00.000Z", bio: info.bio || "", ...(info.ownerReader ? {ownerReader:true} : {}) }]] : [];
+      return info ? [[`${author.kind}:${author.id}`, { name: info.name, uid: info.uid, avatar: info.avatar || null, vip: info.vip,active:true, joinedAt: author.kind === "owner" ? null : "2026-01-01T00:00:00.000Z", bio: info.bio || "", ...(info.ownerReader ? {ownerReader:true} : {}) }]] : [];
     })),
     findMember: async (uid) => authorOf(uid),
     findByNames: async (names) => new Map([...Object.entries(members).map(([id, m]) => [m.name, { kind: "reader", id }]), ["無相", { kind: "owner", id: "owner" }]].filter(([name]) => names.includes(name))),
     ...(avatarBytes ? { avatarBytes } : { avatarFile: async (uid) => uid === "u1" ? resolve(directory, "uploads", `reader-avatar-${avatarId}.webp`) : null }),
+    ...(profile ? { profile } : {}),
     audit: async (action, details) => { audits.push({ action, ...details }); },
   });
   const server = createPreviewServer({ contentService: { snapshot: async () => ({ data: { notes: [] } }) }, communityService, communityEnabled: true });
@@ -87,16 +89,16 @@ async function setup(t, { store: withStore = true, simplePosting = false, useDef
     store?.close();
     await cleanup(directory);
   });
-  const get = (path, cookie = "reader=r1") => fetch(`${siteOrigin}/api/community/${path}`, { headers: { cookie } });
+  const get = (path, cookie = "reader=r1", headers = {}) => fetch(`${siteOrigin}/api/community/${path}`, { headers: { cookie, ...headers } });
   const post = (path, body, cookie = "reader=r1", headers = {}) => fetch(`${siteOrigin}/api/community/${path}`, {
     method: "POST",
     headers: { Origin: siteOrigin, "X-Reader-Request": "1", "Content-Type": "application/json", cookie, ...headers },
     body: JSON.stringify(body),
   });
-  const upload = (bytes, type = "image/png", cookie = "reader=r1") => {
+  const upload = (bytes, type = "image/png", cookie = "reader=r1", headers = {}) => {
     const form = new FormData();
     form.append("file", new Blob([bytes], { type }), "picture.png");
-    return fetch(`${siteOrigin}/api/community/images`, { method: "POST", headers: { Origin: siteOrigin, "X-Reader-Request": "1", cookie }, body: form });
+    return fetch(`${siteOrigin}/api/community/images`, { method: "POST", headers: { Origin: siteOrigin, "X-Reader-Request": "1", cookie, ...headers }, body: form });
   };
   const credit = (id, amount) => store.ledger.credit(id === "owner" ? { kind: "owner", id } : { kind: "reader", id }, amount, "test", null, new Date().toISOString());
   return { get, post, upload, siteOrigin, store, audits, setLevel, credit, directory };
@@ -111,11 +113,89 @@ test('remote approved avatar bytes stay private and authority outages remain una
   } });
   const response = await get('avatar/u1.webp');
   assert.equal(response.status, 200);
-  assert.equal(response.headers.get('cache-control'), 'private, no-store');
+  assert.equal(response.headers.get('cache-control'), 'private, no-cache');
   assert.equal(await response.text(), 'approved-remote-avatar');
   assert.equal((await get('avatar/u2.webp')).status, 404);
   offline = true;
-  assert.equal((await get('avatar/u1.webp')).status, 503);
+  const unavailable = await get('avatar/u1.webp', 'reader=r1', { 'If-None-Match': response.headers.get('etag') });
+  assert.equal(unavailable.status, 503);
+  assert.equal(unavailable.headers.get('etag'), null);
+  assert.equal(unavailable.headers.get('cache-control'), 'private, no-store');
+});
+
+test('approved avatar validators reauthorize every read, track actual bytes and never survive removal or logout', async t => {
+  let enabled = true, bytes = Buffer.from('approved-first');
+  const { get } = await setup(t, {
+    identifyOverride: async () => enabled ? { kind: 'reader', id: 'r1', name: '林间', vip: false } : null,
+    avatarBytes: async () => bytes,
+  });
+  const first = await get('avatar/u1.webp');
+  assert.equal(first.status, 200); assert.equal(first.headers.get('cache-control'), 'private, no-cache');
+  assert.equal(first.headers.get('vary'), 'Cookie');
+  const etag = first.headers.get('etag'); assert.match(etag, /^"[0-9a-f]{64}"$/);
+  assert.equal(await first.text(), 'approved-first');
+  for (const validator of [etag, 'W/' + etag, '"different", W/' + etag, '*']) {
+    const reused = await get('avatar/u1.webp', 'reader=r1', { 'If-None-Match': validator });
+    assert.equal(reused.status, 304); assert.equal(await reused.text(), '');
+    assert.equal(reused.headers.get('etag'), etag); assert.equal(reused.headers.get('cache-control'), 'private, no-cache');
+    assert.equal(reused.headers.get('content-length'), null);
+  }
+  bytes = Buffer.from('approved-next');
+  const next = await get('avatar/u1.webp', 'reader=r1', { 'If-None-Match': etag });
+  assert.equal(next.status, 200); assert.notEqual(next.headers.get('etag'), etag); assert.equal(await next.text(), 'approved-next');
+  bytes = null;
+  let denied = await get('avatar/u1.webp', 'reader=r1', { 'If-None-Match': etag });
+  assert.equal(denied.status, 404); assert.equal(denied.headers.get('etag'), null); assert.equal(denied.headers.get('cache-control'), 'private, no-store');
+  enabled = false;
+  denied = await get('avatar/u1.webp', 'reader=r1', { 'If-None-Match': '*' });
+  assert.equal(denied.status, 401); assert.equal(denied.headers.get('etag'), null); assert.equal(denied.headers.get('cache-control'), 'private, no-store');
+});
+
+test('approved avatar cannot return bytes or a validator after requester identity expires during the read', async t => {
+  let enabled = true;
+  const { get } = await setup(t, {
+    identifyOverride: async () => enabled ? { kind: 'reader', id: 'r1', name: '林间', vip: false } : null,
+    avatarBytes: async () => { enabled = false; return Buffer.from('approved-avatar'); },
+  });
+  const denied = await get('avatar/u1.webp', 'reader=r1', { 'If-None-Match': '*' });
+  assert.equal(denied.status, 401); assert.equal(denied.headers.get('etag'), null);
+  assert.equal(denied.headers.get('cache-control'), 'private, no-store');
+});
+
+test('community image validators preserve attachment ownership, variant bytes and withdrawn visibility', async t => {
+  const { get, upload, store } = await setup(t);
+  const image = await json(upload(await png()));
+  const path = `images/${image.id}.webp`;
+  const first = await get(path); const etag = first.headers.get('etag');
+  assert.equal(first.status, 200); assert.equal(first.headers.get('cache-control'), 'private, no-cache');
+  assert.equal(first.headers.get('vary'), 'Cookie'); assert.ok(etag); await first.arrayBuffer();
+  assert.equal((await get(path, 'reader=r1', { 'If-None-Match': etag })).status, 304);
+  let denied = await get(path, 'reader=r2', { 'If-None-Match': etag });
+  assert.equal(denied.status, 404); assert.equal(denied.headers.get('etag'), null); assert.equal(denied.headers.get('cache-control'), 'private, no-store');
+  const topic = store.createTopic({ ...topicBody, author: { kind: 'reader', id: 'r1' }, images: [image.id] });
+  assert.equal((await get(path, 'reader=r2', { 'If-None-Match': etag })).status, 304);
+  const thumb = await get(`images/${image.id}.thumb.webp`, 'reader=r2', { 'If-None-Match': etag });
+  assert.equal(thumb.status, 200); assert.notEqual(thumb.headers.get('etag'), etag);
+  store.hide({ kind: 'topic', id: topic.id }, '隐藏后必须重新授权图片');
+  denied = await get(path, 'reader=r2', { 'If-None-Match': '*' });
+  assert.equal(denied.status, 404); assert.equal(denied.headers.get('etag'), null); assert.equal(denied.headers.get('cache-control'), 'private, no-store');
+});
+
+test('matching image validator cannot skip the final visibility check after file reading', async t => {
+  const { get, upload, store } = await setup(t);
+  const image = await json(upload(await png()));
+  const topic = store.createTopic({ ...topicBody, author: { kind: 'reader', id: 'r1' }, images: [image.id] });
+  const path = `images/${image.id}.webp`;
+  const first = await get(path, 'reader=r2'), etag = first.headers.get('etag'); await first.arrayBuffer();
+  assert.ok(etag);
+  const original = store.image.bind(store); let reads = 0;
+  t.mock.method(store, 'image', id => {
+    if (++reads === 2) store.hide({ kind: 'topic', id: topic.id }, '读取过程中撤回');
+    return original(id);
+  });
+  const denied = await get(path, 'reader=r2', { 'If-None-Match': etag });
+  assert.equal(denied.status, 404); assert.equal(reads, 2);
+  assert.equal(denied.headers.get('etag'), null); assert.equal(denied.headers.get('cache-control'), 'private, no-store');
 });
 
 test('forged like amounts and identities, duplicates and unlike/re-like cannot mint stardust or experience', async t => {
@@ -194,7 +274,7 @@ test('level catalogue receives independent experience and real current membershi
   assert.equal(vip.vip, true);
   assert.equal((await json(get('stardust', 'reader=r1'))).vip, false);
   assert.equal((await json(get('stardust', 'owner=yes'))).vip, false, 'owner access is not membership growth');
-  await post('members/u4/steward', { on: true, boards: ['qa'] }, 'owner=yes');
+  await post('members/u4/steward', { on: true, role:'general',boards: ['qa'],permissions:communityLegacyStaffPermissions,delegable:[] }, 'owner=yes');
   const preview = await json(get('stardust', 'reader=v1; community_browse=reader'));
   assert.equal(preview.browsingAsReader, true);
   assert.equal(preview.vip, true, 'a read-only perspective does not expire actual membership');
@@ -239,7 +319,7 @@ test('only protected active visit POST settles login experience; reads, previews
   assert.equal((await json(get('stardust', 'reader=v1'))).vipGrowth.days, 1);
   const owner = await json(post('active/visit', {}, 'owner=yes'));
   assert.deepEqual(owner, { uid: 'owner', awarded: 0, visited: false, growth: null, vipGrowth: null });
-  await post('members/u4/steward', { on: true, boards: ['qa'] }, 'owner=yes');
+  await post('members/u4/steward', { on: true, role:'general',boards: ['qa'],permissions:communityLegacyStaffPermissions,delegable:[] }, 'owner=yes');
   assert.equal((await post('active/visit', {}, 'reader=v1; community_browse=reader')).status, 403);
 });
 
@@ -254,6 +334,132 @@ test('active visits require the current convention and recheck revoked sessions 
   assert.equal((await revoked.post('active/visit', {})).status, 401);
   assert.equal(revoked.store.experience.state(a).points, 0);
   assert.equal(revoked.store.experience.vipState(a, true).days, 0);
+});
+
+test('passive GET across Beijing days does not record visits, thread reads, experience, VIP days or stardust', async t => {
+  const { get, store } = await setup(t);
+  const reader = { kind: 'reader', id: 'v1' };
+  const topic = store.createTopic({ ...topicBody, author: { kind: 'reader', id: 'r2' } });
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  assert.equal((await get(`topics/${topic.id}`, 'reader=v1')).status, 200);
+  const state = () => ({
+    visits: store.members.stats(reader).visitDays, reads: store.topic(topic.id).views,
+    experience: store.experience.state(reader).points, vipDays: store.experience.vipState(reader, true).days,
+    balance: store.ledger.balance(reader),
+  });
+  const before = state();
+  assert.deepEqual(before, { visits: 1, reads: 1, experience: 0, vipDays: 0, balance: 0 });
+  now += 24 * 3600_000;
+  for (const path of ['me', 'summary', 'stardust', 'inbox', `topics/${topic.id}`, `topics/${topic.id}`]) {
+    assert.equal((await get(path, 'reader=v1', { 'X-Community-Passive': '1' })).status, 200, path);
+  }
+  assert.deepEqual(state(), before, 'background reads must not create a new human visit or reading day');
+  assert.equal((await get(`topics/${topic.id}`, 'reader=v1')).status, 200);
+  assert.deepEqual(state(), { ...before, visits: 2, reads: 2 }, 'normal navigation remains a real visit and reading');
+});
+
+test('the passive header never exempts POST activity from settlement, identity, origin or consent checks', async t => {
+  const { get, post, store } = await setup(t);
+  const reader = { kind: 'reader', id: 'r1' }, passive = { 'X-Community-Passive': '1' };
+  assert.equal((await get('me', 'reader=r1', passive)).status, 200);
+  assert.equal(store.members.stats(reader).visitDays, 0);
+  assert.equal((await post('active/visit', {}, '', passive)).status, 401);
+  assert.equal((await post('active/visit', {}, 'reader=r1', { ...passive, Origin: 'http://wrong-origin.test' })).status, 403);
+  const active = await post('active/visit', {}, 'reader=r1', passive);
+  assert.equal(active.status, 200);
+  assert.equal((await active.json()).awarded, 10, 'a marked POST remains an ordinary active visit');
+  assert.equal(store.members.stats(reader).visitDays, 1);
+  assert.equal(store.experience.state(reader).points, 10);
+  assert.equal((await json(post('active/visit', {}, 'reader=r1', passive))).awarded, 0, 'the existing daily reward remains idempotent');
+  store.convention.replace({ kind: 'owner', id: 'owner' }, store.convention.current().version, '变更公约后仍须重新阅读并同意。');
+  assert.equal((await post('active/visit', {}, 'reader=r1', passive)).status, 428);
+  assert.equal(store.experience.state(reader).points, 10);
+});
+
+test('passive GET retains current VIP, moderation, private image and authentication boundaries', async t => {
+  let identifiedVip = true, signedIn = true;
+  const { get, post, upload, store } = await setup(t, { identifyOverride: async req => {
+    const id = String(req.headers.cookie || '') === 'reader=v1' ? 'v1' : 'r2';
+    return signedIn ? { kind: 'reader', id, name: members[id].name, vip: id === 'v1' && identifiedVip } : null;
+  } });
+  const passive = { 'X-Community-Passive': '1' };
+  const image = await json(upload(await png(), 'image/png', 'reader=v1'));
+  assert.equal((await get(`images/${image.id}.webp`, 'reader=r2', passive)).status, 404, 'unattached uploads remain private');
+  const published = await post('topics', { ...topicBody, board: 'vip', images: [image.id] }, 'reader=v1');
+  assert.equal(published.status, 201);
+  const topic = await published.json();
+  assert.equal((await get(`topics/${topic.id}`, 'reader=v1', passive)).status, 200);
+  assert.equal((await get(`images/${image.id}.webp`, 'reader=v1', passive)).status, 200);
+  identifiedVip = false;
+  assert.equal((await get(`topics/${topic.id}`, 'reader=v1', passive)).status, 404);
+  assert.equal((await get(`images/${image.id}.webp`, 'reader=v1', passive)).status, 404);
+  const viewer = { kind: 'reader', id: 'r2' };
+  store.members.setSteward(viewer, true, ['vip']);
+  assert.equal((await get(`topics/${topic.id}`, 'reader=r2', passive)).status, 200);
+  store.members.setSteward(viewer, false);
+  assert.equal((await get(`topics/${topic.id}`, 'reader=r2', passive)).status, 404);
+  assert.equal((await get(`images/${image.id}.webp`, 'reader=r2', passive)).status, 404);
+  signedIn = false;
+  assert.equal((await get('me', 'reader=v1', passive)).status, 401);
+  assert.equal((await get(`images/${image.id}.webp`, 'reader=v1', passive)).status, 401);
+  assert.equal((await get('avatar/u1.webp', 'reader=v1', passive)).status, 401);
+});
+
+test('ordinary community media GET does not create human visits while POST uploads remain active', async t => {
+  const { get, upload, store } = await setup(t);
+  const reader = { kind: 'reader', id: 'r1' }, other = { kind: 'reader', id: 'r2' };
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  assert.equal((await get('avatar/u1.webp')).status, 200);
+  assert.equal(store.members.stats(reader).visitDays, 0, 'an avatar download is not an active community visit');
+  const uploaded = await upload(await png(), 'image/png', 'reader=r1', { 'X-Community-Passive': '1' });
+  assert.equal(uploaded.status, 201);
+  const image = await uploaded.json();
+  assert.equal(store.members.stats(reader).visitDays, 1, 'the actual upload POST remains active');
+  now += 24 * 3600_000;
+  for (const path of [`images/${image.id}.webp`, `images/${image.id}.thumb.webp`, 'avatar/u1.webp?v=current']) {
+    assert.equal((await get(path)).status, 200, path);
+  }
+  assert.equal(store.members.stats(reader).visitDays, 1, 'background media loading cannot create a new visit day');
+  assert.equal((await get(`images/${image.id}.webp`, 'reader=r2')).status, 404, 'media reads still check private upload ownership');
+  assert.equal(store.members.stats(other).visitDays, 0);
+  assert.equal((await get('avatar/u1.webp', '')).status, 401);
+});
+
+test('pending avatar media keeps personal and moderator checks without recording a visit', async t => {
+  const reviewId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  let personalReads = 0, reviewReads = 0;
+  const { get, store } = await setup(t, { profile: {
+    pendingAvatar: async req => {
+      personalReads++;
+      if (req.headers.cookie !== 'reader=r1') throw Object.assign(Error('no personal pending image'), { status: 404 });
+      return Buffer.from('personal-pending-avatar');
+    },
+    reviewImage: async (_req, id, moderation, check) => {
+      reviewReads++; await check({action:'inspect',kind:'avatar'}); assert.equal(id, reviewId); assert.equal(moderation.role, 'moderator');
+      return Buffer.from('moderator-pending-avatar');
+    },
+  } });
+  const reader = { kind: 'reader', id: 'r1' }, moderator = { kind: 'reader', id: 'r2' };
+  const mine = await get('profile/avatar/pending.webp', 'reader=r1', { 'If-None-Match': '*' });
+  assert.equal(mine.status, 200); assert.equal(await mine.text(), 'personal-pending-avatar');
+  assert.equal(mine.headers.get('cache-control'), 'private, no-store'); assert.equal(mine.headers.get('etag'), null);
+  assert.equal((await get('profile/avatar/pending.webp', 'reader=r2')).status, 404);
+  assert.equal(personalReads, 2);
+  assert.equal(store.members.stats(reader).visitDays, 0);
+  assert.equal(store.members.stats(moderator).visitDays, 0);
+  const path = `manage/profiles/${reviewId}/avatar.webp`;
+  assert.equal((await get(path, 'reader=r2')).status, 403);
+  assert.equal(reviewReads, 0, 'a media path alone never grants reviewer access');
+  store.members.setSteward(moderator, true, ['qa']);
+  const review = await get(path, 'reader=r2', { 'If-None-Match': '*' });
+  assert.equal(review.status, 200); assert.equal(await review.text(), 'moderator-pending-avatar');
+  assert.equal(review.headers.get('cache-control'), 'private, no-store'); assert.equal(review.headers.get('etag'), null);
+  store.members.setSteward(moderator, false);
+  assert.equal((await get(path, 'reader=r2')).status, 403);
+  assert.equal(reviewReads, 1, 'revoked moderation is checked before calling the profile bridge');
+  assert.equal(store.members.stats(moderator).visitDays, 0);
 });
 
 test('bulk review checks the whole selection before changes and reuses approval and rejection accounting', async t => {
@@ -297,7 +503,7 @@ test('community images allow 2 MB for readers and VIP, and reuse the author imag
 test('moderation deletion requires a reason, stores it and tells the author', async t => {
   const { post, get, store, audits, directory } = await setup(t);
   const topic = await (await post('topics', { board: 'qa', title: '删除理由回归测试', body: '足够长的正文内容用于删除测试' })).json();
-  await post('members/u5/steward', { on: true, boards: allModerationBoards }, 'owner=yes');
+  await post('members/u5/steward', { on: true,role:'general', boards: allModerationBoards,permissions:communityLegacyStaffPermissions,delegable:[] }, 'owner=yes');
   assert.equal((await post(`topics/${topic.id}/delete`, {}, 'reader=s1')).status, 400);
   assert.ok(store.topic(topic.id));
   assert.equal((await post(`topics/${topic.id}/delete`, { reason: '重复发布同一内容', violation: false }, 'reader=s1')).status, 200);
@@ -311,7 +517,7 @@ test('moderation deletion requires a reason, stores it and tells the author', as
 
 test('owner switches to a distinct interactive reader while steward perspective stays read-only', async t => {
   const { post, get, upload } = await setup(t);
-  await post('members/u5/steward', { on: true, boards: allModerationBoards }, 'owner=yes');
+  await post('members/u5/steward', { on: true,role:'general', boards: allModerationBoards,permissions:communityLegacyStaffPermissions,delegable:[] }, 'owner=yes');
   for (const identity of ['owner=yes', 'reader=s1']) {
     const before = await (await get('me', identity)).json();
     const switchResponse = await post('browse-mode', { reader: true }, identity);
@@ -343,7 +549,7 @@ test('owner switches to a distinct interactive reader while steward perspective 
 
 test('check-in reads distinguish manager preview from a reader and preserve real author eligibility', async t => {
   const { post, get, store } = await setup(t);
-  await post('members/u5/steward', { on: true, boards: allModerationBoards }, 'owner=yes');
+  await post('members/u5/steward', { on: true,role:'general', boards: allModerationBoards,permissions:communityLegacyStaffPermissions,delegable:[] }, 'owner=yes');
   for (const [identity, owner] of [['owner=yes', true], ['reader=s1', false]]) {
     const normal = await json(get('checkin?month=2026-09', identity));
     assert.equal(normal.owner, owner);
@@ -473,18 +679,18 @@ test('economic actions share durable action throttling while completed request r
 test('private image and approved avatar responses require current permission rather than reuse a previous identity cache', async t => {
   const { post, get, upload } = await setup(t);
   const image = await json(upload(await png()));
-  assert.equal((await get(`images/${image.id}.webp`)).headers.get('cache-control'), 'private, no-store');
+  assert.equal((await get(`images/${image.id}.webp`)).headers.get('cache-control'), 'private, no-cache');
   const topic = await json(post('topics', { ...topicBody, images: [image.id] }));
   assert.ok(topic.id);
   for (const suffix of ['.webp', '.thumb.webp']) {
     const response = await get(`images/${image.id}${suffix}`, 'reader=r2');
     assert.equal(response.status, 200);
-    assert.equal(response.headers.get('cache-control'), 'private, no-store');
+    assert.equal(response.headers.get('cache-control'), 'private, no-cache');
   }
-  assert.equal((await get('avatar/u1.webp', 'reader=r2')).headers.get('cache-control'), 'private, no-store');
+  assert.equal((await get('avatar/u1.webp', 'reader=r2')).headers.get('cache-control'), 'private, no-cache');
   const vipImage = await json(upload(await png(), 'image/png', 'reader=v1'));
   await post('topics', { ...topicBody, board: 'vip', images: [vipImage.id] }, 'reader=v1');
-  assert.equal((await get(`images/${vipImage.id}.webp`, 'reader=v1')).headers.get('cache-control'), 'private, no-store');
+  assert.equal((await get(`images/${vipImage.id}.webp`, 'reader=v1')).headers.get('cache-control'), 'private, no-cache');
   assert.equal((await get(`images/${vipImage.id}.webp`, 'reader=r2')).status, 404);
   assert.equal((await get(`images/${vipImage.id}.webp`, '')).status, 401);
 });
@@ -788,7 +994,7 @@ test("readers post, list, read and reply; the owner can remove anything, readers
   assert.equal(list.total, 2);
   assert.equal(list.items[0].id, id, "the replied topic is most recently active");
   assert.equal(list.items[0].title, "ComfyUI 人脸崩了", "titles are trimmed");
-  assert.deepEqual(list.items[0].author, { name: "林间", role: "reader", uid: "u1", showUid: true, avatar: `/api/community/avatar/u1.webp?v=${avatarId.slice(0, 8)}`, vip: false, level: 1, growth: emptyGrowth, vipGrowth: emptyVIPGrowth, steward: false, frame: null, color: null });
+  assert.deepEqual(list.items[0].author, { name: "林间", role: "reader", uid: "u1", showUid: true, avatar: `/api/community/avatar/u1.webp?v=${avatarId}`, vip: false, level: 1, growth: emptyGrowth, vipGrowth: emptyVIPGrowth, steward: false,staffRole:null, frame: null, color: null });
   assert.equal(list.items[0].replies, 1);
   assert.equal(list.items[0].lastReply.author.name, "远山", "a listed topic names its latest replier");
   assert.equal(list.items[1].lastReply, null);
@@ -1231,7 +1437,7 @@ test("review rejection requires a fixed reason and records the appeal notice and
 test("a steward can reject a pending topic and the audit names the steward", async (t) => {
   const { get, post, audits } = await setup(t);
   const pending = await json(post("topics", { board: "qa", title: "协管待审主题", body: "请看 https://example.com/steward", agree: true }, "reader=r3"));
-  await post("members/u5/steward", { on: true, boards: allModerationBoards }, "owner=yes");
+  await post("members/u5/steward", { on: true,role:"general", boards: allModerationBoards,permissions:communityLegacyStaffPermissions,delegable:[] }, "owner=yes");
   const rejected = await post(`manage/topics/${pending.id}/reject`, { reason: "与版块无关", note: "请换到工具资源版块" }, "reader=s1");
   assert.equal(rejected.status, 200);
   const notice = (await json(get("inbox?tab=system", "reader=r3"))).items[0];
@@ -1273,8 +1479,8 @@ test("shipping company and tracking number survive resolution while recipient PI
 test("public post people keep a linkable UID while display follows viewer permissions", async (t) => {
   const { get, post } = await setup(t);
   const { id } = await json(post("topics", topicBody, "reader=r1"));
-  await post("members/u5/steward", { on: true, boards: allModerationBoards }, "owner=yes");
-  assert.deepEqual((await json(get(`topics/${id}`, "reader=r2"))).topic.author, { name: "林间", role: "reader", uid: "u1", showUid: false, avatar: "/api/community/avatar/u1.webp?v=aaaaaaaa", vip: false, level: 1, growth: emptyGrowth, vipGrowth: emptyVIPGrowth, steward: false, frame: null, color: null });
+  await post("members/u5/steward", { on: true,role:"general", boards: allModerationBoards,permissions:communityLegacyStaffPermissions,delegable:[] }, "owner=yes");
+  assert.deepEqual((await json(get(`topics/${id}`, "reader=r2"))).topic.author, { name: "林间", role: "reader", uid: "u1", showUid: false, avatar: `/api/community/avatar/u1.webp?v=${avatarId}`, vip: false, level: 1, growth: emptyGrowth, vipGrowth: emptyVIPGrowth, steward: false,staffRole:null, frame: null, color: null });
   assert.equal((await json(get(`topics/${id}`, "reader=r1"))).topic.author.showUid, true);
   assert.equal((await json(get(`topics/${id}`, "reader=s1"))).topic.author.showUid, true);
   assert.equal((await json(get("me", "reader=r1"))).uid, "u1");
@@ -1323,7 +1529,7 @@ test("the shop: prices and states, decorations, goods with shipping details for 
 test("stewards, mutes, moderated deletions, tag edits and the audit log", async (t) => {
   const { get, post, audits } = await setup(t);
   assert.equal((await post("members/u5/steward", { on: true })).status, 403, "only the owner appoints");
-  assert.deepEqual(await json(post("members/u5/steward", { on: true, boards: allModerationBoards }, "owner=yes")), { steward: true });
+  assert.equal((await json(post("members/u5/steward", { on: true,role:"general", boards: allModerationBoards,permissions:communityLegacyStaffPermissions,delegable:[] }, "owner=yes"))).staff.role,"general");
   assert.deepEqual([(await json(get("me", "reader=s1"))).mod, (await json(get("me", "reader=s1"))).level], [true, 4]);
   assert.equal((await get("manage", "reader=s1")).status, 200);
   assert.equal((await get("manage?tab=items", "reader=s1")).status, 403, "the shop is the owner's");
@@ -1356,7 +1562,7 @@ test("stewards, mutes, moderated deletions, tag edits and the audit log", async 
   assert.equal((await post("topics", { board: "moments", body: "我被禁言了吗？试试看" }, "reader=r2")).status, 403);
   assert.equal((await json(get("members/u2", "reader=s1"))).muted.reason, "人身攻击");
   assert.deepEqual(audits.map((entry) => entry.action), [
-    "community-steward", "community-pin", "community-retag", "community-delete-reply", "community-delete-topic", "community-lift", "community-mute",
+    "community-staff-appointment", "community-pin", "community-retag", "community-delete-reply", "community-delete-topic", "community-lift", "community-mute",
   ]);
   assert.equal(audits[4].mute, 7);
   const other = await json(post("topics", topicBody, "reader=v1"));

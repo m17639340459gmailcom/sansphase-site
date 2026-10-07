@@ -4,6 +4,49 @@ type ReaderOptions = {maxEntries?: number; maxBytes?: number; now?: () => number
 type CachedResponse = {text: string; etag: string; time: number; bytes: number};
 type ActiveRequest = {key: string; prefetch: boolean; controller: AbortController; timer: ReturnType<typeof setTimeout> | null; deadline: (ms: number) => void; promise: Promise<string>};
 type ContentQuery = URLSearchParams | string | Record<string, string>;
+
+// Keep only an already committed publication page during a very short read.
+// This does not expose a cached target before the server validates it, and book
+// bodies, author previews and non-content screens are never retained.
+function createContentPresentation() {
+ let committed: {host: HTMLElement; children: ChildNode[]} | null=null;
+ let pending: {host: HTMLElement; inert: string | null; busy: string | null; timer: ReturnType<typeof setTimeout> | null} | null=null;
+ const release=()=>{
+  const held=pending;pending=null;
+  if(!held)return;
+  if(held.timer)clearTimeout(held.timer);
+  for(const [attribute,value] of [['inert',held.inert],['aria-busy',held.busy]] as const) {
+   if(value===null)held.host.removeAttribute(attribute);
+   else held.host.setAttribute(attribute,value);
+  }
+ };
+ const clear=()=>{release();committed=null;};
+ return {
+  release,clear,
+  commit(host: HTMLElement | null,query: ContentQuery) {
+   clear();
+   const params=new URLSearchParams(query),view=params.get('view'),kind=params.get('kind');
+   if(!host||host.hidden||!host.isConnected||!host.hasChildNodes()||params.has('preview')||
+      !['notes','works','resources','software','resource-center'].includes(kind || '')||
+      !(view==='list'||(view==='detail'&&kind!=='resource-center')))return;
+   committed={host,children:[...host.childNodes]};
+  },
+  begin(host: HTMLElement | null,show: () => void) {
+   release();
+   if(!host||host.hidden||!host.isConnected||committed?.host!==host||
+      committed.children.length!==host.childNodes.length||
+      committed.children.some((child,index)=>child!==host.childNodes[index])) {
+    show();return ()=>{};
+   }
+   const held={host,inert:host.getAttribute('inert'),busy:host.getAttribute('aria-busy'),timer:null as ReturnType<typeof setTimeout> | null};
+   pending=held;
+   host.setAttribute('inert','');host.setAttribute('aria-busy','true');
+   const finish=()=>{if(pending===held)release();};
+   held.timer=setTimeout(()=>{if(pending!==held)return;finish();show();},120);
+   return finish;
+  },
+ };
+}
 export function contentQuery({page,id}: Route,{page:pageNumber=1,category='all',query=''}: QueryOptions={}) {
  const kind=page==='note'?'notes':page==='work'?'works':page;
  if(!['notes','works','resources','software','resource-center'].includes(kind)) return null;
@@ -11,6 +54,7 @@ export function contentQuery({page,id}: Route,{page:pageNumber=1,category='all',
 }
 export function createContentReader(fetcher: typeof fetch=fetch,{maxEntries=12,maxBytes=2*1024*1024,now=Date.now,allowBookPreview=false}: ReaderOptions={}) {
  let active: ActiveRequest | undefined,bytes=0;
+ const presentation=createContentPresentation();
  const cache=new Map<string, CachedResponse>();
  const drop=(key: string)=>{const entry=cache.get(key);if(entry)bytes-=entry.bytes;cache.delete(key);};
  const cancel=()=>{active?.controller.abort();active=undefined;};
@@ -62,5 +106,5 @@ export function createContentReader(fetcher: typeof fetch=fetch,{maxEntries=12,m
   })();
   return job.promise.then(text=>JSON.parse(text));
  }
- return {cancel,clear(){cancel();cache.clear();bytes=0;},read:(query: ContentQuery)=>request(query),prefetch:(query: ContentQuery)=>request(query,true)};
+ return {presentation,cancel(){cancel();presentation.clear();},clear(){cancel();presentation.clear();cache.clear();bytes=0;},read:(query: ContentQuery)=>request(query),prefetch:(query: ContentQuery)=>request(query,true)};
 }

@@ -9,6 +9,18 @@ const denied = { state: 'error', status: 403, message: '只有站长和协管能
 const data = owner => ({ owner, tab: 'queue', counts: { queue: 0, reports: 0, orders: 0, sanctions: 0 }, kpis: { topics24h: 0, replies24h: 0 }, queue: { topics: [], replies: [] }, reports: [], orders: [], items: [], sanctions: [], data: null });
 const render = options => new JSDOM(communityManageHTML({ ...common, tab: 'items', ...options }));
 
+test('profile review navigation has the existing person icon for owners and moderators', () => {
+  for (const owner of [true, false]) {
+    const dom = render({ me: { ...reader, owner, mod: true }, manage: { state: 'ready', data: { ...data(owner), tab: 'profiles', profiles: [], backgrounds: [] } }, tab: 'profiles', icons: { user: '<svg data-test-icon="user" aria-hidden="true"></svg>' } });
+    try {
+      const link = dom.window.document.querySelector('nav a[href="#/community/manage/profiles"]');
+      assert.equal(link.getAttribute('aria-current'), 'page');
+      assert.ok(link.querySelector('svg[data-test-icon="user"]'));
+      assert.equal(link.querySelector('span').textContent, '资料审核');
+    } finally { dom.window.close(); }
+  }
+});
+
 test('readers and unknown identities are never labelled as moderators or offered management controls', () => {
   for (const me of [reader, null, { ...reader, management: { role: 'owner', browsingAsReader: true } }]) {
     for (const manage of [denied, { state: 'loading' }]) {

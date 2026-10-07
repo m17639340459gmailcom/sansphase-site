@@ -7,6 +7,7 @@ import { tagList, imageList, showcaseMeta, resourceMeta } from './community-cont
 import type { Body, Ctx } from './community-context.ts';
 import type { StoredTopic } from './community-store.ts';
 import { bodyImageContent } from '../src/community-body-images.ts';
+import { isCommunityPassiveRead } from './community-passive-request.ts';
 
 const pageSize = 20;
 const searchLimit = 40;
@@ -46,7 +47,7 @@ async function threadDTO(ctx: Ctx, id: string) {
   const { live, me } = ctx;
   const topic = visibleTopic(ctx, id);
   const canModerate = ctx.canModerateBoard(topic.board);
-  live.view(topic.id, me);
+  if (!isCommunityPassiveRead(ctx.req)) live.view(topic.id, me);
   const related = topic.pending || topic.hidden ? [] : live.related(topic);
   const quoted = new Map(topic.replies.map(reply => [reply.id, reply]));
   const authors = [topic.author, ...topic.replies.map(reply => reply.author), ...related.flatMap(item => [item.author, ...(item.lastReply ? [item.lastReply.author] : [])])];
@@ -60,6 +61,7 @@ async function threadDTO(ctx: Ctx, id: string) {
   const currentTopic = visibleTopic(ctx, id);
   if (canModerate !== ctx.canModerateBoard(currentTopic.board)) throw fail('管理权限发生变化，请重新打开帖子。', 403);
   const mentions = Object.fromEntries([...mentioned].map(([name, member]) => [name, mentionMap.get(memberKey(member))?.uid || null]).filter(([, uid]) => uid));
+  const lowerTarget=(author:CommunityAuthor)=>{try{live.staff.protect(me,author);return true;}catch{return false;}};
   const replies = topic.replies.map(reply => {
     const replyTarget = { kind: 'reply' as const, id: reply.id };
     const mine = !ctx.readOnly && same(me, reply.author), byTopicAuthor = same(reply.author, topic.author);
@@ -71,7 +73,8 @@ async function threadDTO(ctx: Ctx, id: string) {
       edited: reply.edited, likes: reply.likes, liked: live.liked(replyTarget, me), thanked: live.thanked(replyTarget, me), thanks: live.thanks(replyTarget),
       byTopicAuthor, accepted: topic.acceptedReplyId === reply.id, mine, hidden: reply.hidden,
       quote: quote && !(quote.hidden && !canModerate) ? { id: quote.id, author: ctx.person(quote.author, map).name, excerpt: [...quote.body].slice(0, 80).join('') } : null,
-      canDelete: !ctx.readOnly && (canModerate || mine), deleteReasonRequired: canModerate, canEdit: canEdit(ctx, reply.author, reply.createdAt), canRestore: canModerate && reply.hidden,
+      canDelete: !ctx.readOnly && (mine || ctx.canStaff('reply.delete',currentTopic.board)&&lowerTarget(reply.author)), deleteReasonRequired: ctx.canStaff('reply.delete',currentTopic.board), canEdit: canEdit(ctx, reply.author, reply.createdAt), canRestore: ctx.canStaff('reply.restore',currentTopic.board) && reply.hidden,
+      canPenalty: ctx.canStaff('reply.penalty',currentTopic.board)&&lowerTarget(reply.author),canMute:ctx.canStaff('member.mute')&&lowerTarget(reply.author),
       canAccept: topic.board === 'qa' && isAuthor && !topic.acceptedReplyId && !byTopicAuthor && !reply.hidden,
     };
   });
@@ -86,8 +89,10 @@ async function threadDTO(ctx: Ctx, id: string) {
       ...(ctx.options.simplePosting ? { rawTitle: topic.rawTitle } : {}),
       liked: live.liked(target, me), bookmarked: live.bookmarked(topic.id, me), bookmarks: topic.bookmarks,
       thanked: live.thanked(target, me), thanks: topic.thanks, mine: isAuthor,
-      canDelete: !ctx.readOnly && (canModerate || isAuthor), deleteReasonRequired: canModerate, canEdit: canEdit(ctx, topic.author, topic.createdAt), canModerate, canFeature: ctx.owner,
-      canRetag: !ctx.readOnly && (ctx.trustLevel >= 3 || canModerate), canPaidPin: isAuthor && (topic.board === 'showcase' || topic.board === 'tools') && !topic.paidPin,
+      canDelete: !ctx.readOnly && (isAuthor || ctx.canStaff(topic.pending?'topic.reject':'topic.delete',currentTopic.board)&&lowerTarget(topic.author)), deleteReasonRequired: ctx.canStaff(topic.pending?'topic.reject':'topic.delete',currentTopic.board), canEdit: canEdit(ctx, topic.author, topic.createdAt), canModerate, canFeature: ctx.staff?.role!=='assistant'&&ctx.canStaff('feature.decide',currentTopic.board),
+      canRecommend:ctx.canStaff('feature.recommend',currentTopic.board)&&me.kind==='reader',canPenalty:ctx.canStaff('topic.penalty',currentTopic.board)&&lowerTarget(topic.author),canMute:ctx.canStaff('member.mute')&&lowerTarget(topic.author),
+      canPin:ctx.canStaff('topic.pin',currentTopic.board),canLock:ctx.canStaff('topic.lock',currentTopic.board),canMove:ctx.canStaff('topic.move',currentTopic.board),canApprove:ctx.canStaff('topic.approve',currentTopic.board),canRestore:ctx.canStaff('topic.restore',currentTopic.board),
+      canRetag: !ctx.readOnly && (ctx.trustLevel >= 3 || ctx.canStaff('topic.retag',currentTopic.board)), canPaidPin: isAuthor && (topic.board === 'showcase' || topic.board === 'tools') && !topic.paidPin,
       canHighlight: isAuthor && !topic.glow, canReply: !ctx.readOnly && canParticipateBoard(ctx, topic.board) && !topic.locked && !muted && !topic.pending,
       meta: meta && {
         tools: meta.tools, model: meta.model, usage: meta.usage, promptMode: meta.promptMode, price: meta.price,
@@ -208,7 +213,12 @@ async function report(ctx: Ctx, body: Body) {
   if (!kind) throw fail('举报对象无效。');
   const subject = kind === 'topic' ? { topic: visibleTopic(ctx, id), reply: null } : visibleReply(ctx, id);
   const author = subject.reply?.author ?? subject.topic.author;
-  const reportLevel = ctx.canModerateBoard(subject.topic.board) ? 4 : ctx.trustLevel;
+  let reportLevel = ctx.trustLevel;
+  if (ctx.canStaff('report.review', subject.topic.board)) {
+    // A staff capability must not turn a report about a peer or superior into
+    // an immediate moderation action. Earned ordinary trust still applies.
+    try { live.staff.protect(me, author); reportLevel = 4; } catch { /* Use earned trust. */ }
+  }
   if (reportLevel < 1) throw fail('初光等级还不能举报，升到巡天就可以了。', 403);
   if (same(me, author)) throw fail('不能举报自己的内容。');
   const reason = String(body.reason || '');
@@ -234,13 +244,17 @@ export async function contentRoutes(ctx: Ctx): Promise<boolean> {
       return true;
     }
     if (path === 'summary') {
-      const summary = live.summary({ limit: 20, hiddenBoard: ctx.hiddenBoard });
-      const hot = summary.hot.filter(topic => ctx.canSeeBoard(topic.board)).slice(0, 5);
+      const hiddenBoard = ctx.hiddenBoard;
+      let summary = live.summary({ limit: 20, hiddenBoard });
+      const hot = await ctx.topicsDTO(summary.hot.filter(topic => ctx.canSeeBoard(topic.board)).slice(0, 5));
+      // Person lookup also refreshes live staff/account authorization. Counts,
+      // tags and latest titles must use the same final private-board boundary.
+      if (ctx.hiddenBoard !== hiddenBoard) summary = live.summary({ limit: 20, hiddenBoard: ctx.hiddenBoard });
       const stats = Object.values(summary.boards);
       ctx.send({
         total: stats.reduce((sum, board) => sum + board.topics, 0),
         repliesToday: stats.reduce((sum, board) => sum + board.repliesToday, 0),
-        checkinsToday: summary.checkinsToday, boards: summary.boards, tags: summary.tags, hot: await ctx.topicsDTO(hot),
+        checkinsToday: summary.checkinsToday, boards: summary.boards, tags: summary.tags, hot,
       });
       return true;
     }
@@ -272,8 +286,11 @@ export async function contentRoutes(ctx: Ctx): Promise<boolean> {
       }
       const posters = [...counts.values()].sort((a, b) => b.topics - a.topics).slice(0, 5);
       const map = await ctx.people([...items.flatMap((topic: StoredTopic) => topic.lastReply ? [topic.author, topic.lastReply.author] : [topic.author]), ...posters.map(poster => poster.author)]);
+      if (board && !ctx.canSeeBoard(board)) throw fail('没有这个版块。', 404);
+      const currentVisible = visible.filter(topic => { const current = live.topic(topic.id); return current && current.board === topic.board && ctx.canSeeBoard(current.board) && !current.pending && !current.hidden; });
+      const currentItems = currentVisible.slice((page - 1) * pageSize, page * pageSize);
       ctx.send({
-        items: items.map(topic => ctx.topicDTO(topic, map)), total: visible.length, page, pageSize,
+        items: currentItems.map(topic => ctx.topicDTO(topic, map)), total: currentVisible.length, page, pageSize,
         ...(following ? { followingCount: following.length } : {}),
         ...(withPosters ? { posters: posters.map(poster => ({ author: ctx.person(poster.author, map), topics: poster.topics })) } : {}),
       });
@@ -297,7 +314,6 @@ export async function contentRoutes(ctx: Ctx): Promise<boolean> {
   const topicAction = /^topics\/([^/]+)\/([a-z-]+)$/.exec(path);
   if (topicAction) {
     const topic = visibleTopic(ctx, topicAction[1]);
-    const canModerate = ctx.canModerateBoard(topic.board);
     const target: Target = { kind: 'topic', id: topic.id };
     const isAuthor = same(me, topic.author);
     switch (topicAction[2]) {
@@ -333,21 +349,26 @@ export async function contentRoutes(ctx: Ctx): Promise<boolean> {
       }
       case 'edit': await editTopic(ctx, topic, body); ctx.send({ ok: true }); return true;
       case 'retag':
-        if (!(ctx.trustLevel >= 3 || canModerate)) throw fail('守夜以上等级才能修改别人的标签。', 403);
-        await ctx.auditMutation('retag', () => live.retag(topic.id, tagList(body.tags), me), { topic: topic.id });
+        if (!(ctx.trustLevel >= 3 || ctx.canStaff('topic.retag',topic.board))) throw fail('守夜以上等级才能修改别人的标签。', 403);
+        await ctx.auditMutation('retag', () => {if(ctx.trustLevel<3)ctx.requireStaff('topic.retag',live.topic(topic.id)?.board);return live.retag(topic.id, tagList(body.tags), me);}, { topic: topic.id });
         ctx.send({ ok: true });
         return true;
       case 'delete': {
-        if (!(canModerate || isAuthor)) throw fail('只能删除自己的帖子。', 403);
-        const moderated = !isAuthor && (body.violation !== false || Boolean(topic.pending));
-        const reason = canModerate ? ctx.clean(body.reason, [2, 200], '删除理由', false) : '';
+        const canDelete=ctx.canStaff(topic.pending?'topic.reject':'topic.delete',topic.board);
+        if (!(canDelete || isAuthor)) throw fail('只能删除自己的帖子，或需要对应删除权限。', 403);
+        const moderated = !isAuthor;
+        const penalty = moderated && !topic.pending && (body.violation===true || body.violation===undefined&&ctx.canStaff('topic.penalty',topic.board));
+        const reason = canDelete ? ctx.clean(body.reason, [2, 200], '删除理由', false) : '';
         const note = typeof body.note === 'string' ? body.note.trim().slice(0, 200) : '';
         const days = Number(body.mute || 0);
         const remove = () => {
-          live.deleteTopic(topic.id, { moderated, reason, note });
-          if (!isAuthor && [1, 7, 30].includes(days) && topic.author.kind === 'reader') live.members.mute(topic.author, days, '发布违规内容', me);
+          const current=visibleTopic(ctx,topic.id);
+          if(!isAuthor){ctx.requireStaff(current.pending?'topic.reject':'topic.delete',current.board);live.staff.protect(me,current.author);if(penalty)ctx.requireStaff('topic.penalty',current.board);}
+          if(days){if(![1,7,30].includes(days)||isAuthor)throw fail('禁言参数无效。');ctx.requireStaff('member.mute');live.staff.protect(me,current.author);}
+          live.deleteTopic(topic.id, { moderated, penalty, reason, note });
+          if (days && current.author.kind === 'reader') live.members.mute(current.author, days, '发布违规内容', me);
         };
-        if (canModerate) await ctx.auditMutation('delete-topic', remove, { topic: topic.id, author: memberKey(topic.author), moderated, reason, note, mute: days || 0 });
+        if (canDelete) await ctx.auditMutation('delete-topic', remove, { topic: topic.id, author: memberKey(topic.author), moderated, penalty, reason, note, mute: days || 0 });
         else remove();
         ctx.send({ ok: true });
         return true;
@@ -379,10 +400,19 @@ export async function contentRoutes(ctx: Ctx): Promise<boolean> {
       }
       case 'paid-pin': ctx.send(live.economy.paidPin(topic.id, me)); return true;
       case 'highlight': ctx.send(live.economy.highlight(topic.id, me)); return true;
+      case 'feature-recommend': {
+        ctx.requireStaff('feature.recommend',topic.board);
+        const reason=body.reason===undefined?'':ctx.clean(body.reason,[0,200],'推荐理由',false);
+        const id=await ctx.auditMutation('feature-recommend',()=>{ctx.requireStaff('feature.recommend',live.topic(topic.id)?.board);return live.featureRecommendations.recommend(me,topic.id,reason);},{topic:topic.id,reason});
+        ctx.send({ok:true,id});return true;
+      }
       // 置顶、锁帖、移动、审核、恢复显示：站长和协管；精华只有站长。
       case 'pin': case 'lock': case 'move': case 'approve': case 'restore': case 'feature': {
-        if (topicAction[2] === 'feature' ? !ctx.owner : !canModerate) throw fail(topicAction[2] === 'feature' ? '只有站长能评精华。' : '你没有这个板块的管理权限。', 403);
+        const permission=topicAction[2]==='feature'?'feature.decide':`topic.${topicAction[2]}` as 'topic.pin'|'topic.lock'|'topic.move'|'topic.approve'|'topic.restore';
+        ctx.requireStaff(permission,topic.board);
+        if(topicAction[2]==='feature'&&ctx.staff?.role==='assistant')throw fail('协管需推荐给所属版主审批。',403);
         await ctx.auditMutation(topicAction[2], () => {
+          ctx.requireStaff(permission,live.topic(topic.id)?.board);
           if (topicAction[2] === 'pin') live.setPinned(topic.id, flag(body));
           else if (topicAction[2] === 'lock') live.setLocked(topic.id, flag(body));
           else if (topicAction[2] === 'feature') live.setFeatured(topic.id, flag(body), { actor: me });
@@ -391,7 +421,7 @@ export async function contentRoutes(ctx: Ctx): Promise<boolean> {
           else {
             const board = String(body.board || '');
             if (!boardIds.has(board)) throw fail('请选择要移到的版块。');
-            if (!ctx.canModerateBoard(board)) throw fail('你没有目标板块的管理权限。', 403);
+            ctx.requireStaff('topic.move',board);
             live.move(topic.id, board);
           }
         }, { topic: topic.id, on: flag(body), board: body.board ?? undefined });
@@ -404,7 +434,6 @@ export async function contentRoutes(ctx: Ctx): Promise<boolean> {
   const replyAction = /^replies\/([^/]+)\/([a-z-]+)$/.exec(path);
   if (replyAction) {
     const { reply, topic } = visibleReply(ctx, replyAction[1]);
-    const canModerate = ctx.canModerateBoard(topic.board);
     const target: Target = { kind: 'reply', id: reply.id };
     const mine = same(me, reply.author);
     switch (replyAction[2]) {
@@ -416,15 +445,19 @@ export async function contentRoutes(ctx: Ctx): Promise<boolean> {
         return true;
       }
       case 'delete': {
-        if (!(canModerate || mine)) throw fail('只能删除自己的回复。', 403);
-        const moderated = !mine && body.violation !== false;
-        const reason = canModerate ? ctx.clean(body.reason, [2, 200], '删除理由', false) : '';
+        const canDelete=ctx.canStaff('reply.delete',topic.board);
+        if (!(canDelete || mine)) throw fail('只能删除自己的回复，或需要对应删除权限。', 403);
+        const moderated = !mine,penalty=moderated&&(body.violation===true||body.violation===undefined&&ctx.canStaff('reply.penalty',topic.board));
+        const reason = canDelete ? ctx.clean(body.reason, [2, 200], '删除理由', false) : '';
         const days = Number(body.mute || 0);
         const remove = () => {
-          live.deleteReply(reply.id, { moderated, reason });
-          if (!mine && [1, 7, 30].includes(days) && reply.author.kind === 'reader') live.members.mute(reply.author, days, '发布违规内容', me);
+          const current=visibleReply(ctx,reply.id);
+          if(!mine){ctx.requireStaff('reply.delete',current.topic.board);live.staff.protect(me,current.reply.author);if(penalty)ctx.requireStaff('reply.penalty',current.topic.board);}
+          if(days){if(![1,7,30].includes(days)||mine)throw fail('禁言参数无效。');ctx.requireStaff('member.mute');live.staff.protect(me,current.reply.author);}
+          live.deleteReply(reply.id, { moderated, penalty, reason });
+          if (days && current.reply.author.kind === 'reader') live.members.mute(current.reply.author, days, '发布违规内容', me);
         };
-        if (canModerate) await ctx.auditMutation('delete-reply', remove, { reply: reply.id, author: memberKey(reply.author), moderated, reason, mute: days || 0 });
+        if (canDelete) await ctx.auditMutation('delete-reply', remove, { reply: reply.id, author: memberKey(reply.author), moderated, penalty, reason, mute: days || 0 });
         else remove();
         ctx.send({ ok: true });
         return true;
@@ -441,8 +474,8 @@ export async function contentRoutes(ctx: Ctx): Promise<boolean> {
         ctx.send({ earned: live.accept(reply.id) });
         return true;
       case 'restore':
-        if (!canModerate) throw fail('你没有这个板块的管理权限。', 403);
-        await ctx.auditMutation('restore', () => live.restore(target), { reply: reply.id });
+        ctx.requireStaff('reply.restore',topic.board);
+        await ctx.auditMutation('restore', () => {ctx.requireStaff('reply.restore',visibleReply(ctx,reply.id).topic.board);return live.restore(target);}, { reply: reply.id });
         ctx.send({ ok: true });
         return true;
     }

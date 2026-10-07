@@ -20,6 +20,8 @@ import { purgeCommunityReaderData } from './community-reader-cleanup.ts';
 import { createCommunityConvention } from './community-convention.ts';
 import { createCommunityExperience } from './community-experience.ts';
 import { createCommunityProfileBackgrounds } from './community-profile-backgrounds.ts';
+import { createCommunityStaff } from './community-staff.ts';
+import { createCommunityFeatureRecommendations } from './community-staff-features.ts';
 
 export type { CommunityAuthor, Target } from './community-db.ts';
 export type ShowcaseMeta = { tools: string; model: string; usage: string; prompt: string; promptMode: PromptMode; price: number };
@@ -73,8 +75,10 @@ export function createCommunityStore(directory: string, { previewCatalog = false
   const ledger = createLedger(db);
   const convention = createCommunityConvention(db, tx);
   const experience = createCommunityExperience(db, tx, convention);
-  const members = createMembers(db, convention, tx);
-  const banners = createCommunityBanners(db, tx, members);
+  const staff = createCommunityStaff(db, tx);
+  const featureRecommendations = createCommunityFeatureRecommendations(db, tx, staff);
+  const members = createMembers(db, convention, tx, staff);
+  const banners = createCommunityBanners(db, tx, members, staff);
   const profileBackgrounds = createCommunityProfileBackgrounds(db, tx, (id, reason) => {
     // Queue both filenames durably before removing their registry. A rollback
     // leaves the picture registered, which protects it from queued cleanup.
@@ -252,7 +256,7 @@ export function createCommunityStore(directory: string, { previewCatalog = false
     return earned;
   }
   // A moderated deletion (by the owner or a steward, of someone else's content) costs the author a penalty.
-  function deleteTopicIn(id: string, { moderated = false, reason = '', note = '', now }: { moderated?: boolean; reason?: string; note?: string; now: string }) {
+  function deleteTopicIn(id: string, { moderated = false, penalty = moderated, reason = '', note = '', now }: { moderated?: boolean; penalty?: boolean; reason?: string; note?: string; now: string }) {
     const row = topicRow(id);
     if (!row || !Number(removeTopic.run(now, reason || null, id).changes)) return false;
     experience.revert({ kind: 'topic', id }, now);
@@ -264,15 +268,15 @@ export function createCommunityStore(directory: string, { previewCatalog = false
     if (refund) notify(author, { type: 'system', topicId: id, text: '悬赏退回一半', data: { refund: refund.amount } }, now);
     if (moderated) {
       // Rejecting a post that was never public is not a violation.
-      if (!row.pending) ledger.penalise(author, { kind: 'topic', id }, now);
-      notify(author, { type: row.pending ? 'review' : 'penalty', text: row.pending ? `你的帖子没有通过审核：${reason || '其他'}。有异议可以在站务反馈发帖。` : `你的帖子因违规被删除：${reason}`, data: { what: 'topic', title: displayTitle(row.title, row.body), state: row.pending ? 'rejected' : undefined, reason: reason || '其他', note, penalty: row.pending ? 0 : rules.penalty }, link: row.pending ? '#/community/boards/meta' : undefined }, now);
+      if (!row.pending && penalty) ledger.penalise(author, { kind: 'topic', id }, now);
+      notify(author, { type: row.pending ? 'review' : 'penalty', text: row.pending ? `你的帖子没有通过审核：${reason || '其他'}。有异议可以在站务反馈发帖。` : `你的帖子因违规被删除：${reason}`, data: { what: 'topic', title: displayTitle(row.title, row.body), state: row.pending ? 'rejected' : undefined, reason: reason || '其他', note, penalty: row.pending || !penalty ? 0 : rules.penalty }, link: row.pending ? '#/community/boards/meta' : undefined }, now);
     } else if (reason) {
       notify(author, { type: 'system', text: `你的帖子已被删除：${reason}`, data: { what: 'topic', title: displayTitle(row.title, row.body), reason } }, now);
     }
     for (const report of reportsOn.all('topic', id) as Array<{ id: string }>) closeReport.run(moderated ? 'upheld' : 'dismissed', now, report.id);
     return true;
   }
-  function deleteReplyIn(id: string, { moderated = false, reason = '', now }: { moderated?: boolean; reason?: string; now: string }) {
+  function deleteReplyIn(id: string, { moderated = false, penalty = moderated, reason = '', now }: { moderated?: boolean; penalty?: boolean; reason?: string; now: string }) {
     const row = replyRow(id);
     if (!row || !Number(removeReply.run(now, reason || null, id).changes)) return false;
     experience.revert({ kind: 'reply', id }, now);
@@ -281,8 +285,8 @@ export function createCommunityStore(directory: string, { previewCatalog = false
     const topic = topicRow(row.topic_id);
     if (topic?.accepted_reply_id === id) setAccepted.run(null, null, row.topic_id);
     if (moderated) {
-      ledger.penalise(authorOf(row), { kind: 'reply', id }, now);
-      notify(authorOf(row), { type: 'penalty', topicId: row.topic_id, text: `你的一条回复因违规被删除：${reason}`, data: { what: 'reply', reason, penalty: rules.penalty } }, now);
+      if (penalty) ledger.penalise(authorOf(row), { kind: 'reply', id }, now);
+      notify(authorOf(row), { type: 'penalty', topicId: row.topic_id, text: `你的一条回复因违规被删除：${reason}`, data: { what: 'reply', reason, penalty: penalty ? rules.penalty : 0 } }, now);
     } else if (reason) {
       notify(authorOf(row), { type: 'system', topicId: row.topic_id, text: `你的一条回复已被删除：${reason}`, data: { what: 'reply', reason } }, now);
     }
@@ -294,6 +298,8 @@ export function createCommunityStore(directory: string, { previewCatalog = false
     ledger,
     experience,
     members,
+    staff,
+    featureRecommendations,
     convention,
     economy,
     banners,
@@ -479,11 +485,11 @@ export function createCommunityStore(directory: string, { previewCatalog = false
         boards: Object.fromEntries((boardCounts.all() as Array<{ board: string; count: number }>).filter(row => !scope || scope.includes(row.board)).map(row => [row.board, Number(row.count)])),
       };
     },
-    deleteTopic(id: string, { moderated = false, reason = '', note = '', now = new Date().toISOString() }: { moderated?: boolean; reason?: string; note?: string; now?: string } = {}) {
-      return tx(() => deleteTopicIn(id, { moderated, reason, note, now }));
+    deleteTopic(id: string, { moderated = false, penalty = moderated, reason = '', note = '', now = new Date().toISOString() }: { moderated?: boolean; penalty?: boolean; reason?: string; note?: string; now?: string } = {}) {
+      return tx(() => deleteTopicIn(id, { moderated, penalty, reason, note, now }));
     },
-    deleteReply(id: string, { moderated = false, reason = '', now = new Date().toISOString() }: { moderated?: boolean; reason?: string; now?: string } = {}) {
-      return tx(() => deleteReplyIn(id, { moderated, reason, now }));
+    deleteReply(id: string, { moderated = false, penalty = moderated, reason = '', now = new Date().toISOString() }: { moderated?: boolean; penalty?: boolean; reason?: string; now?: string } = {}) {
+      return tx(() => deleteReplyIn(id, { moderated, penalty, reason, now }));
     },
     // Permanent account cleanup is separate from reversible moderation deletes.
     purgeReaderData(readerId: string, queueFile: (filename: string, reason: string) => void) {
@@ -675,7 +681,7 @@ export function createCommunityStore(directory: string, { previewCatalog = false
     },
     // Upholding removes the content (with the penalty) and notifies every open reporter;
     // dismissing closes this report and shows the content again if nothing else holds it.
-    resolveReport(id: string, uphold: boolean, now = new Date().toISOString(), decisionReason = '') {
+    resolveReport(id: string, uphold: boolean, now = new Date().toISOString(), decisionReason = '', penalty = true) {
       return tx(() => {
         const report = oneReport.get(id) as { id: string; target_kind: 'topic' | 'reply'; target_id: string; status: string; reason: string } | undefined;
         if (!report || report.status !== 'open') throw fail('这条举报已经处理过了。', 404);
@@ -687,7 +693,7 @@ export function createCommunityStore(directory: string, { previewCatalog = false
         }
         const reporters = reportsOn.all(target.kind, target.id) as Array<{ id: string; reporter_kind: Kind; reporter_id: string }>;
         const reason = decisionReason || `举报成立：${report.reason}`;
-        const removed = target.kind === 'topic' ? deleteTopicIn(target.id, { moderated: true, reason, now }) : deleteReplyIn(target.id, { moderated: true, reason, now });
+        const removed = target.kind === 'topic' ? deleteTopicIn(target.id, { moderated: true, penalty, reason, now }) : deleteReplyIn(target.id, { moderated: true, penalty, reason, now });
         for (const row of reporters) {
           closeReport.run('upheld', now, row.id);
           const reporter = { kind: row.reporter_kind, id: row.reporter_id };

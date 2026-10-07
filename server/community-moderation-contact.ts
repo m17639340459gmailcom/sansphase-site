@@ -39,7 +39,7 @@ export async function publicModerationContacts(store: CommunityStore, owner: Com
     const boards = store.members.moderationBoards(member);
     const info = map.get(memberKey(member));
     const contact = store.members.moderationContact(member);
-    if (!info?.uid || !boards.length || board && !boards.includes(board) || !contact || !contact.qq && !contact.email) return [];
+    if (!info?.uid || info.active === false || !boards.length || board && !boards.includes(board) || !contact || !contact.qq && !contact.email) return [];
     return [{ uid: info.uid, name: info.name, owner: member.kind === 'owner', boards, ...contact }];
   });
   return { items };

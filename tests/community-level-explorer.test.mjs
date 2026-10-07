@@ -94,7 +94,7 @@ test('keyboard selection preserves focus and roles; reader previews can browse g
   main.querySelector('[data-level="2"]').click();
   assert.match(main.querySelector('[data-level-detail]').textContent, /权限与限制/);
   assert.doesNotMatch(main.querySelector('[data-level-detail]').textContent, /累计访问天数|9 \/ 15|30 天内/);
-  assert.match(main.querySelector('[data-level-detail]').textContent, /版主由作者任命/);
+  assert.match(main.querySelector('[data-level-detail]').textContent, /不自动给予管理权/);
   main.querySelector('[data-level-step="1"]').click();
   assert.doesNotMatch(main.querySelector('[data-level-detail]').textContent, /近 100 天访问天数|精华 ≥|被采纳 ≥/);
   main.querySelector('[data-level-mode="growth"]').click();
@@ -140,7 +140,7 @@ test('VIP tiers show only the eight multipliers and no fabricated personal grade
       for (let level = 1; level <= 8; level++) {
         const dom = new JSDOM(communityLevelExplorerHTML({ ...data, vip }, { ...common, t: (zh, en) => english ? en : zh }, { mode: 'vip', growth: null, trust: null, vip: level }));
         const doc = dom.window.document;
-        assert.equal(doc.querySelectorAll('[data-level-mode]').length, 3);
+        assert.equal(doc.querySelectorAll('[data-level-mode]').length, 4);
         assert.equal(doc.querySelector('[data-level-mode="vip"]').getAttribute('aria-pressed'), 'true');
         assert.equal(doc.querySelector('[data-vip-multiplier]').textContent.trim(), `${communityVIPMultipliers[level - 1]}×`);
         assert.equal(doc.querySelector('[data-level-preview]').dataset.selectedLevel, String(level));

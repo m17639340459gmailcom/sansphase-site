@@ -67,7 +67,7 @@ for (const mode of [null, false, true, 'hk', 'hk-reduced']) test(typeof mode ===
       const reply = replies(id).at(-1);
       return reply ? { author: person(reply.author), at: reply.createdAt } : null;
     };
-    const dto = ({ body: _body, deleted: _deleted, ...topic }) => ({ ...topic, author: person(topic.author), replies: replies(topic.id).length, lastReply: lastReply(topic.id) });
+    const dto = ({ body: _body, deleted: _deleted, ...topic }) => ({ ...topic, liked: topic.liked === true, author: person(topic.author), replies: replies(topic.id).length, lastReply: lastReply(topic.id) });
     const byActivity = (list) => [...list].sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
     const at = () => new Date(Date.parse("2026-09-30T08:00:00Z") + community.next * 60000).toISOString();
     const unread = () => {
@@ -148,6 +148,7 @@ for (const mode of [null, false, true, 'hk', 'hk-reduced']) test(typeof mode ===
     if (method === "POST" && (match = /^topics\/([^/]+)\/(like|bookmark)$/.exec(path))) {
       const topic = live.find((item) => item.id === match[1]);
       topic[match[2] === "like" ? "likes" : "bookmarks"] = body.on ? 1 : 0;
+      topic[match[2] === "like" ? "liked" : "bookmarked"] = body.on;
       return respond(200, match[2] === "like" ? { likes: topic.likes, liked: body.on, earned: 0 } : { bookmarks: topic.bookmarks, bookmarked: body.on });
     }
     // 通知：一条回复、一条关注。

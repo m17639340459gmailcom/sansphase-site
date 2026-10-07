@@ -17,6 +17,8 @@ import type { CommunityThread } from '../src/community-post.ts';
 import { experienceCatalogue, vipCatalogue } from '../server/community-experience.ts';
 import { communityBadgeFamilies } from '../src/community-badge-policy.ts';
 import { acceptCommunityConvention } from './fixtures/community-convention-consent.ts';
+import { communityBoards } from '../src/community.ts';
+import { communityStaffCapabilities } from '../src/community-staff.ts';
 
 const owner: CommunityAuthor = { kind: 'owner', id: 'owner' };
 const reader: CommunityAuthor = { kind: 'reader', id: 'reader' };
@@ -83,7 +85,11 @@ test('owner reader perspective uses the same reader DTO with top growth, VIP and
   assert.equal(me.owner, false);
   assert.equal(me.mod, false);
   assert.deepEqual(me.moderationBoards, []);
-  assert.deepEqual(me.management, { role: 'owner', browsingAsReader: true, interactive: true });
+  assert.deepEqual(me.management, { role: 'owner', browsingAsReader: true, interactive: true, staff: {
+    role: 'owner', boards: communityBoards.map(board => board.id), permissions: communityStaffCapabilities.map(capability => capability.id),
+    delegable: communityStaffCapabilities.map(capability => capability.id), parent: null,
+  } }, 'switching back retains the original management scope without activating it for the reader');
+  assert.equal(me.staff, null);
   assert.equal(me.level, 3, 'ordinary trust ends before appointed moderation');
   assert.equal(me.trustLevel, 3);
   assert.equal(me.vip, true);

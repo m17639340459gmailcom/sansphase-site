@@ -13,6 +13,8 @@ import { communityGrowthLevel } from './community-growth.mjs';
 import { communityGrowthArtHTML, communityTrustArtHTML, communityVipArtHTML } from './community-growth-art.mjs';
 import type { CommunityGrowthState, CommunityVIPGrowthState } from './community-growth.ts';
 import type { CommunityEntryState } from './community-entry.ts';
+import { communityStaffRoles, communityStaffCapabilities } from './community-staff.mjs';
+import type { CommunityStaffRole, CommunityStaffState } from './community-staff.ts';
 export * from './community-rules.mjs';
 
 export type Translate = (zh: string, en: string) => string;
@@ -64,7 +66,7 @@ export const communityPageTabs = {
   stardust: ["ledger", "levels", "rules"],
   inbox: ["all", "reply", "thanks", "system"],
   shop: ["all", "look", "card", "digital", "goods", "mine"],
-  manage: ["queue", "reports", "profiles", "content", "banners", "orders", "items", "stewards", "sanctions", "data", "contact", "convention"],
+  manage: ["queue", "reports", "profiles", "content", "features", "banners", "orders", "items", "stewards", "sanctions", "data", "contact", "convention"],
 } as const;
 type TabbedView = keyof typeof communityPageTabs;
 const tabbed = (view: CommunityView): view is TabbedView => view in communityPageTabs;
@@ -133,6 +135,7 @@ export type CommunityPerson = {
   vipGrowth?: CommunityVIPGrowthState | null;
   name: string; role: CommunityRole; uid: string | null; avatar?: string | null; vip?: boolean; level?: number;
   steward?: boolean; moderationBoards?: string[]; frame?: string | null; color?: string | null; showUid?: boolean;
+  staffRole?: CommunityStaffRole | null;
 };
 export type CommunityShowcaseMeta = { tools: string; model: string; usage: string; promptMode: PromptMode; price: number };
 export type CommunityResource = { url: string; kind: string; price: string; platform: string; alive: number; dead: number };
@@ -221,7 +224,8 @@ export type CommunityModerationContacts = { items: CommunityModerationContactPer
 export type CommunityMe = CommunityPerson & {
   badgeState?: CommunityBadgeState;
   convention?: { version: string; agreed: boolean };
-  management?: { role: 'owner' | 'steward'; browsingAsReader: boolean; interactive?: true } | null;
+  management?: { role: CommunityStaffRole | 'steward'; browsingAsReader: boolean; interactive?: true; staff?: CommunityStaffState | null } | null;
+  staff?: CommunityStaffState | null;
   moderationContact?: CommunityModerationContact | null;
   owner: boolean; mod: boolean; trustLevel?: number; balance: number; checkedIn: boolean; streak: number;
   nextReward: { total: number; bonus: number }; gainedToday: number; behaviourToday: number; dailyCap: number;
@@ -281,7 +285,11 @@ export const communityLevelName = levelTitle;
 // 等级标识：站长是独立角色，协管也不是自动等级；VIP 另起一个标识。
 export function levelChipHTML(person: CommunityPerson, { t }: Common) {
   if (person.role === "owner") return `<span class="community-role">${t("站长", "Owner")}</span>`;
-  if (person.steward) return `<span class="community-lv is-steward" title="${t("协管", "Steward")}"><span class="community-steward-icon" aria-hidden="true">⬟</span>${t("协管", "Steward")}</span>`;
+  const role = communityStaffRoles.find(item => item.id === person.staffRole);
+  if (role || person.staffRole === undefined && person.steward) {
+    const label = role ? t(role.name, role.nameEn) : t('协管', 'Steward');
+    return `<span class="community-lv is-steward" title="${label}"><span class="community-steward-icon" aria-hidden="true">⬟</span>${label}</span>`;
+  }
   const level = Math.max(0, Math.min(3, person.level ?? 0));
   return `<span class="community-lv is-lv${level}" title="L${level}">${levelTitle(level, t)}</span>`;
 }
@@ -307,7 +315,7 @@ export function levelMarksHTML(person: CommunityPerson, common: Common, large = 
     const item = communityGrowthLevel(person.growth.level);
     marks += mark('growth', t(`成长等级：${item.name}`, `Growth level: ${item.en}`), communityGrowthArtHTML(item.level));
   }
-  if (!person.steward) {
+  if (person.staffRole !== undefined || !person.steward) {
     const level = Math.max(0, Math.min(3, person.level ?? 0));
     marks += mark('trust', t(`权限等级：L${level} ${levelTitle(level, t)}`, `Permission level: L${level} ${levelTitle(level, t)}`), communityTrustArtHTML(level));
   }
@@ -319,7 +327,7 @@ export function levelMarksHTML(person: CommunityPerson, common: Common, large = 
   return marks ? `<span class="community-level-marks${large ? ' is-large' : ''}">${marks}</span>` : '';
 }
 // 站长与协管没有对应的图标，仍用文字标识。
-export const roleChipHTML = (person: CommunityPerson, common: Common) => person.role === "owner" || person.steward ? levelChipHTML(person, common) : "";
+export const roleChipHTML = (person: CommunityPerson, common: Common) => person.role === "owner" || person.staffRole || person.staffRole === undefined && person.steward ? levelChipHTML(person, common) : "";
 function nameWithMarksHTML(label: string, person: CommunityPerson, common: Common, marked = true) {
   const marks = marked ? levelMarksHTML(person, common) : '';
   return marks ? `<span class="community-name">${label}${marks}</span>` : label;
@@ -503,8 +511,30 @@ type AccountOptions = { t: Translate; esc: Escape; icons: Icons; nickname?: stri
 // Only the verified account response supplies management authority. Older
 // responses may omit management; their active mod flag remains compatible.
 export function communityManagementRole(me: CommunityMe | null | undefined) {
-  if (me?.management) return ['owner', 'steward'].includes(me.management.role) ? me.management.role : null;
+  if (me?.management) return [...communityStaffRoles.map(item => item.id), 'steward'].includes(me.management.role) ? me.management.role : null;
   return me?.management === undefined && me?.mod ? me.owner ? 'owner' : 'steward' : null;
+}
+
+// Pick a visible entry from the current account's concrete grants. Server
+// routes still verify those grants; a role title alone never opens a queue.
+export function communityManagementHref(me: CommunityMe | null | undefined): string | null {
+  const role = communityManagementRole(me);
+  if (!me?.mod || !role || me.management?.browsingAsReader) return null;
+  if (me.owner && role === 'owner') return manageHref();
+  const staff = me.staff === undefined ? me.management?.staff : me.staff;
+  if (staff === undefined) return manageHref(); // Verified legacy account DTO.
+  if (!staff || staff.role === 'owner' || !communityStaffRoles.some(item => item.id === staff.role)
+    || !staff.boards.some(board => communityBoards.some(item => item.id === board))) return null;
+  const permissions = communityStaffCapabilities.filter(item => staff.permissions.includes(item.id)).map(item => item.id);
+  if (!permissions.length) return null;
+  const tab = permissions.includes('content.inspect') ? 'queue'
+    : permissions.includes('report.review') ? 'reports'
+      : permissions.some(cap => cap.startsWith('profile.')) ? 'profiles'
+        : permissions.includes('feature.decide') && staff.role !== 'assistant' ? 'features'
+          : permissions.includes('banner.manage') ? 'banners'
+            : permissions.includes('staff.appoint') ? 'stewards'
+              : permissions.includes('member.mute') || permissions.includes('member.unmute') ? 'sanctions' : 'contact';
+  return manageHref(tab);
 }
 
 // A real owner-linked reader can act as that reader. Other browsing
@@ -524,15 +554,19 @@ export function communityAccountHTML({ t, esc, icons, nickname, author, me = nul
   const bell = me ? `<a class="community-bell" href="${inboxHref()}" aria-label="${unread ? t(`通知，${unread} 条未读`, `Notifications, ${unread} unread`) : t("通知", "Notifications")}">${icons.bell || ""}${unread ? `<b>${unread > 99 ? "99+" : unread}</b>` : ""}</a>` : "";
   const item = (href: string, icon: string, text: string, extra = "") => `<a role="menuitem" href="${href}">${icons[icon] || ""}<span>${text}</span>${extra}</a>`;
   const managementRole = communityManagementRole(me);
+  const managementHref = communityManagementHref(me);
   const browsingAsReader = Boolean(me?.management?.browsingAsReader);
-  const head = me ? `<div class="community-menu-head">${avatarHTML(me, common, "sm", false)}<div><b>${nameLabelHTML(me, common)}</b><span>${me.owner || me.management?.role === 'owner' ? t("站长", "Owner") : levelTitle(me.steward ? 4 : me.level ?? 0, t)}${me.uid ? ` · UID ${esc(me.uid)}` : ""}</span></div></div>` : "";
+  const activeRole = communityStaffRoles.find(item => item.id === me?.staffRole);
+  const roleTitle = activeRole ? t(activeRole.name, activeRole.nameEn)
+    : me?.staffRole === undefined && me?.mod && me.steward && !browsingAsReader ? t('协管', 'Moderator') : null;
+  const head = me ? `<div class="community-menu-head">${avatarHTML(me, common, "sm", false)}<div><b>${nameLabelHTML(me, common)}</b><span>${me.owner ? t("站长", "Owner") : roleTitle || levelTitle(me.level ?? 0, t)}${me.uid ? ` · UID ${esc(me.uid)}` : ""}</span></div></div>` : "";
   const personal = me
     ? (me.uid ? item(memberHref(me.uid), "user", t("我的主页", "My page")) : "")
       + item(stardustHref(), "star", t("我的星尘", "My stardust"), `<span class="community-menu-num">${me.balance}</span>`)
       + item(inboxHref(), "bell", t("通知", "Notifications"), unread ? `<span class="community-menu-badge">${unread > 99 ? "99+" : unread}</span>` : "")
       + item("#/community/bookmarks", "bookmark", t("我的收藏", "Bookmarks"))
-      + ((me.owner || me.mod) && !browsingAsReader ? item(manageHref(), "shield", t("管理台", "Management"), me.manageTodo ? `<span class="community-menu-badge">${me.manageTodo > 99 ? "99+" : me.manageTodo}</span>` : "") : "")
-      + (managementRole ? `<button type="button" role="menuitem" data-action="community-browse-mode" data-reader="${!browsingAsReader}">${icons.eye || ''}<span>${browsingAsReader ? managementRole === 'owner' ? t('返回作者身份', 'Restore owner perspective') : t('返回版主身份', 'Restore moderator perspective') : t('以读者身份浏览', 'Browse as a reader')}</span></button>` : '')
+      + (managementHref ? item(managementHref, "shield", t("管理台", "Management"), me.manageTodo ? `<span class="community-menu-badge">${me.manageTodo > 99 ? "99+" : me.manageTodo}</span>` : "") : "")
+      + (managementRole ? `<button type="button" role="menuitem" data-action="community-browse-mode" data-reader="${!browsingAsReader}">${icons.eye || ''}<span>${browsingAsReader ? managementRole === 'owner' ? t('返回作者身份', 'Restore owner perspective') : managementRole === 'steward' || managementRole === 'moderator' ? t('返回版主身份', 'Restore moderator perspective') : t(`返回${communityStaffRoles.find(item => item.id === managementRole)?.name || '管理'}身份`, 'Restore management perspective') : t('以读者身份浏览', 'Browse as a reader')}</span></button>` : '')
     : signedIn ? item("#/community/bookmarks", "bookmark", t("我的收藏", "Bookmarks")) : "";
   const account = author
     ? communityOnly ? "" : `<button type="button" role="menuitem" data-author-login>${icons.user || ""}<span>${t("打开作者台", "Open author studio")}</span></button>`
@@ -551,8 +585,9 @@ export function communityTopicsHTML(items: readonly CommunityTopic[], common: Co
     const when = topic.lastReply
       ? `<time datetime="${esc(topic.lastReply.at)}">${t(`${nameLabelHTML(topic.lastReply.author, common)} ${relativeTime(topic.lastReply.at, now, t)}回复`, `${nameLabelHTML(topic.lastReply.author, common)} replied ${relativeTime(topic.lastReply.at, now, t)}`)}</time>`
       : `<time datetime="${esc(topic.createdAt)}">${relativeTime(topic.createdAt, now, t)}</time>`;
-    const thumbs = topic.thumbs?.length && (common.showTopicCovers || topic.board === "showcase" || topic.board === "moments")
-      ? `<a class="community-topic-thumbs" href="${postHref(topic.id)}" tabindex="-1" aria-hidden="true">${topic.thumbs.slice(0, common.showTopicCovers ? 1 : 4).map((id) => `<img src="${imageSrc(id, true)}" alt="" loading="lazy" decoding="async" width="84" height="60">`).join("")}</a>`
+    const previewImages = topic.thumbs?.slice(0, common.showTopicCovers ? 1 : 4) || [];
+    const thumbs = previewImages.length && (common.showTopicCovers || topic.board === "showcase" || topic.board === "moments")
+      ? `<a class="community-topic-thumbs" href="${postHref(topic.id)}" tabindex="-1" aria-hidden="true">${previewImages.map((id) => `<img src="${imageSrc(id, previewImages.length > 1)}" alt="" loading="lazy" decoding="async" width="84" height="60">`).join("")}</a>`
       : "";
     const tags = (topic.tags || []).slice(0, 2).map((tag) => tagLink(tag, esc)).join("");
     const flags = flagsHTML(topic, common);

@@ -12,7 +12,7 @@ import type { CommunityProfileAccess } from './community-profile-access.ts';
 import { membershipState } from './reader-membership.ts';
 
 type ReaderIdentity = { id: string; nickname: string; vip?: boolean } | null;
-type ReaderRow = { id: string | number; nickname?: string; avatar?: string | null; signature?: string | null; createdAt?: string; vip_until?: string | null; disabled?: boolean };
+type ReaderRow = { id: string | number; nickname?: string; avatar?: string | null; signature?: string | null; createdAt?: string; vip_until?: string | null; disabled?: boolean; _verified?: boolean };
 type Options = {
   payload: Payload;
   directory: string;
@@ -54,13 +54,13 @@ export function createCommunityDirectory({ payload, directory, ownerName, ownerA
       if (!row.nickname) continue;
       map.set(`reader:${row.id}`, {
         name: row.nickname, uid: uidOf(String(row.id)), avatar: uuid.test(row.avatar || '') ? row.avatar! : null,
-        vip: membershipState(row).vip, joinedAt: row.createdAt || null, bio: row.signature || '',
+        vip: membershipState(row).vip, joinedAt: row.createdAt || null, bio: row.signature || '', active: row._verified === true && !row.disabled,
         ...(String(row.id) === ownerReaderId && !row.disabled ? { ownerReader: true as const } : {}),
       });
     }
     if (authors.some(author => author.kind === 'owner' && author.id === authorId)) {
       const [name, avatar] = await Promise.all([ownerName(), ownerAvatar?.current() ?? null]);
-      map.set(`owner:${authorId}`, { name, uid: 'owner', avatar: uuid.test(avatar || '') ? avatar : null, vip: true, joinedAt: null, bio: '' });
+      map.set(`owner:${authorId}`, { name, uid: 'owner', avatar: uuid.test(avatar || '') ? avatar : null, vip: true, joinedAt: null, bio: '', active: true });
     }
     return map;
   };
@@ -94,7 +94,7 @@ export function createCommunityDirectory({ payload, directory, ownerName, ownerA
     }
     const file = await avatarFile(uid);
     if (!file) return null;
-    try { return await readFile(file); }
+    try { const bytes = await readFile(file); return await avatarFile(uid) === file ? bytes : null; }
     catch (error) { if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null; throw error; }
   };
   return { people, findMember, findByNames, avatarFile, avatar };
