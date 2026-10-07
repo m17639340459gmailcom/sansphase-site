@@ -271,7 +271,7 @@ body.community-open #blog-backdrop::after { display: none; }
 .community-button:disabled { opacity: 0.45; }
 .community-button .ui-icon, .community-post .ui-icon { width: 18px; height: 18px; flex: 0 0 18px; }
 .community-button.is-gold, .community-post { border-color: var(--signal); background: linear-gradient(180deg, var(--cm-signal-2), var(--signal)); color: #1a1409; font-weight: 600; box-shadow: inset 0 1px 0 rgb(255 250 236 / 30%); }
-.community-button.is-gold:hover:not(:disabled), .community-post:hover { border-color: var(--cm-signal-2); background: var(--cm-signal-2); }
+.community-button.is-gold:hover:not(:disabled), .community-post:hover:not(:disabled) { border-color: var(--cm-signal-2); background: var(--cm-signal-2); }
 .community-button.is-small { height: 36px; padding: 0 13px; font-size: 14px; }
 .community-button[aria-pressed="true"] { background: var(--community-selected-fill); border-color: var(--community-selected-edge); color: var(--community-selected-ink); }
 .community-button[aria-pressed="true"]:hover:not(:disabled) { background: var(--community-selected-fill); border-color: var(--community-selected-edge); color: var(--community-selected-ink); }
@@ -284,6 +284,9 @@ body.community-open #blog-backdrop::after { display: none; }
 .community-button.is-danger:hover:not(:disabled) { border-color: rgb(255 179 164 / 55%); background: rgb(255 179 164 / 20%); }
 .community-button[data-confirm="true"] { border-color: var(--line-strong); color: var(--muted); }
 .community-button.is-danger[data-confirm="true"], .community-button.is-good[data-confirm="true"] { border-color: currentColor; }
+.community-button:active:not(:disabled), .community-post:active:not(:disabled) { box-shadow: inset 0 2px 4px rgb(5 10 18 / 16%); }
+.community-button:focus-visible:not(:disabled), .community-button:is(.is-good, .is-danger, [aria-pressed="true"]):focus-visible:not(:disabled), .community-post:focus-visible:not(:disabled) { border-color: var(--focus-edge); box-shadow: inset 0 0 0 1.5px var(--focus-edge); }
+.community-button.is-gold:focus-visible:not(:disabled), .community-post:focus-visible:not(:disabled) { border-color: currentColor; box-shadow: inset 0 0 0 1.5px currentColor; }
 .community-icon-button { display: inline-grid; place-items: center; width: 26px; height: 26px; flex-shrink: 0; border: 1px solid transparent; border-radius: 50%; color: var(--muted); }
 .community-icon-button:hover { background: rgb(238 233 224 / 7%); color: var(--text); }
 .community-icon-button .ui-icon { width: 13px; height: 13px; }
@@ -678,9 +681,11 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-choice input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: pointer; }
 .community-choice span { display: inline-flex; align-items: center; gap: 8px; padding: 7px 14px; border: 1px solid var(--line-strong); border-radius: var(--pill); font-size: 13.5px; color: var(--muted); transition: border-color 0.2s, background 0.2s, color 0.2s; }
 .community-choice i { width: 7px; height: 7px; border-radius: 50%; background: var(--board); }
-.community-choice:hover span { color: var(--text); }
+.community-choice:hover:not(:has(input:disabled)) span { color: var(--text); }
 .community-choice input:checked + span { border-color: var(--community-selected-edge); background: var(--community-selected-fill); color: var(--community-selected-ink); }
 .community-choice input:focus-visible + span { border-color: var(--focus-edge); }
+.community-choice:has(input:disabled) { opacity: .45; cursor: default; }
+.community-choice input:disabled { cursor: default; }
 .community-choices:has([aria-invalid="true"]) .community-choice input + span { border-color: var(--error); }
 .community-choice.is-tag span { padding: 5px 12px; font-size: 13px; }
 .community-field { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
@@ -693,12 +698,12 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 11px 14px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--community-reading-control, var(--surface)); color: var(--text); font: inherit; line-height: 1.7; text-align: left; cursor: pointer; }
 .community-select-trigger > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .community-select-trigger svg { display: block; width: 18px; height: 18px; flex-shrink: 0; }
-.community-select-trigger:is(:hover, [data-state="open"], :focus-visible) { border-color: var(--focus-edge); }
+.community-select-trigger:where(:not(:disabled)):is(:hover, [data-state="open"], :focus-visible) { border-color: var(--focus-edge); }
 .community-select-trigger:focus-visible { outline: none; box-shadow: none; }
 .community-select-trigger:disabled { opacity: .55; cursor: default; }
 .community-select-menu { z-index: 180; width: var(--radix-select-trigger-width); max-width: calc(100vw - 32px); max-height: min(300px, var(--radix-select-content-available-height)); overflow: hidden; padding: 5px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--community-reading-control, var(--surface)); color: var(--text); box-shadow: 0 12px 32px rgb(5 10 18 / 18%); font: 14px/1.6 var(--font); }
 .community-select-viewport { max-height: 260px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
-.community-select-option { position: relative; display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 8px 32px 8px 12px; border: 1px solid transparent; border-radius: 8px; color: var(--text); cursor: pointer; outline: none; }
+.community-select-option { position: relative; display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 8px 32px 8px 12px; border: 1px solid transparent; border-radius: 8px; color: var(--text); white-space: normal; overflow-wrap: anywhere; cursor: pointer; outline: none; }
 .community-select-option[data-highlighted] { border-color: var(--cm-signal-edge); background: var(--cm-signal-soft); }
 .community-select-option[data-state="checked"] { border-color: var(--community-selected-edge); background: var(--community-selected-fill); color: var(--community-selected-ink); font-weight: 600; }
 .community-select-option[data-disabled] { opacity: .45; cursor: default; }

@@ -15,21 +15,98 @@ const palettes = {
   dark: { fill: 'rgb(58, 73, 96)', ink: 'rgb(240, 223, 190)', edge: 'rgb(186, 161, 111)' },
 };
 
-async function fixture(theme: keyof typeof palettes, content: string) {
+async function fixture(theme: keyof typeof palettes, content: string, includeFoundation = false, workspace: 'frame' | 'management' = 'frame') {
   const tokens = new Map<string, string>();
-  const source = await composeCommunityStyles();
+  const source = [includeFoundation ? await readFile(new URL('../../src/styles-foundation.css', import.meta.url), 'utf8') : '', await composeCommunityStyles()].join('\n');
   postcss.parse(source).walkRules(rule => {
     if (rule.parent?.type !== 'root') return;
-    if (!['body.community-open', 'body.community-open:is(.community-frame-open, .community-management-open)', ...(theme === 'light' ? [light] : [])].includes(rule.selector)) return;
+    if (![...(includeFoundation ? [':root'] : []), 'body.community-open', 'body.community-open:is(.community-frame-open, .community-management-open)', ...(theme === 'light' ? [light] : [])].includes(rule.selector)) return;
     rule.walkDecls(d => { if (d.prop.startsWith('--')) tokens.set(d.prop, d.value); });
   });
   // JSDOM does not resolve inherited custom properties; use the corresponding
   // desktop theme tokens. Component-local artwork palettes are not tested here.
-  let css = source.replaceAll(':hover', '.test-hover').replaceAll(':focus-visible', '.test-focus');
+  let css = source.replaceAll(':hover', '.test-hover').replaceAll(':focus-visible', '.test-focus').replaceAll(':active', '.test-active');
   for (let n = 0; n < 10; n++) css = css.replace(/var\((--[\w-]+)(?:,\s*([^()]+))?\)/g,
     (match: string, name: string, fallback: string | undefined) => tokens.get(name) ?? fallback ?? match);
-  const { window } = new JSDOM(`<style>${css}</style><body class="community-open community-frame-open" data-community-theme="${theme}">${content}</body>`, { url: `http://localhost/?communityTheme=${theme}#/community/new/showcase` });
+  const { window } = new JSDOM(`<style>${css}</style><body class="community-open community-${workspace}-open" data-community-theme="${theme}">${content}</body>`, { url: `http://localhost/?communityTheme=${theme}#/community/new/showcase` });
   return { window, tokens, style: (element: Element) => window.getComputedStyle(element) };
+}
+
+const actionVariants = [
+  { id: 'neutral', className: 'community-button', primary: false },
+  { id: 'gold', className: 'community-button is-gold', primary: true },
+  { id: 'post', className: 'community-post', primary: true },
+  { id: 'good', className: 'community-button is-good', primary: false },
+  { id: 'danger', className: 'community-button is-danger', primary: false },
+] as const;
+
+for (const theme of ['light', 'dark'] as const) for (const workspace of ['management', 'frame'] as const) {
+  test(`${theme}: ${workspace} actions keep one visible edge through keyboard focus, hover and pressing`, async t => {
+    const variants = workspace === 'frame' ? [...actionVariants, { id: 'rail-compose', className: 'community-feed-rail-compose', primary: true }] : actionVariants;
+    const content = variants.map(variant => variant.id === 'rail-compose'
+      ? `<aside class="community-feed-rail"><a href="#/community/new/qa" class="${variant.className}" data-case="${variant.id}"><span data-compose-label>发布讨论</span></a></aside>`
+      : variant.id === 'post'
+      ? `<a href="#/community/new/qa" class="${variant.className}" data-case="${variant.id}"><span>发布讨论</span></a>`
+      : `<button type="button" class="${variant.className}" data-case="${variant.id}"><span>保存管理配置</span></button>`).join('');
+    const { window, tokens, style } = await fixture(theme, `<section class="page community-${workspace === 'frame' ? 'page' : 'management-page'}"${workspace === 'frame' ? ' data-community-frame="stable"' : ''}>${content}</section>`, true, workspace);
+    try {
+      const probe = window.document.createElement('span');
+      window.document.body.append(probe);
+      const colour = (value: string) => {
+        let resolved = value;
+        for (let n = 0; n < 10; n++) resolved = resolved.replace(/var\((--[\w-]+)\)/g, (match, name: string) => tokens.get(name) ?? match);
+        probe.style.color = resolved;
+        return style(probe).color;
+      };
+      for (const variant of variants) await t.test(variant.id, () => {
+        const control = window.document.querySelector<HTMLElement>(`[data-case="${variant.id}"]`)!;
+        const normal = { edge: style(control).borderColor, shadow: style(control).boxShadow, fill: style(control).backgroundColor, image: style(control).backgroundImage };
+        control.focus();
+        control.classList.add('test-focus');
+        const expectedEdge = variant.primary ? style(control).color : colour(tokens.get('--focus-edge')!);
+        const focusedEdge = () => {
+          const focused = style(control);
+          assert.equal(focused.borderColor, expectedEdge, `${variant.id} uses its readable focus colour on the existing border`);
+          assert.equal(focused.borderTopWidth, '1px', 'focus cannot grow the layout border');
+          assert.ok(!focused.outlineStyle || focused.outlineStyle === 'none', 'focus must not add a detached outer outline');
+          const edges = [...focused.boxShadow.matchAll(/\binset\s+0(?:px)?\s+0(?:px)?\s+0(?:px)?\s+1\.5px\s+(currentColor|#[a-f\d]+|rgba?\([^)]*\))/gi)];
+          assert.equal(edges.length, 1, `${variant.id} keeps one continuous inset stroke against the existing border`);
+          assert.equal(edges[0]![1]!.toLowerCase() === 'currentcolor' ? focused.color : colour(edges[0]![1]!), expectedEdge, 'the inset stroke and existing border use the same colour');
+        };
+        focusedEdge();
+        assert.notDeepEqual({ edge: style(control).borderColor, shadow: style(control).boxShadow }, { edge: normal.edge, shadow: normal.shadow }, 'keyboard focus must differ from the normal surface');
+        control.classList.add('test-hover');
+        focusedEdge();
+        control.classList.add('test-active');
+        focusedEdge();
+        control.classList.remove('test-focus', 'test-hover');
+        assert.notDeepEqual({ shadow: style(control).boxShadow, fill: style(control).backgroundColor, image: style(control).backgroundImage }, { shadow: normal.shadow, fill: normal.fill, image: normal.image }, 'pressing provides feedback without moving the control');
+        assert.ok(!style(control).transform || style(control).transform === 'none');
+        assert.ok(!style(control).filter || style(control).filter === 'none');
+        control.classList.remove('test-active');
+        control.blur();
+      });
+    } finally { window.close(); }
+  });
+}
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`${theme}: disabled actions retain their surface during hover and pressing`, async () => {
+    const { window, style } = await fixture(theme, actionVariants.map(variant => `<button type="button" disabled class="${variant.className}" data-case="${variant.id}"><span>保存管理配置</span></button>`).join(''), true, 'management');
+    try {
+      for (const control of window.document.querySelectorAll<HTMLButtonElement>('button')) {
+        const surface = () => ({ edge: style(control).borderColor, shadow: style(control).boxShadow, fill: style(control).backgroundColor, image: style(control).backgroundImage });
+        const normal = surface();
+        assert.ok(Number(style(control).opacity) < 1, 'disabled controls are visibly distinct');
+        control.classList.add('test-hover', 'test-active');
+        assert.deepEqual(surface(), normal, `${control.dataset.case} cannot show enabled hover or pressed feedback while disabled`);
+        let clicks = 0;
+        control.addEventListener('click', () => { clicks++; });
+        control.click();
+        assert.equal(clicks, 0);
+      }
+    } finally { window.close(); }
+  });
 }
 
 for (const theme of ['light', 'dark'] as const) {

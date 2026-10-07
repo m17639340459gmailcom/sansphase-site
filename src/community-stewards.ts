@@ -41,7 +41,7 @@ export function communityStewardsHTML(stewards: Array<CommunityPerson & { staff?
     const permissions = new Set(person.staff?.permissions ?? (role ? communityStaffDefaultPermissions[role] : []));
     const delegable = new Set(person.staff?.delegable ?? []);
     const parentChanges = existing && actorStaff?.role === 'owner' && person.staff?.parent?.kind === 'reader';
-    const capabilities = modern && role ? `<div class="community-field"><label class="community-field-l" for="${esc(id)}-role">${t('任命身份', 'Appointed role')}</label><select class="community-select" id="${esc(id)}-role" name="role">${assignableRoles.map(option => `<option value="${option}"${option === role ? ' selected' : ''}>${roleLabel(option)}</option>`).join('')}</select></div>`
+    const capabilities = modern && role ? `<div class="community-field community-staff-role"><label class="community-field-l" for="${esc(id)}-role">${t('任命身份', 'Appointed role')}</label><select class="community-select" id="${esc(id)}-role" name="role">${assignableRoles.map(option => `<option value="${option}"${option === role ? ' selected' : ''}>${roleLabel(option)}</option>`).join('')}</select></div>`
       + `<div class="community-staff-permissions"><p class="community-muted">${t('可执行：本人可以使用。可下发：任命下级时可以授予，必须同时有可执行权限。', 'Execute: this member can use the capability. Delegate: this member may grant it to subordinates and must also be able to execute it.')}</p>`
       + (caps.length ? permissionGroups.map(group => {
         const items = group.permissions.flatMap(permission => caps.filter(cap => cap.id === permission));

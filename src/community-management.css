@@ -34,6 +34,9 @@ body.community-management-open #main { z-index: auto; }
 .community-management-filter > span { color: var(--muted); font-size: 13px; margin-right: 4px; }
 .community-steward-section { margin-bottom: 28px; }
 .community-steward-section h2 { margin: 0 0 16px; color: var(--signal); font: 600 22px/1.4 var(--font-serif); }
+.community-steward-section .community-button { min-width: 0; max-width: 100%; height: auto; min-height: 38px; padding: 7px 18px; line-height: 1.5; white-space: normal; }
+.community-steward-section .community-button.is-small { min-height: 36px; padding: 6px 13px; }
+.community-steward-section .community-button > span { min-width: 0; overflow-wrap: anywhere; }
 .community-steward-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--cm-panel); }
 .community-steward-row + .community-steward-row { margin-top: 10px; }
 .community-steward-person { display: flex; align-items: center; gap: 12px; min-width: 0; }
@@ -46,24 +49,32 @@ body.community-management-open #main { z-index: auto; }
 .community-steward-scope .community-muted { margin: 0; font-size: 13px; line-height: 1.7; }
 .community-steward-scope .community-form-status { margin: 0; }
 .community-steward-scope .community-action-group { justify-content: flex-start; flex-wrap: wrap; }
+.community-staff-role { width: 100%; max-width: 320px; }
+.community-staff-role :is(select, .community-select-trigger) { height: 48px; line-height: 1.5; }
 .community-staff-permissions { min-width: 0; display: grid; gap: 20px; container: staff-permissions / inline-size; }
 .community-staff-permission-group { min-width: 0; margin: 0; padding: 16px; border: 1px solid var(--line); border-radius: 10px; }
 .community-staff-permission-group legend { padding: 0 6px; color: var(--signal); font-size: 15px; font-weight: 600; }
 .community-staff-permission-group > .community-muted { margin-bottom: 12px; }
 .community-staff-permission-head, .community-staff-permission-row { display: grid; grid-template-columns: minmax(0, 1fr) repeat(2, 104px); gap: 16px; align-items: center; }
 .community-staff-permission-head { padding: 0 0 10px; color: var(--muted); font-size: 12px; }
-.community-staff-permission-row { min-width: 0; padding: 10px 0; border-top: 1px solid var(--line); }
-.community-staff-permission-row > span { min-width: 0; color: var(--text); font-size: 13.5px; line-height: 1.6; overflow-wrap: anywhere; }
-.community-staff-permission-row .community-check { min-height: 28px; align-items: center; gap: 8px; margin: 0; }
+.community-staff-permission-row { min-width: 0; padding: 8px 0; border-top: 1px solid var(--line); }
+.community-staff-permission-row > span { min-width: 0; color: var(--text); font-size: var(--cm-font-ui, 14px); line-height: 1.6; overflow-wrap: anywhere; }
+.community-staff-permission-row .community-check { min-width: 0; min-height: 36px; align-items: center; gap: 8px; margin: 0; padding: 4px 8px; border: 1px solid transparent; border-radius: 8px; box-shadow: none; }
 .community-staff-permission-row .community-check input { margin: 0; }
+.community-staff-permission-row .community-check:has(input:checked) { color: var(--text); background: var(--cm-signal-soft); }
+.community-staff-permission-row .community-check:hover:not(:has(input:disabled)) { color: var(--text); background: var(--cm-signal-soft); }
+.community-staff-permission-row .community-check:has(input:focus-visible) { border-color: var(--focus-edge); }
+.community-staff-permission-row .community-check:has(input:disabled) { opacity: .55; cursor: default; }
 .community-staff-chain-warning { margin: 0; padding: 12px 14px; border: 1px solid var(--cm-warn); border-radius: 8px; color: var(--cm-warn); background: var(--cm-warn-soft); font-size: 13px; line-height: 1.7; }
 .community-staff-chain-warning[hidden] { display: none; }
 @container staff-permissions (max-width: 480px) {
   .community-staff-permission-head { display: none; }
   .community-staff-permission-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; }
   .community-staff-permission-row > span { grid-column: 1 / -1; }
+  .community-staff-permission-row .community-check { min-height: 44px; }
 }
 .community-steward-lookup { display: grid; grid-template-columns: minmax(160px, 320px) auto; align-items: end; justify-content: start; gap: 12px; }
+.community-steward-lookup .community-field > input, .community-steward-lookup > .community-button { height: 48px; line-height: 1.5; }
 .community-steward-lookup .community-form-status { grid-column: 1 / -1; margin: 0; }
 .community-steward-candidate { margin-top: 14px; }
 .community-steward-candidate:empty { margin-top: 0; }

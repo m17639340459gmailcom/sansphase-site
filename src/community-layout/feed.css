@@ -102,6 +102,8 @@
 :is(.community-page[data-community="home"][data-home-design="feed"], [data-community-frame]) .community-feed-rail-compose .community-compose-icon { display: block; width: 20px; height: 20px; flex: 0 0 20px; }
 :is(.community-page[data-community="home"][data-home-design="feed"], [data-community-frame]) .community-feed-rail-compose [data-compose-label] { line-height: 20px; }
 :is(.community-page[data-community="home"][data-home-design="feed"], [data-community-frame]) .community-feed-rail-compose:hover { background: #e5d3b1; }
+:is(.community-page[data-community="home"][data-home-design="feed"], [data-community-frame]) .community-feed-rail-compose:active { box-shadow: inset 0 2px 4px rgb(5 10 18 / 16%); }
+:is(.community-page[data-community="home"][data-home-design="feed"], [data-community-frame]) .community-feed-rail-compose:focus-visible { border-color: currentColor; box-shadow: inset 0 0 0 1.5px currentColor; }
 :is(.community-page[data-community="home"][data-home-design="feed"], [data-community-frame]) .community-feed-return {
   position: relative;
   border: 0;
@@ -266,7 +268,7 @@
 :is(.community-page[data-community="home"][data-home-design="feed"], [data-community-frame]) .community-search input { width: 100%; font-size: 14px; }
 :is(.community-page[data-community="home"][data-home-design="feed"], [data-community-frame]) .community-search input:focus { border: 0; outline: none; box-shadow: none; }
 :is(.community-page[data-community="home"][data-home-design="feed"], [data-community-frame]) .community-post { height: 40px; padding: 0 16px; border-radius: var(--community-reading-control-radius, 8px); font-size: 15px; }
-:is(.community-page[data-community="home"][data-home-design="feed"], [data-community-frame]) :is(.community-sort-tabs button, .community-post, .community-button, .community-feed-rail a):focus-visible {
+:is(.community-page[data-community="home"][data-home-design="feed"], [data-community-frame]) :is(.community-sort-tabs button, .community-feed-rail a:not(.community-post, .community-feed-rail-compose)):focus-visible {
   outline: 2px solid var(--signal);
   outline-offset: 3px;
 }
