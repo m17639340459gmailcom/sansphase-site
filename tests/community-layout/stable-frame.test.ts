@@ -243,6 +243,34 @@ test('non-community routes and the completed landing page stay outside the readi
   }
 });
 
+for (const mobile of [false, true]) test(`${mobile ? 'mobile' : 'desktop'} scroll pauses decorative motion until idle without replacing content`, t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { window } = new JSDOM('<main></main>', { url: 'http://localhost/#/community/u/10001/badges' });
+  Object.defineProperty(window, 'matchMedia', { value: (query: string) => ({ matches: mobile && query.includes('max-width'), addEventListener() {}, removeEventListener() {} }) });
+  const frame = createStableCommunityFrame(window.document, window);
+  try {
+    frame.render(window.document.querySelector('main')!, page('member'), summary);
+    const root = window.document.querySelector<HTMLElement>('[data-community-frame]')!;
+    const content = root.querySelector('[data-frame-route]')!.firstElementChild;
+    const host = mobile ? window.document.documentElement : frame.center()!;
+    const state = () => root.style.getPropertyValue('--community-decoration-play-state');
+    host.dispatchEvent(new window.Event('scroll'));
+    assert.equal(state(), '', 'unchanged position does not pause decoration');
+    host.scrollTop = 100; host.dispatchEvent(new window.Event('scroll'));
+    assert.equal(state(), 'paused');
+    t.mock.timers.tick(500);
+    host.scrollTop = 200; host.dispatchEvent(new window.Event('scroll'));
+    t.mock.timers.tick(599); assert.equal(state(), 'paused');
+    t.mock.timers.tick(1); assert.equal(state(), '');
+    assert.equal(root.querySelector('[data-frame-route]')!.firstElementChild, content);
+    assert.equal(host.scrollTop, 200);
+    host.scrollTop = 300; host.dispatchEvent(new window.Event('scroll'));
+    frame.dispose();
+    assert.equal(state(), '', 'leaving the frame clears paused motion');
+    t.mock.timers.tick(600); assert.equal(state(), '');
+  } finally { frame.dispose(); window.close(); }
+});
+
 test('the center scrollbar starts hidden, shows on scrolling and hides five seconds after the last movement', t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const { window } = new JSDOM(`<main id="main"></main>`, { url: 'http://localhost:4213/#/community/home' });

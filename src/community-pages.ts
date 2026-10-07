@@ -570,7 +570,7 @@ export function noticeTextHTML(item: CommunityNotice, { t, esc }: Common) {
 }
 export function noticeHref(item: CommunityNotice, me: CommunityMe | null) {
   if (item.link && /^#\/(community|post)\//.test(item.link)) return item.link;
-  if (item.topicId) return postHref(item.topicId);
+  if (item.topicId) return postHref(item.topicId, item.replyId || "");
   if (item.type === "follow" && item.actor?.uid) return memberHref(item.actor.uid);
   if (item.type === "level") return stardustHref("levels");
   if (item.type === "badge" && me?.uid) return memberHref(me.uid, "badges");

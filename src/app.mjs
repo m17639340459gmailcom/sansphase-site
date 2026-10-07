@@ -436,7 +436,7 @@ function syncCommunitySky(inCommunity) {
   document.body.classList.toggle('community-open', inCommunity);
   document.body.classList.toggle('community-management-open', inCommunity && view === 'manage');
   document.body.classList.toggle('community-landing-open', inCommunity && view === 'landing');
-  if (inCommunity && view !== 'landing') cleanCommunitySky ??= mountCommunitySky(document.querySelector('#blog-backdrop'), window);
+  if (inCommunity && view !== 'landing') cleanCommunitySky ??= mountCommunitySky(document.querySelector('#blog-backdrop'), window, { parallax: () => false, pauseWhileScrolling: true });
   else { cleanCommunitySky?.(); cleanCommunitySky = null; }
 }
 // The header reads the community's `me` (bell, balance, level); when that changes it is redrawn,

@@ -1,5 +1,5 @@
 // A modal viewer keeps the reader's page and DOM intact while inspecting an illustration.
-export function createBookImageViewer(root,{english=false}={}) {
+export function createBookImageViewer(root,{english=false,className='book-image-viewer'}={}) {
  const doc=root.ownerDocument,win=doc.defaultView,t=(zh,en)=>english?en:zh;
  let dialog,stage,picture,message,trigger,fit=1,zoom=1,drag=null,dragged=false;
  const button=(action,label)=>`<button type="button" data-image-action="${action}">${label}</button>`;
@@ -29,12 +29,11 @@ export function createBookImageViewer(root,{english=false}={}) {
   dialog.querySelector('[data-image-action="more"]').disabled=zoom>=Math.max(4,1/fit);
   stage.classList.toggle('is-zoomed',zoom>1);
  }
- function open(image){
-  close();trigger=image;dialog=doc.createElement('dialog');dialog.className='book-image-viewer';dialog.setAttribute('aria-label',t('查看大图','Image viewer'));
+ function open(image,{source=image.dataset.bookOriginal||image.currentSrc||image.src,opener=image}={}){
+  close();trigger=opener;dialog=doc.createElement('dialog');dialog.className=className;dialog.setAttribute('aria-label',t('查看大图','Image viewer'));
   dialog.innerHTML=`<header><span>${t('查看大图','Image viewer')}</span><nav aria-label="${t('图片缩放','Image zoom')}">${button('less','−')}<output aria-live="polite"></output>${button('more','＋')}${button('fit',t('适应窗口','Fit'))}${button('original','100%')}${button('close',t('关闭','Close')+' ×')}</nav></header><div class="book-image-canvas"><img draggable="false"></div><p class="book-image-message" role="status"></p>`;
   stage=dialog.querySelector('.book-image-canvas');picture=stage.querySelector('img');message=dialog.querySelector('.book-image-message');picture.alt=image.alt||t('正文插图','Illustration');
   dialog.querySelector('[data-image-action="less"]').setAttribute('aria-label',t('缩小','Zoom out'));dialog.querySelector('[data-image-action="more"]').setAttribute('aria-label',t('放大','Zoom in'));
-  const source=image.dataset.bookOriginal||image.currentSrc||image.src;
   function load(){message.hidden=false;message.textContent=t('正在加载高清图片…','Loading full-resolution image…');picture.src=source;}
   picture.onload=()=>{if(!dialog)return;message.textContent=t('滚轮缩放，放大后可拖动图片。','Scroll to zoom; drag to pan.');message.hidden=true;stage.title=message.textContent;measure();};
   picture.onerror=()=>{if(dialog){message.hidden=false;message.innerHTML=t('图片暂时无法加载。','Image could not be loaded.')+' '+button('retry',t('重试','Retry'));}};
@@ -58,5 +57,5 @@ export function createBookImageViewer(root,{english=false}={}) {
   doc.body.append(dialog);dialog.showModal();dialog.querySelector('[data-image-action="close"]').focus({preventScroll:true});load();
  }
  const onResize=()=>{if(dialog)measure();};win.addEventListener('resize',onResize);
- return {open,get active(){return Boolean(dialog?.open);},destroy(){close();win.removeEventListener('resize',onResize);}};
+ return {open,close,get active(){return Boolean(dialog?.open);},destroy(){close();win.removeEventListener('resize',onResize);}};
 }

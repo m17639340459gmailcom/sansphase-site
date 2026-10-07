@@ -35,6 +35,19 @@ export function createStableCommunityFrame(document: Document, window: FrameWind
   let mobileLayout = Boolean(mobile?.matches);
   let lastScrollTop = 0;
   let scrollbarTimer: ReturnType<typeof setTimeout> | null = null;
+  let decorationTimer: ReturnType<typeof setTimeout> | null = null;
+  const resumeDecoration = () => {
+    if (decorationTimer !== null) clearTimeout(decorationTimer);
+    decorationTimer = null;
+    root?.style.removeProperty('--community-decoration-play-state');
+  };
+  const pauseDecoration = () => {
+    // Freeze only decorative CSS motion, preserving its phase and all content.
+    // Do not rewrite styles on every scroll event or promote individual icons.
+    if (decorationTimer === null) root?.style.setProperty('--community-decoration-play-state', 'paused');
+    else clearTimeout(decorationTimer);
+    decorationTimer = setTimeout(resumeDecoration, 600);
+  };
   const hideScrollbar = () => {
     if (scrollbarTimer !== null) clearTimeout(scrollbarTimer);
     scrollbarTimer = null;
@@ -44,7 +57,7 @@ export function createStableCommunityFrame(document: Document, window: FrameWind
   const showScrollbar = () => {
     if (scrollbarTimer !== null) clearTimeout(scrollbarTimer);
     const target = mobileLayout ? document.documentElement : center;
-    target?.setAttribute('data-frame-scrolling', 'true');
+    if (target && !target.hasAttribute('data-frame-scrolling')) target.setAttribute('data-frame-scrolling', 'true');
     scrollbarTimer = setTimeout(hideScrollbar, 5000);
   };
   // Desktop scrolls the center column; narrow layouts use the document viewport.
@@ -62,7 +75,7 @@ export function createStableCommunityFrame(document: Document, window: FrameWind
     if (event.target === scrollHost() || (mobileLayout && event.target === document)) {
       const top = readTop();
       // writeTop records programmatic restoration before its scroll event fires.
-      if (top !== lastScrollTop) showScrollbar();
+      if (top !== lastScrollTop) { showScrollbar(); pauseDecoration(); }
       lastScrollTop = top;
     }
   };
@@ -120,6 +133,7 @@ export function createStableCommunityFrame(document: Document, window: FrameWind
   };
   const resetToTop = () => {
     if (!center) return;
+    resumeDecoration();
     hideScrollbar();
     releaseReadingHeight();
     restoreAfterLayout(0);
@@ -163,6 +177,7 @@ export function createStableCommunityFrame(document: Document, window: FrameWind
     if (changed) restoreAfterLayout(top);
   };
   const dispose = () => {
+    resumeDecoration();
     hideScrollbar();
     cancelScrollRestore();
     releaseReadingHeight();

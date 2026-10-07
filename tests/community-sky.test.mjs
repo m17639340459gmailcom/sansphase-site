@@ -2,6 +2,26 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { communitySkyFixture as fixture } from './helpers/community-sky.mjs';
 
+test('reading scroll freezes backdrop drawing until scrolling settles and disposal cancels resumption', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const view = fixture(t, undefined, { parallax: () => false, skyOptions: { pauseWhileScrolling: true } });
+  view.step(1000);
+  const drawn = view.records.length;
+  view.host.dispatchEvent(new view.win.Event('scroll'));
+  view.step(1016);
+  assert.equal(view.records.length, drawn, 'nested scrolling must not compete with background canvas paints');
+  t.mock.timers.tick(599);
+  assert.equal(view.queued(), 0);
+  t.mock.timers.tick(1);
+  assert.equal(view.queued(), 1);
+  view.step(1700);
+  assert.equal(view.records.length, drawn + 1);
+  view.host.dispatchEvent(new view.win.Event('scroll'));
+  view.dispose();
+  t.mock.timers.tick(1000);
+  assert.equal(view.queued(), 0, 'a disposed background never resumes');
+});
+
 test('optional meteor renderer receives logical dimensions and replaces only the meteor layer', (t) => {
   const painted = [];
   let enabled = true;

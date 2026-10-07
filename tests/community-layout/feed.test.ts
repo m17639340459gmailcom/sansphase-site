@@ -39,8 +39,9 @@ test('one image fits the preview without clipping while two, three and four keep
       const frame = declarationsFor(container), picture = declarationsFor(image);
       assert.equal(picture.get('object-fit'), count === 1 ? 'contain' : 'cover', `preview with ${count} image(s)`);
       assert.equal(picture.get('width'), '100%');
-      assert.equal(picture.get('height'), '100%');
-      assert.equal(frame.get('aspect-ratio'), ['16 / 9', '2 / 1', '3 / 1', '1'][count - 1]);
+      assert.equal(picture.get('height'), count === 1 ? 'auto' : '100%');
+      if (count === 1) { assert.equal(frame.get('background'), 'transparent'); assert.equal(frame.get('border'), '0'); }
+      assert.equal(frame.get('aspect-ratio'), ['auto', '2 / 1', '3 / 1', '1'][count - 1]);
     }
   } finally { window.close(); }
 });

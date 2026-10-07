@@ -16,6 +16,80 @@ const topic = { id: 'p1', board: 'qa', title: '原讨论', author: person, creat
 const listing = { items: [topic], total: 2, page: 1, pageSize: 1 };
 const thread = { topic: { ...topic, body: '正在阅读的正文', canReply: true, images: [], liked: false, bookmarked: false }, author: person, related: [], replies: [] };
 const passive = init => new Headers(init.headers).get('X-Community-Passive') === '1';
+
+test('active nested scrolling cancels a pending passive repaint without changing the reading DOM', async t => {
+  const slow = wait();
+  const { w, main, tick } = await setup(t, (url, init) => {
+    if (!passive(init)) return null;
+    if (url.endsWith('/summary')) return slow.promise;
+    if (url.includes('/topics?')) return response({ ...listing, items: [{ ...topic, title: '后台更新' }] });
+    return null;
+  });
+  const content = main.querySelector('.community-main');
+  await tick(15000);
+  content.dispatchEvent(new w.Event('scroll'));
+  slow.resolve(response({ ...summary, total: 88 }));
+  await flush();
+  assert.equal(main.querySelector('.community-main'), content, 'an in-flight background response cannot replace content while it is being scrolled');
+});
+
+test('clicking one notification marks only it read, updates the bell and locates the reply after rendering', async t => {
+  let read = false;
+  const notices = [{ id: 'n1', type: 'reply', topicId: 'p1', replyId: 'r2', actor: person, text: '回复了你的主题', data: {}, link: null, count: 1, createdAt: topic.createdAt, read: false, topicTitle: topic.title }];
+  const reply = { id: 'r2', body: '目标回复', author: person, createdAt: topic.createdAt, likes: 0 };
+  const { w, main, ui, calls, remount, frame } = await setup(t, (url, init) => {
+    if (url.endsWith('/inbox/read')) { assert.deepEqual(JSON.parse(init.body), { id: 'n1' }); read = true; return response({ ok: true }); }
+    if (url.endsWith('/me')) return response({ ...person, unread: { all: read ? 1 : 2, reply: read ? 1 : 2, thanks: 0, system: 0 } });
+    if (url.includes('/inbox?')) return response({ tab: 'all', items: notices, unread: { all: 2, reply: 2 } });
+    if (url.endsWith('/topics/p1')) return response({ ...thread, replies: [reply] });
+    return null;
+  }, '#/community/inbox', { frame: true });
+  assert.equal(read, false, 'opening the inbox must not mark unseen messages read');
+  main.querySelector('[data-action="community-notice"]').click();
+  await until(() => w.location.hash === '#/post/p1/reply/r2');
+  assert.equal(ui.me().unread.all, 1);
+  assert.equal(calls.filter(call => call.url.endsWith('/inbox/read')).length, 1);
+  assert.equal(calls.some(call => call.url.endsWith('/inbox/read-all')), false);
+  const located = [];
+  w.HTMLElement.prototype.scrollIntoView = function () { located.push(this.id); frame.center().scrollTop = 950; };
+  await remount(w.location.hash);
+  await until(() => located.length > 0);
+  assert.deepEqual(located, ['reply-r2']);
+  assert.equal(w.document.activeElement.id, 'reply-r2');
+  await new Promise(resolve => w.requestAnimationFrame(resolve));
+  assert.equal(frame.center().scrollTop, 950, 'the frame must retain the located reply after all restoration callbacks finish');
+});
+
+test('a failed notification read keeps its unread state and offers a retry without navigating', async t => {
+  const { w, main } = await setup(t, url => {
+    if (url.endsWith('/inbox/read')) return failure(503);
+    if (url.includes('/inbox?')) return response({ tab: 'all', unread: { all: 1 }, items: [{ id: 'n1', type: 'reply', topicId: 'p1', replyId: 'r2', actor: person, data: {}, read: false, createdAt: topic.createdAt }] });
+    return null;
+  }, '#/community/inbox');
+  const button = main.querySelector('[data-action="community-notice"]');
+  button.click(); await flush();
+  assert.equal(w.location.hash, '#/community/inbox');
+  assert.equal(button.disabled, false);
+  assert.ok(button.classList.contains('is-unread'));
+});
+
+test('post image zoom uses the original, pauses background repaint and closes on leaving or clearing the account', async t => {
+  const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const { w, main, ui, tick, calls, remount } = await setup(t, url => url.endsWith('/topics/p1')
+    ? response({ ...thread, topic: { ...thread.topic, images: [{ id, width: 1200, height: 3600 }] } }) : null, '#/post/p1');
+  w.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  w.HTMLDialogElement.prototype.close = function () { this.open = false; };
+  main.querySelector('[data-action="community-lightbox"]').click();
+  assert.equal(w.document.querySelector('dialog img').getAttribute('src'), `/api/community/images/${id}.webp`);
+  await tick(15000);
+  assert.equal(calls.filter(call => passive(call.init)).length, 0);
+  await remount('#/community/home');
+  assert.equal(w.document.querySelector('dialog'), null);
+  await remount('#/post/p1');
+  main.querySelector('[data-action="community-lightbox"]').click();
+  ui.clear();
+  assert.equal(w.document.querySelector('dialog'), null);
+});
 async function setup(t, handle = () => null, hash = '#/community/home', { frame: framed = false } = {}) {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.UTC(2026, 9, 7) });
   const w = new JSDOM('<main></main>', { url: `http://localhost/${hash}`, pretendToBeVisual: true }).window;
@@ -40,8 +114,8 @@ async function setup(t, handle = () => null, hash = '#/community/home', { frame:
   let cleanup = ui.mount(main, common); await flush();
   t.after(() => { cleanup(); ui.clear(); w.close(); for (const [name, value] of previous) { if (value === undefined) delete globalThis[name]; else globalThis[name] = value; } });
   const tick = async ms => { t.mock.timers.tick(ms); await flush(); };
-  const remount = async hash => { w.history.replaceState(null, '', hash); cleanup(); main.innerHTML = ui.html(common); cleanup = ui.mount(main, common); await flush(); };
-  return { w, ui, main, calls, tick, remount, common };
+  const remount = async hash => { w.history.replaceState(null, '', hash); cleanup(); if (!frame?.render(main, ui.html(common), ui.frameHTML(common))) main.innerHTML = ui.html(common); cleanup = ui.mount(main, common); await flush(); };
+  return { w, ui, main, calls, tick, remount, common, frame };
 }
 
 test('visible idle pages passively stage me, current data and summary without active visit or loading flash', async t => {

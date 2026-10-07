@@ -16,6 +16,8 @@ export type CommunityMeteorPainter = (ctx: CanvasRenderingContext2D, frame: Comm
 export interface CommunitySkyOptions {
   /** Evaluate per frame so a local preview can switch candidates without remounting. */
   parallax?: () => boolean;
+  /** Keep the last painted background intact while the reading area scrolls. */
+  pauseWhileScrolling?: boolean;
   /** Optional point-source renderer. Omission preserves the original sky. */
   starPainter?: () => CommunityStarPainter | undefined;
   /** Optional meteor layer. Omission preserves the original timing and drawing. */
@@ -41,6 +43,8 @@ export function mountCommunitySky(host: HTMLElement, win: Window = window, optio
   const parallax = () => options.parallax?.() ?? true;
   const mouse = { x: 0.5, y: 0.5, tx: 0.5, ty: 0.5 };
   let stars: Star[] = [], w = 0, h = 0, dpr = 1;
+  let resumeTimer: number | null = null;
+  let disposed = false;
   let shoot: Shoot | null = null, nextShoot = 2500, frame = 0, running = false;
 
   function resize() {
@@ -112,7 +116,7 @@ export function mountCommunitySky(host: HTMLElement, win: Window = window, optio
     frame = win.requestAnimationFrame(loop);
   }
   function start() {
-    if (running || doc.hidden) return;
+    if (running || disposed || doc.hidden || resumeTimer !== null) return;
     if (reduced()) { draw(0); return; }
     running = true;
     frame = win.requestAnimationFrame(loop);
@@ -121,13 +125,24 @@ export function mountCommunitySky(host: HTMLElement, win: Window = window, optio
     if (!parallax()) return;
     mouse.tx = event.clientX / w; mouse.ty = event.clientY / h;
   };
+  const onScroll = () => {
+    running = false;
+    win.cancelAnimationFrame(frame);
+    if (resumeTimer !== null) win.clearTimeout(resumeTimer);
+    resumeTimer = win.setTimeout(() => { resumeTimer = null; start(); }, 600);
+  };
   const onVisible = () => { if (!doc.hidden) start(); };
   win.addEventListener('resize', resize);
   win.addEventListener('pointermove', onPointer, { passive: true });
   doc.addEventListener('visibilitychange', onVisible);
+  if (options.pauseWhileScrolling) doc.addEventListener('scroll', onScroll, { capture: true, passive: true });
   resize();
   start();
   return () => {
+    disposed = true;
+    if (resumeTimer !== null) win.clearTimeout(resumeTimer);
+    resumeTimer = null;
+    doc.removeEventListener('scroll', onScroll, true);
     running = false;
     win.cancelAnimationFrame(frame);
     win.removeEventListener('resize', resize);

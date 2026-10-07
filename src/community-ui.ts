@@ -1,3 +1,4 @@
+import { createBookImageViewer } from './book-image-viewer.mjs';
 // 社区页面的数据和交互：读接口、排序、搜索、加载更多、发帖（按版块类型）、编辑、回复（引用、@、排序）、
 // 赞、收藏、感谢、采纳、举报、删除、悬赏、提示词解锁、资源投票、付费置顶和高亮、签到和补签、星尘明细、
 // 兑换所、关注、通知，以及站长和协管的置顶、精华、锁帖、移动、审核、禁言、举报处理、发货和上架。
@@ -465,6 +466,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const { changedAccount, lostPermission } = identityChange(next);
     if (changedAccount) clearData(false);
     else if (lostPermission) {
+      closeImageViewer();
       permissionRevision++; confirmedPage = null; pendingRoute = null; coreRoute = null;
       summary = null; lists.clear(); listRequests.clear(); threads.clear(); manages.clear(); manageRequests.clear();
       memberPages.clear(); frameHighlights.clear(); frameHighlightsPending.clear(); banners.clear(); bannerRequests.clear();
@@ -699,7 +701,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (['unknown', 'landing', 'new', 'edit', 'profile'].includes(current.view)
       || reporting || editingReply || quoting || postMenu || deleting || moving || retagging || redeeming || delivery
       || muting || itemEditing || shippingOrder || rejecting || reviewSelection.size || reviewBusy || stewardBusy) return false;
-    if (document.querySelector('[role="dialog"][aria-modal="true"], .community-select-menu')
+    if (document.querySelector('dialog[open], [role="dialog"][aria-modal="true"], .community-select-menu')
       || mounted.main.querySelector('[data-uploading="true"], [data-community-form="reply-edit"]')
       || uploads.some(upload => upload.state === 'uploading') || [...editors.values()].some(editor => editor.state().pending)) return false;
     if (current.view === 'manage' && mounted.main.querySelector('form[data-community-form]')) return false;
@@ -1140,6 +1142,21 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     } catch { /* An unrelated URL keeps its exact identity. */ }
     return `${source}|${image.className}`;
   }
+  let locatedReplyHash = '';
+  function locateNoticeReply() {
+    const current = route(), hash = location.hash, identity = frameIdentity;
+    if (current.view !== 'post' || !current.replyId || locatedReplyHash === hash || !readyData(threads.get(current.id))) return;
+    const replyId = current.replyId;
+    window.requestAnimationFrame(() => {
+      if (!mounted || identity !== frameIdentity || location.hash !== hash || locatedReplyHash === hash) return;
+      const reply = mounted.main.querySelector<HTMLElement>(`[id=${quoted(`reply-${replyId}`)}]`);
+      locatedReplyHash = hash;
+      if (!reply) { notify(tr('这条回复已删除或暂时无法查看。', 'This reply was removed or is not currently available.')); return; }
+      reply.setAttribute('tabindex', '-1');
+      reply.scrollIntoView({ block: 'center', behavior: 'instant' });
+      reply.focus({ preventScroll: true });
+    });
+  }
   function paint(staged = false) {
     if (!mounted) return;
     const section = mounted.main.querySelector<HTMLElement>('[data-community]');
@@ -1296,6 +1313,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (itemForm) updateProductPreview(itemForm, valueOf(itemForm, 'image'));
     syncConvention();
     mountComposeEditor();
+    locateNoticeReply();
   }
 
   function mountSelects() {
@@ -2094,20 +2112,16 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     }));
   }
 
-  // A full-size image over the page; a click anywhere or Escape closes it.
+  let imageViewer: ReturnType<typeof createBookImageViewer> | null = null;
+  function closeImageViewer() { imageViewer?.destroy(); imageViewer = null; }
   function openLightbox(src: string, opener: HTMLElement) {
-    const box = document.createElement('div');
-    box.className = 'community-lightbox';
-    box.setAttribute('role', 'dialog');
-    box.setAttribute('aria-modal', 'true');
-    box.setAttribute('aria-label', tr('查看图片', 'Image'));
-    box.innerHTML = `<img src="${src.replace(/"/g, '&quot;')}" alt=""><button type="button" class="community-lightbox-close" aria-label="${tr('关闭', 'Close')}">×</button>`;
-    const close = () => { box.remove(); document.removeEventListener('keydown', onKey, true); opener.focus({ preventScroll: true }); };
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); } };
-    box.addEventListener('click', close);
-    document.addEventListener('keydown', onKey, true);
-    document.body.append(box);
-    box.querySelector<HTMLElement>('button')?.focus();
+    const image = opener.querySelector('img');
+    if (!image || !/^\/api\/community\/images\/[a-zA-Z0-9-]+\.webp$/.test(src)) return;
+    closeImageViewer();
+    imageViewer = createBookImageViewer(opener.ownerDocument.body, {
+      english: tr('zh', 'en') === 'en', className: 'community-image-viewer',
+    });
+    imageViewer.open(image, { source: src, opener });
   }
 
   // Search the list on this page; an empty term shows everything again.
@@ -2388,12 +2402,17 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         return;
       case 'community-notice': {
         const href = target.dataset.href || '';
+        const identity = frameIdentity, hash = location.hash;
+        if (target.disabled) return;
         void act(target, async () => {
           if (!communityReaderReadOnly(readyData(me))) {
             await send('inbox/read', { id });
+            if (identity !== frameIdentity) return;
             inboxes.clear();
+            await loadMe();
           }
-          if (href && href !== location.hash) navigate(href); else await reload();
+          if (identity !== frameIdentity || location.hash !== hash) return;
+          if (href && communityRoute(href).view !== 'unknown' && href !== location.hash) navigate(href); else await reload();
         });
         return;
       }
@@ -2813,6 +2832,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   };
 
   function clearData(clearWrites = true) {
+    closeImageViewer();
+    locatedReplyHash = '';
     passiveRecovery = null;
     resourceReads.clear();
     profileReviewWrites.clear();
@@ -2923,6 +2944,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       main.addEventListener('compositionstart', onCompositionStart);
       main.addEventListener('compositionend', onCompositionEnd);
       document.addEventListener('selectionchange', onPassiveEditing);
+      document.addEventListener('scroll', onPassiveEditing, { capture: true, passive: true });
       main.addEventListener('keydown', onKeydown);
       main.addEventListener('pointermove', onPointer);
       main.addEventListener('pointerdown', onActiveInteraction, { passive: true });
@@ -2940,6 +2962,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       window.addEventListener('hashchange', onHistoryNavigation, true);
       window.addEventListener('popstate', onHistoryNavigation, true);
       if (location.hash !== lastHash) {
+        locatedReplyHash = '';
         legacyProfileOpened = false;
         stewardCandidate = null; stewardLookupUid = ''; stewardLookupRequest++;
       }
@@ -2956,6 +2979,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         void refresh();
       }
       return () => {
+        closeImageViewer();
         passiveRefresh?.stop(); passiveRefresh = null;
         conventionConsent.close();
         profileDialog.close();
@@ -2975,6 +2999,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         main.removeEventListener('compositionstart', onCompositionStart);
         main.removeEventListener('compositionend', onCompositionEnd);
         document.removeEventListener('selectionchange', onPassiveEditing);
+        document.removeEventListener('scroll', onPassiveEditing, true);
         main.removeEventListener('keydown', onKeydown);
         main.removeEventListener('pointermove', onPointer);
         main.removeEventListener('pointerdown', onActiveInteraction);

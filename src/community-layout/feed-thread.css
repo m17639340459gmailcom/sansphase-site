@@ -60,16 +60,21 @@
 .community-page[data-community="post"][data-thread-design="feed"] .community-gallery button {
   border-color: transparent;
   border-radius: 12px;
-  background: #0b1018;
+  background: transparent;
 }
 .community-page[data-community="post"][data-thread-design="feed"] .community-gallery .community-g-main,
 .community-page[data-community="post"][data-thread-design="feed"] .community-gallery.is-1 button {
+  width: fit-content;
+  max-width: 100%;
+  justify-self: start;
   aspect-ratio: auto;
   max-height: 660px;
+  border: 0;
 }
 .community-page[data-community="post"][data-thread-design="feed"] .community-gallery .community-g-main img,
 .community-page[data-community="post"][data-thread-design="feed"] .community-gallery.is-1 img {
-  width: 100%;
+  width: auto;
+  max-width: 100%;
   height: auto;
   max-height: 660px;
   object-fit: contain;

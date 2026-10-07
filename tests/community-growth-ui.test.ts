@@ -30,7 +30,7 @@ test('shared member names show growth, permission and VIP as icon-only marks nex
     assert.ok(marks.every(mark => mark.getAttribute('role') === 'img' && mark.getAttribute('aria-label') === mark.getAttribute('title')), 'the name lives in the label, not on screen');
     assert.equal(doc.querySelector('.community-level-marks')!.textContent, '', 'no level or icon names are displayed beside the nickname');
     assert.deepEqual(marks.map(mark => mark.querySelector('[data-level-icon]')!.getAttribute('data-level-icon')), ['constellation-g1', 'trust-l2', 'vip-1']);
-    assert.deepEqual([...doc.querySelectorAll('.community-level-badge.is-trust img')].map(image => [image.getAttribute('src'), image.getAttribute('data-theme')]), [['/assets/community/levels/trust-l2.svg', null]], 'one permission file serves both themes');
+    assert.deepEqual([...doc.querySelectorAll('.community-level-badge.is-trust img')].map(image => [image.getAttribute('src'), image.getAttribute('data-theme')]), [['/assets/community/levels/compact/trust-l2.webp', null]], 'one static permission derivative serves both themes');
     assert.equal(doc.querySelector('.community-uname .community-level-marks'), null, 'marks do not receive the nickname gradient');
     assert.equal(doc.querySelector('.community-lv, .community-vip, .community-growth-chip'), null, 'the text tags are gone from the nickname line');
     assert.equal(doc.querySelector('.community-uname')!.getAttribute('href'), '#/community/u/10001');

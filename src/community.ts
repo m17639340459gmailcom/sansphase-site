@@ -85,7 +85,7 @@ export const communityHomeHref = "#/community/home";
 const tabHref = (id: string) => `#/community/${id}`;
 export const boardHref = (id: string) => `#/community/boards/${encodeURIComponent(id)}`;
 export const composeHref = (board = "") => board ? `#/community/new/${encodeURIComponent(board)}` : "#/community/new";
-export const postHref = (id: string) => `#/post/${encodeURIComponent(id)}`;
+export const postHref = (id: string, replyId = "") => `#/post/${encodeURIComponent(id)}${replyId ? `/reply/${encodeURIComponent(replyId)}` : ""}`;
 export const tagHref = (tag: string) => `#/community/tag/${encodeURIComponent(tag)}`;
 export const memberHref = (uid: string, tab = "") => `#/community/u/${encodeURIComponent(uid)}${tab ? `/${tab}` : ""}`;
 export const stardustHref = (tab = "") => `#/community/stardust${tab ? `/${tab}` : ""}`;
@@ -94,7 +94,7 @@ export const shopHref = (tab = "") => `#/community/shop${tab && tab !== "all" ? 
 export const manageHref = (tab = "") => `#/community/manage${tab && tab !== "queue" ? `/${tab}` : ""}`;
 export const rulesHref = "#/community/rules";
 
-export type CommunityRoute = { view: CommunityView; board: string; id: string; tab: string };
+export type CommunityRoute = { view: CommunityView; board: string; id: string; tab: string; replyId?: string };
 export const communityBoard = (id: string) => communityBoards.find((board) => board.id === id);
 const unknownRoute: CommunityRoute = { view: "unknown", board: "", id: "", tab: "" };
 // #/community/boards/<版块> 版块页，#/community/new/<版块> 在该版块发帖，#/community/tag/<标签> 标签页，
@@ -107,7 +107,10 @@ export function communityRoute(hash: string): CommunityRoute {
   const [page = "", id = "", extra = "", fourth = "", ...rest] = parts;
   const view = communityView(page, id);
   const route = (fields: Partial<CommunityRoute>): CommunityRoute => ({ view, board: "", id: "", tab: "", ...fields });
-  if (view === "post") return id && !extra ? { ...unknownRoute, view, id } : unknownRoute;
+  if (view === "post") {
+    if (!id || rest.length || extra && (extra !== "reply" || !fourth)) return unknownRoute;
+    return { ...unknownRoute, view, id, ...(extra === "reply" ? { replyId: fourth } : {}) };
+  }
   if (rest.length) return unknownRoute;
   if (view === "member") {
     const tabs: readonly string[] = communityPageTabs.member;
@@ -299,7 +302,7 @@ export function growthChipHTML(person: CommunityPerson, common: Common) {
   if (person.role === 'owner' || !person.growth) return '';
   const { t, esc } = common, item = communityGrowthLevel(person.growth.level);
   const label = t(item.name, item.en);
-  return `<span class="community-growth-chip" title="${esc(t(`成长等级：${label}`, `Growth level: ${label}`))}">${communityGrowthArtHTML(item.level)}<span>${esc(label)}</span></span>`;
+  return `<span class="community-growth-chip" title="${esc(t(`成长等级：${label}`, `Growth level: ${label}`))}">${communityGrowthArtHTML(item.level, true)}<span>${esc(label)}</span></span>`;
 }
 // 昵称旁的等级图标：成长、权限、VIP 依次排列，只显示图标，名称放在 title 与无障碍标签里。
 // 站长没有等级；协管是任命，不显示权限图标；旧响应缺少成长字段时不推算成长等级。
@@ -313,16 +316,16 @@ export function levelMarksHTML(person: CommunityPerson, common: Common, large = 
   let marks = '';
   if (person.growth) {
     const item = communityGrowthLevel(person.growth.level);
-    marks += mark('growth', t(`成长等级：${item.name}`, `Growth level: ${item.en}`), communityGrowthArtHTML(item.level));
+    marks += mark('growth', t(`成长等级：${item.name}`, `Growth level: ${item.en}`), communityGrowthArtHTML(item.level, true));
   }
   if (person.staffRole !== undefined || !person.steward) {
     const level = Math.max(0, Math.min(3, person.level ?? 0));
-    marks += mark('trust', t(`权限等级：L${level} ${levelTitle(level, t)}`, `Permission level: L${level} ${levelTitle(level, t)}`), communityTrustArtHTML(level));
+    marks += mark('trust', t(`权限等级：L${level} ${levelTitle(level, t)}`, `Permission level: L${level} ${levelTitle(level, t)}`), communityTrustArtHTML(level, true));
   }
   if (person.vip) {
     const rank = person.vipGrowth?.level;
     const level = person.vipGrowth?.active && typeof rank === 'number' && Number.isInteger(rank) && rank >= 1 && rank <= 8 ? rank : null;
-    marks += mark('vip', level ? `VIP${level}` : t('VIP 会员', 'VIP member'), communityVipArtHTML(level ?? 1));
+    marks += mark('vip', level ? `VIP${level}` : t('VIP 会员', 'VIP member'), communityVipArtHTML(level ?? 1, true));
   }
   return marks ? `<span class="community-level-marks${large ? ' is-large' : ''}">${marks}</span>` : '';
 }

@@ -5,7 +5,7 @@ import {JSDOM} from 'jsdom';
 import postcss from 'postcss';
 import {communityGrowthLevel} from '../src/community-growth.ts';
 import {communityGrowthArtHTML} from '../src/community-growth-art.ts';
-import {growthChipHTML} from '../src/community.ts';
+import {growthChipHTML, levelMarksHTML} from '../src/community.ts';
 import {communityLevelExplorerHTML} from '../src/community-level-explorer.ts';
 
 const common={t:(zh:string)=>zh,esc:(text:unknown)=>String(text??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;'),icons:{},members:true};
@@ -29,7 +29,7 @@ test('every grade renders its approved constellation medallion as one inert imag
  }
 });
 
-test('shared user labels and level explorer render the same approved icon; trust stays static',()=>{
+test('shared user labels and level explorer render derivatives of the same approved icon',()=>{
  for(const grade of [7,8,9,10] as const){
   const person={id:'reader',uid:'10001',name:'读者',role:'reader' as const,growth:{level:grade,points:0,configured:false}};
   const chip=new JSDOM(growthChipHTML(person,common));
@@ -38,7 +38,8 @@ test('shared user labels and level explorer render the same approved icon; trust
   assert.doesNotMatch(chip.window.document.body.textContent!,/\bG(?:10|[1-9])\b/);
   const explorer=new JSDOM(communityLevelExplorerHTML({...data,growth:person.growth},common,{mode:'growth',growth:grade,trust:null}));
   assert.equal(explorer.window.document.querySelector('[data-level-preview] [data-growth-art]')?.getAttribute('data-growth-art'),String(grade));
-  assert.equal(explorer.window.document.querySelector('[data-level-preview] img')?.getAttribute('src'),chip.window.document.querySelector('img')?.getAttribute('src'));
+  assert.equal(explorer.window.document.querySelector('[data-level-preview] img')?.getAttribute('src'),`/assets/community/levels/constellation-g${grade}.svg`);
+  assert.equal(chip.window.document.querySelector('img')?.getAttribute('src'),`/assets/community/levels/compact/constellation-g${grade}.webp`);
   chip.window.close();explorer.window.close();
  }
  const trust=new JSDOM(communityLevelExplorerHTML(data,common,{mode:'trust',growth:10,trust:3}));
@@ -54,6 +55,20 @@ test('art boundary clamps invalid levels and never interpolates caller input int
   assert.equal(dom.window.document.querySelector('[data-growth-art]')?.getAttribute('data-growth-art'),String(expected));
   dom.window.close();
  }
+});
+
+test('all user marks use static derivatives, including the larger profile marks',()=>{
+ const person={id:'reader',uid:'10001',name:'读者',role:'reader' as const,level:3,growth:{level:10 as const,points:72000,configured:true},vip:true,vipGrowth:{active:true,level:8}};
+ const compact=new JSDOM(levelMarksHTML(person,common));
+ assert.deepEqual([...compact.window.document.querySelectorAll('img')].map(image=>image.getAttribute('src')),[
+  '/assets/community/levels/compact/constellation-g10.webp',
+  '/assets/community/levels/compact/trust-l3.webp',
+  '/assets/community/levels/compact/vip-8.webp',
+ ]);
+ const large=new JSDOM(levelMarksHTML(person,common,true));
+ assert.deepEqual([...large.window.document.querySelectorAll('img')].map(image=>image.getAttribute('src')),[...compact.window.document.querySelectorAll('img')].map(image=>image.getAttribute('src')));
+ assert.ok(large.window.document.querySelector('.community-level-marks.is-large'), 'profile sizing is preserved');
+ compact.window.close();large.window.close();
 });
 
 test('shared artwork styling preserves size and delegates motion to the self-contained assets',async()=>{

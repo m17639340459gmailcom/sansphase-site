@@ -165,8 +165,8 @@ html[lang^="en"] [data-inline-editor] .community-inline-upload[data-cover="true"
 [data-compose-layout="simple"] .community-editor-caption { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; margin-top: 8px; font-size: 13px; color: var(--dim); line-height: 1.7; }
 [data-compose-layout="simple"] .community-editor-caption small { margin: 0 0 0 auto; }
 .community-frame-center .community-body-image { margin: 20px 0; }
-.community-frame-center .community-body-image button { display: block; width: 100%; padding: 0; background: transparent; border: 0; cursor: zoom-in; }
-.community-frame-center .community-body-image img { display: block; max-width: 100%; max-height: 720px; height: auto; margin: auto; border-radius: 10px; }
+.community-frame-center .community-body-image button { display: block; width: fit-content; max-width: 100%; padding: 0; background: transparent; border: 0; cursor: zoom-in; }
+.community-frame-center .community-body-image img { display: block; max-width: 100%; max-height: 720px; width: auto; height: auto; margin: 0; border-radius: 10px; }
 [data-compose-layout="simple"] .community-field input[name="title"] { min-height: 46px; }
 [data-compose-layout="simple"] .community-choices > .community-muted { margin: 10px 0 0; font-size: 13px; }
 [data-compose-layout="simple"] .community-compose-extras { min-width: 0; border-top: 1px solid var(--feed-edge); }
