@@ -6,8 +6,10 @@ import type { CommunityService } from '../../server/community-service.ts';
 export const previewIdentityPath = '/api/community/preview-identity';
 const roles = [
   { id: 'demo', label: '读者', name: '预览读者', detail: '浏览、发帖、回复、签到、兑换；没有社区管理权限。' },
-  { id: 'owner', label: '作者 / 站长', name: '無相', detail: '审核、举报、处罚、任命协管，以及兑换物品上架和发货。' },
-  { id: 'steward', label: '版主 / 协管', name: '守望', detail: '样例负责学习问答、工具资源，可在这些板块审核和处理举报；可执行全社区禁言，不能上架、发货或任命其他版主。' },
+  { id: 'owner', label: '作者 / 站长', name: '無相', detail: '审核、举报、处罚，可任命总版主、版主、协管，以及兑换物品上架和发货。' },
+  { id: 'general', label: '总版主', name: '统筹', detail: '已明确授予任命和可下发权限；从管理成员中添加或配置版主。' },
+  { id: 'steward', label: '版主', name: '守望', detail: '负责学习问答、工具资源，已明确授予任命和可下发权限；从管理成员中添加或配置协管，不能上架、发货或任命版主。' },
+  { id: 'assistant', label: '协管', name: '协助', detail: '负责学习问答，审核待审主题、协助资料审核和推荐精选；没有任命、删除或最终审批权限。' },
 ] as const;
 const themeOf = (value: string | null) => value === 'light' ? 'light' : 'dark';
 const roleOf = (req: IncomingMessage) => roles.find(role => role.id === /(?:^|;\s*)preview_as=([a-z]+)(?:;|$)/.exec(req.headers.cookie || '')?.[1]) || roles[0];
@@ -59,7 +61,7 @@ export function createCommunityPreviewService(service: Pick<CommunityService, 'h
       }
       const form = new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
       const role = roles.find(role => role.id === form.get('role'));
-      if (!role) { reply(400, '请选择读者、作者或版主。'); return; }
+      if (!role) { reply(400, '请选择有效的样例身份。'); return; }
       res.writeHead(303, {
         'Set-Cookie': [`preview_as=${role.id}; Path=/; HttpOnly; SameSite=Strict`, 'community_browse=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0'],
         Location: communityHref(themeOf(form.get('theme'))),

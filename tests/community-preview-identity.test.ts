@@ -52,7 +52,7 @@ test('local role picker switches fixture identities and keeps management permiss
   assert.equal((await read('manage')).status, 403);
 
   for (const [role, name, owner, mod] of [
-    ['owner', '無相', true, true], ['steward', '守望', false, true], ['demo', '预览读者', false, false],
+    ['owner', '無相', true, true], ['general', '统筹', false, true], ['steward', '守望', false, true], ['assistant', '协助', false, true], ['demo', '预览读者', false, false],
   ] as const) {
     const response = await switchRole(role);
     assert.equal(response.status, 303);
@@ -64,12 +64,28 @@ test('local role picker switches fixture identities and keeps management permiss
     assert.equal(me.convention.agreed, false, 'switching sample identity does not fabricate consent');
     assert.deepEqual([me.name, me.owner, me.mod], [name, owner, mod]);
     if (role === 'steward') assert.deepEqual(me.moderationBoards, ['qa', 'tools'], 'the sample moderator demonstrates explicit board assignments');
+    if (role === 'general' || role === 'steward' || role === 'assistant') {
+      assert.equal(me.staff.role, role === 'steward' ? 'moderator' : role);
+      assert.equal(me.staff.permissions.includes('staff.appoint'), role !== 'assistant');
+      assert.equal(me.staff.delegable.length > 0, role !== 'assistant');
+      assert.equal(me.staff.parent.kind, role === 'general' ? 'owner' : 'reader');
+      assert.equal(me.staff.parent.id, role === 'general' ? 'owner' : role === 'steward' ? 'general' : 'steward');
+    }
     assert.equal(me.previewIdentityHref, undefined);
     assert.equal((await read('manage', cookie)).status, mod ? 200 : 403);
     assert.equal((await read('manage?tab=items', cookie)).status, owner ? 200 : 403);
     assert.equal((await read('manage?tab=orders', cookie)).status, owner ? 200 : 403);
     const profile = await (await read('members/10002', cookie)).json();
-    assert.equal(profile.canAppoint, owner);
+    assert.equal(profile.canAppoint, ['owner', 'general', 'steward'].includes(role));
+    const rosterResponse = await read('manage?tab=stewards', cookie);
+    assert.equal(rosterResponse.status, ['owner', 'general', 'steward'].includes(role) ? 200 : 403);
+    if (role === 'general' || role === 'steward') {
+      const roster = await rosterResponse.json();
+      assert.equal(roster.actorStaff.role, role === 'steward' ? 'moderator' : role);
+      const subordinate = roster.stewards.find((person: { uid: string }) => person.uid === (role === 'general' ? '10006' : '10010'));
+      assert.ok(subordinate, 'the configured role has its actual downstream member to manage');
+      assert.equal(subordinate.canAppoint, true);
+    }
   }
   const defaultThemeSwitch = await fetch(`${origin}${previewIdentityPath}`, {
     method: 'POST', redirect: 'manual', headers: { origin, 'content-type': 'application/x-www-form-urlencoded' }, body: 'role=owner',
@@ -112,7 +128,7 @@ test('the production community service never interprets the role picker or previ
     identify: async () => ({ kind: 'reader', id: 'real-reader', name: '真实读者', vip: false }),
     people: async () => new Map([['reader:real-reader', { name: '真实读者', uid: '10001', avatar: null, vip: false, joinedAt: null, bio: '' }]]),
   });
-  for (const fakeIdentity of ['owner', 'steward']) {
+  for (const fakeIdentity of ['owner', 'general', 'steward', 'assistant']) {
     const headers = { cookie: `preview_as=${fakeIdentity}` };
     const me = await (await fetch(`${origin}/api/community/me`, { headers })).json();
     assert.deepEqual([me.name, me.owner, me.mod], ['真实读者', false, false]);

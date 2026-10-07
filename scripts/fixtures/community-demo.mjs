@@ -16,6 +16,7 @@ import { createCommunityService } from '../../server/community-service.ts';
 import { createCommunityPreviewProfile } from './community-preview-profile.ts';
 import { createCommunityFrameAuthority } from '../../server/community-frame-authority.ts';
 import { communityBoards } from '../../src/community.mjs';
+import { communityStaffCapabilities, communityStaffDefaultPermissions } from '../../src/community-staff.ts';
 
 // Sample members: nickname, public UID, VIP, days since joining, signature and level (null: computed).
 const people = {
@@ -24,8 +25,10 @@ const people = {
   yuanshan: { name: '远山', uid: '10003', vip: false, days: 60, bio: '', level: 1 },
   mobai: { name: '墨白', uid: '10004', vip: true, days: 150, bio: '插画师，用 AI 做底图。', level: 2 },
   newbie: { name: '新人小周', uid: '10005', vip: false, days: 2, bio: '', level: 0 },
-  steward: { name: '守望', uid: '10006', vip: false, days: 300, bio: '社区协管。', level: 3 },
+  steward: { name: '守望', uid: '10006', vip: false, days: 300, bio: '负责学习问答和工具资源的版主。', level: 3 },
   spam: { name: '广告号', uid: '10007', vip: false, days: 1, bio: '', level: 0 },
+  general: { name: '统筹', uid: '10009', vip: false, days: 400, bio: '本地总版主样例，可任命版主。', level: 3 },
+  assistant: { name: '协助', uid: '10010', vip: false, days: 120, bio: '本地协管样例，协助审核，不继续任命。', level: 2 },
 };
 const ownerName = '無相';
 export const previewOwnerReaderId = 'ffffffff-ffff-4fff-8fff-fffffffffff8';
@@ -189,7 +192,13 @@ export async function createCommunityDemo({ simplePosting = true, visualDemo = f
   store.economy.redeem(member('linjian'), bag, { ...context('linjian'), shipping: { name: '林间', phone: '13900139000', address: '浙江省杭州市西湖区示例路 2 号（本地预览示例）' } });
   store.economy.redeem(member('mobai'), book, context('mobai'));
   store.members.mute(member('spam'), 7, '垃圾广告 / 引流', member('owner'), now - 3600e3);
-  store.members.setSteward(member('steward'), true, ['qa', 'tools']);
+  // Explicit fixture grants exercise the same appointment chain as production.
+  // These are demo accounts, not defaults for ordinary appointed moderators.
+  for (const id of ['general', 'steward', 'assistant']) store.members.ensure(member(id));
+  const capabilities = communityStaffCapabilities.map(capability => capability.id);
+  store.staff.appoint(member('owner'), member('general'), { role: 'general', boards: communityBoards.map(board => board.id), permissions: capabilities, delegable: capabilities });
+  store.staff.appoint(member('general'), member('steward'), { role: 'moderator', boards: ['qa', 'tools'], permissions: capabilities, delegable: capabilities });
+  store.staff.appoint(member('steward'), member('assistant'), { role: 'assistant', boards: ['qa'], permissions: [...communityStaffDefaultPermissions.assistant], delegable: [] });
   // A few notifications for 预览读者 beyond the actual shipped order above.
   store.members.notify(member('demo'), { type: 'system', text: '你兑换的物品已经发货', data: { order: 'shipped', item: '無相帆布袋', company: '顺丰', tracking: 'SF-PREVIEW-10001' } }, at(12));
   store.members.notify(member('demo'), { type: 'mention', actor: member('linjian'), topicId: open, text: '在回复里提到了你', data: { where: 'reply' } }, at(24));
