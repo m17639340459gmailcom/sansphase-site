@@ -84,7 +84,7 @@ export const communityLevelRules: Record<1 | 2 | 3, Array<{ key: LevelStat; labe
 export const communityCleanDays = { 2: 30, 3: 180 } as const;
 export const communityLevelPerks: Record<number, Array<[string, string]>> = {
   0: [["每天最多 2 个主题、10 条回复", "Up to 2 topics and 10 replies a day"], ["每帖最多 1 张图、2 个外链", "1 image and 2 links per post"], ["前 2 个带链接或图片的帖子先审后发", "The first 2 posts with links or images are reviewed first"], ["不能悬赏、不能感谢、不能举报；点赞不给对方星尘", "No bounties, thanks or reports; likes give no stardust"]],
-  1: [["去掉图片和链接限制", "No image or link limits"], ["点赞表达认可，不发星尘", "Likes show appreciation without stardust"], ["可以举报、悬赏、感谢", "Can report, offer bounties and thank"]],
+  1: [["解除初光限制：普通帖子最多 4 张图，作品展廊最多 9 张", "Lift first-light limits: up to 4 images per post, or 9 in Showcase"], ["点赞表达认可，不发星尘", "Likes show appreciation without stardust"], ["可以举报、悬赏、感谢", "Can report, offer bounties and thank"]],
   2: [["编辑期限延长到 30 天", "Edit for 30 days"], ["每日发帖、回复上限 ×1.5", "1.5× daily posting limits"], ["举报开始计入自动隐藏", "Reports count towards auto-hiding"]],
   3: [["举报即隐藏初光、巡天用户的内容", "A report hides content by first-light and survey members"], ["可以给帖子改标签", "Can change tags on posts"], ["条件不满足会掉回观测", "Falls back to observer when the conditions lapse"]],
   4: [["置顶、移动、锁帖、审核", "Pin, move, lock and review"], ["操作全部进审计日志", "Every action is audited"]],

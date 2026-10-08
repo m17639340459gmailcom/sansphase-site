@@ -250,7 +250,7 @@ test('appointed role labels do not grant automatic trust or minimum-level redemp
   store.ledger.credit(moderator, 20000, 'test', null, new Date().toISOString());
   const me = await (await get('me', 'moderator')).json();
   assert.equal(me.mod, true);
-  assert.equal(me.level, 4, 'appointment remains visible as an appointed role');
+  assert.equal(me.level, 0, 'ordinary moderator presentation keeps earned trust');
   assert.equal(me.trustLevel, 0, 'ordinary business receives earned trust independently of that role');
   const shop = await (await get('shop', 'moderator')).json();
   assert.equal(shop.level, 0);

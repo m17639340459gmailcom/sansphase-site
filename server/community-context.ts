@@ -51,7 +51,8 @@ export type Body = Record<string, unknown>;
 export type Ctx = {
   req: IncomingMessage; res: ServerResponse; url: URL; path: string; method: string;
   viewer: CommunityViewer; me: CommunityAuthor; live: CommunityStore; options: ServiceOptions;
-  // Earned trust drives ordinary business rules; appointments separately grant board moderation.
+  // Ordinary trust includes the active general's temporary maximum projection;
+  // earned trust remains stored separately, and board moderation stays capability based.
   level: number; trustLevel: number; owner: boolean; mod: boolean; ownerMember: CommunityAuthor;
   moderationBoards: string[];
   staff: CommunityStaffState | null;

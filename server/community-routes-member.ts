@@ -88,8 +88,8 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
       }
       // What else a row is about: the item redeemed or refunded, or the day made up.
       const detail = (ref: { kind: string; id: string } | null) => ref?.kind === 'item' ? economy.item(ref.id)?.name ?? null : ref?.kind === 'day' || ref?.kind === 'month' ? ref.id : null;
-      const level = ctx.level;
       const profile = (await ctx.people([me])).get(memberKey(me));
+      const level = ctx.level;
       ctx.send({
         balance: ledger.balance(me), gainedToday: ledger.gainedToday(me), behaviourToday: ledger.behaviourToday(me), dailyCap: r.dailyCap,
         checkedIn: economy.checked(me), month: ledger.month(me), flow,

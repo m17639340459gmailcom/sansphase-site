@@ -16,12 +16,15 @@ import { createOwnerReaderPreview } from './community-owner-reader-preview.ts';
 import { profileRoutes } from './community-routes-profile.ts';
 import { isCommunityPassiveRead } from './community-passive-request.ts';
 import { communityApprovedAvatarURL } from './community-avatar-url.ts';
+import { communityLevelRules } from '../src/community-rules.ts';
+import type { CommunityStaffRole } from '../src/community-staff.ts';
 
 export { communityContactReason } from './community-context.ts';
 export type { CommunityViewer, PersonInfo } from './community-context.ts';
 
 const statusOf = (error: unknown) => (error && typeof error === 'object' && 'status' in error && typeof error.status === 'number' ? error.status : 500);
 const membersBoard = 'vip';
+const maximumTrustLevel = Math.max(...Object.keys(communityLevelRules).map(Number));
 const consentExemptPaths = new Set(['convention/read', 'agree', 'browse-mode']);
 // /api/community/* needs a signed-in reader or the owner. Writes also need the site's own
 // origin and the X-Reader-Request header, as the reader service does.
@@ -88,10 +91,13 @@ export function createCommunityService(options: ServiceOptions) {
     const readOnly = browsingAsReader && !viewer.ownerAccountId;
     const ownerReaderPreview = actualOwner && browsingAsReader ? createOwnerReaderPreview() : null;
     const owner = actualOwner && !browsingAsReader;
-    const trustLevel = ownerReaderPreview?.trustLevel ?? (browsingAsReader ? 1 : live.members.trustLevel(me));
-    // Appointments grant board moderation, not automatic trust, posting or reward benefits.
-    const level = trustLevel;
     let staffAccountsValid = true;
+    // An appointment projects ordinary permissions, never the member's earned
+    // trust, experience or VIP. Re-read the live role at every authorization use.
+    const ordinaryTrust = (author: CommunityAuthor, role: CommunityStaffRole | null) =>
+      role === 'general' ? maximumTrustLevel : live.members.trustLevel(author);
+    const trustLevel = () => ownerReaderPreview?.trustLevel ?? (browsingAsReader ? 1
+      : ordinaryTrust(me, staffAccountsValid ? live.staff.state(me)?.role ?? null : null));
     const relatedStaffReaders:CommunityAuthor[]=[];
     const refreshStaff = async (related:readonly CommunityAuthor[]=[]) => {
       for(const member of related)if(member.kind==='reader'&&!relatedStaffReaders.some(previous=>same(previous,member)))relatedStaffReaders.push(member);
@@ -124,6 +130,9 @@ export function createCommunityService(options: ServiceOptions) {
     const presentationStaffRole = (author: CommunityAuthor, map: Map<string, PersonInfo>) => {
       const current = live.staff.state(author);
       if (!current || author.kind === 'owner') return current?.role ?? null;
+      // The final refresh may invalidate the viewer after this profile batch
+      // was read. Its DTO must use the same final authority as request rules.
+      if (same(author, me) && !staffAccountsValid) return null;
       // Re-read the appointment after asynchronous profiles resolve: a revoked
       // chain or a newly appointed, unverified ancestor must not keep its badge.
       return [author, ...live.staff.ancestors(author)].filter(member => member.kind === 'reader')
@@ -135,6 +144,7 @@ export function createCommunityService(options: ServiceOptions) {
       const decorations = live.members.decorations(author);
       const steward = live.members.steward(author);
       const preview = author.kind === 'reader' && info.ownerReader ? createOwnerReaderPreview() : same(author, me) ? ownerReaderPreview : null;
+      const staffRole = preview ? null : presentationStaffRole(author, map);
       const nameEffect = live.economy.nameEffect(decorations.color);
       const canSeeUid = author.kind === 'owner' || same(author, me) || mod();
       return {
@@ -143,8 +153,8 @@ export function createCommunityService(options: ServiceOptions) {
         showUid: canSeeUid,
         growth: preview?.growth ?? live.experience.state(author), vipGrowth: preview?.vipGrowth ?? live.experience.vipState(author, info.vip),
         avatar: communityApprovedAvatarURL(info.uid, info.avatar),
-        vip: preview ? true : info.vip, level: preview?.trustLevel ?? live.members.level(author), steward: preview ? false : steward,
-        staffRole: preview ? null : presentationStaffRole(author, map),
+        vip: preview ? true : info.vip, level: preview?.trustLevel ?? (same(author, me) && browsingAsReader ? trustLevel() : ordinaryTrust(author, staffRole)), steward: preview ? false : steward,
+        staffRole,
         ...(steward ? { moderationBoards: live.members.moderationBoards(author) } : {}), frame: decorations.frame, color: decorations.color, ...(nameEffect ? { nameEffect } : {}),
       };
     };
@@ -169,7 +179,9 @@ export function createCommunityService(options: ServiceOptions) {
     };
     return {
       req, res, url: new URL(req.url || '', siteOrigin), path, method: req.method || 'GET',
-      viewer, me, live, options, level, trustLevel, owner, canModerateBoard, ownerMember, actualOwner, browsingAsReader, readOnly, ownerReaderPreview,
+      viewer, me, live, options, owner, canModerateBoard, ownerMember, actualOwner, browsingAsReader, readOnly, ownerReaderPreview,
+      get level() { return trustLevel(); },
+      get trustLevel() { return trustLevel(); },
       get actualMod() { return actualOwner || staffAccountsValid && Boolean(live.staff.state(me)); },
       get mod() { return mod(); },
       get moderationBoards() { return moderationBoards(); },
@@ -190,7 +202,7 @@ export function createCommunityService(options: ServiceOptions) {
       },
       throttle(kind) {
         requireConsent();
-        live.rateLimits.consume(me, kind, level);
+        live.rateLimits.consume(me, kind, trustLevel());
       },
       auditMutation: async <T>(action: string, execute: () => T, details: CommunityAuditDetails<T> = {}) => {
         await refreshStaff();

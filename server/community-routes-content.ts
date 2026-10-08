@@ -144,7 +144,7 @@ function topicInput(ctx: Ctx, board: string, body: Body, level: number, previous
 }
 
 async function createTopic(ctx: Ctx, body: Body) {
-  const { live, me, level } = ctx;
+  const { live, me } = ctx;
   assertNotMuted(ctx);
   const board = String(body.board || '');
   if (!live.boards.has(board)) throw fail('请选择一个版块。');
@@ -152,6 +152,7 @@ async function createTopic(ctx: Ctx, body: Body) {
   // Resolve mentions before the transaction; the creation, reward, notices and
   // saved retry result then form one synchronous commit.
   const mentions = await ctx.mentions(typeof body.body === 'string' ? body.body : '');
+  await ctx.refreshStaff();
   ctx.requireConsent();
   assertNotMuted(ctx);
   if (!ctx.canSeeBoard(board) || !canParticipateBoard(ctx, board)) throw fail('会员茶室只有 VIP 能发帖。', 403);
@@ -165,6 +166,7 @@ async function createTopic(ctx: Ctx, body: Body) {
     return result;
   }, () => {
     if (!live.members.agreed(me)) throw fail('请先阅读并同意当前社区公约。', 428);
+    const level = ctx.level;
     const { title, content, images, meta, resource } = topicInput(ctx, board, body, level);
     const tags = tagList(body.tags);
     const links = countLinks(content) + (resource ? 1 : 0);
@@ -193,8 +195,10 @@ function replyInput(ctx: Ctx, value: unknown) {
 }
 
 async function editTopic(ctx: Ctx, topic: NonNullable<ReturnType<Ctx['live']['topic']>>, body: Body) {
+  const map = await ctx.people([topic.author]);
+  topic = visibleTopic(ctx, topic.id);
   if (!canEdit(ctx, topic.author, topic.createdAt)) throw fail(ctx.level >= 2 ? '只能在发帖后 30 天内编辑自己的帖子。' : `只能在发帖后 ${r.editWindowHours} 小时内编辑自己的帖子。`, 403);
-  const authorLevel = ctx.live.members.trustLevel(topic.author);
+  const authorLevel = ctx.person(topic.author, map).level ?? 0;
   const { title, content, images, meta, resource } = topicInput(ctx, topic.board, body, authorLevel, topic);
   if (authorLevel < 1 && countLinks(content) + (resource ? 1 : 0) > r.l0Links) throw fail(`初光等级每帖最多 ${r.l0Links} 个链接。`);
   ctx.live.editTopic(topic.id, {
@@ -210,13 +214,16 @@ async function report(ctx: Ctx, body: Body) {
   const kind = body.kind === 'reply' ? 'reply' : body.kind === 'topic' ? 'topic' : '';
   const id = String(body.id || '');
   if (!kind) throw fail('举报对象无效。');
-  const subject = kind === 'topic' ? { topic: visibleTopic(ctx, id), reply: null } : visibleReply(ctx, id);
+  let subject = kind === 'topic' ? { topic: visibleTopic(ctx, id), reply: null } : visibleReply(ctx, id);
   const author = subject.reply?.author ?? subject.topic.author;
+  const map = await ctx.people([author]);
+  subject = kind === 'topic' ? { topic: visibleTopic(ctx, id), reply: null } : visibleReply(ctx, id);
+  if (!same(author, subject.reply?.author ?? subject.topic.author)) throw fail('举报对象发生变化，请刷新页面。', 409);
   let reportLevel = ctx.trustLevel;
   if (ctx.canStaff('report.review', subject.topic.board)) {
     // A staff capability must not turn a report about a peer or superior into
-    // an immediate moderation action. Earned ordinary trust still applies.
-    try { live.staff.protect(me, author); reportLevel = 4; } catch { /* Use earned trust. */ }
+    // an immediate moderation action. Effective ordinary trust still applies.
+    try { live.staff.protect(me, author); reportLevel = 4; } catch { /* Use effective ordinary trust. */ }
   }
   if (reportLevel < 1) throw fail('初光等级还不能举报，升到巡天就可以了。', 403);
   if (same(me, author)) throw fail('不能举报自己的内容。');
@@ -227,7 +234,7 @@ async function report(ctx: Ctx, body: Body) {
   const target: Target = { kind, id };
   return live.transaction(() => {
     live.report({ target, reporter: me, reporterLevel: reportLevel, reason, note });
-    const authorLevel = live.members.trustLevel(author);
+    const authorLevel = ctx.person(author, map).level ?? 0;
     const strong = reportLevel >= 3 && author.kind !== 'owner' && authorLevel <= 1;
     const hidden = author.kind !== 'owner' && (strong || live.reportsFrom(target, 2) >= 2) ? live.hide(target, `举报：${reason}`) : false;
     live.members.notify(ctx.ownerMember, { type: 'system', actor: me, topicId: kind === 'topic' ? id : live.reply(id)?.topicId, text: '收到一条举报', data: { report: 'new', reason, hidden }, link: '#/community/manage/reports' });
@@ -343,6 +350,7 @@ export async function contentRoutes(ctx: Ctx): Promise<boolean> {
         assertNotMuted(ctx);
         if (!canParticipateBoard(ctx, topic.board)) throw fail('会员茶室只有 VIP 能回复。', 403);
         const mentions = await ctx.mentions(typeof body.body === 'string' ? body.body : '');
+        await ctx.refreshStaff();
         ctx.requireConsent();
         assertNotMuted(ctx);
         const current = visibleTopic(ctx, topic.id);
