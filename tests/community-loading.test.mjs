@@ -83,7 +83,9 @@ test('a slow old board index cannot replace a selected tag or overwrite counts w
     return response({ ...summary, total: 9, tags: { ComfyUI: 9 } });
   }, { hash: '#/community/boards' });
   await remount('#/community/tag/ComfyUI');
-  assert.ok(main.querySelector('[data-community="tag"] .community-topic'));
+  const title = main.querySelector('[data-community="tag"] .community-curated-row[data-topic-id="p1"] .community-curated-title');
+  assert.ok(title);
+  assert.equal(title.textContent, listing.items[0].title);
   assert.ok(calls.some(call => call.url.includes('/topics?') && new URL(call.url, 'http://localhost').searchParams.get('tag') === 'ComfyUI'));
   await remount('#/community/boards');
   const tags = main.querySelector('.community-tagcloud');
@@ -100,12 +102,12 @@ for (const status of [401, 403]) test(`me ${status} removes ready protected cont
     const support = slowSupport(url, slow); if (support) return support;
     return null;
   });
-  assert.equal(main.querySelector('.community-topic'), null);
+  assert.equal(main.querySelector('.community-curated-row'), null);
   assert.equal(main.querySelector('a[href="#/community/new"]'), null);
   assert.ok(main.querySelector(`[data-content-state="${status === 401 ? 'auth' : 'forbidden'}"]`));
   assert.equal(ui.me(), null);
   slow.resolve(response(summary)); await settle();
-  assert.equal(main.querySelector('.community-topic'), null, 'late reads cannot restore rejected content');
+  assert.equal(main.querySelector('.community-curated-row'), null, 'late reads cannot restore rejected content');
 });
 
 test('a definite identity denial removes a previously readable post and its reply controls', async t => {
@@ -128,7 +130,7 @@ test('identity service failure is visible without discarding the last confirmed 
   assert.equal(main.querySelector('[data-content-state="not-open"]'), null);
   assert.match(main.textContent, /身份服务暂时不可用/);
   assert.doesNotMatch(main.textContent, /社区尚未开放/);
-  assert.equal(main.querySelector('.community-topic'), null);
+  assert.equal(main.querySelector('.community-curated-row'), null);
   assert.equal(main.querySelector('.community-thread'), null);
   assert.equal(main.querySelector('form[data-community-form="reply"]'), null);
   assert.equal(ui.me()?.uid, person.uid, '503 is not a sign-out response');
@@ -169,9 +171,11 @@ test('the configured service closure response from me retains the genuine closed
 test('ready topics cannot paint until the current identity read succeeds', async t => {
   const identity = deferred();
   const { main } = await setup(t, url => url.endsWith('/me') ? identity.promise : null);
-  assert.equal(main.querySelector('.community-topic'), null);
+  assert.equal(main.querySelector('.community-curated-row'), null);
   identity.resolve(response(person)); await settle();
-  assert.ok(main.querySelector('.community-topic'));
+  const row = main.querySelector('.community-curated-row[data-topic-id="p1"]');
+  assert.ok(row);
+  assert.equal(row.querySelector('.community-curated-title').textContent, listing.items[0].title);
 });
 
 test('a new identity response wins over an older successful response in the same frame', async t => {
@@ -222,14 +226,14 @@ test('confirmed identity starts the protected daily receipt without waiting for 
   assert.equal(visit.init.method, 'POST');
   assert.equal(visit.init.headers['X-Reader-Request'], '1');
   assert.deepEqual(JSON.parse(visit.init.body), {}, 'the server determines the daily award');
-  assert.ok(main.querySelector('.community-topic'));
+  assert.ok(main.querySelector('.community-curated-row[data-topic-id="p1"]'));
   slow.resolve(response(summary)); await settle();
 });
 
 for (const hash of ['#/community/home', '#/post/p1']) test(`supporting reads preserve readable core nodes and text selection on ${hash}`, async t => {
   const slowSummary = deferred(), slowBanners = deferred();
   const { main, w } = await setup(t, url => url.endsWith('/summary') ? slowSummary.promise : url.startsWith('/api/community/banners') ? slowBanners.promise : null, { hash });
-  const selector = hash.endsWith('/home') ? '.community-topic-main h3 a' : '.community-text';
+  const selector = hash.endsWith('/home') ? '.community-curated-row[data-topic-id="p1"] .community-curated-title' : '.community-text';
   const title = main.querySelector(selector), section = main.querySelector('[data-community]');
   assert.ok(title);
   const selection = w.getSelection(), range = w.document.createRange(); range.selectNodeContents(title); selection.addRange(range);
@@ -251,6 +255,9 @@ test('staged paints retain a promoted full community image on the same route and
     if (url.endsWith('/summary')) return slow.promise;
     return null;
   });
+  const newest = main.querySelector('[data-action="community-sort"][data-sort="newest"]');
+  assert.ok(newest); newest.click(); await settle();
+  assert.equal(main.querySelector('[data-sort="newest"]').getAttribute('aria-pressed'), 'true');
   const image = main.querySelector('.community-topic-thumbs img');
   assert.ok(image); image.src = `/api/community/images/${imageId}.webp`;
   slow.resolve(response(summary)); await settle();
@@ -285,9 +292,11 @@ test('a failed identity network refresh keeps existing reading nodes but cannot 
     if (offline && url.includes('/topics?')) return response({ ...listing, items: [{ ...listing.items[0], title: '新一轮受保护内容' }] });
     return null;
   });
-  const title = main.querySelector('.community-topic-main h3 a');
+  const title = main.querySelector('.community-curated-row[data-topic-id="p1"] .community-curated-title');
+  assert.ok(title);
+  assert.equal(title.textContent, listing.items[0].title);
   offline = true; retry(); await settle();
-  assert.equal(main.querySelector('.community-topic-main h3 a'), title);
+  assert.equal(main.querySelector('.community-curated-row[data-topic-id="p1"] .community-curated-title'), title);
   assert.doesNotMatch(main.textContent, /新一轮受保护内容/);
   assert.equal(ui.me()?.uid, person.uid);
 });
@@ -299,7 +308,7 @@ test('a route return cannot expose cached controls until its own identity read c
   await remount('#/post/p1');
   held = true;
   await remount('#/community/home');
-  assert.equal(main.querySelector('.community-topic'), null);
+  assert.equal(main.querySelector('.community-curated-row'), null);
   assert.equal(main.querySelector('a[href="#/community/new"]'), null);
   identity.resolve(errorResponse(403)); await settle();
   assert.ok(main.querySelector('[data-content-state="forbidden"]'));
@@ -325,13 +334,17 @@ test('protected full images are not reused across accounts, routes or external o
     if (url.includes('/topics?')) return response({ ...listing, items: [{ ...listing.items[0], board: 'showcase', thumbs: [id] }] });
     return null;
   });
+  const newest = main.querySelector('[data-action="community-sort"][data-sort="newest"]');
+  assert.ok(newest); newest.click(); await settle();
+  assert.equal(main.querySelector('[data-sort="newest"]').getAttribute('aria-pressed'), 'true');
   const first = main.querySelector('.community-topic-thumbs img'); first.src = `/api/community/images/${id}.webp`;
   reader = { ...person, uid: '10002' }; retry(); await settle();
   const second = main.querySelector('.community-topic-thumbs img');
   assert.notEqual(second, first); assert.equal(ui.me()?.uid, reader.uid);
   second.src = `https://other.example/api/community/images/${id}.webp`;
   // A same-route structural change forces the image matching path.
-  main.querySelector('[data-action="community-sort"][data-sort="newest"]').click(); await settle();
+  main.querySelector('[data-action="community-sort"][data-sort="active"]').click(); await settle();
+  assert.equal(main.querySelector('[data-sort="active"]').getAttribute('aria-pressed'), 'true');
   const third = main.querySelector('.community-topic-thumbs img');
   assert.notEqual(third, second); assert.equal(new URL(third.src).origin, 'http://localhost');
   await remount('#/post/p1'); await remount('#/community/home');
@@ -341,9 +354,11 @@ test('protected full images are not reused across accounts, routes or external o
 test('current me VIP loss overrides an old startup membership flag on the tea-room board', async t => {
   let vip = true;
   const { main, retry } = await setup(t, url => url.endsWith('/me') ? response({ ...person, vip }) : null, { hash: '#/community/boards/vip', members: true });
-  assert.ok(main.querySelector('.community-topic'));
+  const row = main.querySelector('.community-curated-row[data-topic-id="p1"]');
+  assert.ok(row);
+  assert.equal(row.querySelector('.community-curated-title').textContent, listing.items[0].title);
   vip = false; retry(); await settle();
-  assert.equal(main.querySelector('.community-topic'), null);
+  assert.equal(main.querySelector('.community-curated-row'), null);
   assert.equal(main.querySelector('a[href="#/community/new/vip"]'), null);
   assert.ok(main.querySelector('[data-content-state="members"]'));
 });

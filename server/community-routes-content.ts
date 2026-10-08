@@ -1,5 +1,5 @@
 import { saveCommunityImage } from './community-images.ts';
-import { isCommunitySort } from '../src/community.mjs';
+import { isCommunitySort, communityCuratedPageSize } from '../src/community.mjs';
 import { communityRules, communityTags, communityReportReasons, countLinks, imageLimit } from '../src/community-rules.mjs';
 import { fail, same, memberKey } from './community-db.ts';
 import type { CommunityAuthor, Target } from './community-db.ts';
@@ -266,6 +266,7 @@ export async function contentRoutes(ctx: Ctx): Promise<boolean> {
       const sort = url.searchParams.get('sort') || 'active';
       const page = Math.max(1, Math.min(1000, Number.parseInt(url.searchParams.get('page') || '1', 10) || 1));
       if (!isCommunitySort(sort)) throw fail('排序方式无效。');
+      const listingPageSize = sort === 'curated' ? communityCuratedPageSize : pageSize;
       const query = (url.searchParams.get('q') || '').trim();
       if ([...query].length > searchLimit) throw fail(`搜索词最多 ${searchLimit} 个字。`);
       const uid = url.searchParams.get('author') || '';
@@ -275,7 +276,7 @@ export async function contentRoutes(ctx: Ctx): Promise<boolean> {
       const following = sort === 'following' ? live.members.followingOf(me) : undefined;
       const all = live.listTopics({ board: board || undefined, tag: tag || undefined, query: query || undefined, author: author || undefined, following, sort, page: 1, pageSize: Number.MAX_SAFE_INTEGER });
       const visible = all.items.filter(topic => ctx.canSeeBoard(topic.board));
-      const items = visible.slice((page - 1) * pageSize, page * pageSize);
+      const items = visible.slice((page - 1) * listingPageSize, page * listingPageSize);
       const withPosters = board && !query && !tag && !author && page === 1;
       const counts = new Map<string, { author: CommunityAuthor; topics: number }>();
       const boardTopics = withPosters && following ? live.listTopics({ board, sort: 'active', page: 1, pageSize: Number.MAX_SAFE_INTEGER }).items.filter(topic => ctx.canSeeBoard(topic.board)) : visible;
@@ -288,9 +289,9 @@ export async function contentRoutes(ctx: Ctx): Promise<boolean> {
       const map = await ctx.people([...items.flatMap((topic: StoredTopic) => topic.lastReply ? [topic.author, topic.lastReply.author] : [topic.author]), ...posters.map(poster => poster.author)]);
       if (board && !ctx.canSeeBoard(board)) throw fail('没有这个版块。', 404);
       const currentVisible = visible.filter(topic => { const current = live.topic(topic.id); return current && current.board === topic.board && ctx.canSeeBoard(current.board) && !current.pending && !current.hidden; });
-      const currentItems = currentVisible.slice((page - 1) * pageSize, page * pageSize);
+      const currentItems = currentVisible.slice((page - 1) * listingPageSize, page * listingPageSize);
       ctx.send({
-        items: currentItems.map(topic => ctx.topicDTO(topic, map)), total: currentVisible.length, page, pageSize,
+        items: currentItems.map(topic => ctx.topicDTO(topic, map)), total: currentVisible.length, page, pageSize: listingPageSize,
         ...(following ? { followingCount: following.length } : {}),
         ...(withPosters ? { posters: posters.map(poster => ({ author: ctx.person(poster.author, map), topics: poster.topics })) } : {}),
       });

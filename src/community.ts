@@ -203,15 +203,16 @@ export type CommunityTopic = {
   resource?: CommunityResource | null;
 };
 
-export type CommunitySort = "active" | "newest" | "hot" | "featured" | "following";
+export type CommunitySort = "curated" | "active" | "newest" | "hot" | "featured" | "following";
+export const communityCuratedPageSize = 6;
 export const communitySorts: ReadonlyArray<readonly [CommunitySort, string, string]> = [
-  ["active", "最新回复", "Latest replies"],
+  ["curated", "精选", "Curated"],
   ["newest", "最新发布", "Newest"],
-  ["hot", "热门", "Popular"],
-  ["featured", "精华", "Featured"],
+  ["active", "最新回复", "Latest replies"],
   ["following", "关注", "Following"],
 ];
-export const isCommunitySort = (value: unknown): value is CommunitySort => communitySorts.some(([id]) => id === value);
+// Keep existing hot/featured reads available to sidebars and older clients.
+export const isCommunitySort = (value: unknown): value is CommunitySort => value === 'hot' || value === 'featured' || communitySorts.some(([id]) => id === value);
 
 const time = (value: string) => Date.parse(value) || 0;
 // 热度：回复比赞更重，越旧的帖子分数越低（每 8 小时减 1 分）。
@@ -221,7 +222,9 @@ const heat = (topic: Sortable, now: number) => topic.likes * 2 + topic.replies *
 
 export function sortTopics<T extends Sortable>(topics: readonly T[], sort: CommunitySort, now = Date.now()): T[] {
   const list = sort === "featured" ? topics.filter((topic) => topic.featured) : [...topics];
-  if (sort === "hot") list.sort((a, b) => heat(b, now) - heat(a, now));
+  if (sort === "curated") list.sort((a, b) => Number(Boolean(b.featured)) - Number(Boolean(a.featured))
+    || (a.featured && b.featured ? time(b.lastActivityAt) - time(a.lastActivityAt) : heat(b, now) - heat(a, now)));
+  else if (sort === "hot") list.sort((a, b) => heat(b, now) - heat(a, now));
   else if (sort === "newest") list.sort((a, b) => time(b.createdAt) - time(a.createdAt));
   else list.sort((a, b) => time(b.lastActivityAt) - time(a.lastActivityAt));
   // 按时间排序时：站长置顶 > 付费推荐 > 普通帖子；热门和精华按内容本身排。
@@ -642,6 +645,22 @@ export function communityTopicsHTML(items: readonly CommunityTopic[], common: Co
 
 export const communitySearchLimit = 40;
 
+/** The same visible listing, presented as a compact ordered board. */
+function communityCuratedHTML(items: readonly CommunityTopic[], common: Common, showBoard: boolean) {
+  const { t, esc, now = Date.now(), icons = {} } = common;
+  const rows = items.map((topic, index) => {
+    const title = topic.board === 'moments' && !topic.hasTitle ? plainText(topic.excerpt || topic.title) : topic.title;
+    const authorLabel = nameLabelHTML(topic.author, common, false);
+    const author = topic.author.uid ? `<a class="community-curated-author" href="${memberHref(topic.author.uid)}">${avatarHTML(topic.author, common, 'xs', false)}${authorLabel}</a>`
+      : `<span class="community-curated-author">${avatarHTML(topic.author, common, 'xs', false)}${authorLabel}</span>`;
+    return `<li class="community-curated-row${topic.glow ? ' is-glow' : ''}" data-topic-id="${esc(topic.id)}"><span class="community-curated-rank${index < 3 ? ' is-top' : ''}" aria-hidden="true">${String(index + 1).padStart(2, '0')}</span>`
+      + `<div class="community-curated-main"><div class="community-curated-heading">${topic.featured ? `<span class="community-curated-featured">${t('精华', 'Featured')}</span>` : ''}<a class="community-curated-title" href="${postHref(topic.id)}" title="${esc(title)}">${esc(title)}</a></div>`
+      + `<div class="community-curated-meta">${author}${showBoard ? boardChip(topic.board, t, esc) : ''}</div></div>`
+      + `<div class="community-curated-aside"><span class="community-curated-counts"><span>${icons.like || ''}${topic.likes || 0}<span class="sr-only">${t(' 个赞', ' likes')}</span></span><span>${icons.reply || ''}${topic.replies}<span class="sr-only">${t(' 条回复', ' replies')}</span></span></span><time datetime="${esc(topic.createdAt)}">${relativeTime(topic.createdAt, now, t)}</time></div></li>`;
+  });
+  return `<section class="community-curated" aria-label="${t('精选榜单', 'Curated discussions')}"><header class="community-curated-head"><h2>${t('精选榜单', 'Curated discussions')}</h2><p>${t('精华优先 · 热门补充', 'Featured first · popular discussions next')}</p></header><ol class="community-curated-list" role="list">${rows.join('')}</ol></section>`;
+}
+
 type ListingOptions = Common & { list: CommunityLoad<CommunityListing>; sort: CommunitySort; query: string; board: string; empty: string; meForSort?: CommunityMe | null; showCompose?: boolean };
 
 // 帖子列表上方的一栏（首页、版块页和标签页共用）：左边排序，右边搜索和发帖。
@@ -655,6 +674,9 @@ function listingHTML({ list, sort, query, board, empty, showCompose = true, ...c
   let body = communityStatusHTML(list, common);
   if (list.state === "ready") {
     const { items, total: count } = list.data;
+    // Dynamic rankings can overlap between pages. Exhaustion follows the
+    // server cursor, not the number of unique rows retained by the client.
+    const more = items.length < count && list.data.page * list.data.pageSize < count;
     const summary = query
       ? `<p class="community-search-summary">${t(`搜索“${esc(query)}”，找到 ${count} 个主题`, `${count} results for “${esc(query)}”`)}<button type="button" data-action="community-search-clear">${t("清除搜索", "Clear search")}</button></p>`
       : "";
@@ -663,8 +685,8 @@ function listingHTML({ list, sort, query, board, empty, showCompose = true, ...c
       : sort === "featured" ? emptyHTML(common, t("还没有精华帖", "No featured posts yet"))
       : emptyHTML(common, t("这里还没有帖子", "No posts yet"), empty);
     body = summary + (items.length
-      ? communityTopicsHTML(items, common, { showBoard: !board }) + (items.length < count
-        ? `<button type="button" class="community-button community-more" data-action="community-more"${list.more ? " disabled" : ""}>${list.more ? t("正在加载…", "Loading…") : t(`加载更多 · 还有 ${count - items.length} 个`, `Load more · ${count - items.length} left`)}</button>`
+      ? (sort === 'curated' ? communityCuratedHTML(items, common, !board) : communityTopicsHTML(items, common, { showBoard: !board })) + (more
+        ? `<button type="button" class="community-button community-more" data-action="community-more"${list.more ? " disabled" : ""}>${list.more ? t("正在加载…", "Loading…") : sort === 'curated' ? t('查看更多', 'View more') : t(`加载更多 · 还有 ${count - items.length} 个`, `Load more · ${count - items.length} left`)}</button>`
         : `<p class="community-end">${t("已经到底了", "That's everything")}</p>`)
       : none);
   }

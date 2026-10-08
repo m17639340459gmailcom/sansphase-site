@@ -555,6 +555,38 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-end { padding: 8px; text-align: center; font-size: 12.5px; color: var(--cm-faint); }
 
 .community-topics { overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: var(--cm-panel); }
+/* One broad, compact board for editorial features and popular discussions. */
+.community-curated { container-type: inline-size; min-width: 0; padding: 12px 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--community-reading-surface, var(--cm-panel)); }
+.community-curated-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.community-curated-head h2 { margin: 0; font: 600 17px/1.5 var(--font-serif); color: var(--community-reading-title, var(--text)); }
+.community-curated-head p { margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
+.community-curated-list { margin: 0; padding: 0; list-style: none; }
+.community-curated-row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: start; gap: 12px; min-width: 0; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.community-curated-row:last-child { padding-bottom: 2px; border-bottom: 0; }
+.community-curated-rank { padding-top: 2px; font: 500 15px/1.5 var(--font-mono); color: var(--dim); }
+.community-curated-rank.is-top { color: var(--signal); font-weight: 600; }
+.community-curated-main { display: grid; min-width: 0; gap: 5px; }
+.community-curated-heading { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.community-curated-title { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 15px; font-weight: 600; line-height: 1.5; }
+.community-curated-title:hover { color: var(--signal); }
+.community-curated-row.is-glow .community-curated-title { color: var(--signal); }
+.community-curated-title:focus-visible, .community-curated-author:focus-visible { outline: 1px solid var(--focus-edge); outline-offset: 3px; border-radius: 3px; }
+.community-curated-featured { flex: 0 0 auto; color: var(--cm-feature); font-size: 11px; line-height: 1.6; }
+.community-curated-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; min-width: 0; color: var(--muted); font-size: 12px; line-height: 20px; }
+.community-curated-author { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.community-curated-author > .community-av { width: 20px; height: 20px; flex: 0 0 20px; }
+.community-curated-author .community-uname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.community-curated-meta .community-topic-board { font-size: 12px; }
+.community-curated-aside { display: grid; justify-items: end; gap: 7px; padding-top: 2px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.community-curated-counts { display: inline-flex; align-items: center; gap: 14px; font-variant-numeric: tabular-nums; }
+.community-curated-counts > span { display: inline-flex; align-items: center; gap: 4px; }
+.community-curated-counts .ui-icon { width: 14px; height: 14px; }
+.community-curated-aside time { white-space: nowrap; color: var(--dim); font-size: 11px; }
+@container (max-width: 480px) {
+  .community-curated-row { grid-template-columns: 22px minmax(0, 1fr); gap: 5px 8px; }
+  .community-curated-title { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .community-curated-aside { grid-column: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding-top: 0; }
+}
 .community-topic { position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr) 56px; gap: 14px; padding: 16px 18px; border-top: 1px solid var(--line); transition: background 0.2s; }
 .community-topic:first-child { border-top: 0; }
 .community-topic:hover { background: rgb(238 233 224 / 2.5%); }

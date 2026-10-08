@@ -76,6 +76,9 @@ const message = (error: unknown) => error instanceof Error ? error.message : Str
 // Attribute values in selectors (ids are server UUIDs, but stay safe).
 const quoted = (value: string) => `"${value.replace(/["\\]/g, '\\$&')}"`;
 const enc = encodeURIComponent;
+const changesDiscussionListing = (path: string) => path === 'topics' || path === 'reports' || path === 'manage/review'
+  || /^(?:topics|replies)\/[^/]+\/(?:replies|edit|retag|delete|like|accept|paid-pin|highlight|pin|lock|move|approve|restore|feature)$/.test(path)
+  || /^manage\/(?:topics|replies|reports|feature-recommendations)\//.test(path);
 const staffFingerprint = (staff: CommunityStaffState | null | undefined) => staff === undefined ? 'legacy' : !staff ? 'none' : JSON.stringify({ role: staff.role, boards: [...staff.boards].sort(), permissions: [...staff.permissions].sort(), delegable: [...staff.delegable].sort(), parent: staff.parent });
 const permissionFingerprint = (person: CommunityMe) => [person.staffRole ?? '', staffFingerprint(person.staff), person.management?.role ?? '', staffFingerprint(person.management?.staff)].join('|');
 
@@ -102,7 +105,7 @@ function applyMarkdown(field: HTMLTextAreaElement, kind: string, tr: Translate) 
 }
 
 export function createCommunityUI({ request = (...args) => fetch(...args), navigate: go = (hash) => { location.hash = hash; }, createProfileCrop }: Options = {}) {
-  let sort: CommunitySort = 'active';
+  let sort: CommunitySort = 'curated';
   let summary: CommunityLoad<CommunitySummary> | null = null;
   const frameHighlights = new Map<string, CommunityLoad<CommunityListing>>();
   const frameHighlightsPending = new Map<string, Promise<void>>();
@@ -294,7 +297,14 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       const viewer = readyData(me);
       if (writing && /^manage(?:\/|\?|$)/.test(path) && (!(viewer?.owner || viewer?.mod) || viewer.management?.browsingAsReader))
         throw Object.assign(Error(tr('请先返回管理身份。', 'Restore management first.')), { status: 403 });
-      return await requestAPI<T>(path, init);
+      const value = await requestAPI<T>(path, init);
+      if (writing && businessWrites.get(operation) === frameIdentity && changesDiscussionListing(path)) {
+        // Only a confirmed content write retires cached rankings. Retire
+        // in-flight reads too, so an older response cannot revive these rows.
+        lists.clear(); listRequests.clear();
+        frameHighlights.clear(); frameHighlightsPending.clear();
+      }
+      return value;
     } finally { businessWrites.delete(operation); foregroundReads.delete(operation); }
   }
   async function requestAPI<T>(path: string, init: RequestInit): Promise<T> {
@@ -482,12 +492,12 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const identity = frameIdentity, revision = permissionRevision;
     const params = new URLSearchParams({ ...(scope ? { board: scope } : {}), sort: 'active', page: '1' });
     const pending = load<CommunityListing>(`topics?${params}`, frameHighlights.get(scope)).then(value => {
-      if (identity === frameIdentity && revision === permissionRevision) frameHighlights.set(scope, value);
+      if (identity === frameIdentity && revision === permissionRevision && frameHighlightsPending.get(scope) === pending) frameHighlights.set(scope, value);
     }).finally(() => { if (frameHighlightsPending.get(scope) === pending) frameHighlightsPending.delete(scope); });
     frameHighlightsPending.set(scope, pending);
     return pending;
   }
-  const highlightsFor = (scope: string) => frameHighlights.get(scope) || lists.get(`${scope}|active|`) || loading;
+  const highlightsFor = (scope: string) => frameHighlights.get(scope) || lists.get(`${scope}|curated|`) || lists.get(`${scope}|active|`) || loading;
   function loadBanners(scope: string): Promise<void> {
     const existing = bannerRequests.get(scope);
     if (existing) return existing;
@@ -640,8 +650,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   };
   async function loadList(scope: string) {
     const key = listKey(scope), current = claim(key);
-    // Reuse the normal active list for the frame's supporting content.
-    const suppliesHighlights = Boolean(mounted?.ctx.painted) && sort === 'active' && !queryOf(scope) && !scope.startsWith('tag:');
+    // Reuse the current unfiltered list for the frame's supporting content.
+    const suppliesHighlights = Boolean(mounted?.ctx.painted) && (sort === 'active' || sort === 'curated') && !queryOf(scope) && !scope.startsWith('tag:');
     try {
       try { const data = await api<CommunityListing>(listPath(scope, 1)); if (current()) lists.set(key, { state: 'ready', data }); }
       catch (error) { if (current()) lists.set(key, settle(lists.get(key), error)); }
@@ -679,7 +689,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const sharedFrame = Boolean(mounted?.ctx.painted);
     const highlightScope = current.view === 'board' ? current.board : '';
     const canLoadHighlights = current.view === 'home' || current.view === 'board' && (current.board !== 'vip' || members());
-    const loadsHighlightList = canLoadHighlights && sort === 'active' && !queryOf(highlightScope);
+    const loadsHighlightList = canLoadHighlights && (sort === 'active' || sort === 'curated') && !queryOf(highlightScope);
     const needsHighlights = sharedFrame && ['home', 'board'].includes(current.view)
       && canLoadHighlights && highlightsFor(highlightScope).state !== 'ready' && !loadsHighlightList;
     return current.view === 'unknown' || current.view === 'landing' ? page : [...page,
@@ -793,7 +803,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
           stage<CommunityListing>(listPath(scope, 1), value => {
             listRequests.delete(key);
             lists.set(key, value);
-            if (sort === 'active' && !queryOf(scope) && !scope.startsWith('tag:')) frameHighlights.set(scope, value);
+            if ((sort === 'active' || sort === 'curated') && !queryOf(scope) && !scope.startsWith('tag:')) frameHighlights.set(scope, value);
           });
         if (mounted?.ctx.painted && current.view !== 'tag' && (current.board !== 'vip' || members())) {
           const scope = current.view === 'board' ? current.board : 'home';
@@ -1056,18 +1066,20 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const documentPosition = !restoreView && section ? preserveDocumentReading(section) : null;
     mounted?.main.classList.remove('community-entering');
     if (append) {
-      const rows = results.querySelector('.community-topics');
-      const incoming = next.querySelector('.community-topics');
+      const rows = results.querySelector('.community-topics, .community-curated-list');
+      const incoming = rows && next.querySelector(rows.matches('.community-curated-list') ? '.community-curated-list' : '.community-topics');
       if (rows && incoming) {
-        const href = (row: Element) => row.querySelector('.community-topic-replies')?.getAttribute('href');
+        const href = (row: Element) => row.getAttribute('data-topic-id') || row.querySelector('.community-topic-replies')?.getAttribute('href');
         const known = new Set([...rows.children].map(href));
-        for (const row of [...incoming.children]) if (!known.has(href(row))) rows.append(row);
+        for (const row of [...incoming.children]) if (!known.has(href(row))) { known.add(href(row)); rows.append(row); }
+        const container = rows.closest('.community-curated') || rows;
+        const incomingContainer = incoming.closest('.community-curated') || incoming;
         // Keep the existing list attached: moving it through a fragment would
         // invalidate the browser's scroll anchor despite retaining its children.
-        for (const child of [...results.children]) if (child !== rows) child.remove();
+        for (const child of [...results.children]) if (child !== container) child.remove();
         for (const child of [...next.children]) {
-          if (child === incoming) continue;
-          if (child.classList.contains('community-search-summary')) rows.before(child);
+          if (child === incomingContainer) continue;
+          if (child.classList.contains('community-search-summary')) container.before(child);
           else results.append(child);
         }
       } else results.replaceChildren(...next.childNodes);
@@ -1082,6 +1094,13 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const change = ++listChange;
     const scope = scopeOf(), key = listKey(scope), hash = location.hash;
     const section = mounted?.main.querySelector('[data-community]');
+    const saved = lists.get(key);
+    if (saved?.state === 'ready') {
+      paintList();
+      // A return to an expanded list keeps its cached pages. Permission and
+      // write invalidation still clear the cache before it can be reused.
+      if (sort === 'curated' && saved.data.page > 1) return;
+    }
     listBusy(true);
     await loadList(scope);
     if (change === listChange && location.hash === hash && listKey(scopeOf()) === key && mounted?.main.querySelector('[data-community]') === section) paintList();
@@ -2231,13 +2250,13 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (button) { button.disabled = true; button.textContent = tr('正在加载…', 'Loading…'); }
     const known = new Set(current.data.items.map(item => item.id));
     try {
-      const next = await api<CommunityListing>(listPath(scope, Math.floor(current.data.items.length / current.data.pageSize) + 1));
+      const next = await api<CommunityListing>(listPath(scope, current.data.page + 1));
       if (!latest()) return;
-      const added = next.items.filter(item => !known.has(item.id));
+      const added = next.items.filter(item => { if (known.has(item.id)) return false; known.add(item.id); return true; });
       lists.set(key, { state: 'ready', data: { ...next, items: [...current.data.items, ...added] } });
       if (!visible()) return;
       paintList(true);
-      const link = added[0] && mounted?.main.querySelector<HTMLElement>(`.community-topic a[href=${quoted(postHref(added[0].id))}]`);
+      const link = added[0] && mounted?.main.querySelector<HTMLElement>(`:is(.community-topic a, .community-curated-title)[href=${quoted(postHref(added[0].id))}]`);
       link?.focus({ preventScroll: true });
     } catch {
       if (!latest()) return;

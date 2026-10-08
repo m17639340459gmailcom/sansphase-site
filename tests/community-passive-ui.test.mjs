@@ -127,10 +127,12 @@ test('visible idle pages passively stage me, current data and summary without ac
     if (url.includes('/topics?')) return response({ ...listing, items: [{ ...topic, title: '最新讨论' }] });
     return null;
   });
-  const old = main.querySelector('.community-topic');
+  const old = main.querySelector('.community-curated-row[data-topic-id="p1"]');
+  assert.ok(old);
+  assert.equal(old.querySelector('.community-curated-title').textContent, topic.title);
   await tick(15000);
   assert.equal(calls.filter(x => passive(x.init)).length, 3);
-  assert.equal(main.querySelector('.community-topic'), old);
+  assert.equal(main.querySelector('.community-curated-row[data-topic-id="p1"]'), old);
   assert.match(main.textContent, /原讨论/);
   assert.doesNotMatch(main.textContent, /正在读取/);
   slowSummary.resolve(response(summary)); await flush(); updated = true;
@@ -168,18 +170,22 @@ test('interaction that begins after a passive batch started prevents applying it
   const slow = wait();
   const { main, tick, w } = await setup(t, (url, init) => passive(init) && url.includes('/topics?') ? slow.promise : null);
   await tick(15000);
-  const core = main.querySelector('.community-topic-main h3 a');
+  const core = main.querySelector('.community-curated-row[data-topic-id="p1"] .community-curated-title');
+  assert.ok(core);
+  assert.equal(core.textContent, topic.title);
   const range = w.document.createRange(); range.selectNodeContents(core); w.getSelection().addRange(range);
   slow.resolve(response({ ...listing, items: [{ ...topic, title: '不能覆盖选区' }] })); await flush();
-  assert.equal(main.querySelector('.community-topic-main h3 a'), core);
+  assert.equal(main.querySelector('.community-curated-row[data-topic-id="p1"] .community-curated-title'), core);
   assert.equal(w.getSelection().toString(), '原讨论');
 });
 
 for (const status of [401, 403, 503]) test(`passive ${status} ${status === 503 ? 'keeps the confirmed page' : 'retires all protected data'}`, async t => {
   const { main, ui, tick } = await setup(t, (url, init) => passive(init) && url.endsWith('/me') ? failure(status) : null);
-  const core = main.querySelector('.community-topic'); await tick(15000);
-  if (status === 503) { assert.equal(main.querySelector('.community-topic'), core); assert.equal(ui.me().uid, person.uid); }
-  else { assert.equal(main.querySelector('.community-topic'), null); assert.equal(ui.me(), null); assert.ok(main.querySelector(`[data-content-state="${status === 401 ? 'auth' : 'forbidden'}"]`)); }
+  const core = main.querySelector('.community-curated-row[data-topic-id="p1"]');
+  assert.ok(core); assert.equal(core.querySelector('.community-curated-title').textContent, topic.title);
+  await tick(15000);
+  if (status === 503) { assert.equal(main.querySelector('.community-curated-row[data-topic-id="p1"]'), core); assert.equal(ui.me().uid, person.uid); }
+  else { assert.equal(main.querySelector('.community-curated-row'), null); assert.equal(ui.me(), null); assert.ok(main.querySelector(`[data-content-state="${status === 401 ? 'auth' : 'forbidden'}"]`)); }
 });
 
 test('navigation and identity clear abort old batches whose late response cannot restore an old account', async t => {
@@ -236,13 +242,14 @@ test('permission shrink retires the old VIP pixels immediately and retries scope
     if (url.endsWith('/summary') && outage) return failure(503);
     return null;
   }, '#/community/boards/vip');
-  assert.ok(main.querySelector('.community-topic'));
+  const row = main.querySelector('.community-curated-row[data-topic-id="p1"]');
+  assert.ok(row); assert.equal(row.querySelector('.community-curated-title').textContent, topic.title);
   await tick(15000);
-  assert.equal(main.querySelector('.community-topic'), null, 'old private pixels retire before support succeeds');
+  assert.equal(main.querySelector('.community-curated-row'), null, 'old private pixels retire before support succeeds');
   assert.equal(ui.me().vip, false);
   outage = false; await tick(15000);
   assert.equal(calls.filter(x => passive(x.init) && x.url.endsWith('/me')).length, 2);
-  assert.equal(main.querySelector('.community-topic'), null);
+  assert.equal(main.querySelector('.community-curated-row'), null);
   assert.match(main.textContent, /VIP/);
   assert.equal(calls.filter(x => passive(x.init) && x.url.includes('board=vip')).length, 0);
   assert.equal(calls.some(x => x.url.endsWith('/active/visit')), false);
