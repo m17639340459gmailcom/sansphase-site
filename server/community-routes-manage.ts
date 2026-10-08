@@ -30,10 +30,14 @@ function itemInput(ctx: Ctx, body: Body, id?: string): CustomItemInput {
         throw fail('商品图片已失效，请重新上传。');
     }
   }
-  const cat = body.cat === 'goods' ? 'goods' : body.cat === 'digital' ? 'digital' : body.cat === 'look' ? 'look' : null;
+  const cat = body.cat === 'goods' ? 'goods' : body.cat === 'digital' ? 'digital' : body.cat === 'look' ? 'look' : body.cat === 'card' ? 'card' : null;
   if (!cat) throw fail('请选择物品类别。');
-  const kind = cat === 'look' && (body.kind === 'frame' || body.kind === 'color' || body.kind === 'cover') ? body.kind : undefined;
+  const card = cat === 'card' && body.kind === 'card' && (body.ref === 'makeup' || body.ref === 'pin' || body.ref === 'highlight') ? body.ref : null;
+  if (cat === 'card' && !card) throw fail('请选择有效的道具卡用途。');
+  if (cat !== 'card' && body.ref !== undefined) throw fail('物品类型与道具卡用途不匹配。');
+  const kind = card || (cat === 'look' && (body.kind === 'frame' || body.kind === 'color' || body.kind === 'cover') ? body.kind : undefined);
   if (cat === 'look' && !kind) throw fail('请选择头像框、昵称特效或主页背景。');
+  if (cat !== 'look' && cat !== 'card' && body.kind !== undefined && body.kind !== cat) throw fail('物品类型与用途不匹配。');
   const previous = id ? ctx.live.economy.item(id) : null;
   if (kind === 'frame') {
     const assetId = image === undefined ? previous?.image : image;
@@ -64,7 +68,7 @@ function itemInput(ctx: Ctx, body: Body, id?: string): CustomItemInput {
     cat, name: ctx.clean(body.name, [2, 30], '名称', false), description: ctx.clean(body.description, [4, 200], '说明', true),
     price: whole(body.price, '价格', 1, 100000), stock, limitPer, limitN: limitPer ? whole(body.limitN || 1, '限兑次数', 1, 100) : null,
     minLevel: whole(body.minLevel || 0, '最低等级', 0, 3), minDays: whole(body.minDays || 0, '注册天数', 0, 3650),
-    delivery, image, category, kind, effect: kind === 'color' ? effect : null,
+    delivery: cat === 'digital' ? delivery : '', image, category, kind, effect: kind === 'color' ? effect : null,
     note: typeof body.note === 'string' ? ctx.clean(body.note || ' ', [0, 60], '备注', false) : '', active: body.active !== false,
   };
 }
@@ -359,6 +363,14 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
   }
   const item = /^manage\/items(?:\/([^/]+))?$/.exec(path);
   if (item) {
+    const fields = Object.keys(body);
+    if (fields.length === 1 && fields[0] === 'active') {
+      if (!item[1] || typeof body.active !== 'boolean') throw fail('请选择已有物品并设置正确的上架状态。');
+      const active = body.active;
+      const id = await ctx.auditMutation('item-update', () => live.economy.setItemActive(item[1], active), saved => ({ item: saved, active }));
+      ctx.send({ id }, 200);
+      return true;
+    }
     const id = await ctx.auditMutation(item[1] ? 'item-update' : 'item-create',
       () => live.economy.saveItem(item[1] || null, itemInput(ctx, body, item[1])), saved => ({ item: saved }));
     ctx.send({ id }, item[1] ? 200 : 201);

@@ -1178,18 +1178,19 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-sitem:hover { border-color: var(--line-strong); box-shadow: 0 8px 18px rgb(0 0 0 / 24%); }
 .community-sitem.is-off { opacity: 0.6; }
 .community-sitem.is-owned { border-color: rgb(159 211 180 / 24%); }
-.community-sitem-art { position: relative; height: 112px; overflow: hidden; display: grid; place-items: center; border-bottom: 1px solid var(--line); background: radial-gradient(70% 90% at 50% 40%, rgb(96 118 170 / 18%), transparent 70%), rgb(5 7 11 / 55%); }
+.community-sitem-art { position: relative; box-sizing: border-box; width: 100%; min-width: 0; min-height: 0; height: 112px; padding: 0; overflow: hidden; display: grid; grid-template-rows: minmax(0, 1fr); place-items: center; border: 0; border-bottom: 1px solid var(--line); background: radial-gradient(70% 90% at 50% 40%, rgb(96 118 170 / 18%), transparent 70%), rgb(5 7 11 / 55%); cursor: pointer; }
+.community-sitem-art.is-tool-card { height: 176px; }
+.community-sitem-art.is-tool-card .community-holo:not(.is-uploaded) { width: 100px; height: 142px; transform: perspective(700px) rotateX(var(--holo-rx, 0deg)) rotateY(var(--holo-ry, 0deg)) rotate(5deg); }
+.community-sitem-art > .community-product-image { display: block; box-sizing: border-box; min-width: 0; min-height: 0; width: 100%; height: 100%; max-width: 100%; max-height: 100%; padding: 8px; object-fit: contain; }
+.community-sitem-art:focus-visible { outline: 1px solid var(--focus-edge); outline-offset: -4px; }
 .community-owned-tag { position: absolute; top: 6px; right: 6px; display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border: 1px solid rgb(159 211 180 / 35%); border-radius: var(--pill); background: var(--cm-good-soft); font-size: 12px; color: var(--cm-good); }
 .community-owned-tag .ui-icon { width: 12px; height: 12px; }
 .community-sitem-body { min-width: 0; display: grid; grid-template-rows: auto minmax(24px, 1fr) auto; gap: 8px; padding: 10px 12px 12px; }
-.community-sitem-body h3 { margin: 0; display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 15px; font-weight: 500; line-height: 1.45; overflow-wrap: anywhere; text-wrap: pretty; }
-.community-sitem-body p { margin: 8px 0 0; font-size: 14px; line-height: 1.55; color: var(--muted); overflow-wrap: anywhere; }
-.community-sitem-details > summary { list-style: none; cursor: pointer; }
-.community-sitem-details > summary::-webkit-details-marker { display: none; }
-.community-sitem-details > summary .ui-icon { flex: 0 0 16px; width: 16px; height: 16px; color: var(--dim); }
-.community-sitem-details[open] > summary .ui-icon { transform: rotate(180deg); }
-.community-sitem-details > summary:hover h3 { color: var(--signal); }
-.community-sitem-details > summary:focus-visible { outline: 1px solid var(--focus-edge); outline-offset: 3px; border-radius: 4px; }
+.community-sitem-body h3 { margin: 0; font-size: 15px; font-weight: 500; line-height: 1.45; overflow-wrap: anywhere; text-wrap: pretty; }
+.community-sitem-title { display: flex; align-items: center; justify-content: space-between; gap: 6px; width: 100%; min-height: 28px; padding: 0; border: 1px solid transparent; border-radius: 4px; font: inherit; text-align: start; color: inherit; background: transparent; cursor: pointer; }
+.community-sitem-title .ui-icon { flex: 0 0 16px; width: 16px; height: 16px; color: var(--dim); }
+.community-sitem-title:hover { color: var(--signal); }
+.community-sitem-title:focus-visible { border-color: var(--focus-edge); }
 .community-sitem-meta { min-width: 0; display: grid; align-content: start; gap: 6px; }
 .community-stags { display: flex; flex-wrap: wrap; gap: 5px; }
 .community-stags span { max-width: 100%; padding: 1px 6px; border: 1px solid var(--line); border-radius: 6px; background: rgb(238 233 224 / 4%); font-size: 12px; color: var(--dim); overflow-wrap: anywhere; }
@@ -1200,6 +1201,28 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-price { display: inline-flex; align-items: center; gap: 5px; color: var(--signal); }
 .community-price b { font: 500 18px var(--font-mono); }
 .community-price .ui-icon { width: 15px; height: 15px; }
+/* Product explanations share the profile dialog's materials and close control. */
+.community-shop-dialog { position: fixed; z-index: 140; inset: 0; display: grid; place-items: center; padding: 24px; color: var(--text); }
+.community-shop-dialog[aria-hidden="true"] { display: none; }
+.community-shop-detail-backdrop { position: absolute; inset: 0; background: var(--dialog-shade, rgb(7 15 28 / 64%)); }
+.community-shop-detail-window { position: relative; display: flex; flex-direction: column; width: min(820px, 100%); max-height: calc(100dvh - 48px); min-height: 0; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 20px; background: var(--community-reading-card, var(--cm-panel)); box-shadow: var(--dialog-shadow, 0 24px 80px rgb(3 9 18 / 35%)); }
+.community-shop-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 22px 26px 18px; border-bottom: 1px solid var(--line); }
+.community-shop-detail-head h2 { min-width: 0; margin: 0; font: 600 23px/1.4 var(--font-serif); letter-spacing: .04em; overflow-wrap: anywhere; color: var(--community-reading-title, var(--text)); }
+.community-shop-detail-content { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 28px; min-height: 0; padding: 26px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+.community-shop-detail-art { --tool-card-stage-height: min(420px, 60dvh); display: grid; grid-template-rows: minmax(0, 1fr); place-items: center; min-width: 0; min-height: 0; height: var(--tool-card-stage-height); padding: 16px; border-radius: 14px; background: var(--community-reading-raised, var(--surface-2)); }
+.community-shop-detail-art > .community-product-image { display: block; min-width: 0; min-height: 0; width: 100%; height: 100%; max-width: 100%; max-height: 100%; object-fit: contain; }
+.community-shop-detail-art:focus-visible { outline: 1px solid var(--focus-edge); outline-offset: -4px; }
+.community-shop-detail-info { display: flex; flex-direction: column; align-self: stretch; min-width: 0; gap: 22px; }
+.community-shop-detail-description { margin: 0; font-size: 15px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); }
+.community-shop-detail-foot { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 14px; margin-top: auto; padding-top: 20px; border-top: 1px solid var(--line); }
+.community-shop-detail-foot .community-button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.community-shop-detail-art .community-sart { min-height: 0; grid-template-rows: minmax(0, 1fr); }
+.community-shop-detail-art .community-holo:not(.is-uploaded) { width: min(228px, 80%, calc((var(--tool-card-stage-height) - 64px) * .7)); height: auto; aspect-ratio: 7 / 10; max-height: 100%; transform: perspective(700px) rotateX(var(--holo-rx, 0deg)) rotateY(var(--holo-ry, 0deg)) rotate(5deg); }
+.community-shop-detail-art .community-holo b { font-size: 18px; }
+.community-shop-detail-art .community-holo-ic { width: 56px; height: 56px; }
+.community-shop-detail-art .community-holo-ic .ui-icon { width: 30px; height: 30px; }
+.community-shop-detail-art .community-sart .community-av-xl { width: 110px; height: 110px; font-size: 44px; }
+.community-shop-detail-art .community-cover-sample { width: 100%; height: 140px; }
 /* 物品的样子 */
 .community-sart { position: relative; display: grid; place-items: center; align-content: center; gap: 8px; width: 100%; height: 100%; }
 .community-sart small { padding-inline: 8px; font-size: 12px; line-height: 1.4; text-align: center; color: var(--dim); }
@@ -1219,10 +1242,22 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .is-cover-abyss { background: linear-gradient(180deg, #2f8591, #123b52 55%, #051420); }
 .is-cover-abyss i { background: linear-gradient(100deg, transparent 42%, rgb(200 240 240 / 18%) 47%, transparent 53%); }
 .is-cover-abyss i + i { background: radial-gradient(30% 50% at 60% 10%, rgb(250 240 210 / 45%), transparent 70%); }
-.community-holo { position: relative; overflow: hidden; display: grid; justify-items: center; align-content: center; gap: 4px; width: 72px; height: 92px; border: 1px solid rgb(217 196 156 / 40%); border-radius: 9px; background: linear-gradient(135deg, #2a2440, #16202e); box-shadow: 0 8px 18px rgb(0 0 0 / 35%), inset 0 0 0 1px rgb(255 255 255 / 5%); transform: rotate(-6deg); transition: transform 0.35s var(--ease); }
-.community-holo::before { content: ""; position: absolute; inset: 0; mix-blend-mode: screen; background: linear-gradient(115deg, transparent 20%, rgb(255 120 200 / 18%) 35%, rgb(120 220 255 / 18%) 50%, rgb(255 240 150 / 18%) 65%, transparent 80%); background-size: 250% 100%; animation: community-holo 4s linear infinite; }
+.community-holo { position: relative; overflow: hidden; display: grid; justify-items: center; align-content: center; gap: 4px; width: 72px; height: 92px; border: 1px solid rgb(217 196 156 / 40%); border-radius: 9px; background: linear-gradient(135deg, #2a2440, #16202e); box-shadow: 0 8px 18px rgb(0 0 0 / 35%), inset 0 0 0 1px rgb(255 255 255 / 5%); transform: perspective(700px) rotateX(var(--holo-rx, 0deg)) rotateY(var(--holo-ry, 0deg)) rotate(-6deg); transition: transform 0.35s var(--ease); }
+.community-holo::before { content: ""; position: absolute; inset: 0; pointer-events: none; mix-blend-mode: screen; background: linear-gradient(115deg, transparent 20%, rgb(255 120 200 / 18%) 35%, rgb(120 220 255 / 18%) 50%, rgb(255 240 150 / 18%) 65%, transparent 80%); background-size: 250% 100%; animation: community-holo 4s linear infinite; animation-play-state: var(--community-decoration-play-state, running); }
 @keyframes community-holo { from { background-position: 100% 0; } to { background-position: -150% 0; } }
-.community-sitem:hover .community-holo, .community-inv:hover .community-holo { transform: rotate(0) scale(1.06); }
+.community-inv:hover .community-holo { transform: perspective(700px) rotateX(var(--holo-rx, 0deg)) rotateY(var(--holo-ry, 0deg)) scale(1.06); }
+.community-sitem:hover .community-sitem-art.is-tool-card .community-holo:not(.is-uploaded), .community-sitem-art.is-tool-card:focus-visible .community-holo:not(.is-uploaded), .community-shop-detail-art:is(:hover, :focus-visible) .community-holo:not(.is-uploaded) { transform: perspective(700px) rotateX(var(--holo-rx, 0deg)) rotateY(var(--holo-ry, 0deg)) rotate(5deg) scale(1.035); }
+/* Uploaded cards retain their exact silhouette; both sheen layers use the
+   same contain-fitted alpha mask as the original artwork. */
+.community-sart.is-uploaded-card { box-sizing: border-box; min-width: 0; min-height: 0; padding: 8px; grid-template-rows: minmax(0, 1fr); }
+.community-holo.is-uploaded { box-sizing: border-box; min-width: 0; min-height: 0; width: 100%; height: 100%; max-width: 100%; max-height: 100%; grid-template-rows: minmax(0, 1fr); gap: 0; overflow: visible; border: 0; border-radius: 0; background: transparent; box-shadow: none; filter: drop-shadow(0 5px 5px rgb(3 9 18 / 25%)); transform: perspective(700px) rotateX(var(--holo-rx, 0deg)) rotateY(var(--holo-ry, 0deg)) rotate(-2deg); }
+.community-sitem-art.is-tool-card .community-holo.is-uploaded, .community-shop-detail-art .community-holo.is-uploaded { transform: perspective(700px) rotateX(var(--holo-rx, 0deg)) rotateY(var(--holo-ry, 0deg)); }
+.community-holo.is-uploaded > .community-product-image { display: block; min-width: 0; min-height: 0; width: 100%; height: 100%; max-width: 100%; max-height: 100%; object-fit: contain; }
+.community-holo.is-uploaded::before, .community-holo.is-uploaded::after { pointer-events: none; mask-image: var(--card-image); mask-size: contain; mask-position: center; mask-repeat: no-repeat; mask-mode: alpha; }
+.community-holo.is-uploaded::before { z-index: 1; opacity: .85; }
+.community-holo.is-uploaded::after { content: ""; position: absolute; inset: 0; z-index: 2; background: radial-gradient(ellipse at var(--holo-x, 50%) var(--holo-y, 35%), rgb(255 253 239 / 26%), transparent 58%); mix-blend-mode: screen; opacity: .3; transition: opacity .25s; }
+.community-sitem-art:is(:hover, :focus-visible) .community-holo.is-uploaded, .community-shop-detail-art:is(:hover, :focus-visible) .community-holo.is-uploaded { transform: perspective(700px) rotateX(var(--holo-rx, 0deg)) rotateY(var(--holo-ry, 0deg)) scale(1.035); }
+.community-sitem-art:is(:hover, :focus-visible) .community-holo.is-uploaded::after, .community-shop-detail-art:is(:hover, :focus-visible) .community-holo.is-uploaded::after { opacity: .85; }
 .community-holo-ic { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--cm-signal-soft); color: var(--signal); box-shadow: 0 0 14px rgb(217 196 156 / 30%); }
 .community-holo-ic .ui-icon { width: 19px; height: 19px; }
 .community-holo b { font-size: 13px; font-weight: 500; }
@@ -1414,6 +1449,11 @@ a.community-queue-title:hover { text-decoration: underline; text-underline-offse
 @media (prefers-reduced-motion: reduce) {
   .community-av.is-frame-orbit::after, .community-bh-glow, .community-holo::before,
   .community-cover-sample i, .community-m-cover i, .is-color-aurora, .community-ck-dot, body.community-open .community-uname[data-name-effect] { animation: none; }
+  .community-holo.is-uploaded,
+  .community-sitem-art.is-tool-card .community-holo:not(.is-uploaded), .community-shop-detail-art .community-holo:not(.is-uploaded),
+  .community-sitem-art.is-tool-card .community-holo.is-uploaded, .community-shop-detail-art .community-holo.is-uploaded,
+  .community-sitem:hover .community-sitem-art.is-tool-card .community-holo:not(.is-uploaded), .community-sitem-art.is-tool-card:focus-visible .community-holo:not(.is-uploaded), .community-shop-detail-art:is(:hover, :focus-visible) .community-holo:not(.is-uploaded),
+  .community-sitem-art:is(:hover, :focus-visible) .community-holo.is-uploaded, .community-shop-detail-art:is(:hover, :focus-visible) .community-holo.is-uploaded { transform: none; transition: none; }
 }
 
 /* ================= 窄屏 ================= */
@@ -1460,6 +1500,11 @@ a.community-queue-title:hover { text-decoration: underline; text-underline-offse
   .community-shop-grid { grid-template-columns: repeat(2, minmax(0, 176px)); gap: 8px; }
   .community-shop-cats { max-width: 100%; flex-wrap: nowrap; overflow-x: auto; border-radius: 0; }
   .community-sitem-body { gap: 5px; padding: 9px 10px 11px; }
+  .community-shop-dialog { padding: 12px; }
+  .community-shop-detail-window { max-height: calc(100dvh - 24px); border-radius: 16px; }
+  .community-shop-detail-head { padding: 18px 20px 14px; }
+  .community-shop-detail-content { grid-template-columns: minmax(0, 1fr); gap: 20px; padding: 20px; }
+  .community-shop-detail-art { --tool-card-stage-height: min(280px, 35dvh); }
   .community-inv-grid { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .community-inv { grid-template-columns: 48px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 9px; }
   .community-inv .community-sart { grid-column: 1; grid-row: 1; width: 48px; height: 48px; border-bottom: 0; border-radius: 8px; }

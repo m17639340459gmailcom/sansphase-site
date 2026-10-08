@@ -29,7 +29,7 @@ function clipboardFixture(t) {
 async function setup(t, hash, handle = () => null, ctxOptions = {}) {
   const dom = new JSDOM('<main></main>', { url: `http://localhost/${hash}`, pretendToBeVisual: true });
   const w = dom.window;
-  const names = ['window', 'document', 'location', 'HTMLElement', 'Element', 'Node', 'HTMLInputElement', 'HTMLTextAreaElement', 'HTMLSelectElement', 'HTMLButtonElement', 'HTMLFormElement', 'HTMLAnchorElement', 'Event'];
+  const names = ['window', 'document', 'location', 'HTMLElement', 'Element', 'Node', 'HTMLInputElement', 'HTMLTextAreaElement', 'HTMLSelectElement', 'HTMLButtonElement', 'HTMLFormElement', 'HTMLAnchorElement', 'Event', 'CustomEvent', 'getComputedStyle'];
   const previous = new Map(names.map(name => [name, globalThis[name]]));
   for (const name of names) globalThis[name] = name === 'window' ? w : w[name];
   const requests = [];
@@ -72,6 +72,119 @@ async function setup(t, hash, handle = () => null, ctxOptions = {}) {
 
 const managementViewer = { ...person, name: '無相', uid: 'owner', role: 'owner', owner: true, mod: true, management: { role: 'owner', browsingAsReader: false } };
 const managementData = { owner: true, tab: 'items', counts: { queue: 0, reports: 0, orders: 0, sanctions: 0 }, kpis: { topics24h: 1, replies24h: 2 }, queue: { topics: [], replies: [] }, reports: [], content: [topic('p1')], items: [], orders: [], sanctions: [], data: null };
+
+test('authors correct an unredeemed product into a make-up card without replacing its image or draft', async t => {
+  const item = { id: 'wrong-kind', cat: 'digital', kind: 'digital', name: '补签卡', desc: '补签漏签的一天。', price: 8, stock: 99, left: 99, active: true, delivery: '原来的错误资源说明', image: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', canChangeKind: true };
+  const fixture = await setup(t, '#/community/manage/items', (url, init) => {
+    if (url.endsWith('/me')) return response(managementViewer);
+    if (url.includes('/manage?')) return response({ ...managementData, items: [item] });
+    if (url.endsWith('/manage/items/wrong-kind')) return response({ id: item.id });
+    return null;
+  });
+  fixture.main.querySelector('[data-action="community-item-edit"][data-id="wrong-kind"]').click();
+  const form = fixture.main.querySelector('[data-community-form="item"]');
+  const card = form.querySelector('[name="kind"][value="card"]');
+  assert.ok(card, 'authors can correct the actual product type');
+  card.checked = true; card.dispatchEvent(new fixture.w.Event('change', { bubbles: true }));
+  assert.equal(form.elements.namedItem('cat').value, 'card');
+  assert.equal(form.querySelector('[data-item-delivery]').hidden, true);
+  assert.equal(form.elements.namedItem('name').value, item.name);
+  form.dispatchEvent(new fixture.w.Event('submit', { bubbles: true, cancelable: true })); await turn();
+  const writes = fixture.requests.filter(call => call.url.endsWith('/manage/items/wrong-kind'));
+  assert.equal(writes.length, 1);
+  const body = JSON.parse(writes[0].init.body);
+  assert.equal(body.cat, 'card'); assert.equal(body.kind, 'card'); assert.equal(body.ref, 'makeup');
+  assert.equal(body.delivery, ''); assert.equal(body.image, item.image); assert.equal(body.price, 8); assert.equal(body.stock, 99);
+});
+
+test('publication shortcuts send only the intended state and lock through the pending update', async t => {
+  const pending = deferred();
+  const item = { id: 'on-sale', cat: 'goods', kind: 'goods', name: '收藏卡片', desc: '卡片说明', price: 8, stock: 99, left: 90, active: true, delivery: '' };
+  const fixture = await setup(t, '#/community/manage/items', (url, init) => {
+    if (url.endsWith('/me')) return response(managementViewer);
+    if (url.includes('/manage?')) return response({ ...managementData, items: [item] });
+    if (url.endsWith('/manage/items/on-sale')) return pending.promise;
+    return null;
+  });
+  const button = fixture.main.querySelector('[data-action="community-item-active"][data-id="on-sale"]');
+  assert.ok(button, 'publication is visible in the management list'); assert.match(button.textContent, /下架/);
+  button.click(); button.click();
+  const writes = fixture.requests.filter(call => call.url.endsWith('/manage/items/on-sale'));
+  assert.equal(writes.length, 1); assert.deepEqual(JSON.parse(writes[0].init.body), { active: false });
+  assert.equal(button.disabled, true);
+  item.active = false; pending.resolve(response({ id: item.id })); await turn(); await turn();
+  assert.match(fixture.main.querySelector('[data-action="community-item-active"]').textContent, /重新上架/);
+});
+
+test('publication shortcut failures restore the button without changing the saved list state', async t => {
+  const pending = deferred(), notices = [];
+  const item = { id: 'unlist-fails', cat: 'goods', kind: 'goods', name: '待下架卡片', desc: '卡片说明', price: 8, stock: 99, left: 90, active: true, delivery: '' };
+  const fixture = await setup(t, '#/community/manage/items', url => {
+    if (url.endsWith('/me')) return response(managementViewer);
+    if (url.includes('/manage?')) return response({ ...managementData, items: [item] });
+    if (url.endsWith('/manage/items/unlist-fails')) return pending.promise;
+    return null;
+  }, { notify: message => notices.push(message) });
+  const table = fixture.main.querySelector('.community-table');
+  const button = table.querySelector('[data-action="community-item-active"]');
+  const row = button.closest('tr'), savedText = row.textContent;
+  const readsBefore = fixture.requests.filter(call => call.url.includes('/manage?')).length;
+  button.click();
+  assert.equal(button.disabled, true);
+  pending.resolve({ ok: false, status: 500, json: async () => ({ error: '上架状态未能保存，请重试。' }) });
+  await turn(); await turn();
+  assert.equal(fixture.main.querySelector('.community-table'), table, 'a rejected update retains the readable list');
+  assert.equal(fixture.main.querySelector('[data-action="community-item-active"]'), button);
+  assert.equal(button.disabled, false, 'the author can retry after a definitive failure');
+  assert.equal(button.dataset.active, 'false'); assert.match(button.textContent, /下架/);
+  assert.equal(row.textContent, savedText); assert.match(row.textContent, /上架中/);
+  assert.equal(item.active, true);
+  assert.deepEqual(notices, ['上架状态未能保存，请重试。']);
+  assert.equal(fixture.requests.filter(call => call.url.includes('/manage?')).length, readsBefore, 'a failed write does not reload or optimistically relabel the list');
+  const writes = fixture.requests.filter(call => call.url.endsWith('/manage/items/unlist-fails'));
+  assert.equal(writes.length, 1); assert.deepEqual(JSON.parse(writes[0].init.body), { active: false });
+});
+
+test('a pending publication shortcut cannot repaint the old pane after management navigation', async t => {
+  const pending = deferred(), olderContent = deferred();
+  let contentReads = 0;
+  const item = { id: 'unlist-while-moving', cat: 'goods', kind: 'goods', name: '旧商品列表卡片', desc: '卡片说明', price: 8, stock: 99, left: 90, active: true, delivery: '' };
+  const latestContent = { ...topic('current-content'), title: '当前帖子管理内容' };
+  const fixture = await setup(t, '#/community/manage/items', url => {
+    if (url.endsWith('/me')) return response(managementViewer);
+    if (url.includes('/manage?tab=content')) {
+      contentReads++;
+      if (contentReads === 1) return olderContent.promise;
+      return response({ ...managementData, tab: 'content', items: [item], content: [latestContent] });
+    }
+    if (url.includes('/manage?')) return response({ ...managementData, items: [item] });
+    if (url.endsWith('/manage/items/unlist-while-moving')) return pending.promise;
+    return null;
+  });
+  fixture.w.scrollTo = () => {};
+  fixture.main.querySelector('[data-action="community-item-active"]').click();
+  await fixture.remount('#/community/manage/content');
+  assert.equal(contentReads, 1, 'the new pane begins its own read while the publication write is pending');
+  assert.equal(fixture.w.location.hash, '#/community/manage/content');
+  item.active = false; pending.resolve(response({ id: item.id }));
+  await turn(); await turn(); await turn();
+  assert.ok(contentReads >= 2, 'the settled write refreshes the current pane and releases its route handoff');
+  const page = fixture.main.querySelector('[data-community="manage"]');
+  assert.equal(page.dataset.tab, 'content');
+  assert.equal(page.querySelector('.community-management-nav [aria-current="page"]').getAttribute('href'), '#/community/manage/content');
+  const currentLink = page.querySelector('.community-queue-title');
+  assert.equal(currentLink.textContent, latestContent.title);
+  assert.equal(page.querySelector('[data-action="community-item-active"]'), null);
+  assert.doesNotMatch(page.querySelector('.community-management-content').textContent, /正在读取/);
+  olderContent.resolve(response({ ...managementData, tab: 'content', items: [item], content: [{ ...topic('stale-content'), title: '过期帖子管理内容' }] }));
+  await turn(); await turn();
+  assert.equal(fixture.main.querySelector('[data-community="manage"]'), page);
+  assert.equal(page.querySelector('.community-queue-title'), currentLink, 'the superseded read cannot replace the current content');
+  assert.equal(currentLink.textContent, latestContent.title);
+  assert.equal(fixture.w.location.hash, '#/community/manage/content');
+  const writes = fixture.requests.filter(call => call.url.endsWith('/manage/items/unlist-while-moving'));
+  assert.equal(writes.length, 1); assert.deepEqual(JSON.parse(writes[0].init.body), { active: false });
+});
 
 const ownerStaff = { role: 'owner', boards: ['qa', 'tools'], permissions: communityStaffCapabilities.map(cap => cap.id), delegable: communityStaffCapabilities.map(cap => cap.id), parent: null };
 async function staffSetup(t, { actor = ownerStaff, target = null, save } = {}) {
@@ -859,6 +972,40 @@ test('product uploads preserve typed fields, block saving while pending and subm
   assert.equal(JSON.parse(requests.find(entry => entry.url.endsWith('/manage/items')).init.body).image, image);
 });
 
+for (const [label, failure, expected] of [
+  ['HTML 413', () => new Response('<html><title>413 Request Entity Too Large</title></html>', { status: 413, headers: { 'Content-Type': 'text/html' } }), '文件超过上传上限，请缩小后重试。'],
+  ['empty JSON 413', () => new Response('{}', { status: 413, headers: { 'Content-Type': 'application/json' } }), '文件超过上传上限，请缩小后重试。'],
+  ['specific JSON 413', () => new Response(JSON.stringify({ error: '此类文件最多 25 MiB。' }), { status: 413, headers: { 'Content-Type': 'application/json' } }), '此类文件最多 25 MiB。'],
+  ['HTML 502', () => new Response('<html><title>502 Bad Gateway</title></html>', { status: 502, headers: { 'Content-Type': 'text/html' } }), '社区暂时无法读取。'],
+]) test(`product upload reports ${label} accurately and preserves the editable draft`, async t => {
+  const { main, w, requests } = await setup(t, '#/community/manage/items', url => {
+    if (url.endsWith('/me')) return response(managementViewer);
+    if (url.includes('/manage?')) return response(managementData);
+    if (url.endsWith('/manage/item-image')) return failure();
+    return null;
+  });
+  main.querySelector('[data-action="community-item-edit"]').click();
+  const form = main.querySelector('[data-community-form="item"]');
+  form.elements.namedItem('name').value = '尚未保存的补签卡';
+  form.elements.namedItem('price').value = '30';
+  form.elements.namedItem('image').value = 'previous-artwork';
+  const input = form.querySelector('[data-community-item-upload]');
+  Object.defineProperty(input, 'files', { value: [new File([new Uint8Array([1, 2, 3])], 'makeup-card.png', { type: 'image/png' })] });
+  input.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await turn();
+  assert.equal(form.querySelector('[data-item-upload-status]').textContent, expected);
+  assert.equal(main.querySelector('[data-community-form="item"]'), form);
+  assert.equal(form.elements.namedItem('name').value, '尚未保存的补签卡');
+  assert.equal(form.elements.namedItem('price').value, '30');
+  assert.equal(form.elements.namedItem('image').value, 'previous-artwork');
+  assert.equal(form.querySelector('[type="submit"]').disabled, false);
+  assert.equal(input.disabled, false);
+  assert.equal(form.dataset.uploading, undefined);
+  assert.equal(form.getAttribute('aria-busy'), 'false');
+  assert.equal(requests.filter(entry => entry.url.endsWith('/manage/item-image')).length, 1);
+  assert.equal(requests.some(entry => entry.url.endsWith('/manage/items')), false);
+});
+
 test('desktop frame drops upload once, retain the draft and position, and clear drag feedback', async t => {
   const pending = deferred(), image = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   const { main, w, requests } = await setup(t, '#/community/manage/items', url => {
@@ -1415,23 +1562,26 @@ test('a pending perspective switch does not offer a new existing-content editor 
   assert.equal(main.querySelector('form[data-edit]'), null);
 });
 
-test('exchange descriptions remain expanded when opening and cancelling a redemption panel', async t => {
+test('exchange detail viewing hands off to the existing confirmation and cancelling preserves the compact collection', async t => {
   const merchandise = {
     balance: 30, level: 1, owner: false, inventory: { makeup: 0, pin: 0, highlight: 0 }, decorations: { frame: null, color: null, cover: null },
     items: [{ id: 'card-makeup', cat: 'card', kind: 'card', ref: 'makeup', name: '补签卡', desc: '补签最近七天的一天。', price: 30, builtin: true, active: true,
       state: { owned: false, left: null, ok: true, code: 'ok', why: '' } }],
   };
-  const { main, requests } = await setup(t, '#/community/shop', url => url.endsWith('/shop') ? response(merchandise) : null);
-  const details = main.querySelector('[data-shop-description="card-makeup"]');
-  assert.ok(details);
-  details.querySelector('summary').click();
-  assert.equal(details.open, true);
-  main.querySelector('[data-action="community-redeem"]').click();
+  const { main, w, requests } = await setup(t, '#/community/shop', url => url.endsWith('/shop') ? response(merchandise) : null);
+  main.querySelector('.community-sitem-title').click();
+  const dialog = w.document.querySelector('.community-shop-dialog');
+  assert.ok(dialog);
+  assert.match(dialog.querySelector('.community-shop-detail-description').textContent, /最近七天/);
+  dialog.querySelector('[data-action="community-redeem"]').click();
+  assert.equal(w.document.querySelector('.community-shop-dialog'), null, 'the reviewable confirmation owns focus after the handoff');
   assert.ok(main.querySelector('form[data-community-form="redeem"]'));
-  assert.equal(main.querySelector('[data-shop-description="card-makeup"]').open, true);
   main.querySelector('[data-action="community-redeem-cancel"]').click();
   assert.equal(main.querySelector('form[data-community-form="redeem"]'), null);
-  assert.equal(main.querySelector('[data-shop-description="card-makeup"]').open, true);
+  assert.ok(main.querySelector('.community-sitem-title'));
+  assert.equal(main.querySelector('details[data-shop-description]'), null);
+  main.querySelector('.community-sitem-title').click();
+  assert.ok(w.document.querySelector('.community-shop-dialog'), 'details can be opened again after cancellation');
   assert.equal(requests.some(entry => entry.init.method === 'POST'), false, 'viewing an explanation and cancelling must not spend stardust');
 });
 

@@ -39,6 +39,7 @@ const result = await build({
     "community-landing": "src/community-landing.ts",
     "community-compose-editor": "src/community-compose-editor.ts",
     "community-profile-dialog": "src/community-profile-dialog.ts",
+    "community-shop-dialog": "src/community-shop-dialog.ts",
     "community-profile-crop": "src/community-profile-crop.ts",
     "community-page-cache": "src/community-page-cache.ts",
   },

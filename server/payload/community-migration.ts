@@ -375,7 +375,7 @@ CREATE INDEX community_sanctions_member_idx ON community_sanctions(member_kind, 
   // 兑换所：兼容初版 cat 约束，后加 kind 区分可佩戴装扮。
   community_shop_items: `CREATE TABLE community_shop_items (
   id TEXT PRIMARY KEY,
-  cat TEXT NOT NULL CHECK(cat IN ('digital','goods')),
+  cat TEXT NOT NULL CHECK(cat IN ('digital','goods','card')),
   name TEXT NOT NULL,
   description TEXT NOT NULL,
   price INTEGER NOT NULL,
@@ -475,7 +475,7 @@ const columns: Array<[string, string, string]> = [
   ['community_images', 'frame_ready', 'INTEGER NOT NULL DEFAULT 0'],
   ['community_shop_items', 'image', 'TEXT'],
   ['community_shop_items', 'category', 'TEXT REFERENCES community_shop_categories(id)'],
-  ['community_shop_items', 'kind', "TEXT CHECK (kind IN ('frame', 'color', 'cover'))"],
+  ['community_shop_items', 'kind', "TEXT CHECK (kind IN ('frame','color','cover','makeup','pin','highlight')) CONSTRAINT community_shop_card_kind_check CHECK ((cat='card' AND kind IS NOT NULL AND kind IN ('makeup','pin','highlight')) OR (cat='digital' AND (kind IS NULL OR kind IN ('frame','color','cover'))) OR (cat='goods' AND kind IS NULL))"],
   ['community_shop_items', 'effect', 'TEXT'],
   ['community_topics', 'deleted_reason', 'TEXT'],
   ['community_replies', 'deleted_reason', 'TEXT'],
@@ -510,14 +510,16 @@ const missingParts = (db: DatabaseSync) => {
     .find(column => column.name === 'topic_id' && column.notnull));
   const shopSQL = (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='community_shop_items'").get() as { sql: string } | undefined)?.sql || '';
   const shopCoverUpgrade = /CHECK\s*\(\s*kind\s+IN\s*\(\s*'frame'\s*,\s*'color'\s*\)\s*\)/i.test(shopSQL);
+  const shopCardsUpgrade = has('community_shop_items') && (!/CHECK\s*\(\s*cat\s+IN\s*\([^)]*'card'/i.test(shopSQL)
+    || !/CHECK\s*\(\s*kind\s+IN\s*\([^)]*'makeup'/i.test(shopSQL) || !/\bcommunity_shop_card_kind_check\b/i.test(shopSQL));
   const backgroundSQL = (db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='community_profile_background_reviews'").get() as { sql: string } | undefined)?.sql || '';
   const backgroundReviewerUpgrade = /CHECK\s*\(\s*by_kind\s*=\s*'owner'\s*\)/i.test(backgroundSQL);
-  return { tablesMissing, columnsMissing, imagesPurposeUpgrade, bannerCapacityUpgrade, bannerImagesUpgrade, shopCoverUpgrade, backgroundReviewerUpgrade };
+  return { tablesMissing, columnsMissing, imagesPurposeUpgrade, bannerCapacityUpgrade, bannerImagesUpgrade, shopCoverUpgrade, shopCardsUpgrade, backgroundReviewerUpgrade };
 };
 // True when content.db has every community table and column.
 export const communitySchemaReady = (db: DatabaseSync) => {
-  const { tablesMissing, columnsMissing, imagesPurposeUpgrade, bannerCapacityUpgrade, bannerImagesUpgrade, shopCoverUpgrade, backgroundReviewerUpgrade } = missingParts(db);
-  return !tablesMissing.length && !columnsMissing.length && !imagesPurposeUpgrade && !bannerCapacityUpgrade && !bannerImagesUpgrade && !shopCoverUpgrade && !backgroundReviewerUpgrade;
+  const { tablesMissing, columnsMissing, imagesPurposeUpgrade, bannerCapacityUpgrade, bannerImagesUpgrade, shopCoverUpgrade, shopCardsUpgrade, backgroundReviewerUpgrade } = missingParts(db);
+  return !tablesMissing.length && !columnsMissing.length && !imagesPurposeUpgrade && !bannerCapacityUpgrade && !bannerImagesUpgrade && !shopCoverUpgrade && !shopCardsUpgrade && !backgroundReviewerUpgrade;
 };
 
 // SQLite cannot widen a column CHECK in place. Recreate only this table from its
@@ -575,6 +577,27 @@ function extendShopCover(db: DatabaseSync) {
   for (const object of objects) db.exec(object.sql);
 }
 
+// Cards are real stored products. Widen the known enums and enforce their
+// subtype without recoding legacy digital products, orders or entitlements.
+function extendShopCards(db: DatabaseSync) {
+  const source = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='community_shop_items'").get() as { sql: string };
+  const objects = db.prepare("SELECT sql FROM sqlite_master WHERE tbl_name='community_shop_items' AND type IN ('index','trigger') AND sql IS NOT NULL").all() as Array<{ sql: string }>;
+  const catCheck = /CHECK\s*\(\s*cat\s+IN\s*\(([^)]*)\)\s*\)/i;
+  const kindCheck = /CHECK\s*\(\s*kind\s+IN\s*\(([^)]*)\)\s*\)/i;
+  const known = (match: RegExpMatchArray | null, allowed: readonly string[]) => Boolean(match && match[1].split(',').every(value => allowed.includes(value.trim())));
+  if (!known(source.sql.match(catCheck), ["'digital'", "'goods'", "'card'"])
+    || !known(source.sql.match(kindCheck), ["'frame'", "'color'", "'cover'", "'makeup'", "'pin'", "'highlight'"])) throw Error('Shop card schema cannot be upgraded safely.');
+  let sql = source.sql.replace(/CREATE TABLE\s+["`\[]?community_shop_items["`\]]?/i, 'CREATE TABLE community_shop_items_cards_upgrade')
+    .replace(catCheck, "CHECK(cat IN ('digital','goods','card'))")
+    .replace(kindCheck, "CHECK(kind IN ('frame','color','cover','makeup','pin','highlight'))");
+  if (!/\bcommunity_shop_card_kind_check\b/i.test(sql)) sql = sql.replace(/\)\s*;?\s*$/, ", CONSTRAINT community_shop_card_kind_check CHECK ((cat='card' AND kind IS NOT NULL AND kind IN ('makeup','pin','highlight')) OR (cat='digital' AND (kind IS NULL OR kind IN ('frame','color','cover'))) OR (cat='goods' AND kind IS NULL)))");
+  if (!sql.includes('community_shop_items_cards_upgrade') || !/\bcommunity_shop_card_kind_check\b/i.test(sql)) throw Error('Shop card schema cannot be upgraded safely.');
+  const names = (db.prepare('PRAGMA table_info(community_shop_items)').all() as Array<{ name: string }>).map(column => `"${column.name.replaceAll('"', '""')}"`).join(',');
+  db.exec(sql);
+  db.exec(`INSERT INTO community_shop_items_cards_upgrade(${names}) SELECT ${names} FROM community_shop_items; DROP TABLE community_shop_items; ALTER TABLE community_shop_items_cards_upgrade RENAME TO community_shop_items;`);
+  for (const object of objects) db.exec(object.sql);
+}
+
 // One migration snapshot preserves the former automatic highlights. Subsequent
 // pins/features do not update these selections, including deliberately empty ones.
 function snapshotHighlights(db: DatabaseSync) {
@@ -600,8 +623,8 @@ export async function migrateCommunity(directory: string) {
   await stat(database);
   const db = new DatabaseSync(database);
   try {
-    const { tablesMissing, columnsMissing, imagesPurposeUpgrade, bannerCapacityUpgrade, bannerImagesUpgrade, shopCoverUpgrade, backgroundReviewerUpgrade } = missingParts(db);
-    if (!tablesMissing.length && !columnsMissing.length && !imagesPurposeUpgrade && !bannerCapacityUpgrade && !bannerImagesUpgrade && !shopCoverUpgrade && !backgroundReviewerUpgrade) return { changed: false };
+    const { tablesMissing, columnsMissing, imagesPurposeUpgrade, bannerCapacityUpgrade, bannerImagesUpgrade, shopCoverUpgrade, shopCardsUpgrade, backgroundReviewerUpgrade } = missingParts(db);
+    if (!tablesMissing.length && !columnsMissing.length && !imagesPurposeUpgrade && !bannerCapacityUpgrade && !bannerImagesUpgrade && !shopCoverUpgrade && !shopCardsUpgrade && !backgroundReviewerUpgrade) return { changed: false };
     const root = resolve(directory, 'schema-backups');
     await mkdir(root, { recursive: true });
     const snapshot = resolve(root, `before-community-${Date.now()}-${randomUUID()}.db`);
@@ -609,7 +632,7 @@ export async function migrateCommunity(directory: string) {
     // A table rebuild must not execute ON DELETE actions on referencing rows.
     // Keep references intact, then check them inside the transaction before committing.
     const foreignKeys = Number((db.prepare('PRAGMA foreign_keys').get() as { foreign_keys: number }).foreign_keys);
-    const rebuildTables = imagesPurposeUpgrade || bannerCapacityUpgrade || bannerImagesUpgrade || shopCoverUpgrade || backgroundReviewerUpgrade;
+    const rebuildTables = imagesPurposeUpgrade || bannerCapacityUpgrade || bannerImagesUpgrade || shopCoverUpgrade || shopCardsUpgrade || backgroundReviewerUpgrade;
     if (rebuildTables) db.exec('PRAGMA foreign_keys=OFF');
     db.exec('BEGIN IMMEDIATE');
     try {
@@ -624,6 +647,7 @@ export async function migrateCommunity(directory: string) {
       if (imagesPurposeUpgrade) extendImagePurpose(db);
       if (bannerCapacityUpgrade || bannerImagesUpgrade) extendBannerEntries(db);
       if (shopCoverUpgrade) extendShopCover(db);
+      if (shopCardsUpgrade) extendShopCards(db);
       if (backgroundReviewerUpgrade) extendBackgroundReviewer(db);
       if (tablesMissing.includes('community_staff')) {
         const validBoards=defaultCommunityBoards.map(board=>board.id);

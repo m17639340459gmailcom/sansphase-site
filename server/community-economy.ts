@@ -8,10 +8,13 @@ import type { Ledger } from './community-ledger.ts';
 import type { Members } from './community-members.ts';
 
 type Card = 'makeup' | 'pin' | 'highlight';
+type Equipment = 'frame' | 'color' | 'cover';
+const isCard = (value: unknown): value is Card => value === 'makeup' || value === 'pin' || value === 'highlight';
+const isEquipment = (value: unknown): value is Equipment => value === 'frame' || value === 'color' || value === 'cover';
 type CustomItemRow = {
   image: string | null;
-  category: string | null; kind: 'frame' | 'color' | 'cover' | null; effect: string | null;
-  id: string; cat: 'digital' | 'goods'; name: string; description: string; price: number; stock: number | null; stock_left: number | null;
+  category: string | null; kind: Equipment | Card | null; effect: string | null;
+  id: string; cat: 'digital' | 'goods' | 'card'; name: string; description: string; price: number; stock: number | null; stock_left: number | null;
   limit_per: 'month' | 'year' | 'once' | null; limit_n: number | null; min_level: number; min_days: number; delivery: string; note: string; active: number;
 };
 type OrderRow = {
@@ -23,8 +26,8 @@ export type Shipping = { name: string; phone: string; address: string };
 export type Tracking = { company: string; number: string };
 export type CustomItemInput = {
   image?: string | null;
-  category?: string | null; kind?: 'frame' | 'color' | 'cover'; effect?: NameEffect | null;
-  cat: 'look' | 'digital' | 'goods'; name: string; description: string; price: number; stock: number | null; limitPer: 'month' | 'year' | 'once' | null;
+  category?: string | null; kind?: Equipment | Card; effect?: NameEffect | null;
+  cat: 'look' | 'digital' | 'goods' | 'card'; name: string; description: string; price: number; stock: number | null; limitPer: 'month' | 'year' | 'once' | null;
   limitN: number | null; minLevel: number; minDays: number; delivery: string; note: string; active: boolean;
 };
 const previousDay = (key: string) => new Date(Date.parse(`${key}T00:00:00Z`) - day).toISOString().slice(0, 10);
@@ -56,12 +59,16 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
   const insertItem = db.prepare(`INSERT INTO community_shop_items (id, cat, name, description, price, stock, stock_left, limit_per, limit_n, min_level, min_days, delivery, note, active, created_at, updated_at, image, category, kind, effect)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const updateItem = db.prepare(`UPDATE community_shop_items SET name = ?, description = ?, price = ?, stock = ?, stock_left = ?, limit_per = ?, limit_n = ?, min_level = ?, min_days = ?,
-    delivery = ?, note = ?, active = ?, updated_at = ?, image = ?, category = ?, effect = ? WHERE id = ?`);
+    delivery = ?, note = ?, active = ?, updated_at = ?, image = ?, category = ?, effect = ?, cat = ?, kind = ? WHERE id = ?`);
+  const updateItemActive = db.prepare('UPDATE community_shop_items SET active = ?, updated_at = ? WHERE id = ?');
   const visibleImage = db.prepare('SELECT 1 FROM community_shop_items WHERE image = ? AND active = 1 LIMIT 1');
   const redeemedImage = db.prepare(`SELECT 1 FROM community_orders o JOIN community_shop_items i ON i.id = o.item
     WHERE i.image = ? AND o.member_kind = ? AND o.member_id = ? AND o.status != 'cancelled' LIMIT 1`);
   const equippedImage = db.prepare('SELECT 1 FROM community_members WHERE frame = ? OR cover = ? LIMIT 1');
   const itemOwned = db.prepare('SELECT 1 FROM community_owned WHERE item = ? LIMIT 1');
+  const itemOrdered = db.prepare('SELECT 1 FROM community_orders WHERE item = ? LIMIT 1');
+  const protectedProductIds = db.prepare('SELECT item FROM community_orders UNION SELECT item FROM community_owned');
+  const wornProductRefs = db.prepare('SELECT frame AS ref FROM community_members WHERE frame IS NOT NULL UNION SELECT cover AS ref FROM community_members WHERE cover IS NOT NULL');
   const takeStock = db.prepare('UPDATE community_shop_items SET stock_left = stock_left - 1 WHERE id = ? AND stock_left > 0');
   const returnStock = db.prepare('UPDATE community_shop_items SET stock_left = stock_left + 1 WHERE id = ? AND stock IS NOT NULL');
   const ownedRows = db.prepare('SELECT item FROM community_owned WHERE member_kind = ? AND member_id = ?');
@@ -147,13 +154,22 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
   const owned = (member: CommunityAuthor) => new Set((ownedRows.all(member.kind, member.id) as Array<{ item: string }>).map(row => row.item));
 
   /* ---------- 兑换所 ---------- */
-  const customToItem = (row: CustomItemRow): ShopItem & { active: boolean; delivery: string } => ({
-    image: row.image, category: row.category, effect: row.kind === 'color' ? communityNameEffect(parseJson<unknown>(row.effect, null)) : null,
-    ...(row.kind ? { ref: row.kind === 'color' ? `effect:${row.id}` : `image:${row.image}` } : {}),
-    id: row.id, cat: row.kind ? 'look' : row.cat, kind: row.kind || row.cat, name: row.name, desc: row.description, price: row.price,
-    limit: row.limit_per ? { per: row.limit_per, n: row.limit_n || 1 } : null, minLevel: row.min_level, minDays: row.min_days,
-    stock: row.stock, left: row.stock_left, note: row.note, builtin: false, active: Boolean(row.active), delivery: row.delivery,
-  });
+  // Every order, including a refunded order, protects the original product
+  // purpose. Owned rows and a worn image also cover legacy entitlement records.
+  const itemPurposeLocked = (row: CustomItemRow) => Boolean(itemOrdered.get(row.id) || itemOwned.get(row.id)
+    || (row.kind === 'frame' || row.kind === 'cover') && row.image && equippedImage.get(`image:${row.image}`, `image:${row.image}`));
+  const customToItem = (row: CustomItemRow): ShopItem & { active: boolean; delivery: string } => {
+    const card = row.cat === 'card' && isCard(row.kind) ? row.kind : null;
+    if (row.cat === 'card' && !card) throw fail('道具卡用途无效。', 503);
+    const equipment = row.cat === 'digital' && isEquipment(row.kind) ? row.kind : null;
+    return {
+      image: row.image, category: row.category, effect: row.kind === 'color' ? communityNameEffect(parseJson<unknown>(row.effect, null)) : null,
+      ...(card ? { ref: card } : equipment ? { ref: equipment === 'color' ? `effect:${row.id}` : `image:${row.image}` } : {}),
+      id: row.id, cat: equipment ? 'look' : row.cat, kind: row.cat === 'card' ? 'card' : equipment || row.cat, name: row.name, desc: row.description, price: row.price,
+      limit: row.limit_per ? { per: row.limit_per, n: row.limit_n || 1 } : null, minLevel: row.min_level, minDays: row.min_days,
+      stock: row.stock, left: row.stock_left, note: row.note, builtin: false, active: Boolean(row.active), delivery: row.delivery,
+    };
+  };
   const allCustom = () => (customItems.all() as CustomItemRow[]).map(customToItem);
   // Sample definitions remain available for historical orders and owned
   // decorations. Only an explicitly constructed local preview sells them;
@@ -272,8 +288,10 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
         const orderId = randomUUID(), shipping = item.kind === 'goods' ? context.shipping! : null;
         insertOrder.run(orderId, member.kind, member.id, item.id, item.name, item.price, item.kind === 'goods' ? 'pending' : 'done',
           shipping?.name ?? null, shipping?.phone ?? null, shipping?.address ?? null, at);
-        if (item.kind === 'card') addCard.run(member.kind, member.id, item.ref ?? '');
-        else if (item.kind === 'frame' || item.kind === 'color' || item.kind === 'cover') { addOwned.run(member.kind, member.id, item.id, at); members.equip(member, item.kind, item.ref || null); }
+        if (item.kind === 'card') {
+          if (!isCard(item.ref)) throw fail('道具卡用途无效。');
+          addCard.run(member.kind, member.id, item.ref);
+        } else if (item.kind === 'frame' || item.kind === 'color' || item.kind === 'cover') { addOwned.run(member.kind, member.id, item.id, at); members.equip(member, item.kind, item.ref || null); }
         else if (item.kind === 'digital') addOwned.run(member.kind, member.id, item.id, at);
         return { order: orderId, item: { id: item.id, name: item.name, kind: item.kind }, balance: ledger.balance(member) };
       });
@@ -315,7 +333,14 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
         return orderDTO(row);
       });
     },
-    customItems: allCustom,
+    customItems() {
+      // Management eligibility needs two bulk reads, not an order/ownership
+      // lookup per product or an extra check on every public decoration DTO.
+      const protectedIds = new Set((protectedProductIds.all() as Array<{ item: string }>).map(row => row.item));
+      const wornRefs = new Set((wornProductRefs.all() as Array<{ ref: string }>).map(row => row.ref));
+      return (customItems.all() as CustomItemRow[]).map(row => ({ ...customToItem(row), canChangeKind: !protectedIds.has(row.id)
+        && !((row.kind === 'frame' || row.kind === 'cover') && row.image && wornRefs.has(`image:${row.image}`)) }));
+    },
     categories: () => categories.all() as ShopCategory[],
     category: (id: string) => category.get(id) as ShopCategory | undefined,
     saveCategory(name: string, now = Date.now()) {
@@ -339,28 +364,41 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
         coverImage: item?.image && ref === `image:${item.image}` && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(item.image) ? `/api/community/images/${item.image}.webp` : null };
     },
     imageVisible: (id: string, member: CommunityAuthor) => Boolean(visibleImage.get(id) || redeemedImage.get(id, member.kind, member.id) || equippedImage.get(`image:${id}`, `image:${id}`)),
+    setItemActive(id: string, active: boolean, now = Date.now()) {
+      return tx(() => {
+        if (typeof active !== 'boolean') throw fail('上架状态需要是布尔值。');
+        if (!customItem.get(id)) throw fail('没有这个物品。', 404);
+        updateItemActive.run(active ? 1 : 0, iso(now), id);
+        return id;
+      });
+    },
     saveItem(id: string | null, input: CustomItemInput, now = Date.now()) {
       return tx(() => {
-        const at = iso(now), kind = input.cat === 'look' ? input.kind : null;
+        const at = iso(now), kind = input.cat === 'look' || input.cat === 'card' ? input.kind : null;
         if (input.cat === 'look' && kind !== 'frame' && kind !== 'color' && kind !== 'cover') throw fail('请选择头像框、昵称特效或主页背景。');
+        if (input.cat === 'card' && !isCard(kind)) throw fail('请选择有效的道具卡用途。');
+        if (input.cat !== 'look' && input.cat !== 'card' && input.kind !== undefined) throw fail('物品类型与用途不匹配。');
+        const cat = input.cat === 'look' ? 'digital' : input.cat;
+        const delivery = input.cat === 'digital' ? input.delivery : '';
         const effect = kind === 'color' && input.effect ? JSON.stringify(input.effect) : null;
         if (!id) {
           const newId = randomUUID();
-          insertItem.run(newId, input.cat === 'look' ? 'digital' : input.cat, input.name, input.description, input.price, input.stock, input.stock, input.limitPer, input.limitN,
-            input.minLevel, input.minDays, input.delivery, input.note, input.active ? 1 : 0, at, at, input.image || null, input.category || null, kind || null, effect);
+          insertItem.run(newId, cat, input.name, input.description, input.price, input.stock, input.stock, input.limitPer, input.limitN,
+            input.minLevel, input.minDays, delivery, input.note, input.active ? 1 : 0, at, at, input.image || null, input.category || null, kind || null, effect);
           return newId;
         }
         const row = customItem.get(id) as CustomItemRow | undefined;
         if (!row) throw fail('没有这个物品。', 404);
-        if (input.cat !== (row.kind ? 'look' : row.cat) || (kind || null) !== row.kind) throw fail('已上架物品的用途不能修改，请另建新物品。');
+        const changingPurpose = cat !== row.cat || (kind || null) !== row.kind;
+        if (changingPurpose && itemPurposeLocked(row)) throw fail('物品已有兑换记录，不能更改用途；请下架后新建正确类型的物品。');
         if ((row.kind === 'frame' || row.kind === 'cover') && input.image !== undefined && input.image !== row.image && itemOwned.get(id))
           throw fail(`${row.kind === 'frame' ? '头像框' : '主页背景'}已经有人兑换，不能更换使用图片；请新建物品。`);
         // Changing the stock keeps what has already been redeemed.
         const sold = row.stock != null && row.stock_left != null ? row.stock - row.stock_left : 0;
         const left = input.stock == null ? null : Math.max(0, input.stock - sold);
         updateItem.run(input.name, input.description, input.price, input.stock, left, input.limitPer, input.limitN, input.minLevel, input.minDays,
-          input.delivery, input.note, input.active ? 1 : 0, at, input.image === undefined ? row.image : input.image,
-          input.category === undefined ? row.category : input.category, input.effect === undefined ? row.effect : effect, id);
+          delivery, input.note, input.active ? 1 : 0, at, input.image === undefined ? row.image : input.image,
+          input.category === undefined ? row.category : input.category, kind === 'color' && !changingPurpose && input.effect === undefined ? row.effect : effect, cat, kind || null, id);
         return id;
       });
     },

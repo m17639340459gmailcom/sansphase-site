@@ -168,7 +168,7 @@ body.community-open:is(.community-frame-open, .community-management-open)[data-c
 }
 body.community-open:is(.community-frame-open, .community-management-open)[data-community-theme="light"] :is(.community-holo, .community-goods) { --text: #f5f0e7; --dim: #c2cfdf; --signal: #e0c89b; --cm-signal-soft: rgb(224 200 155 / 12%); color: var(--text); }
 body.community-open:is(.community-frame-open, .community-management-open)[data-community-theme="light"] .community-goods { color: var(--signal); }
-body.community-open:is(.community-frame-open, .community-management-open)[data-community-theme="light"] :is(.community-holo, .community-file, .community-goods) { box-shadow: 0 10px 18px rgb(60 67 78 / 24%), inset 0 1px 0 rgb(255 253 246 / 10%); }
+body.community-open:is(.community-frame-open, .community-management-open)[data-community-theme="light"] :is(.community-holo:not(.is-uploaded), .community-file, .community-goods) { box-shadow: 0 10px 18px rgb(60 67 78 / 24%), inset 0 1px 0 rgb(255 253 246 / 10%); }
 body.community-open:is(.community-frame-open, .community-management-open)[data-community-theme="light"] .community-have { background: #f3ead5; border-color: #bba16f; color: #72582d; }
 body.community-open:is(.community-frame-open, .community-management-open)[data-community-theme="light"] .community-owned-tag { background: #d8e6da; border-color: #91ad98; color: #286142; }
 body.community-open:is(.community-frame-open, .community-management-open)[data-community-theme="light"] .community-sitem:hover { box-shadow: 0 12px 26px rgb(76 63 44 / 15%); }

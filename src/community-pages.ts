@@ -105,7 +105,7 @@ export type CommunityManagedTopic = CommunityTopic & { canDelete?: boolean; canR
 export type CommunityQueueTopic = CommunityManagedTopic & { body: string; pendingReason: string | null; hiddenReason: string | null };
 export type CommunityQueueReply = { id: string; topicId: string; topicTitle: string; board?: string | null; author: CommunityPerson; body: string; createdAt: string; hiddenAt: string; canDelete?: boolean; canRestore?: boolean; canPenalty?: boolean; canMute?: boolean };
 export type CommunityGoodsOrder = CommunityOrder & { member: CommunityPerson; shipping?: { name: string; phone: string; address: string } | null };
-export type CommunityManagedItem = ShopItem & { active: boolean; delivery: string };
+export type CommunityManagedItem = ShopItem & { active: boolean; delivery: string; canChangeKind?: boolean };
 export type CommunitySanction = { id: string; member: CommunityPerson; days: number; reason: string; until: string; createdAt: string; state?: 'active' | 'expired' | 'lifted'; active?: boolean; liftedAt?: string | null };
 export type CommunityManage = {
   boardCatalog?: CommunityBoardCatalog;
@@ -290,16 +290,19 @@ const cardIcons: Record<string, string> = { makeup: "calendar", pin: "pin", high
 function itemArtHTML(item: ShopItem, inventory: CommunityInventory | null, common: Common) {
   const { t, esc, icons = {} } = common;
   if (item.kind === 'frame' && item.image) return `<span class="community-sart">${avatarHTML({ name: '無', role: 'reader', uid: null, frame: item.ref || `image:${item.image}` }, common, 'xl', false)}</span>`;
-  if (item.image && /^[0-9a-f-]{36}$/.test(item.image)) return `<img class="community-product-image" src="/api/community/images/${esc(item.image)}.webp" alt="${esc(item.name)}" loading="lazy" decoding="async">`;
+  const image = item.image && /^[0-9a-f-]{36}$/.test(item.image) ? `/api/community/images/${esc(item.image)}.webp` : '';
+  const uploaded = image ? `<img class="community-product-image" src="${image}" alt="${esc(item.name)}" loading="lazy" decoding="async">` : '';
   const sample: CommunityPerson = { name: t("林间", "Lin"), role: "reader", uid: null, avatar: null };
   const ref = item.ref && /^[a-z]+$/.test(item.ref) ? item.ref : "";
+  if (item.kind === "card") {
+    const have = inventory && ref in inventory ? inventory[ref as keyof CommunityInventory] : 0;
+    const art = uploaded ? `<span class="community-holo is-uploaded" data-community-card-art style="--card-image:url('${image}');">${uploaded}</span>` : `<span class="community-holo" data-community-card-art><span class="community-holo-ic">${icons[cardIcons[ref] || "star"] || ""}</span><b>${esc(item.name)}</b><small>CARD</small></span>`;
+    return `<span class="community-sart${uploaded ? ' is-uploaded-card' : ''}">${art}${have ? `<span class="community-have">${t(`背包里有 ${have} 张`, `${have} in your bag`)}</span>` : ""}</span>`;
+  }
+  if (uploaded) return uploaded;
   if (item.kind === "frame") return `<span class="community-sart"><span class="community-av community-av-xl community-shop-avatar is-frame-${ref}" aria-hidden="true"><span>無</span></span></span>`;
   if (item.kind === "color") return `<span class="community-sart"><span class="community-nc-sample">${nameHTML({ ...sample, color: item.ref || null, nameEffect: item.effect }, common)}</span><small>${t("在帖子、回复、排行榜里显示", "Shown in posts, replies and rankings")}</small></span>`;
   if (item.kind === "cover") return `<span class="community-sart"><span class="community-cover-sample is-cover-${ref}"><i></i><i></i></span></span>`;
-  if (item.kind === "card") {
-    const have = inventory && ref in inventory ? inventory[ref as keyof CommunityInventory] : 0;
-    return `<span class="community-sart"><span class="community-holo"><span class="community-holo-ic">${icons[cardIcons[ref] || "star"] || ""}</span><b>${esc(item.name)}</b><small>CARD</small></span>${have ? `<span class="community-have">${t(`背包里有 ${have} 张`, `${have} in your bag`)}</span>` : ""}</span>`;
-  }
   if (item.kind === "digital") return `<span class="community-sart"><span class="community-file"><i class="community-file-fold"></i><span class="community-file-lines"><i></i><i></i><i></i></span><b>${esc(item.name)}</b></span></span>`;
   return `<span class="community-sart"><span class="community-goods">${icons.package || ""}</span></span>`;
 }
@@ -329,17 +332,29 @@ function shopCardHTML(item: CommunityShopItem, shop: CommunityShop, common: Comm
   const { t, esc, icons = {} } = common;
   const wearingFrame = item.state.owned && item.kind === 'frame' && shop.decorations.frame === item.ref;
   const usingCover = item.state.owned && item.kind === 'cover' && shop.decorations.cover === item.ref;
-  const tags = [limitText(item, t), item.minLevel ? t(`${communityLevels[item.minLevel].name}以上`, `${communityLevels[item.minLevel].en} and up`) : "", item.minDays ? t(`注册满 ${item.minDays} 天`, `${item.minDays}+ days`) : "", item.note || ""].filter(Boolean);
-  const left = item.state.left ?? 0;
-  const stock = item.stock ? `<div class="community-stock"><div class="community-stock-row"><span>${t("库存", "Stock")}</span><span class="is-mono">${t(`剩 ${left} / ${item.stock}`, `${left} / ${item.stock} left`)}</span></div><div class="community-meter"><i style="width:${Math.round(left / item.stock * 100)}%"></i></div></div>` : "";
   const off = item.state.code === "soldout" || item.state.code === "closed";
   return `<article class="community-sitem community-spot community-rv${off ? " is-off" : ""}${item.state.owned ? " is-owned" : ""}" style="--i:${i + 2}">`
-    + `<div class="community-sitem-art">${itemArtHTML(item, shop.inventory, common)}${item.state.owned ? `<span class="community-owned-tag">${icons.check || ""}${t(wearingFrame ? '已佩戴' : usingCover ? '使用中' : '已拥有', wearingFrame ? 'Wearing' : usingCover ? 'In use' : 'Owned')}</span>` : ""}</div>`
-    + `<div class="community-sitem-body"><details class="community-sitem-details" data-shop-description="${esc(item.id)}"><summary><h3>${esc(item.name)}${icons['chevron-down'] || ''}</h3></summary><p>${esc(item.desc)}</p></details>`
-    + `<div class="community-sitem-meta">`
-    + (tags.length ? `<div class="community-stags">${tags.map((tag) => `<span>${esc(tag)}</span>`).join("")}</div>` : "")
-    + stock + `</div>`
+    + `<button type="button" class="community-sitem-art${item.kind === 'card' ? ' is-tool-card' : ''}" data-action="community-shop-detail" data-id="${esc(item.id)}" aria-haspopup="dialog" aria-label="${esc(t(`查看${item.name}详情`, `View details for ${item.name}`))}">${itemArtHTML(item, shop.inventory, common)}${item.state.owned ? `<span class="community-owned-tag">${icons.check || ""}${t(wearingFrame ? '已佩戴' : usingCover ? '使用中' : '已拥有', wearingFrame ? 'Wearing' : usingCover ? 'In use' : 'Owned')}</span>` : ""}</button>`
+    + `<div class="community-sitem-body"><h3><button type="button" class="community-sitem-title" data-action="community-shop-detail" data-id="${esc(item.id)}" aria-haspopup="dialog">${esc(item.name)}${icons['chevron-right'] || ''}</button></h3>`
+    + shopItemMetaHTML(item, common)
     + `<div class="community-sitem-foot">${showPrice ? `<span class="community-price">${icons.star || ""}<b>${item.price}</b></span>` : ""}${redeemButtonHTML(item, shop.decorations, common)}</div></div></article>`;
+}
+
+function shopItemMetaHTML(item: CommunityShopItem, { t, esc }: Common) {
+  const tags = [limitText(item, t), item.minLevel ? t(`${communityLevels[item.minLevel].name}以上`, `${communityLevels[item.minLevel].en} and up`) : '', item.minDays ? t(`注册满 ${item.minDays} 天`, `${item.minDays}+ days`) : '', item.note || ''].filter(Boolean);
+  const left = item.state.left ?? 0;
+  const stock = item.stock && item.state.left !== null ? `<div class="community-stock"><div class="community-stock-row"><span>${t('库存', 'Stock')}</span><span class="is-mono">${t(`剩 ${left} / ${item.stock}`, `${left} / ${item.stock} left`)}</span></div><div class="community-meter"><i style="width:${Math.round(left / item.stock * 100)}%"></i></div></div>` : '';
+  return `<div class="community-sitem-meta">${tags.length ? `<div class="community-stags">${tags.map(tag => `<span>${esc(tag)}</span>`).join('')}</div>` : ''}${stock}</div>`;
+}
+
+export type CommunityShopDetail = { item: CommunityShopItem; shop: CommunityShop; showPrice: boolean; common: Common };
+// Use the same item state and purchase controls as the collection. Opening this
+// explanation does not perform a separate read or an economic operation.
+export function communityShopDetailHTML({ item, shop, showPrice, common }: CommunityShopDetail) {
+  const { t, esc, icons = {} } = common;
+  return `<div class="community-shop-detail-backdrop" data-a11y-dialog-hide aria-hidden="true"></div>`
+    + `<section class="community-shop-detail-window" role="document"><header class="community-shop-detail-head"><h2 id="community-shop-detail-title">${esc(item.name)}</h2><button type="button" class="community-profile-close" data-a11y-dialog-hide data-shop-detail-close autofocus aria-label="${t('关闭商品详情', 'Close item details')}">${icons.close || '×'}</button></header>`
+    + `<div class="community-shop-detail-content"><div class="community-shop-detail-art"${item.kind === 'card' ? ` tabindex="0" aria-label="${esc(t(`${item.name}卡片展示`, `${item.name} card artwork`))}"` : ''}>${itemArtHTML(item, shop.inventory, common)}</div><div class="community-shop-detail-info"><p class="community-shop-detail-description">${esc(item.desc)}</p>${shopItemMetaHTML(item, common)}<div class="community-shop-detail-foot">${showPrice ? `<span class="community-price">${icons.star || ''}<b>${item.price}</b><span>${t('星尘', 'stardust')}</span></span>` : ''}${redeemButtonHTML(item, shop.decorations, common)}</div></div></div></section>`;
 }
 
 // 兑换确认：写清花多少、剩多少；实物要填收货信息（只给站长看，发货或取消后删除）。
@@ -767,8 +782,10 @@ export function communityManageHTML({ manage, tab, itemEditing = null, shippingO
       : emptyHTML(common, t("没有实物兑换", "No goods orders"));
   } else if (tab === "items" && data.owner) {
     const editing = itemEditing ? (itemEditing.id ? data.items.find((item) => item.id === itemEditing.id) || null : null) : undefined;
+    const itemType = (item: CommunityManagedItem) => item.kind === 'card' ? t('补签卡', 'Make-up card') : item.kind === 'frame' ? t('头像框', 'Avatar frame') : item.kind === 'color' ? t('昵称特效', 'Name effect') : item.kind === 'cover' ? t('主页背景', 'Profile background') : item.cat === 'digital' ? t('数字资源', 'Digital resource') : t('实物周边', 'Physical goods');
+    const itemCategory = (item: CommunityManagedItem) => data.categories?.find(category => category.id === item.category)?.name || t('默认分组', 'Default collection');
     const list = data.items.length
-      ? `<div class="community-table-wrap"><table class="community-table"><thead><tr><th>${t("名称", "Name")}</th><th>${t("类别", "Kind")}</th><th class="is-right">${t("价格", "Price")}</th><th>${t("库存", "Stock")}</th><th>${t("状态", "Status")}</th><th></th></tr></thead><tbody>${data.items.map((item) => `<tr><td data-label="${t("名称", "Name")}">${item.image ? `<img class="community-managed-art" src="/api/community/images/${esc(item.image)}.webp" alt="">` : ""}${esc(item.name)}</td><td data-label="${t("类别", "Kind")}">${item.kind === "frame" ? t("头像框", "Frame") : item.kind === "color" ? t("昵称特效", "Name effect") : item.cat === "digital" ? t("数字资源", "Digital") : t("实物周边", "Goods")}</td><td class="is-right is-mono" data-label="${t("价格", "Price")}">${item.price}</td><td class="is-mono" data-label="${t("库存", "Stock")}">${item.stock === null || item.stock === undefined ? t("不限", "—") : `${item.left ?? 0} / ${item.stock}`}</td><td data-label="${t("状态", "Status")}">${item.active ? `<span class="community-kind is-in">${t("上架中", "On sale")}</span>` : `<span class="community-kind">${t("已下架", "Off")}</span>`}</td><td class="is-right" data-label="${t("操作", "Actions")}"><button type="button" class="community-button is-small" data-action="community-item-edit" data-id="${esc(item.id)}">${icons.pen || ""}<span>${t("编辑", "Edit")}</span></button></td></tr>`).join("")}</tbody></table></div>`
+      ? `<div class="community-table-wrap"><table class="community-table"><thead><tr><th>${t("名称", "Name")}</th><th>${t("物品类型", "Product type")}</th><th>${t('分类分组', 'Collection')}</th><th class="is-right">${t("价格", "Price")}</th><th>${t("库存", "Stock")}</th><th>${t("状态", "Status")}</th><th>${t('操作', 'Actions')}</th></tr></thead><tbody>${data.items.map((item) => `<tr><td data-label="${t("名称", "Name")}">${item.image ? `<img class="community-managed-art" src="/api/community/images/${esc(item.image)}.webp" alt="">` : ""}${esc(item.name)}</td><td data-label="${t("物品类型", "Product type")}">${itemType(item)}</td><td data-label="${t('分类分组', 'Collection')}">${esc(itemCategory(item))}</td><td class="is-right is-mono" data-label="${t("价格", "Price")}">${item.price}</td><td class="is-mono" data-label="${t("库存", "Stock")}">${item.stock === null || item.stock === undefined ? t("不限", "—") : `${item.left ?? 0} / ${item.stock}`}</td><td data-label="${t("状态", "Status")}">${item.active ? `<span class="community-kind is-in">${t("上架中", "On sale")}</span>` : `<span class="community-kind">${t("已下架", "Off")}</span>`}</td><td class="is-right" data-label="${t("操作", "Actions")}"><div class="community-action-group"><button type="button" class="community-button is-small" data-action="community-item-edit" data-id="${esc(item.id)}">${icons.pen || ""}<span>${t("编辑", "Edit")}</span></button><button type="button" class="community-button is-small" data-action="community-item-active" data-id="${esc(item.id)}" data-active="${item.active ? 'false' : 'true'}">${t(item.active ? '下架' : '重新上架', item.active ? 'Unlist' : 'Relist')}</button></div></td></tr>`).join("")}</tbody></table></div>`
       : emptyHTML(common, t("还没有上架物品", "No items yet"), t("这里可以上架头像框、昵称特效、数字资源和实物周边。", "Create frames, nickname effects, digital resources and physical goods here."));
     body = communityCategoryEditorHTML(data.categories || [], common) + (editing !== undefined ? itemFormHTML(editing, data.categories || [], common) : `<div class="community-form-actions is-start"><button type="button" class="community-button is-gold" data-action="community-item-edit" data-id="">${icons.plus || ""}<span>${t("上架新物品", "New item")}</span></button></div>`) + (editing !== undefined ? "" : list);
   } else if (tab === "stewards" && (staff === undefined ? data.owner : permitted('staff.appoint'))) {

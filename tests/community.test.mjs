@@ -757,13 +757,19 @@ test("the exchange: categories, what each item looks like, what you can do with 
   assert.match(html, /<dt>我的星尘<\/dt><dd>100<\/dd>[\s\S]*href="#\/community\/shop\/mine"/);
   assert.match(html, /<a href="#\/community\/shop" aria-current="page">全部<\/a><a href="#\/community\/shop\/look">装扮<span class="community-seg-n">2<\/span><\/a><a href="#\/community\/shop\/card">道具卡<span class="community-seg-n">1<\/span>/);
   assert.deepEqual([...html.matchAll(/<div class="community-sec-h[^>]*><h2>([^<]+)<\/h2>/g)].map((m) => m[1]), ["装扮", "道具卡", "数字资源", "实物周边"]);
-  const card = (id) => html.slice(html.indexOf(`data-id="${id}"`) - 2000, html.indexOf(`data-id="${id}"`) + 200);
+  const card = (id) => {
+    const dom = new JSDOM(html);
+    try {
+      return dom.window.document.querySelector(`[data-action="community-shop-detail"][data-id="${id}"]`)?.closest('article')?.outerHTML ?? '';
+    } finally { dom.window.close(); }
+  };
   assert.match(html, /<span class="community-av community-av-xl community-shop-avatar is-frame-gold" aria-hidden="true"><span>無<\/span><\/span>/, "a frame preview uses the accepted 無 glyph");
   assert.match(html, /data-action="community-equip" data-kind="frame" data-ref="" aria-label="卸下金环头像框">卸下/, "the frame you wear offers an explicit remove action");
   assert.match(html, /<button type="button" class="community-button is-small" disabled>还差 50 星尘<\/button>/);
   assert.match(card("card-makeup"), /<span>每月限 2 次<\/span>[\s\S]*data-action="community-redeem" data-id="card-makeup"/);
   assert.match(html, /<span class="community-have">背包里有 1 张<\/span>/);
-  assert.match(html, /<h3>&lt;手册&gt;<\/h3>[\s\S]*data-action="community-delivery" data-id="pack"/);
+  assert.equal(textAt(card("pack"), 'h3'), '<手册>');
+  assert.match(card("pack"), /&lt;手册&gt;[\s\S]*data-action="community-delivery" data-id="pack"/);
   assert.match(html, /<span>巡天以上<\/span><span>注册满 30 天<\/span><span>包邮<\/span>[\s\S]*剩 3 \/ 10[\s\S]*width:30%/);
   assert.match(html, /community-owned-tag/);
   const goods = communityShopHTML({ shop: ready(shop), tab: "goods", ...common });

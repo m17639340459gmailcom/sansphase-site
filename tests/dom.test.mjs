@@ -1195,7 +1195,9 @@ for (const mode of [null, false, true, 'hk', 'hk-reduced']) test(typeof mode ===
       await navigate('community/shop/look');
       await until(()=>d.querySelectorAll('.community-sitem').length===1,'a category shows its items only');
       assert.equal(q('.community-shop-cats [aria-current="page"]').getAttribute('href'),'#/community/shop/look');
-      assert.match(q('[data-action="community-redeem"], .community-sitem button').textContent,/还差 69 星尘/,'a short balance says how much is missing');
+      const shortBalance = q('.community-sitem-foot button:disabled');
+      assert.match(shortBalance.textContent,/还差 69 星尘/,'a short balance says how much is missing');
+      assert.equal(shortBalance.hasAttribute('data-action'),false,'an unavailable purchase must not become a redeem action');
     });
     await t.test('the ranking lists contributions, streaks and early birds', async()=>{
       await navigate('community/rank');

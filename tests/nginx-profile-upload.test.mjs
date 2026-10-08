@@ -114,3 +114,22 @@ test('banner upload alone accepts existing moderator and owner file limits plus 
   for (const other of ['/api/community/manage/banners', '/api/community/manage/banner-image/extra', '/api/community/topics'])
     assert.equal(limitFor(community, other), 2 * 1024 ** 2);
 });
+
+test('author product artwork accepts the existing 25MiB file allowance without expanding other management endpoints', async () => {
+  const community = await host('nginx-community.conf', 'community.sansphase.com');
+  const path = '/api/community/manage/item-image', selected = location(community, path);
+  assert.deepEqual(selected?.args, ['location', '=', path], 'product uploads need their own exact envelope override');
+  const form = new FormData();
+  form.set('file', new Blob([new Uint8Array(communityImageBytes(true))], { type: 'image/png' }), 'product.png');
+  const bytes = (await new Request('https://example.test/upload', { method: 'POST', body: form }).arrayBuffer()).byteLength;
+  assert.equal(communityImageBytes(true), 25 * 1024 ** 2);
+  assert.ok(bytes > communityImageBytes(true));
+  assert.ok(bytes < limitFor(community, path), 'valid owner artwork and its multipart envelope must reach the application');
+  assert.equal(limitFor(community, path), 26 * 1024 ** 2);
+  assert.deepEqual(directive(selected.children, 'limit_conn'), ['community_upload', '2']);
+  assert.deepEqual(directive(selected.children, 'limit_conn_status'), ['429']);
+  assert.deepEqual(directive(selected.children, 'proxy_request_buffering'), ['off']);
+  assert.deepEqual(directive(selected.children, 'proxy_pass'), ['http://127.0.0.1:4176']);
+  for (const other of ['/api/community/manage/items', '/api/community/manage/item-image/extra', '/api/community/manage/items/new', '/api/community/topics'])
+    assert.equal(limitFor(community, other), 2 * 1024 ** 2, other);
+});

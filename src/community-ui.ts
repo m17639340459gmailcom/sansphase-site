@@ -26,6 +26,7 @@ import type { CommunityConvention } from './community-convention.ts';
 import type { CommunityGrowthState, CommunityVIPGrowthState } from './community-growth.ts';
 import { createCommunityWriteRequest } from './community-write-request.mjs';
 import { createCommunityProfileDialog } from './community-profile-dialog.mjs';
+import { createCommunityShopDialog, communityShopCardMaterials, communityShopCardPointer, communityShopCardExit } from './community-shop-dialog.mjs';
 import type { CommunityProfile } from './community-profile.ts';
 import { validReaderNickname } from './reader-policy.mjs';
 import { communityStaffCapabilities, communityStaffAssignableRoles, communityStaffCanAppointRole } from './community-staff.mjs';
@@ -41,7 +42,7 @@ import {
 } from './community-pages.mjs';
 import type {
   CommunityCheckin, CommunityStardust, CommunityFlow, CommunityShop, CommunityShopMine, CommunityDelivery, CommunityRank,
-  CommunityMember, CommunityInbox, CommunityManage, CommunityBoardManagement, CommunityItemEditing,
+  CommunityMember, CommunityInbox, CommunityManage, CommunityBoardManagement, CommunityItemEditing, CommunityShopDetail,
 } from './community-pages.ts';
 
 export type CommunityContext = {
@@ -142,6 +143,21 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   let bookmarks: CommunityLoad<CommunityListing> | null = null;
   let shop: CommunityLoad<CommunityShop> | null = null;
   let shopMine: CommunityLoad<CommunityShopMine> | null = null;
+  const shopDialog = createCommunityShopDialog({
+    data: shopDetailData, click: onClick,
+    returnFocus: (id, artwork) => mounted?.main.querySelector<HTMLElement>(`.${artwork ? 'community-sitem-art' : 'community-sitem-title'}[data-id=${quoted(id)}]`) || null,
+  });
+  function shopDetailData(id: string): CommunityShopDetail | null {
+    if (!mounted || route().view !== 'shop' || viewerFailure || (readyData(me)?.convention && !readyData(me)?.convention?.agreed)) return null;
+    if (route().tab === 'mine') {
+      const mine = readyData(shopMine), item = mine?.looks.find(value => value.id === id);
+      if (!mine || !item) return null;
+      return { item: { ...item, active: true, state: { owned: true, left: null, ok: false, code: 'owned', why: '' } },
+        shop: { balance: mine.balance, level: 0, owner: false, inventory: mine.inventory, decorations: mine.decorations, items: [] }, showPrice: false, common: mounted.ctx };
+    }
+    const data = readyData(shop), item = data?.items.find(value => value.id === id);
+    return data && item ? { item, shop: data, showPrice: true, common: mounted.ctx } : null;
+  }
   let rank: CommunityLoad<CommunityRank> | null = null;
   let flow: CommunityFlow = 'all';
   const stardusts = new Map<CommunityFlow, CommunityLoad<CommunityStardust>>();
@@ -285,14 +301,15 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     let response: Response;
     try { response = await request('/api/community/' + path, { credentials: 'same-origin', ...init }); }
     catch { throw Object.assign(new Error('网络连接失败，请稍后重试。'), { status: 0 }); }
+    const fallbackError = response.status === 413 ? '文件超过上传上限，请缩小后重试。' : '社区暂时无法读取。';
     let value: { error?: string };
     try { value = await response.json() as { error?: string }; }
     catch {
-      throw Object.assign(new Error(response.ok ? '响应读取失败，请稍后重试。' : '社区暂时无法读取。'), { status: response.ok ? 0 : response.status });
+      throw Object.assign(new Error(response.ok ? '响应读取失败，请稍后重试。' : fallbackError), { status: response.ok ? 0 : response.status });
     }
     if (value === null || typeof value !== 'object' || Array.isArray(value))
       throw Object.assign(new Error('响应读取失败，请稍后重试。'), { status: response.ok ? 0 : response.status });
-    if (!response.ok) throw Object.assign(new Error(value.error || '社区暂时无法读取。'), { status: response.status });
+    if (!response.ok) throw Object.assign(new Error(value.error || fallbackError), { status: response.status });
     return value as T;
   }
   const writeRequests = createCommunityWriteRequest({
@@ -360,7 +377,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const current = readyData(me);
     // The mandatory convention owns the modal lock while it is open. Restore
     // the management panel's lock first so nested dialogs do not trap each other.
-    if (current?.convention && !current.convention.agreed) { profileDialog.suspend(); restoreManagementBackground(); }
+    if (current?.convention && !current.convention.agreed) { shopDialog.close(); profileDialog.suspend(); restoreManagementBackground(); }
     conventionConsent.sync(current, mounted.main.ownerDocument, mounted.ctx);
     if (!current?.convention || current.convention.agreed) {
       // Legacy bookmarks open the editor only after mandatory consent has
@@ -495,6 +512,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const { changedAccount, lostPermission } = identityChange(next);
     if (changedAccount) clearData(false);
     else if (lostPermission) {
+      shopDialog.close();
       closeImageViewer();
       permissionRevision++; confirmedPage = null; pendingRoute = null; coreRoute = null;
       summary = null; lists.clear(); listRequests.clear(); threads.clear(); manages.clear(); manageRequests.clear();
@@ -1206,6 +1224,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const markup = html(mounted.ctx);
     if (!section || markup === null) return;
     if (routeHandoffPending()) return;
+    // Detail-only changes need not recreate an unchanged compact collection.
+    shopDialog.sync();
     const template = document.createElement('template');
     template.innerHTML = markup;
     let next = template.content.firstElementChild as HTMLElement;
@@ -1267,10 +1287,6 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const previews = preserveControls ? [...section.querySelectorAll<HTMLElement>('[data-action="community-md-preview"][aria-pressed="true"]')].map(button => button.dataset.for || '') : [];
     const extras = next.querySelector<HTMLDetailsElement>('[data-compose-extras]');
     if (extras) extras.open = preserveControls && Boolean(section.querySelector<HTMLDetailsElement>('[data-compose-extras]')?.open);
-    for (const description of preserveControls ? section.querySelectorAll<HTMLDetailsElement>('[data-shop-description][open]') : []) {
-      const twin = next.querySelector<HTMLDetailsElement>(`[data-shop-description=${quoted(description.dataset.shopDescription || '')}]`);
-      if (twin) twin.open = true;
-    }
     const categoryManager = next.querySelector<HTMLDetailsElement>('[data-management-categories]');
     if (categoryManager) categoryManager.open = preserveControls && Boolean(section.querySelector<HTMLDetailsElement>('[data-management-categories]')?.open);
     const previousItemForm = preserveControls ? section.querySelector<Form>('form[data-community-form="item"]') : null;
@@ -1380,6 +1396,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   }
   // Form parts that follow other fields: the unlock price row and the list preview while composing.
   function syncForms(root: ParentNode) {
+    communityShopCardMaterials(root);
     syncStewardTools(root);
     syncReviewTools(root);
     const item = root.querySelector<Form>('form[data-community-form="item"]');
@@ -1833,9 +1850,9 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (kind === 'color' && !effect) return status(form, tr('请先拖入制作好的昵称特效文件。', 'Drop a finished nickname effect file first.'));
     const payload = {
       cat: checkedOf(form, 'cat') || valueOf(form, 'cat'), name: valueOf(form, 'name'), description: valueOf(form, 'description'),
-      kind: kind === 'frame' || kind === 'color' || kind === 'cover' ? kind : undefined, category: valueOf(form, 'category') || null, effect: kind === 'color' ? effect : null,
+      kind: kind === 'frame' || kind === 'color' || kind === 'cover' || kind === 'card' ? kind : undefined, ...(kind === 'card' ? { ref: valueOf(form, 'ref') } : {}), category: valueOf(form, 'category') || null, effect: kind === 'color' ? effect : null,
       price: number('price'), stock: kind === 'frame' || kind === 'color' || kind === 'cover' ? null : number('stock'), limitPer: valueOf(form, 'limitPer') || null, limitN: number('limitN'),
-      minLevel: number('minLevel') ?? 0, minDays: number('minDays') ?? 0, delivery: valueOf(form, 'delivery'), note: valueOf(form, 'note'),
+      minLevel: number('minLevel') ?? 0, minDays: number('minDays') ?? 0, delivery: kind === 'digital' ? valueOf(form, 'delivery') : '', note: valueOf(form, 'note'),
       active: Boolean(fieldOf(form, 'active')?.checked),
       image: valueOf(form, 'image') || null,
     };
@@ -2267,6 +2284,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       'community-browse-mode', 'community-sort', 'community-more', 'community-search-clear', 'community-retry', 'community-reply-sort',
       'community-lightbox', 'community-post-menu', 'community-copy-link', 'community-copy-prompt', 'community-copy-delivery',
       'community-delivery', 'community-delivery-close', 'community-month', 'community-flow', 'community-notice',
+      'community-shop-detail',
       'community-level-mode', 'community-level-select', 'community-badge-family', 'community-badge-tier',
     ].includes(action || '')) {
       notify(tr('当前预览仅供查看，请先返回管理身份。', 'This preview is read-only. Restore management first.')); return;
@@ -2275,7 +2293,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       'community-pin', 'community-feature', 'community-lock', 'community-approve', 'community-batch-approve', 'community-batch-reject',
       'community-restore', 'community-queue-delete', 'community-move', 'community-management-board', 'community-profile-review',
       'community-mute', 'community-steward', 'community-steward-edit', 'community-lift', 'community-ship', 'community-reject',
-      'community-cancel-order', 'community-item-edit', 'community-uphold', 'community-dismiss',
+      'community-cancel-order', 'community-item-edit', 'community-item-active', 'community-uphold', 'community-dismiss',
     ].includes(action || '')) { notify(tr('请先返回管理身份。', 'Restore management first.')); return; }
     if (boardEditor.action(target)) return;
     if (bannerEditor.action(target)) return;
@@ -2446,7 +2464,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         void loadStardust().then(current => { if (current && location.hash === hash && flow === value) paint(); });
         return;
       }
-      case 'community-redeem': redeeming = id; delivery = null; openPanel('form[data-community-form="redeem"]'); return;
+      case 'community-shop-detail': shopDialog.open(mounted.main.ownerDocument, id, target); return;
+      case 'community-redeem': shopDialog.close(); redeeming = id; delivery = null; openPanel('form[data-community-form="redeem"]'); return;
       case 'community-redeem-cancel': redeeming = null; paint(); return;
       case 'community-equip': {
         const uid = readyData(me)?.uid, identity = frameIdentity;
@@ -2461,6 +2480,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       case 'community-delivery':
         void act(target, async () => {
           const data = await api<{ name: string; delivery: string }>(`shop/items/${enc(id)}/delivery`);
+          shopDialog.close();
           delivery = { id, ...data };
           redeeming = null;
           openPanel('.community-delivery');
@@ -2518,6 +2538,12 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         void act(target, async () => { await send(`manage/orders/${enc(id)}/cancel`); notify(tr('已取消，星尘已退回。', 'Cancelled and refunded.')); await reload(); });
         return;
       case 'community-item-edit': itemEditing = { id: id || null }; openPanel('form[data-community-form="item"]'); return;
+      case 'community-item-active': {
+        if (!id || !readyData(me)?.owner || route().view !== 'manage' || route().tab !== 'items') return;
+        const active = target.dataset.active === 'true';
+        void act(target, async () => { await send(`manage/items/${enc(id)}`, { active }); notify(active ? tr('已重新上架。', 'Item relisted.') : tr('已下架，既有兑换记录和权益保留。', 'Item unlisted. Existing redemptions are retained.')); await reload(); });
+        return;
+      }
       case 'community-item-cancel': itemEditing = null; paint(); return;
       case 'community-item-image-remove': {
         const form = target.closest<Form>('form');
@@ -2598,6 +2624,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   }
   // Cards glow where the pointer is (demo "spot").
   function onPointer(event: PointerEvent) {
+    communityShopCardPointer(event);
     const card = (event.target as Element).closest?.<HTMLElement>('.community-spot');
     if (!card) return;
     const rect = card.getBoundingClientRect();
@@ -2907,6 +2934,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   };
 
   function clearData(clearWrites = true) {
+    shopDialog.close();
     closeImageViewer();
     locatedReplyHash = '';
     passiveRecovery = null;
@@ -3022,6 +3050,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       document.addEventListener('scroll', onPassiveEditing, { capture: true, passive: true });
       main.addEventListener('keydown', onKeydown);
       main.addEventListener('pointermove', onPointer);
+      main.addEventListener('pointerout', communityShopCardExit, { passive: true });
+      main.addEventListener('pointercancel', communityShopCardExit, { passive: true });
       main.addEventListener('pointerdown', onActiveInteraction, { passive: true });
       main.addEventListener('keydown', onActiveInteraction);
       document.addEventListener('visibilitychange', onActiveVisibility);
@@ -3054,6 +3084,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         void refresh();
       }
       return () => {
+        shopDialog.close();
         closeImageViewer();
         passiveRefresh?.stop(); passiveRefresh = null;
         conventionConsent.close();
@@ -3077,6 +3108,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         document.removeEventListener('scroll', onPassiveEditing, true);
         main.removeEventListener('keydown', onKeydown);
         main.removeEventListener('pointermove', onPointer);
+        main.removeEventListener('pointerout', communityShopCardExit);
+        main.removeEventListener('pointercancel', communityShopCardExit);
         main.removeEventListener('pointerdown', onActiveInteraction);
         main.removeEventListener('keydown', onActiveInteraction);
         document.removeEventListener('visibilitychange', onActiveVisibility);

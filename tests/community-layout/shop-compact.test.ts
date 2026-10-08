@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createRequire } from 'node:module';
 import postcss from 'postcss';
-import { communityShopHTML, communityShopMineHTML } from '../../src/community-pages.ts';
+import { communityShopHTML, communityShopMineHTML, communityShopDetailHTML } from '../../src/community-pages.ts';
 import type { CommunityShop, CommunityShopItem, CommunityShopMine } from '../../src/community-pages.ts';
 import { communityBuiltinItems } from '../../src/community-rules.ts';
 import { composeCommunityStyles } from '../../scripts/compose-community-styles.mjs';
@@ -23,6 +23,8 @@ const shop: CommunityShop = {
       state: { owned: false, left: null, ok: false, code: 'short', why: '还差 20 星尘' } },
     { id: 'bag', cat: 'goods', kind: 'goods', name: '帆布袋', desc: '材料及发货说明。', price: 200, minDays: 30, stock: 10, note: '包邮', builtin: false, active: true,
       state: { owned: false, left: 3, ok: true, code: 'ok', why: '' } },
+    { id: 'portrait-card', cat: 'digital', kind: 'digital', name: '卡片展示图', image: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', desc: '完整保留卡片的上沿与下沿。', price: 8, builtin: false, active: true,
+      state: { owned: false, left: null, ok: true, code: 'ok', why: '' } },
   ]),
 };
 
@@ -36,6 +38,31 @@ async function fixture(theme: 'light' | 'dark', content: string) {
 }
 
 for (const theme of ['light', 'dark'] as const) {
+  test(`${theme}: built-in and uploaded tool cards share a portrait silhouette and rightward direction`, async () => {
+    const uploaded: CommunityShopItem = { ...shop.items.find(item => item.id === 'portrait-card')!, cat: 'card', kind: 'card', ref: 'makeup' };
+    const data = { ...shop, items: [shop.items.find(item => item.id === 'card-pin')!, uploaded] };
+    const details = data.items.map(item => communityShopDetailHTML({ item, shop: data, showPrice: true, common })).join('');
+    const { window, style } = await fixture(theme, communityShopHTML({ shop: { state: 'ready', data }, tab: 'card', ...common }) + details);
+    try {
+      const builtIn = style(window.document.querySelector('.community-sitem-art.is-tool-card .community-holo:not(.is-uploaded)')!);
+      const width = parseFloat(builtIn.width), height = parseFloat(builtIn.height);
+      assert.ok(width / height >= .69 && width / height <= .71, 'the built-in card follows the uploaded portrait rather than the old wide, squat shape');
+      const angle = Number(builtIn.transform.match(/\brotate\(([\d.-]+)deg\)/)?.[1]);
+      assert.ok(angle >= 4 && angle <= 6, 'the built-in card leans right like the artwork itself');
+      const radians = angle * Math.PI / 180;
+      const projectedWidth = (width * Math.cos(radians) + height * Math.sin(radians)) * 1.035;
+      const projectedHeight = (height * Math.cos(radians) + width * Math.sin(radians)) * 1.035;
+      assert.ok(projectedWidth < 160 && projectedHeight < 160, 'the full silhouette and hover enlargement fit inside the unchanged 176px stage');
+      const uploadedStyle = style(window.document.querySelector('.community-sitem-art.is-tool-card .community-holo.is-uploaded')!);
+      assert.doesNotMatch(uploadedStyle.transform, /\brotate\(/, 'an image that already contains a tilt receives no additional planar rotation');
+      const detailBuiltIn = style(window.document.querySelector('.community-shop-detail-art .community-holo:not(.is-uploaded)')!);
+      assert.match(detailBuiltIn.transform, /\brotate\(5deg\)/, 'opening details preserves the list direction');
+      assert.equal(detailBuiltIn.aspectRatio, '7 / 10', 'the detail drawing keeps the same portrait ratio when the viewport narrows');
+      assert.equal(detailBuiltIn.height, 'auto', 'height must follow the constrained width instead of squeezing the portrait');
+      assert.doesNotMatch(style(window.document.querySelector('.community-shop-detail-art .community-holo.is-uploaded')!).transform, /\brotate\(/, 'details also preserve the uploaded image direction');
+    } finally { window.close(); }
+  });
+
   test(`${theme}: exchange and owned looks keep compact tracks even when a category has few items`, async () => {
     const mine: CommunityShopMine = { balance: 1000, inventory: shop.inventory, decorations: shop.decorations,
       looks: shop.items.filter(item => item.id === 'frame-gold'), digital: [], orders: [] };
@@ -48,7 +75,10 @@ for (const theme of ['light', 'dark'] as const) {
         assert.equal(style(grid).alignItems, 'stretch', 'items in the same collection must share the row height');
         assert.equal(style(grid).gridAutoRows, '1fr', 'separate rows must follow the same height rule');
       }
-      for (const art of window.document.querySelectorAll('.community-sitem-art, .community-inv .community-sart')) assert.equal(style(art).height, '112px');
+      for (const art of window.document.querySelectorAll('.community-sitem-art, .community-inv .community-sart')) {
+        const item = shop.items.find(candidate => candidate.id === (art as HTMLElement).dataset.id);
+        assert.equal(style(art).height, item?.kind === 'card' ? '176px' : '112px', 'tool cards are legible without enlarging other merchandise or owned inventory');
+      }
       assert.equal(style(window.document.querySelector('.community-sitem')!).borderRadius, '12px');
       for (const button of window.document.querySelectorAll('.community-sitem-foot .community-button')) assert.ok(parseFloat(style(button).minHeight) >= 36, 'compacting the card must preserve a usable action');
     } finally { window.close(); }
@@ -69,8 +99,9 @@ for (const theme of ['light', 'dark'] as const) {
         assert.equal(style(card).height, '100%');
         assert.equal(style(card).gridTemplateRows, 'auto minmax(0, 1fr)');
         assert.equal(body.lastElementChild?.className, 'community-sitem-foot');
-        card.querySelector<HTMLElement>('summary')!.click();
-        assert.equal(style(card.parentElement!).gridAutoRows, '1fr', 'viewing a long description must keep neighbouring card sizes consistent');
+        const title = card.querySelector<HTMLElement>('.community-sitem-title')!;
+        assert.equal(title.getAttribute('aria-haspopup'), 'dialog');
+        assert.equal(card.querySelector('details'), null, 'long explanations must not expand a card or its neighbours');
       }
     } finally { window.close(); }
   });
@@ -80,35 +111,35 @@ for (const theme of ['light', 'dark'] as const) {
     try {
       for (const selector of ['.community-sart .community-av-xl', '.community-cover-sample', '.community-holo', '.community-file', '.community-goods']) {
         const artwork = style(window.document.querySelector(selector)!);
-        assert.ok(parseFloat(artwork.height) <= 96, `${selector} leaves room for rotation and hover inside 112px`);
+        const limit = selector === '.community-holo' ? 152 : 96;
+        assert.ok(parseFloat(artwork.height) <= limit, `${selector} leaves room for rotation and hover inside its own stage`);
+        if (selector === '.community-holo') assert.ok(parseFloat(artwork.height) >= 130, 'the built-in tool card also fills the larger display instead of leaving its old tiny drawing');
         assert.ok(parseFloat(artwork.width) <= 140, `${selector} leaves horizontal breathing room`);
       }
     } finally { window.close(); }
   });
 }
 
-test('item descriptions expand through native summaries while prices, limits, stock and actions stay visible', async () => {
+test('item descriptions live in a separate dialog while prices, limits, stock and actions stay visible in the collection', async () => {
   const { window } = await fixture('dark', communityShopHTML({ shop: { state: 'ready', data: shop }, tab: 'all', ...common }));
   try {
     const cards = [...window.document.querySelectorAll('.community-sitem')];
     assert.equal(cards.length, shop.items.length, 'all six kinds of merchandise remain available');
     for (const card of cards) {
-      const details = card.querySelector<HTMLDetailsElement>('details.community-sitem-details');
-      assert.ok(details, 'long descriptions should not make every card tall on first render');
-      assert.equal(details.open, false);
-      const summary = details.querySelector<HTMLElement>('summary')!;
-      assert.ok(summary.querySelector('h3'));
-      assert.ok(summary.querySelector('[data-icon="chevron-down"]'));
-      summary.click();
-      assert.equal(details.open, true);
-      summary.click();
-      assert.equal(details.open, false);
-      for (const control of card.querySelectorAll('.community-price, .community-stags, .community-stock, .community-sitem-foot button')) assert.equal(control.closest('details'), null, 'purchase conditions must not disappear inside a collapsed description');
+      assert.equal(card.querySelector('details'), null);
+      const title = card.querySelector<HTMLButtonElement>('h3 .community-sitem-title')!;
+      assert.ok(title);
+      assert.equal(title.dataset.action, 'community-shop-detail');
+      assert.equal(title.getAttribute('aria-haspopup'), 'dialog');
+      assert.equal(card.querySelector('.community-sitem-art')!.getAttribute('aria-haspopup'), 'dialog');
+      for (const control of card.querySelectorAll('.community-price, .community-stags, .community-stock, .community-sitem-foot button')) assert.equal(control.closest('details'), null, 'purchase conditions stay visible in the collection');
     }
     assert.ok(window.document.querySelector('[data-action="community-equip"][data-kind="frame"][data-ref=""]'));
     assert.ok(window.document.querySelector<HTMLButtonElement>('.community-sitem-foot button:disabled'));
     assert.match(window.document.querySelector('.community-stock')!.textContent!, /剩 3 \/ 10/);
-    assert.ok(cards.some(card => card.querySelector('details p')?.textContent === '完整使用说明与 <参数> 示例。'), 'descriptions keep escaped content');
+    const popup = window.document.createElement('div');
+    popup.innerHTML = communityShopDetailHTML({ item: shop.items.find(item => item.id === 'guide')!, shop, showPrice: true, common });
+    assert.equal(popup.querySelector('.community-shop-detail-description')!.textContent, '完整使用说明与 <参数> 示例。', 'descriptions keep escaped content');
     const confirmation = window.document.createElement('div');
     confirmation.innerHTML = communityShopHTML({ shop: { state: 'ready', data: shop }, tab: 'card', redeeming: 'card-pin', ...common });
     const description = shop.items.find(item => item.id === 'card-pin')!.desc;
@@ -123,7 +154,28 @@ test('hovering a merchandise card keeps its outside edges aligned with its neigh
   });
 });
 
-test('narrow screens retain compact artwork and reveal complete descriptions without the former height or line clamp', async () => {
+test('tool-card hover preserves its presentation angle without changing inventory drawing or interactions', async () => {
+  const css = postcss.parse(await composeCommunityStyles());
+  const declarations = new Map<string, Map<string, string>>();
+  css.walkRules(rule => {
+    if (rule.parent?.type === 'atrule') return;
+    const values = new Map<string, string>(); rule.walkDecls(d => values.set(d.prop, d.value)); declarations.set(rule.selector, values);
+  });
+  const hover = [...declarations].find(([selector]) => selector.includes('.community-sitem:hover .community-sitem-art.is-tool-card .community-holo:not(.is-uploaded)'));
+  assert.ok(hover, 'the hover rule is scoped to the actual tool-card list and its detail view');
+  assert.ok(hover[0].includes('.community-shop-detail-art:is(:hover, :focus-visible)'));
+  assert.ok(hover[0].includes('.community-sitem-art.is-tool-card:focus-visible'));
+  assert.match(hover[1].get('transform') || '', /\brotate\(5deg\).*scale\(1\.035\)/, 'hover and keyboard focus retain the rightward tilt and share the uploaded-card enlargement');
+  const inventory = declarations.get('.community-inv:hover .community-holo')!;
+  assert.ok(inventory, 'the existing inventory interaction remains independent');
+  assert.match(inventory.get('transform') || '', /scale\(1\.06\)/);
+  assert.doesNotMatch(inventory.get('transform') || '', /\brotate\(/);
+  const base = declarations.get('.community-holo')!;
+  assert.equal(base.get('width'), '72px'); assert.equal(base.get('height'), '92px');
+  assert.match(base.get('transform') || '', /\brotate\(-6deg\)/, 'other inventory artwork retains its existing orientation');
+});
+
+test('narrow screens retain compact artwork and stack complete product details within the viewport', async () => {
   const css = postcss.parse(await composeCommunityStyles());
   const narrow = new Map<string, Map<string, string>>();
   css.walkAtRules('media', media => {
@@ -138,5 +190,101 @@ test('narrow screens retain compact artwork and reveal complete descriptions wit
   assert.equal(narrow.get('.community-sitem-art')?.get('height'), undefined, 'mobile must not restore the old 156px stage');
   assert.equal(narrow.get('.community-sitem-art .community-sart')?.get('transform'), undefined, 'individual objects now have the correct dimensions without shrinking their text again');
   assert.equal(narrow.get('.community-sitem-body p')?.get('-webkit-line-clamp'), undefined, 'opening a description must reveal all of it');
+  assert.equal(narrow.get('.community-shop-detail-content')?.get('grid-template-columns'), 'minmax(0, 1fr)', 'phone details use one column');
+  assert.equal(narrow.get('.community-shop-detail-window')?.get('max-height'), 'calc(100dvh - 24px)', 'long text stays within a scrollable popup');
+  assert.equal(narrow.get('.community-shop-detail-art')?.get('--tool-card-stage-height'), 'min(280px, 35dvh)', 'the complete card and its proportional drawing share the screen with the description');
   assert.equal(narrow.get('.community-inv .community-sart')?.get('height'), '48px', 'the existing mobile inventory remains a compact row');
+});
+
+test('uploaded portraits and landscape artworks have a bounded, shrinkable grid cell and contain their complete image', async () => {
+  const css = postcss.parse(await composeCommunityStyles());
+  const declarations = new Map<string, Map<string, string>>();
+  css.walkRules(rule => {
+    if (rule.parent?.type === 'atrule') return;
+    const values = new Map<string, string>(); rule.walkDecls(d => values.set(d.prop, d.value)); declarations.set(rule.selector, values);
+  });
+  const art = declarations.get('.community-sitem-art')!;
+  assert.equal(art.get('grid-template-rows'), 'minmax(0, 1fr)', 'intrinsic portrait height must not grow the grid row behind the clip');
+  for (const selector of ['.community-sitem-art > .community-product-image', '.community-shop-detail-art > .community-product-image']) {
+    const image = declarations.get(selector)!;
+    assert.equal(image.get('object-fit'), 'contain');
+    assert.equal(image.get('min-height'), '0');
+    assert.equal(image.get('max-height'), '100%');
+    assert.equal(image.get('max-width'), '100%');
+  }
+  assert.equal(declarations.has('.community-sitem-details > summary'), false, 'the superseded expansion styles must be removed');
+});
+
+test('only genuine uploaded tool cards keep the holo material around their complete artwork', async () => {
+  const portrait = shop.items.find(item => item.id === 'portrait-card')!;
+  const card: CommunityShopItem = { ...portrait, id: 'actual-card', cat: 'card', kind: 'card', ref: 'makeup', name: '补签卡' };
+  const cover: CommunityShopItem = { ...portrait, id: 'photo-cover', cat: 'look', kind: 'cover', ref: `image:${portrait.image}` };
+  const data = { ...shop, items: [card, portrait, cover] };
+  const { window, style } = await fixture('light', communityShopHTML({ shop: { state: 'ready', data }, tab: 'all', ...common }));
+  try {
+    const artwork = window.document.querySelector('[data-id="actual-card"].community-sitem-art')!;
+    assert.equal(style(artwork).height, '176px', 'the full portrait gets a larger stage instead of being cropped to simulate enlargement');
+    const holo = artwork.querySelector<HTMLElement>('.community-holo.is-uploaded')!;
+    assert.ok(holo, 'an uploaded PNG must not bypass the original holographic card renderer');
+    assert.ok(holo.hasAttribute('data-community-card-art'));
+    assert.match(holo.getAttribute('style') || '', /--card-image:\s*url\(['"]?\/api\/community\/images\/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\.webp/);
+    assert.equal(holo.querySelector('img')!.getAttribute('src'), '/api/community/images/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.webp');
+    for (const id of ['portrait-card', 'photo-cover']) {
+      const ordinary = window.document.querySelector(`[data-id="${id}"].community-sitem-art`)!;
+      assert.equal(ordinary.querySelector('.community-holo'), null, 'a card name or photograph does not grant card effects');
+      assert.equal(style(ordinary).height, '112px', 'ordinary photos retain the existing compact layout');
+    }
+    const popup = window.document.createElement('div');
+    popup.innerHTML = communityShopDetailHTML({ item: card, shop: data, showPrice: true, common });
+    assert.ok(popup.querySelector('.community-shop-detail-art .community-holo.is-uploaded'));
+    assert.equal(popup.querySelector('.community-shop-detail-art')!.getAttribute('tabindex'), '0', 'the detail artwork has a keyboard focus state too');
+  } finally { window.close(); }
+});
+
+test('reduced motion removes uploaded-card transforms from both collection and detail', async () => {
+  const portrait = shop.items.find(item => item.id === 'portrait-card')!;
+  const item: CommunityShopItem = { ...portrait, cat: 'card', kind: 'card', ref: 'makeup' };
+  const data = { ...shop, items: [item] };
+  const css = postcss.parse(await composeCommunityStyles());
+  css.walkAtRules('media', media => {
+    if (media.params === '(prefers-reduced-motion: reduce)') media.replaceWith(...media.nodes);
+    else media.remove();
+  });
+  const content = communityShopHTML({ shop: { state: 'ready', data }, tab: 'card', ...common })
+    + communityShopDetailHTML({ item, shop: data, showPrice: true, common });
+  const { window } = new JSDOM(`<style>${css}</style><body class="community-open community-frame-open" data-community-theme="light">${content}</body>`, { url: 'http://localhost:4225/' });
+  try {
+    const artworks = window.document.querySelectorAll('.community-holo.is-uploaded');
+    assert.equal(artworks.length, 2);
+    for (const art of artworks) assert.equal(window.getComputedStyle(art).transform, 'none', 'the normal scoped transform must not override the reduced-motion state');
+  } finally { window.close(); }
+});
+
+test('uploaded holo sheen uses the image alpha with bounded tilt and respects reduced motion', async () => {
+  const css = postcss.parse(await composeCommunityStyles());
+  const declarations = new Map<string, Map<string, string>>();
+  css.walkRules(rule => {
+    if (rule.parent?.type === 'atrule') return;
+    const values = new Map<string, string>(); rule.walkDecls(d => values.set(d.prop, d.value)); declarations.set(rule.selector, values);
+  });
+  const uploaded = declarations.get('.community-holo.is-uploaded')!;
+  assert.ok(uploaded);
+  assert.equal(uploaded.get('background'), 'transparent'); assert.equal(uploaded.get('box-shadow'), 'none');
+  assert.equal(uploaded.get('max-width'), '100%'); assert.equal(uploaded.get('max-height'), '100%');
+  const image = declarations.get('.community-holo.is-uploaded > .community-product-image')!;
+  assert.equal(image.get('object-fit'), 'contain'); assert.equal(image.get('min-height'), '0');
+  const mask = declarations.get('.community-holo.is-uploaded::before, .community-holo.is-uploaded::after')!;
+  assert.equal(mask.get('mask-image'), 'var(--card-image)'); assert.equal(mask.get('mask-size'), 'contain');
+  assert.equal(mask.get('mask-repeat'), 'no-repeat'); assert.equal(mask.get('mask-mode'), 'alpha');
+  assert.equal(mask.get('pointer-events'), 'none');
+  assert.match(declarations.get('.community-holo::before')!.get('animation') || '', /community-holo 4s linear infinite/);
+  let reduced = false;
+  css.walkAtRules('media', media => {
+    if (media.params !== '(prefers-reduced-motion: reduce)') return;
+    media.walkRules(rule => {
+      if (!rule.selector.includes('.community-holo.is-uploaded')) return;
+      rule.walkDecls('transform', declaration => { if (declaration.value === 'none') reduced = true; });
+    });
+  });
+  assert.equal(reduced, true, 'reduced-motion cards never tilt or scale');
 });
