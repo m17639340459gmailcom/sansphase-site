@@ -78,8 +78,11 @@ export type Ctx = {
 // Obvious contact details (lead generation). Unlike reader signatures, the
 // word 微信 alone is fine here: posts legitimately discuss WeChat.
 export function communityContactReason(value: string) {
-  const normalized = value.normalize('NFKC').toLowerCase().replace(/[\s​-‍⁠·._－—-]/gu, '');
-  if (/(?:\+?86)?1[3-9]\d{9}/u.test(normalized)) return '帖子里不能留手机号。';
+  const text = value.normalize('NFKC').toLowerCase();
+  // Match a whole number, not an eleven-digit slice of a news URL or ID.
+  // Allow the existing phone separators without joining separate numeric tokens.
+  if (/(?<!\d)(?:(?:\+?86|0086)[\s\u200b-\u200d\u2060·._－—-]*)?1[\s\u200b-\u200d\u2060·._－—-]*[3-9](?:[\s\u200b-\u200d\u2060·._－—-]*\d){9}(?!\d)/u.test(text)) return '帖子里不能留手机号。';
+  const normalized = text.replace(/[\s​-‍⁠·._－—-]/gu, '');
   if (/(?:加|\+|添加)(?:我)?(?:微信|vx|wx|v信|威信)|(?:vx|wx|v信|微信号|威信)[:：]?[a-z0-9_]{5,}/iu.test(normalized)) return '帖子里不能留微信等联系方式。';
   return null;
 }

@@ -874,6 +874,34 @@ test('registered inline image IDs never trigger contact filtering, while visible
   }
 });
 
+test('long news-link identifiers pass topic creation, editing and replies without weakening phone filtering', async t => {
+  const { post, get, store } = await setup(t, { useDefault: true });
+  const imageId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  store.addImage({ id: imageId, uploader: { kind: 'owner', id: 'owner' }, width: 100, height: 100 });
+  const text = '公告公开转录：[消息来源](https://news.example.test/status/1891380013800012345)';
+  const body = `${text}\n\n${imageMarker(imageId)}`;
+  const payload = { board: 'qa', title: 'AI 产品更新公告', body, images: [imageId], agree: true };
+  const created = await post('topics', payload, 'owner=yes');
+  assert.equal(created.status, 201, await created.clone().text());
+  const { id } = await created.json();
+  const edited = await post(`topics/${id}/edit`, { ...payload, body: `更新说明\n${body}` }, 'owner=yes');
+  assert.equal(edited.status, 200, await edited.clone().text());
+  const replied = await post(`topics/${id}/replies`, { body: text }, 'owner=yes');
+  assert.equal(replied.status, 201, await replied.clone().text());
+  const { id: replyId } = await replied.json();
+  const replyEdited = await post(`replies/${replyId}/edit`, { body: `后续确认：${text}` }, 'owner=yes');
+  assert.equal(replyEdited.status, 200, await replyEdited.clone().text());
+  for (const [path, input] of [
+    [`topics/${id}/edit`, { ...payload, body: `${body}\n请联系 138 0013 8000` }],
+    [`replies/${replyId}/edit`, { body: `${text}\n请联系 138 0013 8000` }],
+  ]) {
+    const rejected = await post(path, input, 'owner=yes');
+    assert.equal(rejected.status, 400);
+    assert.match((await rejected.json()).error, /手机号/);
+  }
+  assert.equal((await json(get(`topics/${id}`, 'owner=yes'))).replies[0].body, `后续确认：${text}`);
+});
+
 test('simple posting requires body text even with a title or cover; tools accepts real inline images', async t => {
   const { post, upload, get } = await setup(t, { simplePosting: true });
   const uploaded = await json(upload(await png()));
