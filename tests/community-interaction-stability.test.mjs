@@ -296,7 +296,14 @@ test('verified owner personal reader can like and reply, while stale management 
   assert.ok(requests.some(entry => entry.url.endsWith('/like') && entry.init.method === 'POST'));
   const form = main.querySelector('[data-community-form="reply"]');
   form.elements.namedItem('body').value = '真实读者身份的正常回复。';
-  form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await turn(); await turn();
+  form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  // As with deliberate reply retries below, wait for the WebCrypto-protected
+  // request itself rather than assuming two zero-delay timers finish its hash.
+  const deadline = performance.now() + 5000;
+  while (!requests.some(entry => entry.url.endsWith('/topics/p1/replies') && entry.init.method === 'POST')) {
+    assert.ok(performance.now() < deadline, 'the personal reader reply request must be sent');
+    await turn();
+  }
   assert.ok(requests.some(entry => entry.url.endsWith('/topics/p1/replies') && entry.init.method === 'POST'));
   const account = new JSDOM(communityAccountHTML({ ...ctxForAccount(), me: personalReader })).window.document;
   assert.equal(account.querySelector('a[href="#/community/manage"]'), null);
