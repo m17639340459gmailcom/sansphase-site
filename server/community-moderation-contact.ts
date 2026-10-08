@@ -1,4 +1,3 @@
-import { communityBoards } from '../src/community.mjs';
 import { fail, memberKey } from './community-db.ts';
 import type { CommunityAuthor } from './community-db.ts';
 import type { CommunityStore } from './community-store.ts';
@@ -28,7 +27,7 @@ export function storedModerationContact(qq: string | null, email: string | null)
 // Explicit voluntary-contact DTO for signed-in readers, including muted accounts.
 export async function publicModerationContacts(store: CommunityStore, owner: CommunityAuthor,
   people: (authors: CommunityAuthor[]) => Promise<Map<string, PersonInfo>>, board: string) {
-  if (board && !communityBoards.some(item => item.id === board)) throw fail('板块不存在。');
+  if (board && !store.boards.has(board)) throw fail('板块不存在。');
   const candidates = [owner, ...store.members.stewards()].filter(member => {
     const boards = store.members.moderationBoards(member);
     return boards.length > 0 && (!board || boards.includes(board));

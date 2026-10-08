@@ -1,17 +1,15 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { CommunityAuthor, Transaction } from './community-db.ts';
 import { fail, same, parseJson } from './community-db.ts';
-import { communityBoards } from '../src/community.mjs';
 import { communityStaffCapabilities, communityStaffCanAppointRole, communityStaffRank } from '../src/community-staff.ts';
 import type { CommunityStaffPermission, CommunityStaffRole, CommunityStaffState } from '../src/community-staff.ts';
-const boards=communityBoards.map(board=>board.id);
 const permissions=communityStaffCapabilities.map(cap=>cap.id);
 // Retain the actual legacy authorities, not every newly introduced capability.
 export const communityLegacyStaffPermissions: CommunityStaffPermission[] = permissions.filter(cap=>!['staff.appoint','feature.decide','profile.signature.advise','profile.signature.decide','profile.nickname.advise','profile.nickname.decide','profile.background.advise','profile.background.decide'].includes(cap));
 type Row={member_kind:'reader';member_id:string;role:Exclude<CommunityStaffRole,'owner'>;boards:string;permissions:string;delegable:string;parent_kind:CommunityAuthor['kind'];parent_id:string|null;legacy_origin:number;legacy_live:number;revoked_at:string|null};
 export type CommunityStaffInput={role:Exclude<CommunityStaffRole,'owner'>;boards:string[];permissions:CommunityStaffPermission[];delegable:CommunityStaffPermission[]};
 const array=<T extends string>(value:unknown,known:readonly T[]):value is T[]=>Array.isArray(value)&&value.every(item=>typeof item==='string'&&known.includes(item as T))&&new Set(value).size===value.length;
-export function createCommunityStaff(db:DatabaseSync,tx:Transaction){
+export function createCommunityStaff(db:DatabaseSync,tx:Transaction,boardIds:()=>string[]){
   let ownerId='owner';
   const row=db.prepare('SELECT * FROM community_staff WHERE member_kind=? AND member_id=?');
   const clearLegacy=db.prepare('UPDATE community_members SET steward=0 WHERE member_kind=? AND member_id=?');
@@ -22,6 +20,7 @@ export function createCommunityStaff(db:DatabaseSync,tx:Transaction){
   function descendants(target:CommunityAuthor){const found:CommunityAuthor[]=[];const seen=new Set([`${target.kind}:${target.id}`]);let pending=[target];while(pending.length){const parent=pending.shift()!;for(const value of db.prepare('SELECT member_kind,member_id FROM community_staff WHERE parent_kind=? AND parent_id=? AND revoked_at IS NULL').all(parent.kind,parent.id) as Array<{member_kind:'reader';member_id:string}>){const key=`${value.member_kind}:${value.member_id}`;if(seen.has(key))continue;seen.add(key);const member:CommunityAuthor={kind:value.member_kind,id:value.member_id};found.push(member);pending.push(member);}}return found;}
   const revokeRows=(targets:CommunityAuthor[],now:string)=>{for(const member of targets){db.prepare('UPDATE community_staff SET revoked_at=?,updated_at=? WHERE member_kind=? AND member_id=?').run(now,now,member.kind,member.id);clearLegacy.run(member.kind,member.id);}};
   function state(member:CommunityAuthor,seen=new Set<string>()):CommunityStaffState|null{
+    const boards=boardIds();
     if(same(member,owner()))return {role:'owner',boards:[...boards],permissions:[...permissions],delegable:[...permissions],parent:null};
     if(member.kind!=='reader'||seen.has(member.id)||seen.size>=16)return null;
     const value=stored(member);if(!value||value.revoked_at||!['general','moderator','assistant'].includes(value.role))return null;
@@ -47,7 +46,7 @@ export function createCommunityStaff(db:DatabaseSync,tx:Transaction){
       const previous=stored(target);
       if(!communityStaffCanAppointRole(current.role,input.role))throw fail(current.role==='owner'?'只能任命总版主、版主或协管。':'只能任命下一级职务。',403);
       if(previous&&!previous.revoked_at&&!(current.role==='owner'||previous.parent_kind===actor.kind&&previous.parent_id===actor.id))throw fail('不能修改其他管理者任命的人员。',403);
-      if(!array(input.boards,boards)||!input.boards.length||input.boards.some(board=>!current.boards.includes(board)))throw fail('只能配置自己管理的有效板块。',403);
+      if(!array(input.boards,boardIds())||!input.boards.length||input.boards.some(board=>!current.boards.includes(board)))throw fail('只能配置自己管理的有效板块。',403);
       if(!array(input.permissions,permissions)||!array(input.delegable,permissions)||input.permissions.some(cap=>!current.delegable.includes(cap))||input.delegable.some(cap=>!input.permissions.includes(cap)))throw fail('不能授予或委派自己没有的权限。',403);
       if(previous&&(previous.role!==input.role||previous.parent_kind!==actor.kind||previous.parent_id!==actor.id&&!(previous.legacy_origin&&previous.parent_id===null&&actor.kind==='owner')))revokeRows(descendants(target),now);
       save.run(target.id,input.role,JSON.stringify(input.boards),JSON.stringify(input.permissions),JSON.stringify(input.delegable),actor.kind,actor.id,previous?.legacy_origin||0,now,now);

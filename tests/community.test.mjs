@@ -168,7 +168,8 @@ test("community routes: the landing page, pages, boards, posts, members and the 
   assert.deepEqual(route(`#/community/tag/${encodeURIComponent("Stable Diffusion")}`), { view: "tag", board: "", id: "Stable Diffusion", tab: "" });
   assert.deepEqual(route("#/community/edit/abc"), { view: "edit", board: "", id: "abc", tab: "" });
   assert.equal(route("#/community/rules").view, "rules");
-  for (const bad of ["#/community/boards/nope", "#/community/home/qa", "#/community/boards/qa/x", "#/post/", "#/post/a/b", "#/community/%E0",
+  assert.equal(route("#/community/boards/new-board-2026").view, "board", "safe deep links resolve their existence after loading the catalog");
+  for (const bad of ["#/community/boards/INVALID", "#/community/home/qa", "#/community/boards/qa/x", "#/post/", "#/post/a/b", "#/community/%E0",
     "#/community/u", "#/community/u/u1/nope", "#/community/u/u1/topics/x", "#/community/stardust/nope", "#/community/manage/x",
     "#/community/tag/没有的标签", "#/community/tag", "#/community/edit", "#/community/rules/x", "#/community/shop/nope", "#/community/inbox/all/x"])
     assert.equal(route(bad).view, "unknown", bad);
@@ -941,14 +942,14 @@ test("moderation: the queue, reports, orders with shipping details, shop items, 
       [['待审', '3'], ['待处理举报', '1'], ['24 小时新主题', '4'], ['24 小时回复', '9']]);
     assert.equal(queueDom.window.document.querySelectorAll('.community-kpis dd.is-warn').length, 2);
     assert.deepEqual([...queueDom.window.document.querySelectorAll('.community-management-nav nav a')].map(link => link.getAttribute('href')),
-      ["#/community/manage", "#/community/manage/profiles", "#/community/manage/content", "#/community/manage/banners", "#/community/manage/orders", "#/community/manage/items", "#/community/manage/stewards", "#/community/manage/sanctions", "#/community/manage/data", "#/community/manage/contact", "#/community/manage/convention"]);
+      ["#/community/manage", "#/community/manage/profiles", "#/community/manage/content", "#/community/manage/banners", "#/community/manage/boards", "#/community/manage/orders", "#/community/manage/items", "#/community/manage/stewards", "#/community/manage/sanctions", "#/community/manage/data", "#/community/manage/contact", "#/community/manage/convention"]);
   } finally { queueDom.window.close(); }
   assert.match(queue, /待审 · 初光等级，帖子带外链[\s\S]*&lt;待审&gt;[\s\S]*链接 https:\/\/a\.example[\s\S]*data-action="community-approve" data-id="p1"[\s\S]*data-action="community-reject" data-kind="topic" data-id="p1"/);
   assert.match(queue, /已自动隐藏 · 举报：其他[\s\S]*data-action="community-restore" data-kind="topic" data-id="h1"[\s\S]*data-action="community-queue-delete" data-kind="topic" data-id="h1"/);
   assert.match(queue, /回复已自动隐藏[\s\S]*data-action="community-restore" data-kind="reply" data-id="hr1"[\s\S]*data-action="community-queue-delete" data-kind="reply" data-id="hr1"/);
   assert.doesNotMatch(queue, /data-violation="true"|按违规删除/, 'deletion does not automatically authorize a penalty');
   const steward = communityManageHTML({ manage: ready(manage({ owner: false })), tab: "queue", ...common });
-  assert.doesNotMatch(steward, /manage\/orders|manage\/items|manage\/stewards|manage\/convention/, "shop, appointments and convention editing are the owner's");
+  assert.doesNotMatch(steward, /manage\/boards|manage\/orders|manage\/items|manage\/stewards|manage\/convention/, "shop, appointments and convention editing are the owner's");
   const reports = communityManageHTML({ manage: ready(manage()), tab: "reports", ...common });
   assert.match(reports, /垃圾广告 \/ 引流 · 已自动隐藏[\s\S]*href="#\/post\/t1">回复：加我领取资料<\/a>/);
   assert.match(textAt(reports, '.community-queue-main .community-muted'), /作者 远山 · 举报人 林间（观测）/);

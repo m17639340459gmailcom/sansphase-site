@@ -4,7 +4,7 @@ import { communityStaffRoles } from './community-staff.mjs';
 import type { CommunityStaffRole } from './community-staff.ts';
 
 export type ManagementSection = [id: string, href: string, label: string, count?: number];
-const sectionIcons: Record<string, string> = { review: 'check', profiles: 'user', content: 'reply', features: 'award', banners: 'image', orders: 'truck', items: 'box', stewards: 'users', sanctions: 'shield', data: 'trending', contact: 'mail', convention: 'bookmark' };
+const sectionIcons: Record<string, string> = { review: 'check', profiles: 'user', content: 'reply', features: 'award', banners: 'image', boards: 'grid', orders: 'truck', items: 'box', stewards: 'users', sanctions: 'shield', data: 'trending', contact: 'mail', convention: 'bookmark' };
 
 export function communityManagementShellHTML(owner: boolean | null, tab: string, sections: ManagementSection[], content: string, { t, esc, icons = {} }: Common, canBrowseAsReader = true, staffRole?: CommunityStaffRole | null) {
   const definition = communityStaffRoles.find(item => item.id === staffRole);

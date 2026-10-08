@@ -1,5 +1,5 @@
 import { saveCommunityImage } from './community-images.ts';
-import { communityBoards, isCommunitySort } from '../src/community.mjs';
+import { isCommunitySort } from '../src/community.mjs';
 import { communityRules, communityTags, communityReportReasons, countLinks, imageLimit } from '../src/community-rules.mjs';
 import { fail, same, memberKey } from './community-db.ts';
 import type { CommunityAuthor, Target } from './community-db.ts';
@@ -12,7 +12,6 @@ import { isCommunityPassiveRead } from './community-passive-request.ts';
 const pageSize = 20;
 const searchLimit = 40;
 const titleLimits = [4, 60] as const, topicLimits = [10, 10000] as const, replyLimits = [2, 2000] as const;
-const boardIds = new Set(communityBoards.map(board => board.id));
 const r = communityRules;
 const flag = (body: Body) => body.on !== false;
 // 发帖后可以编辑多久：站长不限，观测以上 30 天，其他 24 小时。
@@ -148,7 +147,7 @@ async function createTopic(ctx: Ctx, body: Body) {
   const { live, me, level } = ctx;
   assertNotMuted(ctx);
   const board = String(body.board || '');
-  if (!boardIds.has(board)) throw fail('请选择一个版块。');
+  if (!live.boards.has(board)) throw fail('请选择一个版块。');
   if (!ctx.canSeeBoard(board) || !canParticipateBoard(ctx, board)) throw fail('会员茶室只有 VIP 能发帖。', 403);
   // Resolve mentions before the transaction; the creation, reward, notices and
   // saved retry result then form one synchronous commit.
@@ -255,12 +254,13 @@ export async function contentRoutes(ctx: Ctx): Promise<boolean> {
         total: stats.reduce((sum, board) => sum + board.topics, 0),
         repliesToday: stats.reduce((sum, board) => sum + board.repliesToday, 0),
         checkinsToday: summary.checkinsToday, boards: summary.boards, tags: summary.tags, hot,
+        boardCatalog: live.boards.catalog(),
       });
       return true;
     }
     if (path === 'topics') {
       const board = url.searchParams.get('board') || '';
-      if (board && (!boardIds.has(board) || !ctx.canSeeBoard(board))) throw fail('没有这个版块。', 404);
+      if (board && (!live.boards.has(board) || !ctx.canSeeBoard(board))) throw fail('没有这个版块。', 404);
       const tag = url.searchParams.get('tag') || '';
       if (tag && !(communityTags as readonly string[]).includes(tag)) throw fail('没有这个标签。', 404);
       const sort = url.searchParams.get('sort') || 'active';
@@ -420,7 +420,7 @@ export async function contentRoutes(ctx: Ctx): Promise<boolean> {
           else if (topicAction[2] === 'restore') live.restore(target);
           else {
             const board = String(body.board || '');
-            if (!boardIds.has(board)) throw fail('请选择要移到的版块。');
+            if (!live.boards.has(board)) throw fail('请选择要移到的版块。');
             ctx.requireStaff('topic.move',board);
             live.move(topic.id, board);
           }

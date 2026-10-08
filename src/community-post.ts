@@ -405,7 +405,7 @@ export function communityComposeHTML({ board, members, me = null, uploads = [], 
   const moment = chosen === "moments";
   const boards = communityBoards.filter((item) => editing ? item.id === editing.board : members || item.id !== "vip").map((item) =>
     `<label class="community-bp" style="${communityBoardStyle(item.id)}"><input type="radio" id="community-board-${item.id}" name="board" value="${item.id}" required${item.id === chosen ? " checked" : ""}>`
-    + `<span class="community-bp-top"><i aria-hidden="true"></i><b>${t(item.zh, item.en)}</b></span><span class="community-bp-type">${t(...(typeNames[item.id] || ["讨论帖", "Discussion"]))}</span></label>`).join("");
+    + `<span class="community-bp-top"><i aria-hidden="true"></i><b>${esc(t(item.zh, item.en))}</b></span><span class="community-bp-type">${t(...(typeNames[item.id] || ["讨论帖", "Discussion"]))}</span></label>`).join("");
   const fields: string[] = [];
   if (simple || !moment) {
     const [titleMin, titleMax] = simple ? [1, communityLimits.title[1]] : communityLimits.title;
@@ -464,7 +464,7 @@ export function communityComposeHTML({ board, members, me = null, uploads = [], 
     + `<header class="community-page-head community-rv" style="--i:0"><div><nav class="community-crumb" aria-label="${t("位置", "Location")}"><a href="${communityHomeHref}">${t("社区", "Community")}</a>${icons["chevron-right"] || "›"}<span>${editing ? t("编辑帖子", "Edit post") : t("发帖", "New post")}</span></nav><h1>${editing ? t("编辑帖子", "Edit post") : t("发帖", "New post")}</h1></div></header>`
     + `<div class="community-compose-grid">`
     + `<form class="community-form community-compose community-rv" style="--i:1" data-community-form="topic"${editing ? ` data-edit="${esc(editing.id)}"` : ""} novalidate>`
-    + (simple ? `<input type="hidden" name="board" value="${esc(chosen)}"><div class="community-compose-destination"><span>${t('发布到', 'Posting in')}</span><strong style="${communityBoardStyle(chosen)}">${boardName(chosen, t)}</strong><a href="${boardHref(chosen)}">${t('返回板块', 'Back to board')}</a></div>` : `<fieldset class="community-choices"><legend>${t("发到哪个版块", "Board")}</legend><div class="community-board-pick">${boards}</div>${chosen === "meta" && me && !me.owner ? `<p class="community-muted">${t("站务反馈：公告只有站长能发，你发的会作为反馈建议。", "Meta: announcements come from the owner; yours is feedback.")}</p>` : ""}</fieldset>`)
+    + (simple ? `<input type="hidden" name="board" value="${esc(chosen)}"><div class="community-compose-destination"><span>${t('发布到', 'Posting in')}</span><strong style="${communityBoardStyle(chosen)}">${esc(boardName(chosen, t))}</strong><a href="${boardHref(chosen)}">${t('返回板块', 'Back to board')}</a></div>` : `<fieldset class="community-choices"><legend>${t("发到哪个版块", "Board")}</legend><div class="community-board-pick">${boards}</div>${chosen === "meta" && me && !me.owner ? `<p class="community-muted">${t("站务反馈：公告只有站长能发，你发的会作为反馈建议。", "Meta: announcements come from the owner; yours is feedback.")}</p>` : ""}</fieldset>`)
     + fields.join("")
     + `<div class="community-compose-foot"><p class="community-rules">${t("请不要留手机号、微信号等联系方式；广告和引流会被删除。", "Do not post phone numbers or other contact details; ads are removed.")} <a class="community-link-sm" href="${rulesHref}" target="_blank" rel="noopener">${t('社区公约', 'Guidelines')}</a><span class="community-shortcut">${t("Ctrl+Enter 发布", "Ctrl+Enter publishes")}</span></p>`
     + `<p class="community-form-status" role="status" aria-live="polite"></p>`

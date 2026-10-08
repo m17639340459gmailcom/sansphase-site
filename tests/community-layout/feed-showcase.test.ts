@@ -277,3 +277,26 @@ test('standalone banners require server-resolved local image UUIDs and the curre
     assert.doesNotMatch(window.document.querySelector('main')!.textContent!, /external|foreign/);
   } finally { showcase.release(); window.close(); }
 });
+
+test('dynamic board recommendations resolve their names from controller markup rather than the layout registry', () => {
+  const { window } = new JSDOM('<main></main><div id="source"></div>', { url: 'https://community.sansphase.com/#/community/boards/board-10a2' });
+  const host = window.document.querySelector('main')!, source = window.document.getElementById('source')!;
+  const showcase = createSharedFeedShowcase(host);
+  const navigation = '<div class="community-boards"><a class="community-board-link" href="#/community/boards/board-10a2" data-board-id="board-10a2" data-board-icon="box" data-board-color="#8fd0c8" data-board-light-color="#2c6d65"><span>模型讨论</span></a></div>';
+  try {
+    source.innerHTML = navigation + config('board-10a2', item('new-board-post', 'board-10a2', '新板块推荐', imageId) + item('foreign', 'qa', '其他板块'));
+    showcase.sync(source, false, 'board-10a2');
+    assert.deepEqual([...host.querySelectorAll('a')].map(card => card.getAttribute('href')), ['#/post/new-board-post']);
+    assert.equal(host.querySelector('.community-feed-showcase-meta')!.textContent, '模型讨论');
+    assert.equal(host.querySelector('img')!.getAttribute('src'), `/api/community/images/${imageId}.webp`);
+    const card = host.querySelector('a');
+    showcase.sync(source, false, 'board-10a2');
+    assert.equal(host.querySelector('a'), card);
+    source.innerHTML = navigation + config('home', item('new-board-post', 'board-10a2', '新板块推荐') + item('qa-post', 'qa', '问答推荐'));
+    showcase.sync(source, false);
+    assert.deepEqual([...host.querySelectorAll('a')].map(card => card.getAttribute('href')), ['#/post/new-board-post', '#/post/qa-post']);
+    source.querySelector('.community-board-link > span')!.textContent = 'Models';
+    showcase.sync(source, true);
+    assert.equal(host.querySelector('.community-feed-showcase-meta')!.textContent, 'Models');
+  } finally { showcase.release(); window.close(); }
+});

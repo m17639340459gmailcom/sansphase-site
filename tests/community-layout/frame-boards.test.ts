@@ -138,3 +138,77 @@ test('an unchanged summary update does not mutate board navigation or the select
   assert.deepEqual(observer.takeRecords(), [], 'a background count refresh does not touch stable sidebar nodes');
   observer.disconnect();
 });
+
+test('a board order update moves existing navigation links and preserves focus, icons and listeners', t => {
+  const { document, source, boards } = fixture(t);
+  boards.sync(source, '#/community/boards/qa', false);
+  const links = [...boards.element.querySelectorAll<HTMLAnchorElement>(':scope > a')];
+  const icons = links.map(link => link.querySelector('svg'));
+  const focused = links[0];
+  let clicks = 0;
+  focused.addEventListener('click', event => { event.preventDefault(); clicks++; });
+  focused.focus();
+  const container = source.querySelector('.community-boards')!;
+  container.append(...[...container.children].reverse());
+  boards.sync(source, '#/community/boards/qa', false);
+  const reordered = [...boards.element.querySelectorAll<HTMLAnchorElement>(':scope > a')];
+  for (const [index, link] of [...links].reverse().entries()) assert.equal(reordered[index], link);
+  for (const [index, link] of links.entries()) assert.equal(link.querySelector('svg'), icons[index]);
+  assert.equal(document.activeElement, focused);
+  assert.equal(focused.getAttribute('aria-current'), 'page');
+  focused.click();
+  assert.equal(clicks, 1);
+});
+
+test('label and membership updates retain the focused board link and its icon', t => {
+  const { document, source, boards } = fixture(t);
+  boards.sync(source, '#/community/boards/vip', false);
+  const link = boards.element.querySelector<HTMLAnchorElement>('a[href="#/community/boards/vip"]')!;
+  const icon = link.querySelector('svg');
+  link.focus();
+  source.querySelector('a[href$="/vip"] > span:first-child')!.textContent = 'Members';
+  source.querySelector<HTMLElement>('.community-board-lock')!.hidden = true;
+  boards.sync(source, '#/community/boards/vip', true);
+  assert.equal(boards.element.querySelector('a[href="#/community/boards/vip"]'), link);
+  assert.equal(link.querySelector('svg'), icon);
+  assert.equal(link.textContent, 'Members');
+  assert.equal(document.activeElement, link);
+  assert.equal(link.getAttribute('aria-current'), 'page');
+  assert.equal(link.querySelector('.community-feed-category-lock'), null);
+});
+
+test('new author-created boards use validated markup metadata without a shared runtime registry', t => {
+  const { document, source, boards } = fixture(t);
+  const container = source.querySelector('.community-boards')!;
+  container.insertAdjacentHTML('beforeend', '<a class="community-board-link" href="#/community/boards/board-10a2" data-board-id="board-10a2" data-board-icon="box" data-board-color="#8fd0c8" data-board-light-color="#2c6d65"><span>模型讨论</span><span class="community-board-count">0</span></a>');
+  assert.equal(communityBoards.some(board => board.id === 'board-10a2'), false, 'the bundled layout may have its own unchanged registry');
+  boards.sync(source, '#/community/boards/board-10a2', false);
+  const link = boards.element.querySelector<HTMLAnchorElement>('a[href="#/community/boards/board-10a2"]');
+  assert.ok(link);
+  assert.equal(link.textContent, '模型讨论');
+  assert.equal(link.getAttribute('aria-current'), 'page');
+  assert.equal(link.style.getPropertyValue('--board'), '#8fd0c8');
+  assert.equal(link.style.getPropertyValue('--board-light'), '#2c6d65');
+  assert.equal(link.querySelector('svg')!.firstElementChild!.getAttribute('d'), Box[0][1].d);
+  link.focus();
+  const icon = link.querySelector('svg');
+  container.prepend(container.lastElementChild!);
+  boards.sync(source, '#/community/new/board-10a2', false);
+  assert.equal(boards.element.querySelector(':scope > a'), link);
+  assert.equal(link.querySelector('svg'), icon);
+  assert.equal(document.activeElement, link);
+});
+
+test('new board links reject unsafe ids, mismatched metadata, unsupported icons and unsafe colors', t => {
+  const { source, boards } = fixture(t);
+  const container = source.querySelector('.community-boards')!;
+  for (const [id, metadata] of [
+    ['board-1', 'data-board-id="board-2" data-board-icon="box" data-board-color="#8fd0c8" data-board-light-color="#2c6d65"'],
+    ['board-2', 'data-board-id="board-2" data-board-icon="unknown" data-board-color="#8fd0c8" data-board-light-color="#2c6d65"'],
+    ['board-3', 'data-board-id="board-3" data-board-icon="box" data-board-color="red;display:none" data-board-light-color="#2c6d65"'],
+    ['board-4', 'data-board-id="board-4" data-board-icon="box"'],
+    ['board-5?mode=edit', 'data-board-id="board-5?mode=edit" data-board-icon="box" data-board-color="#8fd0c8" data-board-light-color="#2c6d65"'],
+  ]) container.insertAdjacentHTML('beforeend', `<a class="community-board-link" href="#/community/boards/${id}" ${metadata}><span>无效板块</span></a>`);
+  boards.sync(source, '#/community/home', false);
+  assert.equal(boards.element.querySelectorAll(':scope > a').length, communityBoards.length);
+});

@@ -29,7 +29,7 @@ export type CommunityBoard = {
 };
 
 // 版块与设计稿一致：少开版块，细分交给标签。
-export const communityBoards: readonly CommunityBoard[] = [
+export const defaultCommunityBoards: readonly CommunityBoard[] = [
   { id: "qa", zh: "学习问答", en: "Q&A", description: "学 AI 过程中遇到的具体问题。", descriptionEn: "Specific questions about learning AI.", color: "#9fb8e0", lightColor: "#41658f", icon: "help", kind: "问答帖", kindEn: "Questions",
     tips: ["标题一句话说清问题", "写清环境、报错和已经试过的办法", "问题解决了，回帖说一声"], tipsEn: ["Say the question in the title", "Include your setup, errors and what you tried", "Say so when it is solved"] },
   { id: "showcase", zh: "作品展廊", en: "Showcase", description: "用 AI 做的作品，请写清工具和模型。", descriptionEn: "Work made with AI, with tools and models noted.", color: "#e7a9c6", lightColor: "#875073", icon: "image", kind: "作品帖", kindEn: "Work",
@@ -43,6 +43,34 @@ export const communityBoards: readonly CommunityBoard[] = [
   { id: "vip", zh: "会员茶室", en: "Members", description: "只有 VIP 能看能发。", descriptionEn: "Visible to VIP members only.", color: "#c9b6f2", lightColor: "#6f5191", icon: "coffee", kind: "讨论帖", kindEn: "Discussion",
     tips: ["VIP、作者和本板块版主按权限进入", "可以聊得更随意一点", "同样不要留联系方式"], tipsEn: ["VIP members, the owner and assigned moderators enter according to their permissions", "Talk more freely", "Still no contact details"] },
 ];
+
+export type CommunityBoardCatalog = { version: number; items: CommunityBoard[] };
+export const validCommunityBoardId = (id: string) => /^[a-z][a-z0-9-]{1,47}$/.test(id);
+// Public configuration is separate from the immutable migration seed. A late
+// summary read must not roll back a catalog already confirmed by an author save.
+export let communityBoards: readonly CommunityBoard[] = defaultCommunityBoards;
+let boardCatalogVersion = -1;
+export function installCommunityBoardCatalog(catalog: CommunityBoardCatalog): boolean {
+  if (!catalog || !Number.isSafeInteger(catalog.version) || catalog.version < 0 || catalog.version <= boardCatalogVersion || !Array.isArray(catalog.items)) return false;
+  const ids = new Set<string>();
+  const icons = new Set(defaultCommunityBoards.map(board => board.icon));
+  for (const board of catalog.items) {
+    if (!board || !validCommunityBoardId(board.id) || ids.has(board.id) || !icons.has(board.icon)
+      || !/^#[\da-f]{6}$/i.test(board.color) || !/^#[\da-f]{6}$/i.test(board.lightColor)
+      || !(['zh', 'en', 'description', 'descriptionEn', 'kind', 'kindEn'] as const).every(key => typeof board[key] === 'string')
+      || !Array.isArray(board.tips) || !Array.isArray(board.tipsEn)
+      || ![...board.tips, ...board.tipsEn].every(tip => typeof tip === 'string')) return false;
+    ids.add(board.id);
+  }
+  if (defaultCommunityBoards.some(board => !ids.has(board.id))) return false;
+  communityBoards = catalog.items.map(board => ({ ...board, tips: [...board.tips], tipsEn: [...board.tipsEn] }));
+  boardCatalogVersion = catalog.version;
+  return true;
+}
+export function resetCommunityBoardCatalog() {
+  communityBoards = defaultCommunityBoards;
+  boardCatalogVersion = -1;
+}
 
 export const communityTabs = [
   ["home", "首页", "Home"],
@@ -66,7 +94,7 @@ export const communityPageTabs = {
   stardust: ["ledger", "levels", "rules"],
   inbox: ["all", "reply", "thanks", "system"],
   shop: ["all", "look", "card", "digital", "goods", "mine"],
-  manage: ["queue", "reports", "profiles", "content", "features", "banners", "orders", "items", "stewards", "sanctions", "data", "contact", "convention"],
+  manage: ["queue", "reports", "profiles", "content", "features", "banners", "boards", "orders", "items", "stewards", "sanctions", "data", "contact", "convention"],
 } as const;
 type TabbedView = keyof typeof communityPageTabs;
 const tabbed = (view: CommunityView): view is TabbedView => view in communityPageTabs;
@@ -127,7 +155,9 @@ export function communityRoute(hash: string): CommunityRoute {
   }
   if (!extra) return route({});
   if (view !== "boards" && view !== "new") return unknownRoute;
-  if (!communityBoard(extra)) return unknownRoute;
+  // Routing must work on a cold direct link, before the public catalog arrives.
+  // Existence is confirmed by the catalog/API, never inferred from the slug.
+  if (!validCommunityBoardId(extra)) return unknownRoute;
   return route({ view: view === "boards" ? "board" : view, board: extra });
 }
 export type CommunityRole = "reader" | "owner";
@@ -235,7 +265,7 @@ export type CommunityMe = CommunityPerson & {
   unread: CommunityUnread; agreed: boolean; inventory: CommunityInventory; muted: { until: string; reason: string } | null; manageTodo?: number;
 };
 export type CommunityBoardStats = { topics: number; repliesToday: number; latest: { id: string; title: string; lastActivityAt: string } | null };
-export type CommunitySummary = { total: number; repliesToday: number; checkinsToday: number; boards: Record<string, CommunityBoardStats>; tags: Record<string, number>; hot: CommunityTopic[] };
+export type CommunitySummary = { total: number; repliesToday: number; checkinsToday: number; boards: Record<string, CommunityBoardStats>; tags: Record<string, number>; hot: CommunityTopic[]; boardCatalog?: CommunityBoardCatalog };
 export type CommunityPoster = { author: CommunityPerson; topics: number };
 export type CommunityListing = { items: CommunityTopic[]; total: number; page: number; pageSize: number; posters?: CommunityPoster[]; followingCount?: number };
 // status 是接口的 HTTP 状态码：401 未登录，404 不存在，503 社区还没开放。
@@ -654,12 +684,12 @@ function checkinPill(me: CommunityMe | null, { t, icons = {} }: Common) {
 
 // 左边热门讨论和版块（带按帖子数的细条），右边排序栏和列表。
 function boardsMiniHTML(summary: CommunitySummary | null, members: boolean, common: Common) {
-  const { t, icons = {} } = common;
+  const { t, esc, icons = {} } = common;
   const max = Math.max(1, ...communityBoards.map((item) => summary?.boards[item.id]?.topics || 0));
   return communityBoards.map((item) => {
     const locked = item.id === "vip" && !members;
     const count = summary?.boards[item.id]?.topics || 0;
-    return `<a class="community-board-link" href="${boardHref(item.id)}" style="${communityBoardStyle(item.id)};--w:${locked ? 0 : Math.round(count / max * 100)}%"><i aria-hidden="true"></i><span>${t(item.zh, item.en)}</span>`
+    return `<a class="community-board-link" href="${boardHref(item.id)}" data-board-id="${esc(item.id)}" data-board-icon="${esc(item.icon)}" data-board-color="${esc(item.color)}" data-board-light-color="${esc(item.lightColor)}" style="${communityBoardStyle(item.id)};--w:${locked ? 0 : Math.round(count / max * 100)}%"><i aria-hidden="true"></i><span>${esc(t(item.zh, item.en))}</span>`
       + (locked ? `<span class="community-board-lock" aria-label="${t("仅 VIP", "VIP only")}">${icons.lock || ""}</span>` : `<span class="community-board-count">${summary ? count : ""}</span>`) + `</a>`;
   }).join("");
 }
@@ -694,7 +724,7 @@ export function communityBoardsHTML({ summary, members, ...common }: Common & { 
     const stats = ready?.boards[item.id];
     const latest = !locked && stats?.latest;
     return `<a class="community-board-card community-rv community-spot${locked ? " is-locked" : ""}" href="${boardHref(item.id)}" style="${communityBoardStyle(item.id)};--i:${i + 2}">`
-      + `<div class="community-bc-top"><span class="community-bc-icon">${icons[item.icon] || ""}</span><div class="community-bc-name"><h2>${t(item.zh, item.en)}</h2><span>${esc(item.en.toUpperCase())}</span></div>${locked ? `<span class="community-bc-lock">${icons.lock || ""}VIP</span>` : ""}</div>`
+      + `<div class="community-bc-top"><span class="community-bc-icon">${icons[item.icon] || ""}</span><div class="community-bc-name"><h2>${esc(t(item.zh, item.en))}</h2><span>${esc(item.en.toUpperCase())}</span></div>${locked ? `<span class="community-bc-lock">${icons.lock || ""}VIP</span>` : ""}</div>`
       + `<p>${esc(t(item.description, item.descriptionEn))}</p>`
       + `<dl class="community-bc-stats"><div><dt>${t("类型", "Type")}</dt><dd>${t(item.kind, item.kindEn)}</dd></div><div><dt>${t("主题", "Topics")}</dt><dd>${ready ? visibleCount(stats?.topics, locked) : "—"}</dd></div><div><dt>${t("24 小时回复", "Replies · 24 h")}</dt><dd>${ready ? visibleCount(stats?.repliesToday, locked) : "—"}</dd></div></dl>`
       + `<div class="community-bc-latest">${latest ? `<span>${t("最新", "Latest")}</span><b>${esc(latest.title)}</b><time datetime="${esc(latest.lastActivityAt)}">${relativeTime(latest.lastActivityAt, now, t)}</time>` : `<span>${locked ? t("开通 VIP 后可见", "Visible to VIP members") : ready ? t("还没有帖子", "No posts yet") : ""}</span>`}</div>`
@@ -714,14 +744,15 @@ type BoardOptions = Common & { board: string; summary: CommunityLoad<CommunitySu
 
 export function communityBoardHTML({ board, summary, list, sort, query = "", members, me = null, showPostingTips = true, showActiveMembers = true, ...common }: BoardOptions) {
   const { t, esc, icons = {} } = common;
-  const item = communityBoard(board)!;
+  const item = communityBoard(board);
+  if (!item) return `<section class="page community-page" data-community="board">${communityStatusHTML(summary.state === 'loading' ? summary : summary.state === 'error' ? summary : { state: 'error', status: 404, message: t('这个板块不存在。', 'This board does not exist.') }, common)}</section>`;
   const locked = board === "vip" && !members;
   const stats = readyData(summary)?.boards[board];
   const known = summary.state === "ready";
   const hero = `<header class="community-board-hero community-rv" style="--i:0"><div class="community-bh-glow" aria-hidden="true"></div>`
-    + `<nav class="community-crumb" aria-label="${t("位置", "Location")}"><a href="#/community/boards">${t("版块", "Boards")}</a>${icons["chevron-right"] || "›"}<span>${t(item.zh, item.en)}</span></nav>`
+    + `<nav class="community-crumb" aria-label="${t("位置", "Location")}"><a href="#/community/boards">${t("版块", "Boards")}</a>${icons["chevron-right"] || "›"}<span>${esc(t(item.zh, item.en))}</span></nav>`
     + `<div class="community-bh-row"><span class="community-bc-icon is-large">${icons[item.icon] || ""}</span>`
-    + `<div class="community-bh-text"><div class="eyebrow">${esc(item.en.toUpperCase())} · ${t(item.kind, item.kindEn)}</div><h1>${t(item.zh, item.en)}</h1><p>${esc(t(item.description, item.descriptionEn))}</p><a class="community-link-sm community-board-rules" href="${rulesHref}">${t('板块规则与版主联系', 'Board rules and moderator contacts')}</a></div>`
+    + `<div class="community-bh-text"><div class="eyebrow">${esc(item.en.toUpperCase())} · ${t(item.kind, item.kindEn)}</div><h1>${esc(t(item.zh, item.en))}</h1><p>${esc(t(item.description, item.descriptionEn))}</p><a class="community-link-sm community-board-rules" href="${rulesHref}">${t('板块规则与版主联系', 'Board rules and moderator contacts')}</a></div>`
     + `<dl class="community-stats"><div><dt>${t("主题", "Topics")}</dt><dd>${known ? visibleCount(stats?.topics, locked) : "—"}</dd></div><div><dt>${t("24 小时回复", "Replies · 24 h")}</dt><dd>${known ? visibleCount(stats?.repliesToday, locked) : "—"}</dd></div></dl></div></header>`;
   if (locked) {
     return `<section class="page community-page" data-community="board" data-board="${esc(board)}" style="${communityBoardStyle(item.id)}">${hero}`

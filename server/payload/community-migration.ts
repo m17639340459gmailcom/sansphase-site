@@ -2,7 +2,7 @@ import { DatabaseSync, backup } from 'node:sqlite';
 import { mkdir, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { communityBoards } from '../../src/community.ts';
+import { defaultCommunityBoards } from '../../src/community.ts';
 import { communityLegacyStaffPermissions } from '../community-staff.ts';
 
 // Community posts are durable reader content, so they live in content.db and
@@ -11,6 +11,14 @@ import { communityLegacyStaffPermissions } from '../community-staff.ts';
 // this explicit, backed-up migration adds the community tables.
 const member = (prefix = 'member') => `${prefix}_kind TEXT NOT NULL CHECK(${prefix}_kind IN ('reader','owner')), ${prefix}_id TEXT NOT NULL`;
 const tables: Record<string, string> = {
+  community_board_catalog: `CREATE TABLE community_board_catalog (
+  id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL DEFAULT 0 CHECK(version>=0)
+);
+INSERT INTO community_board_catalog(id,version) VALUES(1,0);`,
+  community_boards: `CREATE TABLE community_boards (
+  id TEXT PRIMARY KEY, position INTEGER NOT NULL UNIQUE CHECK(position>=0),
+  definition TEXT NOT NULL CHECK(json_valid(definition)), created_at TEXT NOT NULL, actor_id TEXT NOT NULL
+);`,
   community_staff: `CREATE TABLE community_staff (
   member_kind TEXT NOT NULL CHECK(member_kind='reader'), member_id TEXT NOT NULL,
   role TEXT NOT NULL CHECK(role IN ('general','moderator','assistant')),
@@ -576,7 +584,7 @@ function snapshotHighlights(db: DatabaseSync) {
     ORDER BY t.pinned DESC,t.last_activity_at DESC`).all() as Array<{ id: string; board: string; pinned: number; featured: number; has_image: number }>;
   const config = db.prepare('INSERT INTO community_banners(scope,version) VALUES(?,?)');
   const insert = db.prepare("INSERT INTO community_banner_entries(scope,position,topic_id,topic_board,title,cover) VALUES(?,?,?,?,'',NULL)");
-  for (const scope of ['home', ...communityBoards.map(board => board.id)]) {
+  for (const scope of ['home', ...defaultCommunityBoards.map(board => board.id)]) {
     const scoped = topics.filter(topic => scope === 'home' ? topic.board !== 'vip' : topic.board === scope).slice(0, 20);
     const pinned = scoped.filter(topic => topic.pinned).slice(0, 4);
     const chosen = [...pinned, ...scoped.filter(topic => !topic.pinned && topic.featured && topic.has_image).slice(0, Math.min(2, 4 - pinned.length))];
@@ -606,6 +614,11 @@ export async function migrateCommunity(directory: string) {
     db.exec('BEGIN IMMEDIATE');
     try {
       for (const name of tablesMissing) db.exec(tables[name]);
+      if (tablesMissing.includes('community_boards')) {
+        const insert = db.prepare('INSERT INTO community_boards(id,position,definition,created_at,actor_id) VALUES(?,?,?,?,?)');
+        const now = new Date().toISOString();
+        defaultCommunityBoards.forEach((board, index) => insert.run(board.id, index, JSON.stringify(board), now, 'migration'));
+      }
       // Tables created just now also need the later columns.
       for (const [table, column, type] of missingParts(db).columnsMissing) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
       if (imagesPurposeUpgrade) extendImagePurpose(db);
@@ -613,7 +626,7 @@ export async function migrateCommunity(directory: string) {
       if (shopCoverUpgrade) extendShopCover(db);
       if (backgroundReviewerUpgrade) extendBackgroundReviewer(db);
       if (tablesMissing.includes('community_staff')) {
-        const validBoards=communityBoards.map(board=>board.id);
+        const validBoards=defaultCommunityBoards.map(board=>board.id);
         const legacyRows=db.prepare("SELECT member_id,steward_boards,created_at FROM community_members WHERE member_kind='reader' AND steward=1").all() as Array<{member_id:string;steward_boards:string|null;created_at:string}>;
         const save=db.prepare("INSERT INTO community_staff(member_kind,member_id,role,boards,permissions,delegable,parent_kind,parent_id,legacy_origin,legacy_live,created_at,updated_at)VALUES('reader',?,'moderator',?,?,'[]','owner',NULL,1,1,?,?)");
         for(const row of legacyRows){let scope:unknown=null;try{scope=row.steward_boards===null?validBoards:JSON.parse(row.steward_boards);}catch{/* Damaged appointments fail closed. */}

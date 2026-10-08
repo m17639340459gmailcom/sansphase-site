@@ -112,7 +112,7 @@ export function createCommunityService(options: ServiceOptions) {
     const requireStaff: Ctx['requireStaff'] = (permission, board) => { if (!canStaff(permission, board)) throw fail('管理权限发生变化，或没有这项操作的权限。', 403); };
     const canModerateBoard = (board: string) => canStaff('content.inspect', board);
     viewer = { ...viewer, vip: ownerReaderPreview !== null || viewer.vip && !browsingAsReader };
-    const canSeeBoard = (board: string) => board !== membersBoard || viewer.vip || owner || moderationBoards().includes(board);
+    const canSeeBoard = (board: string) => live.boards.has(board) && (board !== membersBoard || viewer.vip || owner || moderationBoards().includes(board));
     const person = (author: CommunityAuthor, map: Map<string, PersonInfo>) => {
       const info = map.get(memberKey(author));
       if (!info) return { name: '已注销用户', role: author.kind, uid: null, avatar: null, vip: false, level: 0, growth: null, vipGrowth: null, frame: null, color: null };

@@ -1274,10 +1274,13 @@ for (const mode of [null, false, true, 'hk', 'hk-reduced']) test(typeof mode ===
       assert.deepEqual(community.lastDelete,{reason:'违规回复，已核实',violation:true,mute:7});
     });
     await t.test('unknown community pages and the way out', async()=>{
-      for(const route of ['community/nope','community/boards/nope','community/home/extra']) {
+      for(const route of ['community/nope','community/boards/INVALID','community/home/extra']) {
         await navigate(route);
         assert.match(q('main').textContent,/这个角落还没有内容/,route);
       }
+      await navigate('community/boards/nope');
+      assert.match(q('main').textContent,/这个板块不存在/,'safe board URLs confirm existence after reading the catalog');
+      assert.ok(q('#site-header').classList.contains('community-header'),'a missing board keeps the community navigation');
       await navigate('notes');
       assert.ok(!q('#site-header').classList.contains('community-header'));
       assert.ok(!d.body.classList.contains('community-open'));

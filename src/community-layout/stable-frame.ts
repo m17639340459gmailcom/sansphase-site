@@ -1,9 +1,10 @@
-import { communityRoute, communityBoard, inCommunityArea } from '../community.ts';
+import { communityRoute, defaultCommunityBoards, inCommunityArea } from '../community.ts';
 import { createFeedShell } from './feed-shell.ts';
 import { enhanceTrending } from './trending.ts';
 import { createFrameBoards } from './frame-boards.ts';
 import { createSharedFeedShowcase } from './feed-showcase.ts';
 import { createFrameThreadSidebar } from './frame-thread-sidebar.ts';
+import { readCategories } from './board-links.ts';
 
 type FrameWindow = Pick<Window, 'location' | 'matchMedia'> & Partial<Pick<Window, 'requestAnimationFrame' | 'cancelAnimationFrame' | 'history'>>;
 /** Persistent community shell; the controller owns routes, identity and writes. */
@@ -214,7 +215,10 @@ export function createStableCommunityFrame(document: Document, window: FrameWind
     const english = document.documentElement.lang.startsWith('en');
     const current = communityRoute(window.location.hash), view = current.view;
     const activityBoard = data.querySelector<HTMLElement>('[data-frame-board]')?.dataset.frameBoard || '';
-    const board = communityBoard(activityBoard);
+    const boardNavigation = data.querySelector<HTMLElement>('.community-boards');
+    const board = defaultCommunityBoards.find(item => item.id === activityBoard);
+    const boardLabel = (boardNavigation ? readCategories(boardNavigation).find(item => item.id === activityBoard)?.label : null)
+      || (board ? english ? board.en : board.zh : '');
     root.dataset.frameView = view;
     root.dataset.frameBoard = activityBoard;
     boards.sync(data, window.location.hash, english);
@@ -240,7 +244,7 @@ export function createStableCommunityFrame(document: Document, window: FrameWind
       }
     }
     const title = overview?.querySelector('h2');
-    const label = board ? english ? `${board.en} activity` : `${board.zh}动态` : english ? 'Community activity' : '社区动态';
+    const label = boardLabel ? english ? `${boardLabel} activity` : `${boardLabel}动态` : english ? 'Community activity' : '社区动态';
     if (title && title.textContent !== label) title.textContent = label;
     const hot = data.querySelector<HTMLElement>('.community-aside > .community-card');
     const hotSlot = right.querySelector<HTMLElement>('[data-frame-hot]');

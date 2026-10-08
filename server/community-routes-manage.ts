@@ -1,4 +1,3 @@
-import { communityBoards } from '../src/community.mjs';
 import { communityReviewReasons, communityShopCats, communityNameEffect } from '../src/community-rules.mjs';
 import { fail, memberKey } from './community-db.ts';
 import type { CommunityAuthor } from './community-db.ts';
@@ -12,10 +11,10 @@ import type { BadgeFamilyId, BadgeTier } from '../src/community-badge-policy.ts'
 import type { BadgeReview, BadgeSource } from './community-badges.ts';
 import { communityProfileReviews } from './community-routes-profile.ts';
 
-const tabs = ['queue', 'reports', 'content', 'orders', 'items', 'stewards', 'sanctions', 'data', 'banners', 'contact', 'convention', 'profiles', 'features'] as const;
+const tabs = ['queue', 'reports', 'content', 'orders', 'items', 'stewards', 'sanctions', 'data', 'banners', 'contact', 'convention', 'profiles', 'features', 'boards'] as const;
 // Commerce and the convention stay owner-only; staff tools use individual grants.
-const ownerTabs = new Set(['orders', 'items', 'convention']);
-const canTab=(ctx:Ctx,tab:string)=>ctx.owner || tab==='contact' || (tab==='stewards'?ctx.canStaff('staff.appoint'):tab==='sanctions'?ctx.canStaff('member.mute')||ctx.canStaff('member.unmute'):tab==='profiles'?ctx.staff?.permissions.some(cap=>cap.startsWith('profile.')):ctx.moderationBoards.some(board=>ctx.canStaff(tab==='reports'?'report.review':tab==='banners'?'banner.manage':tab==='features'?'feature.decide':'content.inspect',board)) && (tab!=='features'||ctx.staff?.role!=='assistant'));
+const ownerTabs = new Set(['orders', 'items', 'convention', 'boards']);
+const canTab=(ctx:Ctx,tab:string)=>ctx.owner || !ownerTabs.has(tab) && (tab==='contact' || (tab==='stewards'?ctx.canStaff('staff.appoint'):tab==='sanctions'?ctx.canStaff('member.mute')||ctx.canStaff('member.unmute'):tab==='profiles'?ctx.staff?.permissions.some(cap=>cap.startsWith('profile.')):ctx.moderationBoards.some(board=>ctx.canStaff(tab==='reports'?'report.review':tab==='banners'?'banner.manage':tab==='features'?'feature.decide':'content.inspect',board)) && (tab!=='features'||ctx.staff?.role!=='assistant')));
 const whole = (value: unknown, label: string, min: number, max: number) => {
   const number = Number(value);
   if (!Number.isInteger(number) || number < min || number > max) throw fail(`${label}需要是 ${min} 到 ${max} 之间的整数。`);
@@ -85,8 +84,14 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
   }
   if (method === 'GET' && path === 'manage') {
     const tab = (tabs as readonly string[]).includes(url.searchParams.get('tab') || '') ? url.searchParams.get('tab')! : 'queue';
-    if (ownerTabs.has(tab) && !ctx.owner) throw fail(tab === 'stewards' ? '只有作者能管理版主。' : tab === 'convention' ? '只有作者能修改社区公约。' : '只有站长能管理兑换所。', 403);
+    if (ownerTabs.has(tab) && !ctx.owner) throw fail(tab === 'boards' ? '只有作者能管理社区板块。' : tab === 'convention' ? '只有作者能修改社区公约。' : '只有站长能管理兑换所。', 403);
     if(!canTab(ctx,tab))throw fail('没有这个管理通道的权限。',403);
+    if (tab === 'boards') {
+      // Catalog editing has no dependency on people, review queues or commerce data.
+      ctx.send({ tab, owner: ctx.owner, moderationBoards: ctx.moderationBoards, actorStaff: ctx.staff,
+        allowedTabs: tabs.filter(item => canTab(ctx, item)), boardCatalog: live.boards.catalog() });
+      return true;
+    }
     const moderationBoards = ctx.moderationBoards;
     const staffSnapshot=JSON.stringify(ctx.staff);
     const allQueue = live.queue();
@@ -150,6 +155,7 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
     });
     ctx.send({
       tab, owner: ctx.owner, moderationBoards: ctx.moderationBoards, actorStaff:ctx.staff, allowedTabs:tabs.filter(tab=>canTab(ctx,tab)&&(!ownerTabs.has(tab)||ctx.owner)),
+      boardCatalog: live.boards.catalog(),
       ...(profileReviews || {}),
       ...(tab === 'stewards' ? { stewards: stewards.map(member => ({...ctx.person(member, map),staff:live.staff.state(member),canAppoint:live.staff.canAppoint(ctx.me,member)})) } : {}),
       ...(tab === 'features'?{features:features.filter(row=>[row.by,...live.staff.ancestors(row.by)].filter(member=>member.kind==='reader').every(member=>map.get(memberKey(member))?.active===true)&&live.featureRecommendations.pending(ctx.me).some(current=>current.id===row.id)).flatMap(row=>{const topic=live.topic(row.topicId);return topic?[{id:row.id,topic:ctx.topicDTO({...topic,replies:topic.replyCount},map),by:ctx.person(row.by,map),reason:row.reason,createdAt:row.createdAt}]:[];})}:{}),
@@ -181,7 +187,7 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
       items: ctx.owner ? live.economy.customItems() : [],
       categories: ctx.owner ? live.economy.categories() : [],
       sanctions: sanctions.map(sanction => ({ ...sanction, member: ctx.person(sanction.member, map) })),
-      data: tab === 'data' ? { flow: ctx.owner ? live.ledger.flow(7) : [], boards: communityBoards.filter(board => ctx.canModerateBoard(board.id)).map(board => ({ id: board.id, topics: activity.boards[board.id] || 0 })) } : null,
+      data: tab === 'data' ? { flow: ctx.owner ? live.ledger.flow(7) : [], boards: live.boards.list().filter(board => ctx.canModerateBoard(board.id)).map(board => ({ id: board.id, topics: activity.boards[board.id] || 0 })) } : null,
     });
     return true;
   }
@@ -198,6 +204,19 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
   }
   const body = await ctx.json();
   if (!ctx.mod) throw fail('当前身份没有社区管理权限。', 403);
+  if (path === 'manage/boards' || path === 'manage/boards/order') {
+    if (!ctx.owner) throw fail('只有作者能创建和排列社区板块。', 403);
+    const ordering = path.endsWith('/order');
+    const keys = ordering ? ['ids', 'version'] : ['name', 'description', 'icon', 'id'];
+    if (Object.keys(body).some(key => !keys.includes(key))) throw fail('板块请求格式无效。');
+    ctx.throttle('action');
+    const saved = await ctx.auditMutation(ordering ? 'board-order' : 'board-create', () => {
+      if (!ctx.owner || ctx.browsingAsReader) throw fail('请先返回作者管理身份。', 403);
+      return ordering ? live.boards.reorder(body.ids, ctx.me, body.version) : live.boards.create(body, ctx.me);
+    }, result => ({ version: result.version, ids: result.items.map(board => board.id) }));
+    ctx.send(saved, ordering ? 200 : 201);
+    return true;
+  }
   const badgeReview = /^manage\/badges\/([^/]+)\/review$/.exec(path);
   if (badgeReview) {
     if (!ctx.owner) throw fail('只有作者能复核徽章荣誉。', 403);

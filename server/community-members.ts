@@ -4,7 +4,6 @@ import {
   communityLevelRules, communityCleanDays, communityNoticeGroups, communityBadges, beijingDay, decorationKinds,
 } from '../src/community-rules.mjs';
 import type { LevelStat, DecorationKind } from '../src/community-rules.ts';
-import { communityBoards } from '../src/community.mjs';
 import { countOf, same, memberKey, parseJson, day, iso, fail } from './community-db.ts';
 import type { CommunityAuthor } from './community-db.ts';
 import { storedModerationContact, validateModerationContact } from './community-moderation-contact.ts';
@@ -28,13 +27,12 @@ export type MemberStats = {
   accepted: number; featured: number; topics: number; replies: number; violations30: number; violations180: number;
 };
 const monthStart = (now: number) => iso(Date.parse(`${beijingDay(now).slice(0, 7)}-01T00:00:00+08:00`));
-const moderationBoardIds = communityBoards.map(board => board.id);
-const validModerationBoards = (value: unknown): value is string[] => Array.isArray(value) && value.length > 0
-  && value.every(board => typeof board === 'string' && moderationBoardIds.includes(board)) && new Set(value).size === value.length;
-const orderedModerationBoards = (boards: readonly string[]) => moderationBoardIds.filter(board => boards.includes(board));
 
 // Members: trust levels, visits, stewards, decorations, follows, notifications, badges and sanctions.
-export function createMembers(db: DatabaseSync, convention: Pick<ReturnType<typeof createCommunityConvention>, 'state'>, tx: Transaction, staff: ReturnType<typeof createCommunityStaff>) {
+export function createMembers(db: DatabaseSync, convention: Pick<ReturnType<typeof createCommunityConvention>, 'state'>, tx: Transaction, staff: ReturnType<typeof createCommunityStaff>, boardIds:()=>string[]) {
+  const validModerationBoards = (value: unknown): value is string[] => Array.isArray(value) && value.length > 0
+    && value.every(board => typeof board === 'string' && boardIds().includes(board)) && new Set(value).size === value.length;
+  const orderedModerationBoards = (boards: readonly string[]) => boardIds().filter(board => boards.includes(board));
   const ensureRow = db.prepare('INSERT OR IGNORE INTO community_members (member_kind, member_id, created_at) VALUES (?, ?, ?)');
   const memberRow = db.prepare('SELECT level, level_day, steward, steward_boards, frame, name_color, cover, agreed_at, created_at FROM community_members WHERE member_kind = ? AND member_id = ?');
   const saveLevel = db.prepare('UPDATE community_members SET level = ?, level_day = ? WHERE member_kind = ? AND member_id = ?');
@@ -160,7 +158,7 @@ export function createMembers(db: DatabaseSync, convention: Pick<ReturnType<type
   }
   function moderationScope(current: MemberRow | undefined): string[] {
     if (!current?.steward) return [];
-    if (current.steward_boards === null) return [...moderationBoardIds];
+    if (current.steward_boards === null) return boardIds();
     const stored = parseJson<unknown>(current.steward_boards, null);
     // Damaged scope data must never restore an unrestricted appointment.
     return validModerationBoards(stored) ? orderedModerationBoards(stored) : [];

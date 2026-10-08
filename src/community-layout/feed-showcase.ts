@@ -1,5 +1,6 @@
 import { createFeedCarousel } from "./feed-carousel.ts";
-import { communityBoard, imageSrc } from "../community.ts";
+import { defaultCommunityBoards, imageSrc } from "../community.ts";
+import { readCategories } from './board-links.ts';
 export { communityFrameBannersHTML } from '../community-frame-banners.mjs';
 
 type Highlight = {
@@ -28,7 +29,7 @@ function postLink(anchor: HTMLAnchorElement): string | null {
   return href;
 }
 
-function recommendations(config: HTMLElement | undefined, scope: string, english: boolean): Highlight[] {
+function recommendations(config: HTMLElement | undefined, scope: string, boardNames: ReadonlyMap<string, string>): Highlight[] {
   const items: Highlight[] = [];
   const selected = new Set<string>();
   if (config?.dataset.frameBannersState !== 'ready') return items;
@@ -44,9 +45,9 @@ function recommendations(config: HTMLElement | undefined, scope: string, english
     }
     if (source.tagName !== 'A') continue;
     const href = postLink(source as HTMLAnchorElement);
-    const board = communityBoard(boardId);
-    if (!href || !title || !board || (scope !== 'home' && scope !== boardId) || selected.has(href)) continue;
-    items.push({ href, title, board: english ? board.en : board.zh, image: imageId.test(image) ? imageSrc(image, false) : null });
+    const boardName = boardNames.get(boardId);
+    if (!href || !title || !boardName || (scope !== 'home' && scope !== boardId) || selected.has(href)) continue;
+    items.push({ href, title, board: boardName, image: imageId.test(image) ? imageSrc(image, false) : null });
     selected.add(href);
     if (items.length === 5) break;
   }
@@ -119,7 +120,10 @@ export function createSharedFeedShowcase(host: HTMLElement) {
       }
       const scope = board || 'home';
       const config = [...source.querySelectorAll<HTMLElement>('[data-frame-banners-state]')].find(node => node.dataset.frameBannersScope === scope);
-      const items = recommendations(config, scope, english);
+      const boardNames = new Map(defaultCommunityBoards.map(item => [item.id, english ? item.en : item.zh]));
+      const navigation = source.querySelector<HTMLElement>('.community-boards');
+      if (navigation) for (const item of readCategories(navigation)) boardNames.set(item.id, item.label);
+      const items = recommendations(config, scope, boardNames);
       const loading = config?.dataset.frameBannersState === 'loading';
       const failed = config?.dataset.frameBannersState === 'error';
       const empty = config?.dataset.frameBannersState === 'ready' && items.length === 0;

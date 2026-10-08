@@ -6,7 +6,7 @@ import {
   avatarHTML, whoHTML, nameHTML, nameLabelHTML, growthChipHTML, levelMarksHTML, roleChipHTML, badgeHTML, cardHead, moreLink, bannerHTML, statsHTML, emptyHTML, communityManagementRole, communityManagementHref, communityReaderReadOnly,
   communityStatusHTML, communityTopicsHTML, communityBodyHTML, relativeTime, beijingTime, readyData, communityLevelName, plainText,
 } from './community.mjs';
-import type { Common, CommunityLoad, CommunityMe, CommunityPerson, CommunityTopic, CommunityUnread, CommunityInventory, CommunityModerationContacts, Translate } from './community.ts';
+import type { Common, CommunityLoad, CommunityMe, CommunityPerson, CommunityTopic, CommunityUnread, CommunityInventory, CommunityModerationContacts, CommunityBoardCatalog, Translate } from './community.ts';
 import {
   communityRules, communityLevels, communityBadges, communityCheckinBadges,
   communityShopCats, communityReportReasons, communityReviewReasons, checkinMonth, beijingDay,
@@ -25,6 +25,8 @@ import type { CommunityTarget } from './community-post.ts';
 import { checkinStarsHTML } from './community-checkin-stars.mjs';
 import { communityBannerEditorHTML } from './community-banner-editor.mjs';
 import type { CommunityBannerEditorState } from './community-banner-editor.ts';
+import { communityBoardEditorHTML } from './community-board-editor.mjs';
+import type { CommunityBoardEditorState } from './community-board-editor.ts';
 import type { CommunityBannerConfig } from './community-banners.ts';
 import { communityLevelExplorerHTML } from './community-level-explorer.mjs';
 import type { CommunityLevelSelection } from './community-level-explorer.ts';
@@ -106,6 +108,7 @@ export type CommunityGoodsOrder = CommunityOrder & { member: CommunityPerson; sh
 export type CommunityManagedItem = ShopItem & { active: boolean; delivery: string };
 export type CommunitySanction = { id: string; member: CommunityPerson; days: number; reason: string; until: string; createdAt: string; state?: 'active' | 'expired' | 'lifted'; active?: boolean; liftedAt?: string | null };
 export type CommunityManage = {
+  boardCatalog?: CommunityBoardCatalog;
   actorStaff?: CommunityStaffState | null;
   features?: Array<{ id: string; topic: CommunityTopic; by: CommunityPerson; reason: string; createdAt: string }>;
   profiles?: CommunityProfileReview[];
@@ -122,6 +125,7 @@ export type CommunityManage = {
   orders: CommunityGoodsOrder[]; items: CommunityManagedItem[]; sanctions: CommunitySanction[];
   data: { flow: Array<{ day: string; issued: number; recovered: number }>; boards: Array<{ id: string; topics: number }> } | null;
 };
+export type CommunityBoardManagement = Pick<CommunityManage, 'tab' | 'owner' | 'moderationBoards' | 'actorStaff' | 'allowedTabs'> & { boardCatalog: CommunityBoardCatalog };
 
 const pageOf = (view: string, common: Common, load: CommunityLoad<unknown>, head = "") =>
   `<section class="page community-page" data-community="${view}">${head}${communityStatusHTML(load, common)}</section>`;
@@ -665,7 +669,7 @@ function moderationContactFormHTML(me: CommunityMe, { t, esc }: Common) {
     + `<p class="community-form-status" role="status" aria-live="polite"></p><div class="community-form-actions is-start"><button type="submit" class="community-button is-gold">${t('保存联系方式', 'Save contact')}</button></div></form>`;
 }
 
-type ManageOptions = Common & { manage: CommunityLoad<CommunityManage>; tab: string; itemEditing?: CommunityItemEditing | null; shippingOrder?: string | null; deleting?: CommunityTarget | null; me?: CommunityMe | null; selectedReviews?: string[]; managementBoard?: string; stewardCandidate?: CommunityLoad<CommunityMember> | null; stewardEditingUid?: string | null; bannerEditor?: CommunityBannerEditorState; convention?: CommunityLoad<CommunityConvention> | null };
+type ManageOptions = Common & { manage: CommunityLoad<CommunityManage>; tab: string; itemEditing?: CommunityItemEditing | null; shippingOrder?: string | null; deleting?: CommunityTarget | null; me?: CommunityMe | null; selectedReviews?: string[]; managementBoard?: string; stewardCandidate?: CommunityLoad<CommunityMember> | null; stewardEditingUid?: string | null; bannerEditor?: CommunityBannerEditorState; boardEditor?: CommunityBoardEditorState; convention?: CommunityLoad<CommunityConvention> | null };
 function shippingFormHTML(id: string, common: Common) {
   const { t, esc } = common;
   return `<form class="community-panel community-ship-panel" data-community-form="ship" data-id="${esc(id)}" novalidate><p class="community-panel-title">${t("填写快递信息（可选）", "Shipping details (optional)")}</p><div class="community-field-grid"><div class="community-field"><label class="community-field-l" for="community-ship-company">${t("快递公司", "Courier")}</label><input id="community-ship-company" name="company" type="text" maxlength="40" autocomplete="organization"></div><div class="community-field"><label class="community-field-l" for="community-ship-tracking">${t("快递单号", "Tracking number")}</label><input id="community-ship-tracking" name="tracking" type="text" maxlength="80" autocomplete="off"></div></div><p class="community-muted">${t("收件人、手机号和地址会在发货后删除，单号会保留。", "Recipient, phone and address are deleted after shipping; the tracking number is retained.")}</p><p class="community-form-status" role="status" aria-live="polite"></p><div class="community-form-actions"><button type="button" class="community-button" data-action="community-ship-cancel">${t("取消", "Cancel")}</button><button type="submit" class="community-button is-good">${t("确认已发货", "Mark shipped")}</button></div></form>`;
@@ -674,7 +678,7 @@ function rejectPanelHTML(id: string, common: Common, selected = 0) {
   const { t, esc } = common;
   return `<form class="community-panel is-danger community-reject-panel" data-community-form="reject" data-id="${esc(id)}"${selected ? ' data-batch="true"' : ''} novalidate><p class="community-panel-title">${selected ? t(`批量不通过 · ${selected} 个帖子`, `Reject ${selected} posts`) : t("审核不通过", "Reject post")}</p><fieldset><legend>${t("请选择理由", "Reason")}</legend><div class="community-radio-list">${communityReviewReasons.map(reason => { const labels = reviewReasonLabels[reason] || [reason, reason]; return `<label><input type="radio" name="reason" value="${esc(reason)}" required><span>${esc(t(labels[0], labels[1]))}</span></label>`; }).join("")}</div></fieldset><div class="community-field"><label class="community-field-l" for="community-reject-note">${t("补充说明（可选）", "Details (optional)")}</label><input id="community-reject-note" name="note" type="text" maxlength="200"></div><p class="community-form-status" role="status" aria-live="polite"></p><div class="community-form-actions"><button type="button" class="community-button" data-action="community-reject-cancel">${t("取消", "Cancel")}</button><button type="submit" class="community-button is-danger">${t("确认不通过", "Reject")}</button></div></form>`;
 }
-export function communityManageHTML({ manage, tab, itemEditing = null, shippingOrder = null, rejecting = null, deleting = null, me = null, selectedReviews = [], managementBoard = '', stewardCandidate = null, stewardEditingUid = null, bannerEditor, convention = null, ...common }: ManageOptions & { rejecting?: string | null }) {
+export function communityManageHTML({ manage, tab, itemEditing = null, shippingOrder = null, rejecting = null, deleting = null, me = null, selectedReviews = [], managementBoard = '', stewardCandidate = null, stewardEditingUid = null, bannerEditor, boardEditor, convention = null, ...common }: ManageOptions & { rejecting?: string | null }) {
   const { t, esc, now = Date.now(), icons = {} } = common;
   const data = readyData(manage);
   const dialog = (content: string, title: string) => `<div class="community-management-dialog"><div role="dialog" aria-modal="true" aria-label="${esc(title)}">${content}</div></div>`;
@@ -685,14 +689,14 @@ export function communityManageHTML({ manage, tab, itemEditing = null, shippingO
   const staffRole = communityStaffRoles.find(item => item.id === staff?.role);
   const head = pageHead('', staffRole ? t(`${staffRole.name}社区管理`, `${staffRole.nameEn} community management`) : owner === true ? t('作者社区管理', 'Owner community management') : owner === false ? t('版主社区管理', 'Moderator community management') : t('社区管理', 'Community management'), t('处理社区内容与事务，管理操作会留下记录。', 'Manage community content and operations. Actions are recorded.'));
   const taskKpi = (id: 'queue' | 'reports', label: string, count: number | undefined) => { const allowed = mayManage && permitted(id === 'queue' ? 'content.inspect' : 'report.review'); return `<div${allowed ? ` class="community-management-kpi${tab === id ? ' is-selected' : ''}"` : ''}><dt>${allowed ? `<a href="${manageHref(id)}" data-community-management-switch="${id}"${tab === id ? ' aria-current="page"' : ''}>${label}${icons['chevron-right'] || ''}</a>` : label}</dt><dd${count ? ' class="is-warn"' : ''}>${count ?? '—'}</dd></div>`; };
-  const kpis = `<dl class="community-kpis community-rv" style="--i:1">${taskKpi('queue', t('待审', 'Queue'), data?.counts.queue)}${taskKpi('reports', t('待处理举报', 'Open reports'), data?.counts.reports)}<div><dt>${t("24 小时新主题", "Topics · 24 h")}</dt><dd>${data?.kpis.topics24h ?? '—'}</dd></div><div><dt>${t("24 小时回复", "Replies · 24 h")}</dt><dd>${data?.kpis.replies24h ?? '—'}</dd></div></dl>`;
+  const kpis = tab === 'boards' ? '' : `<dl class="community-kpis community-rv" style="--i:1">${taskKpi('queue', t('待审', 'Queue'), data?.counts.queue)}${taskKpi('reports', t('待处理举报', 'Open reports'), data?.counts.reports)}<div><dt>${t("24 小时新主题", "Topics · 24 h")}</dt><dd>${data?.kpis.topics24h ?? '—'}</dd></div><div><dt>${t("24 小时回复", "Replies · 24 h")}</dt><dd>${data?.kpis.replies24h ?? '—'}</dd></div></dl>`;
   const all: Array<[string, string, string, number?]> = (!mayManage ? [] : [
-    ...(permitted('content.inspect') || permitted('report.review') ? [["review", manageHref(permitted('content.inspect') ? 'queue' : 'reports'), t("内容审核", "Content review"), data ? data.counts.queue + data.counts.reports : undefined]] as Array<[string, string, string, number?]> : []),
+    ...(permitted('content.inspect') || permitted('report.review') ? [["review", manageHref(permitted('content.inspect') ? 'queue' : 'reports'), t("内容审核", "Content review"), data && data.tab !== 'boards' ? data.counts.queue + data.counts.reports : undefined]] as Array<[string, string, string, number?]> : []),
     ...(staff === undefined || staff?.permissions.some(cap => cap.startsWith('profile.')) ? [["profiles", manageHref("profiles"), t("资料审核", "Profile review")]] as Array<[string, string, string, number?]> : []),
     ...(permitted('content.inspect') ? [["content", manageHref("content"), t("帖子管理", "Posts")]] as Array<[string, string, string, number?]> : []),
     ...(staff !== undefined && permitted('feature.decide') ? [["features", manageHref("features"), t("精选推荐", "Featured recommendations")]] as Array<[string, string, string, number?]> : []),
     ...(permitted('banner.manage') ? [["banners", manageHref("banners"), t("横幅设置", "Banners")]] as Array<[string, string, string, number?]> : []),
-    ...(owner ? [["orders", manageHref("orders"), t("兑换发货", "Orders"), data?.counts.orders], ["items", manageHref("items"), t("兑换所上架", "Shop items")]] as Array<[string, string, string, number?]> : []),
+    ...(owner ? [["boards", manageHref("boards"), t("板块管理", "Boards")], ["orders", manageHref("orders"), t("兑换发货", "Orders"), data?.counts.orders], ["items", manageHref("items"), t("兑换所上架", "Shop items")]] as Array<[string, string, string, number?]> : []),
     ...((staff === undefined ? owner : permitted('staff.appoint')) ? [["stewards", manageHref("stewards"), t("管理成员", "Staff")]] as Array<[string, string, string, number?]> : []),
     ...(staff === undefined || permitted('member.mute') || permitted('member.unmute') ? [["sanctions", manageHref("sanctions"), t("处罚记录", "Sanctions")]] as Array<[string, string, string, number?]> : []),
     ...(permitted('content.inspect') ? [["data", manageHref("data"), t("数据", "Data")]] as Array<[string, string, string, number?]> : []),
@@ -707,9 +711,10 @@ export function communityManageHTML({ manage, tab, itemEditing = null, shippingO
   const allowedBoards = data.owner ? communityBoards : communityBoards.filter(item => (staff?.boards ?? data.moderationBoards ?? me?.moderationBoards ?? communityBoards.map(board => board.id)).includes(item.id));
   const board = allowedBoards.some(item => item.id === managementBoard) ? managementBoard : '';
   const matchesBoard = (value: string | null | undefined) => !board || value === board;
-  const boardFilter = tab === 'queue' || tab === 'reports' ? `<h2 class="community-subtitle">${tab === 'queue' ? t('待审内容', 'Review queue') : t('举报处理', 'Reports')}</h2><div class="community-management-filter" role="group" aria-label="${t('按板块筛选', 'Filter by board')}"><span>${t('板块', 'Board')}</span>${[['', data.owner ? t('全部板块', 'All boards') : t('我负责的板块', 'My boards')], ...allowedBoards.map(item => [item.id, t(item.zh, item.en)])].map(([id, label]) => `<button type="button" class="community-button is-small" data-action="community-management-board" data-board="${id}" aria-pressed="${board === id}">${label}</button>`).join('')}</div>` : '';
+  const boardFilter = tab === 'queue' || tab === 'reports' ? `<h2 class="community-subtitle">${tab === 'queue' ? t('待审内容', 'Review queue') : t('举报处理', 'Reports')}</h2><div class="community-management-filter" role="group" aria-label="${t('按板块筛选', 'Filter by board')}"><span>${t('板块', 'Board')}</span>${[['', data.owner ? t('全部板块', 'All boards') : t('我负责的板块', 'My boards')], ...allowedBoards.map(item => [item.id, t(item.zh, item.en)])].map(([id, label]) => `<button type="button" class="community-button is-small" data-action="community-management-board" data-board="${id}" aria-pressed="${board === id}">${esc(label)}</button>`).join('')}</div>` : '';
   let body = "";
-  if (tab === 'profiles') {
+  if (tab === 'boards') body = data.owner && boardEditor ? communityBoardEditorHTML({ ...boardEditor, ...common }) : communityStatusHTML({ state: 'error', status: 403, message: t('只有作者能创建和排列社区板块。', 'Only the owner can create and order community boards.') }, common);
+  else if (tab === 'profiles') {
     body = communityProfileReviewsHTML(data.profiles || [], data.backgrounds || [], data.owner, common);
   } else if (tab === 'contact') {
     body = me && (me.owner || me.mod) && !me.management?.browsingAsReader ? moderationContactFormHTML(me, common) : communityStatusHTML({ state: 'loading' }, common);

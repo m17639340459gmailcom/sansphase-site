@@ -17,6 +17,7 @@ export const typedBrowserModules = new Set([
   'community-convention.mjs',
   'community-convention-consent.mjs',
   'community-management.mjs',
+  'community-board-editor.mjs',
   'community-banner-controller.mjs',
   'community-banner-editor.mjs',
   'community-frame-banners.mjs',

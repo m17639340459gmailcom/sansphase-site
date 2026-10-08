@@ -1,11 +1,9 @@
 import type { DatabaseSync } from 'node:sqlite';
-import { communityBoards } from '../src/community.ts';
 import type { CommunityBannerConfig } from '../src/community-banners.ts';
 import { fail, same } from './community-db.ts';
 import type { CommunityAuthor, Transaction } from './community-db.ts';
 import type { createMembers } from './community-members.ts';
 
-const scopes = ['home', ...communityBoards.map(board => board.id)];
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 type Access = { actor: CommunityAuthor; browsingAsReader: boolean; canSeeBoard: (board: string) => boolean };
 type Entry = { scope: string; position: number; topic_id: string | null; topic_board: string; title: string; cover: string | null };
@@ -13,7 +11,8 @@ type Topic = { id: string; board: string; title: string; body: string; pending: 
 type Image = { id: string; uploader_kind: CommunityAuthor['kind']; uploader_id: string; purpose: string; banner_scope: string | null; deleted_at: string | null };
 
 /** The homepage and each board own a separate ordered selection. Post flags never alter it. */
-export function createCommunityBanners(db: DatabaseSync, tx: Transaction, members: ReturnType<typeof createMembers>, staff: ReturnType<typeof import('./community-staff.ts').createCommunityStaff>) {
+export function createCommunityBanners(db: DatabaseSync, tx: Transaction, members: ReturnType<typeof createMembers>, staff: ReturnType<typeof import('./community-staff.ts').createCommunityStaff>, boardIds:()=>string[]) {
+  const scopes = () => ['home', ...boardIds()];
   const current = db.prepare('SELECT version FROM community_banners WHERE scope=?');
   const entries = db.prepare('SELECT scope, position, topic_id, topic_board, title, cover FROM community_banner_entries WHERE scope=? ORDER BY position');
   const topicById = db.prepare('SELECT id, board, title, body, pending, hidden_at, deleted_at FROM community_topics WHERE id=?');
@@ -32,9 +31,9 @@ export function createCommunityBanners(db: DatabaseSync, tx: Transaction, member
   };
   const imageBoard = (scope: string) => scope === 'home' ? '' : scope;
   const validImageEntry = (entry: Entry, canSeeBoard: Access['canSeeBoard']) => entry.topic_id === null
-    && scopes.includes(entry.scope) && entry.topic_board === imageBoard(entry.scope) && Boolean(entry.cover)
+    && scopes().includes(entry.scope) && entry.topic_board === imageBoard(entry.scope) && Boolean(entry.cover)
     && (entry.scope === 'home' || canSeeBoard(entry.scope));
-  const validateScope = (scope: string) => { if (!scopes.includes(scope)) throw fail('没有这个横幅范围。', 404); };
+  const validateScope = (scope: string) => { if (!scopes().includes(scope)) throw fail('没有这个横幅范围。', 404); };
   const authorize = (scope: string, access: Access) => {
     validateScope(scope);
     if (access.browsingAsReader || (scope === 'home' ? staff.state(access.actor)?.role !== 'owner' : !staff.can(access.actor,'banner.manage',scope)))
@@ -67,7 +66,7 @@ export function createCommunityBanners(db: DatabaseSync, tx: Transaction, member
     get,
     managed(access: Access) {
       if (access.browsingAsReader) throw fail('请先返回管理身份。', 403);
-      const allowed = staff.state(access.actor)?.role === 'owner' ? scopes : members.moderationBoards(access.actor).filter(scope=>staff.can(access.actor,'banner.manage',scope));
+      const allowed = staff.state(access.actor)?.role === 'owner' ? scopes() : members.moderationBoards(access.actor).filter(scope=>staff.can(access.actor,'banner.manage',scope));
       return allowed.map(scope => get(scope, access.canSeeBoard));
     },
     replace(scope: string, version: unknown, value: unknown, access: Access) {

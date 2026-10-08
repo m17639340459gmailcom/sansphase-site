@@ -22,6 +22,7 @@ import { createCommunityExperience } from './community-experience.ts';
 import { createCommunityProfileBackgrounds } from './community-profile-backgrounds.ts';
 import { createCommunityStaff } from './community-staff.ts';
 import { createCommunityFeatureRecommendations } from './community-staff-features.ts';
+import { createCommunityBoards } from './community-boards.ts';
 
 export type { CommunityAuthor, Target } from './community-db.ts';
 export type ShowcaseMeta = { tools: string; model: string; usage: string; prompt: string; promptMode: PromptMode; price: number };
@@ -75,10 +76,11 @@ export function createCommunityStore(directory: string, { previewCatalog = false
   const ledger = createLedger(db);
   const convention = createCommunityConvention(db, tx);
   const experience = createCommunityExperience(db, tx, convention);
-  const staff = createCommunityStaff(db, tx);
+  const boards: ReturnType<typeof createCommunityBoards> = createCommunityBoards(db, tx, actor => staff.state(actor)?.role === 'owner');
+  const staff: ReturnType<typeof createCommunityStaff> = createCommunityStaff(db, tx, boards.ids);
   const featureRecommendations = createCommunityFeatureRecommendations(db, tx, staff);
-  const members = createMembers(db, convention, tx, staff);
-  const banners = createCommunityBanners(db, tx, members, staff);
+  const members = createMembers(db, convention, tx, staff, boards.ids);
+  const banners = createCommunityBanners(db, tx, members, staff, boards.ids);
   const profileBackgrounds = createCommunityProfileBackgrounds(db, tx, (id, reason) => {
     // Queue both filenames durably before removing their registry. A rollback
     // leaves the picture registered, which protects it from queued cleanup.
@@ -295,6 +297,7 @@ export function createCommunityStore(directory: string, { previewCatalog = false
   }
 
   return {
+    boards,
     ledger,
     experience,
     members,

@@ -1,5 +1,4 @@
 import { communityRules, communityShopCats, beijingDay, communityReportReasons } from '../src/community-rules.mjs';
-import { communityBoards } from '../src/community.mjs';
 import { experienceCatalogue, vipCatalogue } from './community-experience.ts';
 import { fail, same, memberKey } from './community-db.ts';
 import type { CommunityAuthor } from './community-db.ts';
@@ -284,7 +283,7 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
     if (typeof body.on !== 'boolean') throw fail('请选择任命或撤销版主。');
     const on = body.on;
     const boards = body.boards;
-    const knownBoards = communityBoards.map(board => board.id);
+    const knownBoards = live.boards.ids();
     if (on && (!Array.isArray(boards) || boards.length === 0 || boards.some(board => typeof board !== 'string' || !knownBoards.includes(board)) || new Set(boards).size !== boards.length))
       throw fail('请至少选择一个有效的管理板块。');
     const current=live.staff.state(member);

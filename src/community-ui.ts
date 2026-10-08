@@ -4,11 +4,11 @@ import { createBookImageViewer } from './book-image-viewer.mjs';
 // 兑换所、关注、通知，以及站长和协管的置顶、精华、锁帖、移动、审核、禁言、举报处理、发货和上架。
 // 页面 HTML 由 community.ts、community-post.ts 和 community-pages.ts 生成；这里先确认当前路由的身份，再显示缓存与新的页面结果。
 import {
-  communityRoute, communityHomeHTML, communityBoardsHTML, communityBoardHTML, communityTagHTML, communityBookmarksHTML,
+  communityRoute, communityHomeHTML, communityBoardsHTML, communityBoardHTML, communityBoard, installCommunityBoardCatalog, communityTagHTML, communityBookmarksHTML,
   communityBodyHTML, communityBoards, communityRules, communitySearchLimit, isCommunitySort, boardHref, postHref, readyData, imageLimit, avatarHTML, nameLabelHTML, communityManagementRole, communityReaderReadOnly, communityStatusHTML,
 } from './community.mjs';
 import type {
-  CommunityLoad, CommunityListing, CommunitySort, CommunitySummary, CommunityRoute, CommunityMe, CommunityPerson, CommunityModerationContact, CommunityModerationContacts, Escape, Translate,
+  CommunityLoad, CommunityListing, CommunitySort, CommunitySummary, CommunityBoardCatalog, CommunityRoute, CommunityMe, CommunityPerson, CommunityModerationContact, CommunityModerationContacts, Escape, Translate,
 } from './community.ts';
 import { communityPostHTML, communityComposeHTML, communityLimits, bodyLimits, composePreviewHTML, editingFrom } from './community-post.mjs';
 import type { CommunityThread, CommunityUpload, CommunityTarget, CommunityReplySort } from './community-post.ts';
@@ -18,6 +18,7 @@ import { readNameEffectFile } from './community-equipment-import.mjs';
 import type { ShopCategory } from './community-rules.ts';
 import { autosizeCommunityTextarea } from './community-editor-size.mjs';
 import { createCommunityBannerController } from './community-banner-controller.mjs';
+import { createCommunityBoardController } from './community-board-editor.mjs';
 import { createCommunityConventionConsent } from './community-convention-consent.mjs';
 import { createCommunityLevelExplorer } from './community-level-explorer.mjs';
 import { createCommunityBadgeExplorer } from './community-badge-explorer.mjs';
@@ -40,7 +41,7 @@ import {
 } from './community-pages.mjs';
 import type {
   CommunityCheckin, CommunityStardust, CommunityFlow, CommunityShop, CommunityShopMine, CommunityDelivery, CommunityRank,
-  CommunityMember, CommunityInbox, CommunityManage, CommunityItemEditing,
+  CommunityMember, CommunityInbox, CommunityManage, CommunityBoardManagement, CommunityItemEditing,
 } from './community-pages.ts';
 
 export type CommunityContext = {
@@ -256,6 +257,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (current.view === 'new') return draftHasText(readDraft<SavedComposeDraft>(draftKey('compose', hash)));
     if (current.view === 'post') return draftHasText(readDraft<{ body: string }>(draftKey('reply', current.id)));
     if (current.view === 'manage' && current.tab === 'stewards') return stewardBusy || staffFormDirty();
+    if (current.view === 'manage' && current.tab === 'boards') return boardEditor.state().busy || boardEditor.dirty();
     return false;
   };
   const draftTags = (form: Form) => [...form.querySelectorAll<HTMLInputElement>('input[name="tags"]:checked')].map(item => item.value).slice(0, communityRules.tagMax);
@@ -381,6 +383,32 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   const notify = (text: string) => mounted?.ctx.notify?.(text);
   const tr = (zh: string, en: string) => mounted ? mounted.ctx.t(zh, en) : zh;
   const route = () => communityRoute(location.hash);
+  function syncBoardCatalog(catalog: CommunityBoardCatalog | undefined) {
+    if (!catalog) return;
+    if (installCommunityBoardCatalog(catalog) && readyData(me)) mounted?.ctx.headerChanged?.();
+    boardEditor.sync(catalog);
+  }
+  const boardEditor = createCommunityBoardController({
+    t: tr, esc: value => mounted?.ctx.esc(value) || '',
+    get icons() { return mounted?.ctx.icons || {}; },
+    root: () => mounted?.main.querySelector<HTMLElement>('[data-board-editor]') || null,
+    active: () => Boolean(mounted && route().view === 'manage' && route().tab === 'boards'),
+    owner: () => Boolean(readyData(me)?.owner && !readyData(me)?.management?.browsingAsReader),
+    create: input => send<CommunityBoardCatalog>('manage/boards', input),
+    reorder: (ids, version) => send<CommunityBoardCatalog>('manage/boards/order', { ids, version }),
+    reload: async () => {
+      const data = await api<Pick<CommunityManage, 'tab' | 'owner' | 'boardCatalog'>>('manage?tab=boards');
+      if (!data.boardCatalog) throw Error(tr('无法读取板块设置，请重试。', 'Could not read board settings. Try again.'));
+      installCommunityBoardCatalog(data.boardCatalog);
+      return data.boardCatalog;
+    },
+    saved: catalog => {
+      installCommunityBoardCatalog(catalog);
+      if (summary?.state === 'ready') summary.data.boardCatalog = catalog;
+      for (const entry of manages.values()) if (entry.state === 'ready') entry.data.boardCatalog = catalog;
+    },
+    notify,
+  });
   const bannerEditor = createCommunityBannerController({
     request: api, paint, notify, t: tr,
     active: () => Boolean(mounted && route().view === 'manage' && route().tab === 'banners' && !readyData(me)?.management?.browsingAsReader),
@@ -428,7 +456,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       if (resourceReads.get(path) === token) resourceReads.delete(path);
     }
   }
-  async function loadSummary() { await assignLoad('summary', summary, value => { summary = value; }); }
+  async function loadSummary() { await assignLoad('summary', summary, value => { summary = value; syncBoardCatalog(readyData(value)?.boardCatalog); }); }
   async function loadModerationContacts() { await assignLoad('moderation-contacts', moderationContacts, value => { moderationContacts = value; }); }
   async function loadConvention() { await assignLoad('convention', convention, value => { convention = value; }); }
   function loadFrameHighlights(scope: string): Promise<void> {
@@ -565,14 +593,24 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   async function loadManage(tab: string) {
     const requestId = (manageRequests.get(tab) || 0) + 1;
     manageRequests.set(tab, requestId);
-    await assignLoad(`manage?tab=${enc(tab)}`, manages.get(tab), value => {
+    await assignLoad<CommunityManage | CommunityBoardManagement>(`manage?tab=${enc(tab)}`, manages.get(tab), value => {
       if (manageRequests.get(tab) !== requestId) return;
-      manages.set(tab, value);
-      const data = readyData(value);
+      // The catalog channel intentionally does not scan reviews or members.
+      // Empty collections are an internal render model, not activity counts.
+      const normalized = normalizeManagement(value);
+      manages.set(tab, normalized);
+      const data = readyData(normalized);
+      syncBoardCatalog(data?.boardCatalog);
       if (data && !data.owner && managementBoard && data.moderationBoards && !data.moderationBoards.includes(managementBoard) && route().view === 'manage' && route().tab === tab) { managementBoard = ''; reviewSelection.clear(); }
       if (data) for (const id of reviewSelection) if (!data.queue.topics.some(topic => topic.id === id && topic.pending)) reviewSelection.delete(id);
       if (tab === 'banners' && data) bannerEditor.sync(data.banners || []);
     });
+  }
+  function normalizeManagement(value: CommunityLoad<CommunityManage | CommunityBoardManagement>): CommunityLoad<CommunityManage> {
+    if (value.state !== 'ready') return value;
+    if ('queue' in value.data) return { state: 'ready', data: value.data };
+    return { ...value, data: { counts: { queue: 0, reports: 0, orders: 0, sanctions: 0 },
+      kpis: { topics24h: 0, replies24h: 0 }, queue: { topics: [], replies: [] }, reports: [], orders: [], items: [], sanctions: [], data: null, ...value.data } };
   }
   // The latest request per list wins: a refresh that finishes after "load
   // more" must not replace the longer list with its first page.
@@ -615,6 +653,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       case 'inbox': return [() => loadInbox(current.tab)];
       case 'shop': return [current.tab === 'mine' ? loadShopMine : loadShop];
       case 'rank': return [loadRank];
+      case 'new': return [loadSummary];
       default: return [];
     }
   }
@@ -645,7 +684,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const page = pageLoadsFor(current);
     // Summary is a supporting area on lists, but the board index itself needs
     // it. A slow supporting card must not delay a readable discussion.
-    const core = page.filter(run => run !== loadSummary || current.view === 'boards');
+    const core = page.filter(run => run !== loadSummary || current.view === 'boards' || current.view === 'new' || current.view === 'board' && !communityBoard(current.board));
     const reads = loadsFor(current, page).filter(run => !preflight || run !== loadMe);
     let viewerFinished = !reads.includes(loadMe), coreFinished = false, queued = false;
     const showReady = () => {
@@ -697,7 +736,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       || [...foregroundReads.values()].some(read => read.frame === frameIdentity && read.hash === location.hash)
       || [...businessWrites.values(), ...interactionWorks.values()].includes(frameIdentity)
       || writeRequests.hasPending() || profileWrite || switchingBrowseMode || composing || profileDialog.opened()
-      || bannerEditor.dirty() || bannerEditor.state().busy || hasUnsavedDraft()) return false;
+      || bannerEditor.dirty() || bannerEditor.state().busy || boardEditor.dirty() || boardEditor.state().busy || hasUnsavedDraft()) return false;
     const current = route();
     if (['unknown', 'landing', 'new', 'edit', 'profile'].includes(current.view)
       || reporting || editingReply || quoting || postMenu || deleting || moving || retagging || redeeming || delivery
@@ -727,7 +766,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         throw error;
       }));
     };
-    stage<CommunitySummary>('summary', value => { summary = value; }, current.view === 'boards');
+    stage<CommunitySummary>('summary', value => { summary = value; syncBoardCatalog(readyData(value)?.boardCatalog); }, current.view === 'boards');
     switch (current.view) {
       case 'home': case 'board': case 'tag': {
         const scope = scopeOf(current), key = listKey(scope), saved = readyData(lists.get(key));
@@ -750,7 +789,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       case 'manage': {
         if (!(readyData(me)?.owner || readyData(me)?.mod) || readyData(me)?.management?.browsingAsReader) break;
         const tab = current.tab === 'convention' ? 'queue' : current.tab;
-        stage<CommunityManage>(`manage?tab=${enc(tab)}`, value => { manages.set(tab, value); }); break;
+        stage<CommunityManage | CommunityBoardManagement>(`manage?tab=${enc(tab)}`, value => { const normalized = normalizeManagement(value); manages.set(tab, normalized); syncBoardCatalog(readyData(normalized)?.boardCatalog); }); break;
       }
       case 'member': {
         const key = memberKey(current.id, current.tab);
@@ -866,7 +905,10 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       case 'boards': return communityBoardsHTML({ ...common, summary: summary || loading, members: ctx.members });
       case 'board': return communityBoardHTML({ ...common, board: current.board, summary: summary || loading, list: lists.get(listKey(current.board)) || loading, sort, query: queryOf(current.board), members: ctx.members, me: viewer, showPostingTips: ctx.showPostingTips, showActiveMembers: ctx.showActiveMembers });
       case 'tag': return communityTagHTML({ ...common, tag: current.id, list: lists.get(listKey(`tag:${current.id}`)) || loading, sort, query: queryOf(`tag:${current.id}`), me: viewer });
-      case 'new': return communityComposeHTML({ ...common, board: ctx.simpleCompose ? current.board : composeBoard ?? current.board, members: canPostMembers, me: viewer, uploads: composeUploads(current, null), simple: ctx.simpleCompose });
+      case 'new': {
+        if (current.board && !communityBoard(current.board)) return `<section class="page community-page" data-community="new">${communityStatusHTML(summary?.state === 'ready' ? { state: 'error', status: 404, message: ctx.t('这个板块不存在。', 'This board does not exist.') } : summary || loading, common)}</section>`;
+        return communityComposeHTML({ ...common, board: ctx.simpleCompose ? current.board : composeBoard ?? current.board, members: canPostMembers, me: viewer, uploads: composeUploads(current, null), simple: ctx.simpleCompose });
+      }
       case 'edit': {
         const thread = threads.get(current.id);
         const asEdit = (markup: string) => markup.replace('data-community="post"', 'data-community="edit"');
@@ -878,7 +920,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       case 'post': return communityPostHTML({ ...common, thread: threads.get(current.id) || loading, me: viewer, reporting, editingReply, menuOpen: postMenu, deleting, moving, retagging, quoting, replySort });
       case 'checkin': return communityCheckinHTML({ ...common, checkin: checkin || loading, me: viewer });
       case 'bookmarks': return communityBookmarksHTML({ ...common, list: bookmarks || loading });
-      case 'manage': return communityManageHTML({ ...common, manage: manages.get(current.tab === 'convention' ? 'queue' : current.tab) || loading, tab: current.tab, itemEditing, shippingOrder, rejecting, deleting, me: viewer, selectedReviews: [...reviewSelection], managementBoard, stewardCandidate, stewardEditingUid, bannerEditor: bannerEditor.state(), convention });
+      case 'manage': return communityManageHTML({ ...common, manage: manages.get(current.tab === 'convention' ? 'queue' : current.tab) || loading, tab: current.tab, itemEditing, shippingOrder, rejecting, deleting, me: viewer, selectedReviews: [...reviewSelection], managementBoard, stewardCandidate, stewardEditingUid, bannerEditor: bannerEditor.state(), boardEditor: boardEditor.state(), convention });
       case 'member': return communityMemberHTML({ ...common, member: memberPages.get(memberKey(current.id, current.tab)) || loading, me: viewer, muting, badgeSelection: badgeExplorer.state() });
       case 'profile': return communityMemberHTML({ ...common, member: memberPages.get(memberKey(viewer?.uid || readyData(profile)?.person.uid || '', 'topics')) || loading, me: viewer });
       case 'stardust': return communityStardustHTML({ ...common, stardust: stardusts.get(flow) || loading, tab: current.tab, levelSelection: levelExplorer.state() });
@@ -2235,6 +2277,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       'community-mute', 'community-steward', 'community-steward-edit', 'community-lift', 'community-ship', 'community-reject',
       'community-cancel-order', 'community-item-edit', 'community-uphold', 'community-dismiss',
     ].includes(action || '')) { notify(tr('请先返回管理身份。', 'Restore management first.')); return; }
+    if (boardEditor.action(target)) return;
     if (bannerEditor.action(target)) return;
     if (levelExplorer.action(target)) return;
     if (badgeExplorer.action(target)) return;
@@ -2569,6 +2612,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (switchingBrowseMode) { status(form, tr('正在切换浏览身份，请稍候。', 'Switching browsing perspective; please wait.')); return; }
     if (communityReaderReadOnly(readyData(me)) && form.dataset.communityForm !== 'search') { status(form, tr('请先返回管理身份。', 'Restore management first.')); return; }
     if (form.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled) return;
+    if (boardEditor.submit(form)) return;
     if (bannerEditor.submit(form)) return;
     const handlers: Record<string, (form: Form) => unknown> = {
       'profile-nickname': item => submitProfile(item, 'nickname'), 'profile-signature': item => submitProfile(item, 'signature'), 'profile-avatar': item => submitProfile(item, 'avatar'),
@@ -2586,6 +2630,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const field = event.target;
     if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) return;
     if (!field.closest?.('form[data-community-form]')) return;
+    if (boardEditor.input(field)) return;
     if (field instanceof HTMLInputElement && bannerEditor.input(field)) return;
     if (field.name === 'q') {
       // Search as the visitor pauses typing; Enter searches at once.
@@ -2780,6 +2825,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   function onChange(event: Event) {
     if (routeHandoffPending()) return;
     const scopeField = event.target;
+    if ((scopeField instanceof HTMLInputElement || scopeField instanceof HTMLSelectElement || scopeField instanceof HTMLTextAreaElement) && boardEditor.input(scopeField)) return;
     if ((scopeField instanceof HTMLInputElement || scopeField instanceof HTMLSelectElement) && changeStewardScope(scopeField)) return;
     const field = event.target as HTMLInputElement;
     if (field instanceof HTMLInputElement && bannerEditor.change(field)) return;
@@ -2872,7 +2918,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     convention = null;
     if (clearWrites) writeRequests.clear();
     releaseDocumentReading();
-    bannerEditor.reset(); banners.clear(); bannerRequests.clear();
+    boardEditor.reset(); bannerEditor.reset(); banners.clear(); bannerRequests.clear();
     browseRequest++;
     switchingBrowseMode = false;
     managementOpener = null;
@@ -2901,7 +2947,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     }
     // Existing-content edits and product forms have no independent saved
     // draft. Do not discard them when their write permissions disappear.
-    if (profileDialog.opened() && hasUnsavedDraft() || reader && (staffFormDirty() || bannerEditor.dirty() || bannerEditor.state().busy || mounted?.main.querySelector('form[data-community-form="topic"][data-edit], form[data-community-form="reply-edit"], form[data-community-form="item"]'))) {
+    if (profileDialog.opened() && hasUnsavedDraft() || reader && (staffFormDirty() || boardEditor.dirty() || boardEditor.state().busy || bannerEditor.dirty() || bannerEditor.state().busy || mounted?.main.querySelector('form[data-community-form="topic"][data-edit], form[data-community-form="reply-edit"], form[data-community-form="item"]'))) {
       notify(tr('请先完成或取消当前编辑，再切换浏览身份。', 'Finish or cancel the current edit before switching perspectives.'));
       return;
     }

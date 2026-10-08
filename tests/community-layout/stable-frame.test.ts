@@ -11,6 +11,27 @@ const header = '<div class="community-brand-group">社区</div><nav id="navigati
 const page = (view: string) => `<section data-community="${view}"><h1>${view}</h1><button>内容按钮</button></section>`;
 const postPage = (author: string) => `<section data-community="post"><div class="community-post-grid"><article class="community-thread"><p>${author}的正文</p><form><textarea>未发送的回复</textarea></form></article><aside class="community-post-side"><section class="community-card community-author-card">${author}<button data-action="community-follow">关注</button></section><section class="community-card"><h2>作品信息</h2><button data-action="community-unlock">解锁</button></section><section class="community-card"><h2>同版块</h2><a href="#/post/related">相关帖子</a></section></aside></div></section>`;
 
+test('a dynamic board activity title follows controller metadata without replacing the reading shell', () => {
+  const { window } = new JSDOM('<main></main>', { url: 'https://community.sansphase.com/#/community/boards/board-10a2' });
+  const main = window.document.querySelector('main')!;
+  const frame = createStableCommunityFrame(window.document, window);
+  const supporting = (label: string) => `<section data-community="home" data-frame-board="board-10a2"><div class="community-banner-side"><dl class="community-stats"><dd>1</dd></dl></div><div class="community-boards"><a class="community-board-link" href="#/community/boards/board-10a2" data-board-id="board-10a2" data-board-icon="box" data-board-color="#8fd0c8" data-board-light-color="#2c6d65"><span>${label}</span></a></div></section>`;
+  try {
+    frame.render(main, page('board'), supporting('模型讨论'));
+    const root = main.firstElementChild, right = main.querySelector('[data-frame-right]');
+    const center = frame.center()!;
+    center.scrollTop = 190;
+    assert.equal(right!.querySelector('[data-frame-overview] h2')!.textContent, '模型讨论动态');
+    window.document.documentElement.lang = 'en';
+    frame.sync(supporting('Models'));
+    assert.equal(right!.querySelector('[data-frame-overview] h2')!.textContent, 'Models activity');
+    assert.equal(main.firstElementChild, root);
+    assert.equal(main.querySelector('[data-frame-right]'), right);
+    assert.equal(frame.center(), center);
+    assert.equal(center.scrollTop, 190);
+  } finally { frame.dispose(); window.close(); }
+});
+
 for (const mobile of [false, true]) {
   for (const mode of ['paint', 'tab'] as const) {
     test(`${mobile ? 'mobile document' : 'desktop center'} reserves reading height through ${mode} loading without an intermediate scroll clamp`, () => {
