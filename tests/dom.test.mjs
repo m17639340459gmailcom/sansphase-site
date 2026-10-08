@@ -1154,7 +1154,10 @@ for (const mode of [null, false, true, 'hk', 'hk-reduced']) test(typeof mode ===
       assert.equal(q('#navigation [aria-current="page"]').getAttribute('href'),'#/community/checkin');
       await until(()=>d.querySelector('.community-constellation'),'the check-in page loads');
       assert.equal(d.querySelectorAll('.community-cs').length,30);
-      assert.match(q('[data-community="checkin"] > .community-page-head').textContent,/每日签到 \+1 星尘，自然月满勤额外 \+5/);
+      const description=q('[data-community="checkin"] > .community-page-head').textContent;
+      assert.match(description,/每日签到 \+1 星尘/);
+      assert.match(description,/有效 VIP 额外 \+1/);
+      assert.match(description,/自然月满勤额外 \+5/);
       assert.equal(d.querySelector('[data-community="checkin"] [data-action="community-checkin"]'),null);
       click('[data-action="community-month"]');
       await until(()=>community.requests.includes('GET checkin?month=2026-08'),'the calendar pages back a month');

@@ -653,7 +653,10 @@ test("the check-in page: constellation, calendar with make-up days, early birds 
   };
   const html = communityCheckinHTML({ checkin: ready(data), ...common });
   assert.doesNotMatch(html, /data-action="community-checkin"/, "the right rail owns the check-in action");
-  assert.match(html, /每日签到 \+1 星尘，自然月满勤额外 \+5。补签计入满勤/);
+  const description = textAt(html, '.community-page-head');
+  assert.match(description, /每日签到 \+1 星尘/);
+  assert.match(description, /有效 VIP 额外 \+1/);
+  assert.match(description, /自然月满勤额外 \+5。补签计入满勤/);
   assert.equal(count(html, /class="community-cs[ "]/g), 30);
   assert.equal(count(html, /class="community-cs is-on/g), 2, 'only actual September records light stars');
   assert.match(html, /class="community-cs is-now is-bonus is-big"/);
@@ -681,7 +684,10 @@ test("the check-in page: constellation, calendar with make-up days, early birds 
   assert.match(communityCheckinHTML({ checkin: ready({ ...data, makeup: { ...data.makeup, cards: 2 } }), ...common }), /先用补签卡（剩 2 张）/);
   const done = communityCheckinHTML({ checkin: ready({ ...data, checkedIn: true, streak: 7 }), ...common });
   assert.doesNotMatch(done, /data-action="community-checkin"|今日已签到 · 明天/);
-  assert.match(done, /每日签到 \+1 星尘，自然月满勤额外 \+5/);
+  const doneDescription = textAt(done, '.community-page-head');
+  assert.match(doneDescription, /每日签到 \+1 星尘/);
+  assert.match(doneDescription, /有效 VIP 额外 \+1/);
+  assert.match(doneDescription, /自然月满勤额外 \+5/);
 });
 
 const stardust = (overrides = {}) => ({
