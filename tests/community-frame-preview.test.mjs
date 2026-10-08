@@ -832,7 +832,8 @@ for (const board of communityBoards) test(`${board.zh}: sorting, searching and p
   }
   const curated = main.querySelector('[data-sort="curated"]'); assert.ok(curated);
   curated.click(); steady();
-  assert.deepEqual([...results.querySelectorAll('.community-curated-row')].map(row => row.dataset.topicId), firstPage.items.map(item => item.id), 'returning to the cached curated page displays its confirmed ranks immediately');
+  assert.deepEqual([...results.querySelectorAll('.community-topic-replies')].map(row => row.getAttribute('href')), firstPage.items.map(item => `#/post/${item.id}`), 'returning to the cached curated board page immediately displays ordinary posts');
+  assert.equal(results.querySelector('.community-curated'), null, 'compact rankings belong to the home page');
   assert.equal(results.querySelector('[data-content-state="loading"]'), null);
   await turn(); steady();
   assert.equal(w.document.activeElement, curated);
@@ -842,14 +843,14 @@ for (const board of communityBoards) test(`${board.zh}: sorting, searching and p
   assert.equal(w.document.activeElement, search);
   center.scrollTop = 240;
   main.querySelector('[data-action="community-search-clear"]').click(); await turn(); steady();
-  const ranked = results.querySelector('.community-curated-list'); assert.ok(ranked);
-  const rows = [...ranked.children];
+  const posts = results.querySelector('.community-topics'); assert.ok(posts);
+  const rows = [...posts.children];
   center.dispatchEvent(new w.Event('wheel'));
   center.scrollTop = 240;
   main.querySelector('[data-action="community-more"]').click(); await turn(); steady(240);
-  assert.equal(results.querySelector('.community-curated-list'), ranked, 'expanded ranked rows retain their original container');
-  assert.deepEqual([...ranked.children].slice(0, 6), rows);
-  assert.equal(ranked.children.length, 12);
+  assert.equal(results.querySelector('.community-topics'), posts, 'expanded ordinary posts retain their original container');
+  assert.deepEqual([...posts.children].slice(0, 6), rows);
+  assert.equal(posts.children.length, 12);
 });
 
 test('late calendar responses cannot replace the selected month or disturb a newly opened board', async t => {

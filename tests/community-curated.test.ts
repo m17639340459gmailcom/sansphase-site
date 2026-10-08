@@ -53,11 +53,18 @@ test('curated is a six-row ordered board with safe titles and real metadata inst
   } finally { dom.window.close(); }
 });
 
-test('the compact curated view is shared by board and tag scopes, while newest keeps ordinary topic presentation', () => {
+test('curated board and tag pages retain ordinary post images and excerpts while the home ranking stays compact', () => {
   const items = [topic('one', { thumbs: ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'], excerpt: '普通列表摘要' })];
-  for (const html of [communityBoardHTML({ ...common, board: 'qa', summary, list: listing(items), sort: 'curated', members: false }), communityTagHTML({ ...common, tag: '新手', list: listing(items), sort: 'curated' })]) {
+  for (const html of [communityBoardHTML({ ...common, board: 'qa', summary, list: listing(items), sort: 'curated', members: false, showTopicCovers: true }), communityTagHTML({ ...common, tag: '新手', list: listing(items), sort: 'curated', showTopicCovers: true })]) {
     const dom = new JSDOM(html);
-    try { assert.equal(dom.window.document.querySelectorAll('.community-curated-row').length, 1); assert.equal(dom.window.document.querySelector('.community-topic-thumbs'), null); }
+    try {
+      assert.equal(dom.window.document.querySelector('.community-curated'), null);
+      assert.equal(dom.window.document.querySelectorAll('.community-topic').length, 1);
+      assert.equal(dom.window.document.querySelector('.community-topic-thumbs img')?.getAttribute('src'), '/api/community/images/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.webp');
+      assert.equal(dom.window.document.querySelector('.community-topic-thumbs')?.getAttribute('href'), '#/post/one');
+      assert.match(dom.window.document.querySelector('.community-topic-excerpt')!.textContent!, /普通列表摘要/);
+      assert.equal(dom.window.document.querySelector('[data-sort="curated"]')?.getAttribute('aria-pressed'), 'true');
+    }
     finally { dom.window.close(); }
   }
   const dom = new JSDOM(communityHomeHTML({ ...common, summary, list: listing(items), sort: 'newest', members: false, showTopicCovers: true }));

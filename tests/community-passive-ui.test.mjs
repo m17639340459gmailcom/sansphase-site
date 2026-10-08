@@ -242,14 +242,14 @@ test('permission shrink retires the old VIP pixels immediately and retries scope
     if (url.endsWith('/summary') && outage) return failure(503);
     return null;
   }, '#/community/boards/vip');
-  const row = main.querySelector('.community-curated-row[data-topic-id="p1"]');
-  assert.ok(row); assert.equal(row.querySelector('.community-curated-title').textContent, topic.title);
+  const row = main.querySelector('.community-topic');
+  assert.ok(row); assert.equal(row.querySelector('h3 a[href="#/post/p1"]').textContent, topic.title);
   await tick(15000);
-  assert.equal(main.querySelector('.community-curated-row'), null, 'old private pixels retire before support succeeds');
+  assert.equal(main.querySelector('.community-topic, .community-curated-row'), null, 'old private pixels retire before support succeeds');
   assert.equal(ui.me().vip, false);
   outage = false; await tick(15000);
   assert.equal(calls.filter(x => passive(x.init) && x.url.endsWith('/me')).length, 2);
-  assert.equal(main.querySelector('.community-curated-row'), null);
+  assert.equal(main.querySelector('.community-topic, .community-curated-row'), null);
   assert.match(main.textContent, /VIP/);
   assert.equal(calls.filter(x => passive(x.init) && x.url.includes('board=vip')).length, 0);
   assert.equal(calls.some(x => x.url.endsWith('/active/visit')), false);

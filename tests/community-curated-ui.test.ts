@@ -7,6 +7,7 @@ import { createStableCommunityFrame } from '../src/community-layout/stable-frame
 import type { CommunityListing, CommunityMe, CommunitySummary, CommunityTopic } from '../src/community.ts';
 import type { CommunityThread } from '../src/community-post.ts';
 import type { CommunityManage } from '../src/community-pages.ts';
+import { tagHref } from '../src/community.ts';
 
 interface TestWindow extends Window {
   close(): void;
@@ -132,6 +133,81 @@ test('default selection requests one curated first page and renders six compact 
     assert.ok(row.querySelector('.community-curated-counts'));
     assert.equal(titleLinks(f.main)[index]?.getAttribute('href'), `#/post/${initial[index].id}`);
   }
+});
+
+for (const board of ['qa', 'showcase']) test(`opening ${board} directly retains post covers and excerpts under the default curated sorting`, async t => {
+  const items = initial.map(item => ({ ...item, board }));
+  const f = await fixture(t, { frame: true, hash: `#/community/boards/${board}`, intercept: url => {
+    if (!url.startsWith('/api/community/topics?')) return null;
+    assert.equal(params(url).get('board'), board, 'the default list remains scoped to the actual board');
+    if (params(url).get('sort') === 'hot') return response(listing([], 1, 0));
+    return response(listing(items));
+  } });
+  assert.equal(f.main.querySelector('.community-results .community-curated'), null);
+  assert.equal(f.main.querySelectorAll('.community-results .community-topic').length, 6);
+  assert.equal(f.main.querySelectorAll(`.community-results .community-topic-thumbs img[src="/api/community/images/${image}.webp"]`).length, 6);
+  assert.match(f.main.querySelector('.community-results .community-topic-excerpt')?.textContent || '', /正文摘要\s*1/);
+  assert.equal(f.main.querySelector('.community-topic-thumbs')?.getAttribute('href'), '#/post/p1');
+  assert.equal(f.calls.filter(call => call.url.startsWith('/api/community/topics?') && params(call.url).get('sort') === 'curated').length, 1, 'restoring images adds no extra reads of the visible post list');
+  const rows = [...f.main.querySelectorAll('.community-results .community-topic')];
+  await f.more();
+  assert.deepEqual([...f.main.querySelectorAll('.community-results .community-topic')].slice(0, 6), rows, 'load more retains existing image-bearing post nodes');
+});
+
+test('home to board to tag and back preserves compact home rankings while each scoped post list displays its covers', async t => {
+  const f = await fixture(t, { frame: true, intercept: url => {
+    if (!url.startsWith('/api/community/topics?')) return null;
+    const query = params(url), board = query.get('board'), tag = query.get('tag');
+    if (board) return response(listing(initial.map(item => ({ ...item, board }))));
+    if (tag) return response(listing(initial.map(item => ({ ...item, board: 'qa', tags: [tag] }))));
+    return null;
+  } });
+  const homeIds = ids(f.main);
+  await f.remount('#/community/boards/qa');
+  assert.equal(f.main.querySelector('.community-results .community-curated'), null);
+  assert.equal(f.main.querySelectorAll('.community-results .community-topic-thumbs img').length, 6);
+  assert.equal(params(f.calls.find(call => call.url.startsWith('/api/community/topics?') && params(call.url).get('board') === 'qa')!.url).get('sort'), 'curated');
+  await f.remount(tagHref('提示词'));
+  assert.ok(f.main.querySelector('[data-community="tag"]'));
+  assert.equal(f.main.querySelector('.community-results .community-curated'), null);
+  assert.equal(f.main.querySelectorAll('.community-results .community-topic-thumbs img').length, 6);
+  assert.match(f.main.querySelector('.community-results .community-topic-excerpt')?.textContent || '', /正文摘要\s*1/);
+  assert.ok(f.calls.some(call => call.url.startsWith('/api/community/topics?') && params(call.url).get('tag') === '提示词'));
+  await f.remount('#/community/home');
+  assert.deepEqual(ids(f.main), homeIds);
+  assert.equal(f.main.querySelectorAll('.community-results .community-topic-thumbs').length, 0, 'returning home keeps the accepted compact ranking layout');
+  assert.equal(f.main.querySelector('[data-sort="curated"]')?.getAttribute('aria-pressed'), 'true');
+});
+
+test('board covers survive a failed second-page read and overlap retry, with successful append focusing the first new post', async t => {
+  let attempts = 0;
+  const f = await fixture(t, { frame: true, hash: '#/community/boards/qa', intercept: url => {
+    if (!url.startsWith('/api/community/topics?')) return null;
+    const query = params(url); assert.equal(query.get('board'), 'qa');
+    if (query.get('sort') === 'hot') return response(listing([], 1, 0));
+    if (query.get('page') !== '2') return response(listing(initial.map(item => ({ ...item, board: 'qa' }))));
+    attempts++;
+    if (attempts === 1) return Response.json({ error: '暂时无法读取下一页' }, { status: 503 });
+    return response(listing([6, 7, 8, 8, 9, 10].map(id => ({ ...topic(id), board: 'qa' })), 2));
+  } });
+  const container = f.main.querySelector('.community-results .community-topics'); assert.ok(container);
+  const rows = [...container.children], images = [...container.querySelectorAll('img')];
+  const button = f.main.querySelector<HTMLButtonElement>('[data-action="community-more"]'); assert.ok(button); button.focus();
+  await f.more();
+  assert.equal(attempts, 1);
+  assert.equal(f.main.querySelector('.community-results .community-topics'), container, 'an outage leaves the established list attached to the page');
+  assert.deepEqual([...container.children], rows, 'an outage preserves all confirmed posts');
+  assert.deepEqual([...container.querySelectorAll('img')], images, 'an outage does not reload confirmed covers');
+  const retry = f.main.querySelector<HTMLButtonElement>('[data-action="community-more"]'); assert.ok(retry);
+  assert.equal(retry.disabled, false, 'the unchanged current page can retry its failed next page');
+  retry.focus();
+  await f.more();
+  assert.equal(attempts, 2);
+  assert.equal(f.main.querySelector('.community-results .community-topics'), container);
+  assert.deepEqual([...container.children].slice(0, 6), rows);
+  assert.deepEqual([...container.querySelectorAll('img')].slice(0, images.length), images);
+  assert.deepEqual([...container.querySelectorAll('.community-topic-replies')].map(link => link.getAttribute('href')), Array.from({ length: 10 }, (_, index) => `#/post/p${index + 1}`));
+  assert.equal(f.window.document.activeElement?.getAttribute('href'), '#/post/p7', 'focus advances to the first newly appended post');
 });
 
 test('curated pagination appends unique rows, retains the existing DOM, and advances by the returned page despite overlapping entries', async t => {

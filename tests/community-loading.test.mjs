@@ -83,7 +83,7 @@ test('a slow old board index cannot replace a selected tag or overwrite counts w
     return response({ ...summary, total: 9, tags: { ComfyUI: 9 } });
   }, { hash: '#/community/boards' });
   await remount('#/community/tag/ComfyUI');
-  const title = main.querySelector('[data-community="tag"] .community-curated-row[data-topic-id="p1"] .community-curated-title');
+  const title = main.querySelector('[data-community="tag"] .community-topic h3 a[href="#/post/p1"]');
   assert.ok(title);
   assert.equal(title.textContent, listing.items[0].title);
   assert.ok(calls.some(call => call.url.includes('/topics?') && new URL(call.url, 'http://localhost').searchParams.get('tag') === 'ComfyUI'));
@@ -354,11 +354,11 @@ test('protected full images are not reused across accounts, routes or external o
 test('current me VIP loss overrides an old startup membership flag on the tea-room board', async t => {
   let vip = true;
   const { main, retry } = await setup(t, url => url.endsWith('/me') ? response({ ...person, vip }) : null, { hash: '#/community/boards/vip', members: true });
-  const row = main.querySelector('.community-curated-row[data-topic-id="p1"]');
+  const row = main.querySelector('.community-topic');
   assert.ok(row);
-  assert.equal(row.querySelector('.community-curated-title').textContent, listing.items[0].title);
+  assert.equal(row.querySelector('h3 a[href="#/post/p1"]').textContent, listing.items[0].title);
   vip = false; retry(); await settle();
-  assert.equal(main.querySelector('.community-curated-row'), null);
+  assert.equal(main.querySelector('.community-topic, .community-curated-row'), null);
   assert.equal(main.querySelector('a[href="#/community/new/vip"]'), null);
   assert.ok(main.querySelector('[data-content-state="members"]'));
 });

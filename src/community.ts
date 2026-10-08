@@ -663,12 +663,14 @@ function communityCuratedHTML(items: readonly CommunityTopic[], common: Common, 
 }
 
 type NewsOptions = { board: CommunityBoard | null; list: CommunityLoad<CommunityListing>; catalogPending?: boolean };
-type ListingOptions = Common & { list: CommunityLoad<CommunityListing>; sort: CommunitySort; query: string; board: string; empty: string; meForSort?: CommunityMe | null; showCompose?: boolean; news?: NewsOptions };
+type ListingOptions = Common & { list: CommunityLoad<CommunityListing>; sort: CommunitySort; query: string; board: string; empty: string; meForSort?: CommunityMe | null; showCompose?: boolean; compactCurated?: boolean; news?: NewsOptions };
 
 // 帖子列表上方的一栏（首页、版块页和标签页共用）：左边排序，右边搜索和发帖。
 // 版块页里的“发帖”默认发到这个版块。“加载更多”在还有下一页时出现。
-function listingHTML({ list, sort, query, board, empty, showCompose = true, news, ...common }: ListingOptions) {
+function listingHTML({ list, sort, query, board, empty, showCompose = true, compactCurated = false, news, ...common }: ListingOptions) {
   const { t, esc, icons = {} } = common;
+  // Curated is a sort everywhere; only the home page presents it as a ranking.
+  const ranked = compactCurated && sort === 'curated';
   const sortHTML = communitySorts.filter(([id]) => id !== "following" || Boolean(common.meForSort)).map(([id, zh, en]) =>
     `<button type="button" data-action="community-sort" data-sort="${id}" aria-pressed="${sort === id}">${t(zh, en)}</button>`).join("");
   const search = `<form class="community-search" role="search" data-community-form="search"><label class="sr-only" for="community-search">${t("搜索帖子", "Search posts")}</label>${icons.search || ""}<input id="community-search" name="q" type="search" autocomplete="off" maxlength="${communitySearchLimit}" value="${esc(query)}" placeholder="${t("搜索帖子", "Search posts")}"></form>`;
@@ -687,12 +689,12 @@ function listingHTML({ list, sort, query, board, empty, showCompose = true, news
       : sort === "featured" ? emptyHTML(common, t("还没有精华帖", "No featured posts yet"))
       : emptyHTML(common, t("这里还没有帖子", "No posts yet"), empty);
     body = summary + (items.length
-      ? (sort === 'curated' ? communityCuratedHTML(items, common, !board) : communityTopicsHTML(items, common, { showBoard: !board })) + (more
-        ? `<button type="button" class="community-button community-more" data-action="community-more"${list.more ? " disabled" : ""}>${list.more ? t("正在加载…", "Loading…") : sort === 'curated' ? t('查看更多', 'View more') : t(`加载更多 · 还有 ${count - items.length} 个`, `Load more · ${count - items.length} left`)}</button>`
+      ? (ranked ? communityCuratedHTML(items, common, !board) : communityTopicsHTML(items, common, { showBoard: !board })) + (more
+        ? `<button type="button" class="community-button community-more" data-action="community-more"${list.more ? " disabled" : ""}>${list.more ? t("正在加载…", "Loading…") : ranked ? t('查看更多', 'View more') : t(`加载更多 · 还有 ${count - items.length} 个`, `Load more · ${count - items.length} left`)}</button>`
         : `<p class="community-end">${t("已经到底了", "That's everything")}</p>`)
       : none);
   }
-  if (news && sort === 'curated' && !query) {
+  if (news && ranked && !query) {
     const main = `<div class="community-discussion-primary">${body}</div>`;
     body = `<div class="community-discussion-boards"><div class="community-discussion-grid">${main}${communityNewsHTML({ ...common, ...news })}</div></div>`;
   }
@@ -739,7 +741,7 @@ export function communityHomeHTML({ summary, list, sort, query = "", members, me
     + `<div class="community-layout"><aside class="community-aside">`
     + `<section class="community-card community-rv community-spot" style="--i:2">${cardHead(t("热门讨论", "Trending"), icons.trending)}${hotHTML}</section>`
     + `<section class="community-card community-rv community-spot" style="--i:3">${cardHead(t("版块", "Boards"), icons.grid, moreLink("#/community/boards", t("全部版块", "All boards"), icons))}<div class="community-boards">${boardsMiniHTML(ready, members, common)}</div></section>`
-    + `</aside><div class="community-main">${listingHTML({ list, sort, query, board: "", showCompose, news, empty: showCompose ? t("点上方的“发帖”，来发第一帖吧。", "Use “New post” to start the first discussion.") : t("选择一个板块，开始第一场讨论。", "Choose a board to start the first discussion."), meForSort: readyData(me), ...common })}</div></div></section>`;
+    + `</aside><div class="community-main">${listingHTML({ list, sort, query, board: "", showCompose, compactCurated: true, news, empty: showCompose ? t("点上方的“发帖”，来发第一帖吧。", "Use “New post” to start the first discussion.") : t("选择一个板块，开始第一场讨论。", "Choose a board to start the first discussion."), meForSort: readyData(me), ...common })}</div></div></section>`;
 }
 
 /* ---------- 版块目录 ---------- */
