@@ -5,6 +5,7 @@ export const typedBrowserModules = new Set([
   'book-progress.mjs',
   'catalog.mjs',
   'community.mjs',
+  'community-news.mjs',
   'community-entry.mjs',
   'community-ui.mjs',
   'community-passive-refresh.mjs',

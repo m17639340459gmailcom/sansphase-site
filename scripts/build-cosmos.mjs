@@ -109,6 +109,7 @@ for (const file of [
   "blog-background.css",
   "author.css",
   "community.mjs",
+  "community-news.mjs",
   "community-entry.mjs",
   "community-ui.mjs",
   "community-passive-refresh.mjs",

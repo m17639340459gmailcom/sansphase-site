@@ -49,7 +49,7 @@ async function demoImage(directory, uploader, index, store, sourceFile = null) {
   return id;
 }
 
-export async function createCommunityDemo({ simplePosting = true, visualDemo = false } = {}) {
+export async function createCommunityDemo({ simplePosting = true, visualDemo = false, newsDemo = false } = {}) {
   const directory = mkdtempSync(resolve(tmpdir(), 'sansphase-community-preview-'));
   new DatabaseSync(resolve(directory, 'content.db')).close();
   await migrateCommunity(directory);
@@ -60,6 +60,14 @@ export async function createCommunityDemo({ simplePosting = true, visualDemo = f
   const store = createCommunityStore(directory, { previewCatalog: true, queueFile: profiles.queueFile });
   const now = Date.now();
   const at = (minutesAgo) => new Date(now - minutesAgo * 60000).toISOString();
+  if (newsDemo) {
+    const catalog = store.boards.create({ name: 'AI资讯', description: '本地演示资讯，仅用于检查榜单布局和发布时间。', icon: 'bot' }, member('owner'));
+    const board = catalog.items.find(item => item.zh === 'AI资讯');
+    if (!board) throw Error('Local news fixture board was not created.');
+    const titles = ['Agent 工具更新记录', '模型能力与使用场景整理', '开源项目发布记录', 'AI 产品功能变化', '行业信息与来源汇总', '本周智能体动态整理'];
+    titles.forEach((title, index) => store.createTopic({ board: board.id, author: member('owner'), title: `[本地演示] ${title}`,
+      body: '这是本地演示资讯，仅用于检查标题、卡片密度和发布时间，不会发布到线上。', now: at([5, 90, 420, 1500, 3000, 5000][index]) }));
+  }
   const joinedDays = id => id === previewOwnerReaderId ? 0 : visualDemo && id === 'demo' ? 180 : visualDemo && id === 'linjian' ? 500 : people[id].days;
   const images = async (author, count, offset) => {
     const ids = [];

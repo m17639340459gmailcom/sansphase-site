@@ -14,6 +14,7 @@ import { communityPostHTML, communityComposeHTML, communityLimits, bodyLimits, c
 import type { CommunityThread, CommunityUpload, CommunityTarget, CommunityReplySort } from './community-post.ts';
 import { bodyImageContent } from './community-body-images.mjs';
 import { communityImageBytes, communityNameEffect } from './community-rules.mjs';
+import { communityNewsBoard } from './community-news.mjs';
 import { readNameEffectFile } from './community-equipment-import.mjs';
 import type { ShopCategory } from './community-rules.ts';
 import { autosizeCommunityTextarea } from './community-editor-size.mjs';
@@ -114,7 +115,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   let frameIdentity = 0;
   let permissionRevision = 0;
   let paintedAccount: string | null = null;
-  let paintedPage: { hash: string; frame: number; markup: string; style: string | null; main: string | null; banner: string | null; aside: string | null } | null = null;
+  let paintedPage: { hash: string; frame: number; markup: string; style: string | null; main: string | null; banner: string | null; aside: string | null; news: string | null } | null = null;
   // Only an already confirmed page may remain visible during a route handoff.
   // Its DOM is retained by the stable frame and is inert until the new page's
   // own authority and core reads finish; this is not an identity cache.
@@ -412,8 +413,11 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   const route = () => communityRoute(location.hash);
   function syncBoardCatalog(catalog: CommunityBoardCatalog | undefined) {
     if (!catalog) return;
-    if (installCommunityBoardCatalog(catalog) && readyData(me)) mounted?.ctx.headerChanged?.();
+    const previousNews = communityNewsBoard(communityBoards)?.id;
+    const installed = installCommunityBoardCatalog(catalog);
+    if (installed && readyData(me)) mounted?.ctx.headerChanged?.();
     boardEditor.sync(catalog);
+    if (installed && previousNews !== communityNewsBoard(communityBoards)?.id && newsEnabled()) void loadNews();
   }
   const boardEditor = createCommunityBoardController({
     t: tr, esc: value => mounted?.ctx.esc(value) || '',
@@ -483,7 +487,12 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       if (resourceReads.get(path) === token) resourceReads.delete(path);
     }
   }
-  async function loadSummary() { await assignLoad('summary', summary, value => { summary = value; syncBoardCatalog(readyData(value)?.boardCatalog); }); }
+  async function loadSummary() {
+    await assignLoad('summary', summary, value => { summary = value; syncBoardCatalog(readyData(value)?.boardCatalog); });
+    // The directory identifies the news source. Its independent read must not
+    // hold up the confirmed primary discussion list.
+    if (newsEnabled()) void loadNews();
+  }
   async function loadModerationContacts() { await assignLoad('moderation-contacts', moderationContacts, value => { moderationContacts = value; }); }
   async function loadConvention() { await assignLoad('convention', convention, value => { convention = value; }); }
   function loadFrameHighlights(scope: string): Promise<void> {
@@ -658,6 +667,23 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       if (current() && suppliesHighlights) frameHighlights.set(scope, lists.get(key)!);
     } finally { current.release(); }
   }
+  const newsEnabled = () => route().view === 'home' && sort === 'curated' && !queryOf('');
+  const newsBoard = () => communityNewsBoard(communityBoards);
+  const newsKey = (board: string) => `${board}|published|`;
+  const newsPath = (board: string) => `topics?${new URLSearchParams({ board, sort: 'published', page: '1' })}`;
+  async function loadNews() {
+    const board = newsEnabled() && newsBoard();
+    if (!board) return;
+    const key = newsKey(board.id);
+    if (listRequests.has(key)) return;
+    const current = claim(key), identity = frameIdentity, revision = permissionRevision;
+    try {
+      const value = await load<CommunityListing>(newsPath(board.id), lists.get(key));
+      if (!current() || identity !== frameIdentity || revision !== permissionRevision || newsBoard()?.id !== board.id) return;
+      lists.set(key, value);
+      paintNews();
+    } finally { current.release(); }
+  }
   async function loadThread(id: string) { await assignLoad(`topics/${enc(id)}`, threads.get(id), value => { threads.set(id, value); }); }
   const members = (ctx = mounted?.ctx) => {
     const viewer = readyData(me);
@@ -809,6 +835,11 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
           const scope = current.view === 'board' ? current.board : 'home';
           stage<CommunityBannerConfig>(`banners?scope=${enc(scope)}`, value => { banners.set(scope, value); }, false);
         }
+        const board = newsEnabled() && newsBoard();
+        if (board) stage<CommunityListing>(newsPath(board.id), value => {
+          listRequests.delete(newsKey(board.id));
+          if (newsBoard()?.id === board.id) lists.set(newsKey(board.id), value);
+        });
         break;
       }
       case 'post': stage<CommunityThread>(`topics/${enc(current.id)}`, value => { threads.set(current.id, value); }); break;
@@ -929,7 +960,11 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const savedCompose = draftComposeValues(current);
     if (!ctx.simpleCompose && current.view === 'new' && composeBoard === null && !current.board && savedCompose?.board) composeBoard = savedCompose.board;
     switch (current.view) {
-      case 'home': return communityHomeHTML({ ...common, summary: summary || loading, list: lists.get(listKey('')) || loading, sort, query: queryOf(''), members: ctx.members, me, showCompose: ctx.showHomeCompose });
+      case 'home': {
+        const board = newsBoard();
+        return communityHomeHTML({ ...common, summary: summary || loading, list: lists.get(listKey('')) || loading, sort, query: queryOf(''), members: ctx.members, me, showCompose: ctx.showHomeCompose,
+          news: { board, list: board ? lists.get(newsKey(board.id)) || loading : loading, catalogPending: !summary || summary.state === 'loading' } });
+      }
       case 'boards': return communityBoardsHTML({ ...common, summary: summary || loading, members: ctx.members });
       case 'board': return communityBoardHTML({ ...common, board: current.board, summary: summary || loading, list: lists.get(listKey(current.board)) || loading, sort, query: queryOf(current.board), members: ctx.members, me: viewer, showPostingTips: ctx.showPostingTips, showActiveMembers: ctx.showActiveMembers });
       case 'tag': return communityTagHTML({ ...common, tag: current.id, list: lists.get(listKey(`tag:${current.id}`)) || loading, sort, query: queryOf(`tag:${current.id}`), me: viewer });
@@ -1059,6 +1094,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       // The list changed in place. Supporting reads must compare against that
       // new core, while still updating their own previously painted areas.
       paintedPage.main = page?.querySelector('.community-main')?.outerHTML ?? null;
+      paintedPage.news = page?.querySelector('.community-news')?.outerHTML ?? null;
       paintedPage.markup = '';
     }
     const restoreView = mounted?.ctx.beforePaint?.();
@@ -1076,11 +1112,13 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         const incomingContainer = incoming.closest('.community-curated') || incoming;
         // Keep the existing list attached: moving it through a fragment would
         // invalidate the browser's scroll anchor despite retaining its children.
-        for (const child of [...results.children]) if (child !== container) child.remove();
-        for (const child of [...next.children]) {
+        const region = rows.closest('.community-discussion-primary') || results;
+        const incomingRegion = incoming.closest('.community-discussion-primary') || next;
+        for (const child of [...region.children]) if (child !== container) child.remove();
+        for (const child of [...incomingRegion.children]) {
           if (child === incomingContainer) continue;
           if (child.classList.contains('community-search-summary')) container.before(child);
-          else results.append(child);
+          else region.append(child);
         }
       } else results.replaceChildren(...next.childNodes);
     } else results.replaceChildren(...next.childNodes);
@@ -1090,11 +1128,43 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (documentPosition && section) restoreDocumentReading(section, documentPosition);
   }
   let listChange = 0;
+  function replaceNews(current: Element, next: Element) {
+    const active = document.activeElement;
+    const focused = active instanceof HTMLElement && current.contains(active);
+    const href = focused ? active.closest('a')?.getAttribute('href') : null;
+    current.replaceWith(next);
+    if (!focused) return;
+    const target = href ? [...next.querySelectorAll<HTMLAnchorElement>('a[href]')].find(link => link.getAttribute('href') === href) : null;
+    const fallback = next.querySelector<HTMLElement>('.community-news-more') || (next instanceof HTMLElement ? next : null);
+    if (!target && fallback === next) fallback.setAttribute('tabindex', '-1');
+    (target || fallback)?.focus({ preventScroll: true });
+  }
+  function paintNews() {
+    if (!newsEnabled() || !viewerVerified || viewerFailure || viewerHash !== location.hash || routeHandoffPending()) return;
+    const current = mounted?.main.querySelector('.community-news'), page = renderedPage(), next = page?.querySelector('.community-news');
+    if (!current || !next || current.outerHTML === next.outerHTML) return;
+    const restoreView = mounted?.ctx.beforePaint?.();
+    const section = current.closest<HTMLElement>('[data-community]');
+    const position = !restoreView && section ? preserveDocumentReading(section) : null;
+    // Moving the news node out of this detached template changes its HTML.
+    // Remember the complete generated snapshot before that move.
+    const nextMainMarkup = page?.querySelector('.community-main')?.outerHTML ?? null;
+    const nextNewsMarkup = next.outerHTML;
+    replaceNews(current, next);
+    if (paintedPage?.hash === location.hash && paintedPage.frame === frameIdentity) {
+      paintedPage.main = nextMainMarkup;
+      paintedPage.news = nextNewsMarkup;
+      paintedPage.markup = '';
+    }
+    mounted?.ctx.painted?.(); restoreView?.();
+    if (position && section) restoreDocumentReading(section, position);
+  }
   async function changeList() {
     const change = ++listChange;
     const scope = scopeOf(), key = listKey(scope), hash = location.hash;
     const section = mounted?.main.querySelector('[data-community]');
     const saved = lists.get(key);
+    if (newsEnabled()) void loadNews();
     if (saved?.state === 'ready') {
       paintList();
       // A return to an expanded list keeps its cached pages. Permission and
@@ -1202,6 +1272,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   function rememberPaint(markup: string, page: HTMLElement) {
     paintedPage = { hash: location.hash, frame: frameIdentity, markup, style: page.getAttribute('style'),
       main: page.querySelector('.community-main')?.outerHTML ?? null,
+      news: page.querySelector('.community-news')?.outerHTML ?? null,
       banner: page.querySelector('.community-banner, .community-board-hero')?.outerHTML ?? null,
       aside: page.querySelector('.community-aside')?.outerHTML ?? null };
     const account = draftIdentity();
@@ -1261,17 +1332,23 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       }
       const view = route().view;
       const core = section.querySelector('.community-main'), nextCore = next.querySelector('.community-main');
-      if (['home', 'board', 'tag'].includes(view) && core && nextCore && paintedPage.main === nextCore.outerHTML
+      const nextNews = nextCore?.querySelector('.community-news');
+      const samePrimary = core && nextCore && (paintedPage.main === nextCore.outerHTML
+        || view === 'home' && paintedPage.news && nextNews
+          && paintedPage.main?.replace(paintedPage.news, '') === nextCore.outerHTML.replace(nextNews.outerHTML, ''));
+      if (['home', 'board', 'tag'].includes(view) && core && nextCore && samePrimary
         && paintedPage.style === next.getAttribute('style')
         && ['.community-banner, .community-board-hero', '.community-aside'].every(selector => Boolean(section.querySelector(selector)) === Boolean(next.querySelector(selector)))) {
         const restoreView = mounted.ctx.beforePaint?.();
-        const previousBanner = paintedPage.banner, previousAside = paintedPage.aside;
+        const previousBanner = paintedPage.banner, previousAside = paintedPage.aside, previousNews = paintedPage.news;
         rememberPaint(markup, next);
         // Only these existing list-page supporting areas can change here. The
         // results, editor, focus and text selection remain attached in place.
-        for (const [selector, previous] of [['.community-banner, .community-board-hero', previousBanner], ['.community-aside', previousAside]] as const) {
+        for (const [selector, previous] of [['.community-banner, .community-board-hero', previousBanner], ['.community-aside', previousAside], ['.community-news', previousNews]] as const) {
           const current = section.querySelector(selector), replacement = next.querySelector(selector);
-          if (current && replacement && previous !== replacement.outerHTML) current.replaceWith(replacement);
+          if (current && replacement && previous !== replacement.outerHTML) {
+            if (selector === '.community-news') replaceNews(current, replacement); else current.replaceWith(replacement);
+          }
         }
         mountSelects(); mounted.ctx.painted?.(); restoreView?.();
         return;

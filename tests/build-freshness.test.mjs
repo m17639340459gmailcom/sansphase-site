@@ -44,6 +44,7 @@ const canonicalFiles = [
   "community-growth.mjs",
   "community-pages.mjs",
   "community-ui.mjs",
+  "community-news.mjs",
   "community-passive-refresh.mjs",
   "community-staff.mjs",
   "community-profile.mjs",

@@ -10,7 +10,7 @@ const port=Number(process.env.PORT || 4177);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('PORT must be an integer between 1024 and 65535.');
 const origin=`http://127.0.0.1:${port}`;
 const music=createMusicDemo();
-const community=await createCommunityDemo({ visualDemo: true });
+const community=await createCommunityDemo({ visualDemo: true, newsDemo: process.env.COMMUNITY_NEWS_DEMO === '1' });
 const data={...makeReadingDemo(),author:null,announcements:[{title:'本地预演',summary:'文章、作品、推荐与试听音均为模拟内容，仅用于确认展示效果。',image:'./assets/materials/eso-triangulum.jpg'}],profile:{
   name:'無相',signature:'本地预演',bio:'此页面用于预览，模拟内容不会发布到正式网站。',socialLinks:[],music:music.settings,
 }};

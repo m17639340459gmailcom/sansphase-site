@@ -266,7 +266,7 @@ export async function contentRoutes(ctx: Ctx): Promise<boolean> {
       const sort = url.searchParams.get('sort') || 'active';
       const page = Math.max(1, Math.min(1000, Number.parseInt(url.searchParams.get('page') || '1', 10) || 1));
       if (!isCommunitySort(sort)) throw fail('排序方式无效。');
-      const listingPageSize = sort === 'curated' ? communityCuratedPageSize : pageSize;
+      const listingPageSize = sort === 'curated' || sort === 'published' ? communityCuratedPageSize : pageSize;
       const query = (url.searchParams.get('q') || '').trim();
       if ([...query].length > searchLimit) throw fail(`搜索词最多 ${searchLimit} 个字。`);
       const uid = url.searchParams.get('author') || '';

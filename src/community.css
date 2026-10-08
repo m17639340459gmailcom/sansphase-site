@@ -555,7 +555,13 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-end { padding: 8px; text-align: center; font-size: 12.5px; color: var(--cm-faint); }
 
 .community-topics { overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: var(--cm-panel); }
-/* One broad, compact board for editorial features and popular discussions. */
+/* Compact discussion boards adapt to the available center column. */
+.community-discussion-boards { container-type: inline-size; min-width: 0; }
+.community-discussion-grid { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 16px; }
+.community-discussion-primary { min-width: 0; }
+@container (min-width: 740px) {
+  .community-discussion-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .community-curated { container-type: inline-size; min-width: 0; padding: 12px 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--community-reading-surface, var(--cm-panel)); }
 .community-curated-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
 .community-curated-head h2 { margin: 0; font: 600 17px/1.5 var(--font-serif); color: var(--community-reading-title, var(--text)); }
@@ -587,6 +593,27 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
   .community-curated-title { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .community-curated-aside { grid-column: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding-top: 0; }
 }
+.community-news { min-width: 0; padding: 12px 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--community-reading-surface, var(--cm-panel)); }
+.community-news-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.community-news-head > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; min-width: 0; }
+.community-news-head h2 { margin: 0; font: 600 17px/1.5 var(--font-serif); color: var(--community-reading-title, var(--text)); }
+.community-news-sub { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.community-news-more { color: var(--muted); font-size: 12px; }
+.community-news-list { margin: 0; padding: 0; list-style: none; }
+.community-news-row { display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: start; gap: 12px; min-width: 0; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.community-news-row:last-child { padding-bottom: 2px; border-bottom: 0; }
+.community-news-rank { padding-top: 2px; font: 500 15px/1.5 var(--font-mono); color: var(--dim); }
+.community-news-rank.is-top { color: var(--signal); font-weight: 600; }
+.community-news-main { display: grid; min-width: 0; gap: 5px; }
+.community-news-title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; color: var(--text); font-size: 15px; font-weight: 600; line-height: 1.5; }
+.community-news-title:hover, .community-news-more:hover, .community-news-row.is-glow .community-news-title { color: var(--signal); }
+.community-news-meta { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; min-width: 0; color: var(--muted); font-size: 12px; line-height: 20px; }
+.community-news-author { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.community-news-author > .community-av { width: 20px; height: 20px; flex: 0 0 20px; }
+.community-news-author .community-uname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.community-news-time { color: var(--dim); font-size: 11px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.community-news-state { padding: 12px 0 2px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.community-news-title:focus-visible, .community-news-author:focus-visible, .community-news-more:focus-visible { outline: 1px solid var(--focus-edge); outline-offset: 3px; border-radius: 3px; }
 .community-topic { position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr) 56px; gap: 14px; padding: 16px 18px; border-top: 1px solid var(--line); transition: background 0.2s; }
 .community-topic:first-child { border-top: 0; }
 .community-topic:hover { background: rgb(238 233 224 / 2.5%); }

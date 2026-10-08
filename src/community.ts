@@ -16,6 +16,7 @@ import type { CommunityEntryState } from './community-entry.ts';
 import { communityStaffRoles, communityStaffCapabilities } from './community-staff.mjs';
 import type { CommunityStaffRole, CommunityStaffState } from './community-staff.ts';
 import { communityBoardIcon } from './community-board-icons.mjs';
+import { communityNewsHTML } from './community-news.mjs';
 export * from './community-rules.mjs';
 
 export type Translate = (zh: string, en: string) => string;
@@ -203,7 +204,7 @@ export type CommunityTopic = {
   resource?: CommunityResource | null;
 };
 
-export type CommunitySort = "curated" | "active" | "newest" | "hot" | "featured" | "following";
+export type CommunitySort = "curated" | "published" | "active" | "newest" | "hot" | "featured" | "following";
 export const communityCuratedPageSize = 6;
 export const communitySorts: ReadonlyArray<readonly [CommunitySort, string, string]> = [
   ["curated", "精选", "Curated"],
@@ -212,7 +213,7 @@ export const communitySorts: ReadonlyArray<readonly [CommunitySort, string, stri
   ["following", "关注", "Following"],
 ];
 // Keep existing hot/featured reads available to sidebars and older clients.
-export const isCommunitySort = (value: unknown): value is CommunitySort => value === 'hot' || value === 'featured' || communitySorts.some(([id]) => id === value);
+export const isCommunitySort = (value: unknown): value is CommunitySort => value === 'published' || value === 'hot' || value === 'featured' || communitySorts.some(([id]) => id === value);
 
 const time = (value: string) => Date.parse(value) || 0;
 // 热度：回复比赞更重，越旧的帖子分数越低（每 8 小时减 1 分）。
@@ -225,7 +226,7 @@ export function sortTopics<T extends Sortable>(topics: readonly T[], sort: Commu
   if (sort === "curated") list.sort((a, b) => Number(Boolean(b.featured)) - Number(Boolean(a.featured))
     || (a.featured && b.featured ? time(b.lastActivityAt) - time(a.lastActivityAt) : heat(b, now) - heat(a, now)));
   else if (sort === "hot") list.sort((a, b) => heat(b, now) - heat(a, now));
-  else if (sort === "newest") list.sort((a, b) => time(b.createdAt) - time(a.createdAt));
+  else if (sort === "newest" || sort === 'published') list.sort((a, b) => time(b.createdAt) - time(a.createdAt));
   else list.sort((a, b) => time(b.lastActivityAt) - time(a.lastActivityAt));
   // 按时间排序时：站长置顶 > 付费推荐 > 普通帖子；热门和精华按内容本身排。
   if (sort === "active" || sort === "newest") {
@@ -661,11 +662,12 @@ function communityCuratedHTML(items: readonly CommunityTopic[], common: Common, 
   return `<section class="community-curated" aria-label="${t('精选榜单', 'Curated discussions')}"><header class="community-curated-head"><h2>${t('精选榜单', 'Curated discussions')}</h2><p>${t('精华优先 · 热门补充', 'Featured first · popular discussions next')}</p></header><ol class="community-curated-list" role="list">${rows.join('')}</ol></section>`;
 }
 
-type ListingOptions = Common & { list: CommunityLoad<CommunityListing>; sort: CommunitySort; query: string; board: string; empty: string; meForSort?: CommunityMe | null; showCompose?: boolean };
+type NewsOptions = { board: CommunityBoard | null; list: CommunityLoad<CommunityListing>; catalogPending?: boolean };
+type ListingOptions = Common & { list: CommunityLoad<CommunityListing>; sort: CommunitySort; query: string; board: string; empty: string; meForSort?: CommunityMe | null; showCompose?: boolean; news?: NewsOptions };
 
 // 帖子列表上方的一栏（首页、版块页和标签页共用）：左边排序，右边搜索和发帖。
 // 版块页里的“发帖”默认发到这个版块。“加载更多”在还有下一页时出现。
-function listingHTML({ list, sort, query, board, empty, showCompose = true, ...common }: ListingOptions) {
+function listingHTML({ list, sort, query, board, empty, showCompose = true, news, ...common }: ListingOptions) {
   const { t, esc, icons = {} } = common;
   const sortHTML = communitySorts.filter(([id]) => id !== "following" || Boolean(common.meForSort)).map(([id, zh, en]) =>
     `<button type="button" data-action="community-sort" data-sort="${id}" aria-pressed="${sort === id}">${t(zh, en)}</button>`).join("");
@@ -690,11 +692,15 @@ function listingHTML({ list, sort, query, board, empty, showCompose = true, ...c
         : `<p class="community-end">${t("已经到底了", "That's everything")}</p>`)
       : none);
   }
+  if (news && sort === 'curated' && !query) {
+    const main = `<div class="community-discussion-primary">${body}</div>`;
+    body = `<div class="community-discussion-boards"><div class="community-discussion-grid">${main}${communityNewsHTML({ ...common, ...news })}</div></div>`;
+  }
   return `<div class="community-sort community-rv" style="--i:1"><div class="community-sort-tabs" role="group" aria-label="${t("排序", "Sort")}">${sortHTML}</div><div class="community-sort-actions">${search}${compose}</div></div><div class="community-results">${body}</div>`;
 }
 
 /* ---------- 首页 ---------- */
-type HomeOptions = Common & { summary: CommunityLoad<CommunitySummary>; list: CommunityLoad<CommunityListing>; sort: CommunitySort; query?: string; members: boolean; me?: CommunityLoad<CommunityMe> | null; showCompose?: boolean; activityBoard?: string };
+type HomeOptions = Common & { summary: CommunityLoad<CommunitySummary>; list: CommunityLoad<CommunityListing>; sort: CommunitySort; query?: string; members: boolean; me?: CommunityLoad<CommunityMe> | null; showCompose?: boolean; activityBoard?: string; news?: NewsOptions };
 
 // 横幅里的签到胶囊：没签到时直接签，签过了去签到页。
 function checkinPill(me: CommunityMe | null, { t, icons = {} }: Common) {
@@ -716,7 +722,7 @@ function boardsMiniHTML(summary: CommunitySummary | null, members: boolean, comm
   }).join("");
 }
 
-export function communityHomeHTML({ summary, list, sort, query = "", members, me = null, showCompose = true, activityBoard = '', ...common }: HomeOptions) {
+export function communityHomeHTML({ summary, list, sort, query = "", members, me = null, showCompose = true, activityBoard = '', news, ...common }: HomeOptions) {
   const { t, esc, icons = {} } = common;
   const ready = readyData(summary);
   const locked = activityBoard === 'vip' && !members;
@@ -733,7 +739,7 @@ export function communityHomeHTML({ summary, list, sort, query = "", members, me
     + `<div class="community-layout"><aside class="community-aside">`
     + `<section class="community-card community-rv community-spot" style="--i:2">${cardHead(t("热门讨论", "Trending"), icons.trending)}${hotHTML}</section>`
     + `<section class="community-card community-rv community-spot" style="--i:3">${cardHead(t("版块", "Boards"), icons.grid, moreLink("#/community/boards", t("全部版块", "All boards"), icons))}<div class="community-boards">${boardsMiniHTML(ready, members, common)}</div></section>`
-    + `</aside><div class="community-main">${listingHTML({ list, sort, query, board: "", showCompose, empty: showCompose ? t("点上方的“发帖”，来发第一帖吧。", "Use “New post” to start the first discussion.") : t("选择一个板块，开始第一场讨论。", "Choose a board to start the first discussion."), meForSort: readyData(me), ...common })}</div></div></section>`;
+    + `</aside><div class="community-main">${listingHTML({ list, sort, query, board: "", showCompose, news, empty: showCompose ? t("点上方的“发帖”，来发第一帖吧。", "Use “New post” to start the first discussion.") : t("选择一个板块，开始第一场讨论。", "Choose a board to start the first discussion."), meForSort: readyData(me), ...common })}</div></div></section>`;
 }
 
 /* ---------- 版块目录 ---------- */
