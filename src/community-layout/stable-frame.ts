@@ -5,6 +5,7 @@ import { createFrameBoards } from './frame-boards.ts';
 import { createSharedFeedShowcase } from './feed-showcase.ts';
 import { createFrameThreadSidebar } from './frame-thread-sidebar.ts';
 import { readCategories } from './board-links.ts';
+import { createCommunityLevelMotion, levelMotionMarkup } from './level-motion.ts';
 
 type FrameWindow = Pick<Window, 'location' | 'matchMedia'> & Partial<Pick<Window, 'requestAnimationFrame' | 'cancelAnimationFrame' | 'history'>>;
 /** Persistent community shell; the controller owns routes, identity and writes. */
@@ -37,16 +38,19 @@ export function createStableCommunityFrame(document: Document, window: FrameWind
   let lastScrollTop = 0;
   let scrollbarTimer: ReturnType<typeof setTimeout> | null = null;
   let decorationTimer: ReturnType<typeof setTimeout> | null = null;
+  let levelMotion: ReturnType<typeof createCommunityLevelMotion> | null = null;
   const resumeDecoration = () => {
     if (decorationTimer !== null) clearTimeout(decorationTimer);
     decorationTimer = null;
     root?.style.removeProperty('--community-decoration-play-state');
+    levelMotion?.resume();
   };
   const pauseDecoration = () => {
     // Freeze only decorative CSS motion, preserving its phase and all content.
     // Do not rewrite styles on every scroll event or promote individual icons.
     if (decorationTimer === null) root?.style.setProperty('--community-decoration-play-state', 'paused');
     else clearTimeout(decorationTimer);
+    levelMotion?.pause();
     decorationTimer = setTimeout(resumeDecoration, 600);
   };
   const hideScrollbar = () => {
@@ -78,6 +82,10 @@ export function createStableCommunityFrame(document: Document, window: FrameWind
       // writeTop records programmatic restoration before its scroll event fires.
       if (top !== lastScrollTop) { showScrollbar(); pauseDecoration(); }
       lastScrollTop = top;
+    } else if (event.target instanceof document.defaultView!.Element && root?.contains(event.target)) {
+      // Independent reading sidebars share the same motion pause, while the
+      // main scroll position and scrollbar activity keep their own owner.
+      pauseDecoration();
     }
   };
   const scrollInputs = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
@@ -178,6 +186,7 @@ export function createStableCommunityFrame(document: Document, window: FrameWind
     if (changed) restoreAfterLayout(top);
   };
   const dispose = () => {
+    levelMotion?.release(); levelMotion = null;
     resumeDecoration();
     hideScrollbar();
     cancelScrollRestore();
@@ -297,6 +306,7 @@ export function createStableCommunityFrame(document: Document, window: FrameWind
       }
       document.body.classList.add('community-frame-open');
       document.documentElement.classList.add('community-frame-document');
+      levelMotion = createCommunityLevelMotion(document, request);
     }
     const nextHash = window.location.hash;
     const previous = communityRoute(currentHash), next = communityRoute(nextHash);
@@ -337,7 +347,7 @@ export function createStableCommunityFrame(document: Document, window: FrameWind
     const source = fragment(html);
     for (const selector of ['.community-brand-group', '.header-actions']) {
       const old = bar.querySelector(selector), next = source.querySelector(selector);
-      if (old && next && old.outerHTML !== next.outerHTML) old.replaceWith(next);
+      if (old && next && levelMotionMarkup(old) !== next.outerHTML) old.replaceWith(next);
     }
     const links = source.querySelectorAll<HTMLAnchorElement>('#navigation a');
     const label = source.querySelector('#navigation')?.getAttribute('aria-label');

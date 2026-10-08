@@ -261,7 +261,39 @@ test("likes, bookmarks, views, tags, edits and reports", async (t) => {
   assert.throws(() => store.resolveReport(second.id, true, at(15)), /已经处理/);
 });
 
-test("trust levels: earned from visits, reading, posting, likes and replies; recomputed once a day; 守夜 falls back", async (t) => {
+test('trust levels: 巡天 needs three visit days and a published topic, without a reading quota', async t => {
+  const store = await open(t);
+  const me = reader('no-reading-quota');
+  const day0 = Date.parse('2026-09-01T02:00:00Z');
+  const on = d => day0 + d * 86400e3;
+  const iso = d => new Date(on(d)).toISOString();
+
+  const progress = store.members.levelProgress(me, 0, on(0));
+  assert.deepEqual(progress.rows.map(row => [row.key, row.need]), [['visitDays', 3], ['approved', 1]], 'progress uses only the two confirmed requirements');
+  store.members.visit(me, on(0));
+  store.members.visit(me, on(1));
+  const topic = post(store, me, { now: iso(1) });
+  assert.equal(store.members.stats(me, on(1)).topicsViewed, 0);
+  assert.equal(store.members.trustLevel(me, on(1)), 0, 'a public topic alone does not bypass three visit days');
+
+  store.members.visit(me, on(2));
+  assert.equal(store.members.trustLevel(me, on(2)), 1, 'three visits and one public topic promote a member who has read no topics');
+  assert.equal(store.members.stats(me, on(2)).topicsViewed, 0);
+  assert.equal(store.members.inbox(me).filter(notice => notice.type === 'level' && notice.data.level === 1).length, 1);
+
+  const pendingAuthor = reader('pending-no-reading-quota');
+  for (let d = 0; d < 3; d++) store.members.visit(pendingAuthor, on(d));
+  const pending = post(store, pendingAuthor, { pending: 'newcomer', now: iso(2) });
+  assert.equal(store.members.trustLevel(pendingAuthor, on(2)), 0, 'a pending topic does not qualify as published');
+  store.approveTopic(pending.id, iso(2));
+  assert.equal(store.members.trustLevel(pendingAuthor, on(2)), 0, 'approval preserves the existing once-per-day evaluation');
+  assert.equal(store.members.trustLevel(pendingAuthor, on(3)), 1, 'an approved topic qualifies at the next daily evaluation');
+
+  store.deleteTopic(topic.id, { now: iso(3) });
+  assert.equal(store.members.trustLevel(me, on(3)), 1, 'earned 巡天 is retained');
+});
+
+test("trust levels: earned from visits, posting, likes and replies; recomputed once a day; 守夜 falls back", async (t) => {
   const store = await open(t);
   const me = reader("climber");
   const day0 = Date.parse("2026-09-01T02:00:00Z");
@@ -271,7 +303,6 @@ test("trust levels: earned from visits, reading, posting, likes and replies; rec
   for (let d = 0; d < 3; d++) store.members.visit(me, on(d));
   const topics = [];
   for (let i = 0; i < 20; i++) topics.push(post(store, reader(`writer${i}`), { title: `别人的主题 ${i}`, now: iso(0) }));
-  for (const topic of topics) store.view(topic.id, me, on(2));
   assert.equal(store.members.level(me, on(2)), 0, "no published topic yet");
   post(store, me, { now: iso(2) });
   assert.equal(store.members.level(me, on(2)), 0, "recomputed only once a day");

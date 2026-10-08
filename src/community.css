@@ -1117,6 +1117,8 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-level-emblem { display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; min-width: 0; width: 100%; max-width: 248px; aspect-ratio: 1; margin-inline: auto; }
 .community-growth-art, .community-trust-art, .community-vip-art { position: relative; display: inline-block; flex: 0 0 auto; width: 100%; aspect-ratio: 1; isolation: isolate; line-height: 0; vertical-align: middle; background: none; border: 0; transform-origin: 50% 55%; }
 .community-growth-art-image, .community-trust-art-image, .community-vip-art-image { display: block; width: 100%; height: 100%; object-fit: contain; }
+.community-level-motion-canvas { position: absolute; inset: 0; display: block; pointer-events: none; }
+[data-level-motion-ready] > :is(.community-growth-art-image, .community-trust-art-image, .community-vip-art-image) { visibility: hidden; }
 .community-level-emblem .community-growth-art, .community-level-emblem .community-trust-art { width: 88%; }
 .community-growth-chip .community-growth-art { width: 20px; height: 20px; }
 /* 昵称旁的三枚等级图标。三套图形占各自画布的比例不同：成长星盘的盘面只有画布的 50%～61%，权限菱形

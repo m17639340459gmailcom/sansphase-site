@@ -67,7 +67,6 @@ export type LevelStat = "visitDays" | "visits100" | "topicsViewed" | "approved" 
 export const communityLevelRules: Record<1 | 2 | 3, Array<{ key: LevelStat; label: string; labelEn: string; need: number }>> = {
   1: [
     { key: "visitDays", label: "访问天数", labelEn: "Days visited", need: 3 },
-    { key: "topicsViewed", label: "看过的主题", labelEn: "Topics read", need: 20 },
     { key: "approved", label: "发出的主题", labelEn: "Topics published", need: 1 },
   ],
   2: [
