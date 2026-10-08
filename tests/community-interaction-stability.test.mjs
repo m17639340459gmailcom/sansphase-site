@@ -338,7 +338,12 @@ test('verified owner personal reader publishes in the VIP board as its real read
   const form = main.querySelector('[data-community-form="topic"]'); assert.ok(form);
   form.elements.namedItem('title').value = '个人读者的会员主题';
   form.elements.namedItem('body').value = '通过真实读者身份发布的会员主题正文。'.repeat(8);
-  form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await turn(); await turn();
+  form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  const deadline = performance.now() + 5000;
+  while (!requests.some(entry => entry.url.endsWith('/topics') && entry.init.method === 'POST')) {
+    assert.ok(performance.now() < deadline, 'the personal reader topic request must be sent');
+    await turn();
+  }
   const write = requests.find(entry => entry.url.endsWith('/topics') && entry.init.method === 'POST'); assert.ok(write, form.querySelector('.community-form-status')?.textContent);
   assert.equal(JSON.parse(write.init.body).board, 'vip');
   assert.equal(JSON.parse(write.init.body).owner, undefined);
@@ -1468,7 +1473,11 @@ test('sending a reply does not scroll the page to the new reply', async t => {
   w.HTMLElement.prototype.scrollIntoView = () => { autoScroll++; };
   main.querySelector('#community-reply').value = '这是准备发送的回复内容。';
   main.querySelector('form[data-community-form="reply"]').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
-  for (let attempt = 0; attempt < 10 && !main.querySelector('#reply-r3'); attempt++) await turn();
+  const deadline = performance.now() + 5000;
+  while (!main.querySelector('#reply-r3')) {
+    assert.ok(performance.now() < deadline, 'the reply request and rendered response must settle');
+    await turn();
+  }
   assert.equal(requests.filter(item => item.url.endsWith('/replies') && item.init.method === 'POST').length, 1);
   assert.ok(main.querySelector('#reply-r3')); assert.equal(autoScroll, 0);
 });
