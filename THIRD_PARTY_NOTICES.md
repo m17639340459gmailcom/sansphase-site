@@ -10,6 +10,7 @@
 - 用户提供的博客背景记录在 src/vendor/user-space-assets/sources.json。
 - 社区成长等级采用项目所有者于 2026-10-06 确认的“命之座”星盘徽章，共十枚自包含的动态 SVG。图形为本项目在所有者指示下借助 AI 绘制的原创矢量，由 scripts/growth-constellation.ts 确定性生成，不含第三方素材、字体或位图，不继承任何图库许可，也不是原神官方图像。文件校验与生成器记录见 public/assets/community/levels/sources.json。此前的 C v3 序列（含 Lorc 的 Feather SVG）已不再随站点分发；社区权限等级同日改用项目原创的“月相”徽章，共四枚，深浅主题共用，由 scripts/trust-moon.ts 生成，同样不含第三方素材；此前沿用的 Game-icons.net 星形图标（Lorc、Delapouite，CC BY 3.0）已不再随站点分发。社区 VIP 等级同日采用项目原创的六角徽章，共八枚，由 scripts/vip-badge.ts 生成，图形不含第三方素材或位图；徽章上的“VIP”与数字取自 Noto Serif SC（思源宋体）Black 的字形并转为轮廓，字体 © 2017-2023 Adobe (http://www.adobe.com/)，以 SIL Open Font License 1.1 授权（https://openfontlicense.org），“Noto”是 Google Inc. 的商标；轮廓数据与取法见 scripts/vip-badge-glyphs.ts，站点不分发该字体文件。等级切换箭头仍为 Lucide Arrow Right（ISC）。
 - 时区中文城市名称及别名取自 Unicode CLDR 48.0.0，遵循 Unicode-3.0 许可证；数据来源和处理说明见 src/vendor/cldr/sources.json，许可证见 src/vendor/cldr/LICENSE。
+- 管理身份页的协管、版主、总版主徽标复用合作者提交 `099f293` 的设计与生成脚本，以本地已有的项目透明参考图复现。三个自包含 SVG 内嵌 WebP 像素和 CSS 动效，属于此组素材的位图例外，不改变成长、社区权限及 VIP 图标的原有矢量约定。来源与文件校验记录见 public/assets/community/staff/sources.json；归档脚本位于 drafts/staff-icons-v8，仅用于来源留档，不参与网站构建。本次为本地集成预览，未作上线视觉验收。
 - 首页 Active Theory 参考着色器、环形几何体及相关材质的使用依据：项目所有者于 2026-09-15 明确确认拥有这些素材的完整使用权，并允许用于本站及当前公开仓库。此为项目所有者的授权确认记录，不是对上游开放源代码许可的声明，也不向其他使用者另行授予素材权利。原始来源与文件校验记录继续保留在 active-theory-glass、active-theory-tubes、reference-materials 目录。
 
 本仓库不包含作者私有数据库、登录配置、上传文件或私有备份。

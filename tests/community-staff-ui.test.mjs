@@ -74,7 +74,7 @@ test('appointed role labels remain separate from earned community levels and rea
   assert.equal(doc.querySelector('a[href="#/community/manage"]'), null);
 });
 
-test('fourth role tab uses the existing carousel with an empty art slot and preserves ordinary trust status', () => {
+test('fourth role tab displays collaborator artwork in the existing carousel and preserves ordinary trust status', () => {
   const dom = new JSDOM(communityLevelExplorerHTML(dust, common));
   const root = dom.window.document.querySelector('[data-level-explorer]');
   const explorer = createCommunityLevelExplorer({ root: () => root, data: () => dust, common: () => common });
@@ -83,11 +83,46 @@ test('fourth role tab uses the existing carousel with an empty art slot and pres
   explorer.action(modes[3]);
   assert.match(root.querySelector('[data-level-status]').textContent, /协管/);
   assert.ok(root.querySelector('[data-staff-art-slot]'));
-  assert.equal(root.querySelector('[data-level-preview] img, [data-level-preview] svg'), null);
+  const image = root.querySelector('[data-level-preview] img');
+  assert.equal(image.getAttribute('src'), '/assets/community/staff/badge-assistant.svg');
+  assert.equal(image.getAttribute('width'), '240');
+  assert.equal(image.getAttribute('height'), '240');
+  assert.equal(root.querySelector('[data-carousel-neighbour] img').getAttribute('src'), '/assets/community/staff/badge-moderator.svg');
+  assert.equal(root.querySelector('[data-level-preview] svg'), null, 'the self-contained SVG stays in an image, outside application markup');
   assert.match(root.querySelector('[data-level-detail]').textContent, /上级|删除|禁言|管理联系方式/);
   explorer.action(modes[1]);
   assert.match(root.querySelector('[data-level-status]').textContent, /守夜/);
   assert.doesNotMatch(root.querySelector('[data-level-status]').textContent, /版主|协管/);
+  dom.window.close();
+});
+
+test('staff carousel navigation keeps artwork paired with role descriptions without changing appointments', () => {
+  const dom = new JSDOM(communityLevelExplorerHTML(dust, common));
+  const root = dom.window.document.querySelector('[data-level-explorer]');
+  const explorer = createCommunityLevelExplorer({ root: () => root, data: () => dust, common: () => common });
+  const before = structuredClone(dust);
+  explorer.action(root.querySelector('[data-level-mode="staff"]'));
+  for (const [level, role, title] of [[0, 'assistant', '协管'], [1, 'moderator', '版主'], [2, 'general', '总版主'], [3, 'owner', '站长']]) {
+    if (level) explorer.action(root.querySelector('[data-level-step="1"]'));
+    assert.equal(root.querySelector('[data-level-preview] [data-staff-role]').dataset.staffRole, role);
+    assert.equal(root.querySelector('[data-level-detail] h3').textContent, title);
+    const image = root.querySelector('[data-level-preview] img');
+    if (role === 'owner') assert.equal(image, null, 'the collaborator supplied three appointed roles, not an owner icon');
+    else assert.equal(image.getAttribute('src'), `/assets/community/staff/badge-${role}.svg`);
+    assert.match(root.querySelector('[data-level-status]').textContent, /当前管理身份：协管/);
+  }
+  assert.equal(root.querySelector('[data-level-step="1"]').disabled, true);
+  const preview = root.querySelector('[data-level-preview]');
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'Element');
+  Object.defineProperty(globalThis, 'Element', { configurable: true, value: dom.window.Element });
+  try { explorer.keydown({ target: preview, key: 'Home', preventDefault() {} }); }
+  finally {
+    if (descriptor) Object.defineProperty(globalThis, 'Element', descriptor);
+    else delete globalThis.Element;
+  }
+  assert.equal(root.querySelector('[data-level-preview] img').getAttribute('src'), '/assets/community/staff/badge-assistant.svg');
+  assert.equal(dom.window.document.activeElement, root.querySelector('[data-level-preview]'));
+  assert.deepEqual(dust, before, 'browsing role artwork grants no role or capability');
   dom.window.close();
 });
 

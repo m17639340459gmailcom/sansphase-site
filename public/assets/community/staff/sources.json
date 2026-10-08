@@ -1,0 +1,31 @@
+{
+  "description": "Three collaborator management identity emblems, reconstructed for local integration from the existing owner-provided transparent reference. The SVGs embed WebP artwork and CSS motion; they are not pure vector assets. Owner artwork was not supplied.",
+  "collaboratorCommit": "099f293c3f8ea7ed4abd1d385e98b55e84c1b859",
+  "generator": "drafts/staff-icons-v8/build.mjs",
+  "sourceImageSha256": "1c1ba16ee0ac397111d994bf6b97c1fb5420dee4e0172acab0690e44e3a6152f",
+  "reconstructedAt": "2026-10-09",
+  "scope": "Local management role explorer preview; no appointment, permission or member-avatar changes.",
+  "icons": [
+    {
+      "role": "assistant",
+      "file": "badge-assistant.svg",
+      "bytes": 48505,
+      "sha256": "d7f7828946dba3a1d30748cba0483cea99dd6e9e7f4f0ace957fec97a5bc24db",
+      "kind": "animated-svg-with-embedded-webp"
+    },
+    {
+      "role": "moderator",
+      "file": "badge-moderator.svg",
+      "bytes": 49098,
+      "sha256": "57a47ed897bed5fa463e24878f411062def94a3cfce07b1bda2f236875a9b8a9",
+      "kind": "animated-svg-with-embedded-webp"
+    },
+    {
+      "role": "general",
+      "file": "badge-general.svg",
+      "bytes": 61635,
+      "sha256": "a9d28889c568c26ecff35632065c8d3a97634e30ca1fae4de8704630be0728e0",
+      "kind": "animated-svg-with-embedded-webp"
+    }
+  ]
+}

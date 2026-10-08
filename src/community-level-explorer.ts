@@ -38,7 +38,12 @@ function growthProgressHTML(data: CommunityStardust, common: Common, selected: n
 }
 
 const levelIconHTML = (level: number, mode: Mode) => {
-  if (mode === 'staff') return `<span data-staff-art-slot data-staff-role="${staffRanks[level].id}" aria-hidden="true"></span>`;
+  if (mode === 'staff') {
+    const role = staffRanks[level].id;
+    // The collaborator supplied the three appointed roles. Owner remains a
+    // distinct identity; viewing artwork never changes a member's appointment.
+    return `<span class="community-staff-art" data-staff-art-slot data-staff-role="${role}" aria-hidden="true">${role === 'owner' ? '' : `<img src="/assets/community/staff/badge-${role}.svg" width="240" height="240" alt="" decoding="async" draggable="false">`}</span>`;
+  }
   if (mode === 'growth') return communityGrowthArtHTML(level);
   if (mode === 'vip') return communityVipArtHTML(level);
   return communityTrustArtHTML(level);
