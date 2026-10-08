@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { DatabaseSync } from 'node:sqlite';
 import type { CommunityBoard } from '../src/community.ts';
-import { defaultCommunityBoards } from '../src/community.ts';
+import { availableCommunityBoardIcons, communityBoardIcon } from '../src/community-board-icons.ts';
 import { fail } from './community-db.ts';
 import type { CommunityAuthor, Transaction } from './community-db.ts';
 
@@ -22,6 +22,7 @@ function label(value: unknown, min: number, max: number, name: string) {
 export function createCommunityBoards(db: DatabaseSync, tx: Transaction, isOwner: (actor: CommunityAuthor) => boolean) {
   const versionRow = db.prepare('SELECT version FROM community_board_catalog WHERE id=1');
   const all = db.prepare('SELECT id,position,definition FROM community_boards ORDER BY position');
+  const highestPosition = db.prepare('SELECT COALESCE(MAX(position),-1) AS position FROM community_boards');
   const present = db.prepare('SELECT id FROM community_boards WHERE id=?');
   const insert = db.prepare('INSERT INTO community_boards(id,position,definition,created_at,actor_id) VALUES(?,?,?,?,?)');
   const bump = db.prepare('UPDATE community_board_catalog SET version=version+1 WHERE id=1 AND version=?');
@@ -29,6 +30,12 @@ export function createCommunityBoards(db: DatabaseSync, tx: Transaction, isOwner
   const catalog = (): CommunityBoardCatalog => ({ version: Number((versionRow.get() as { version: number }).version),
     items: (all.all() as BoardRow[]).map(row => ({ ...(JSON.parse(row.definition) as CommunityBoard), id: row.id })) });
   const authorize = (actor: CommunityAuthor) => { if (!isOwner(actor)) throw fail('只有作者能创建和排列社区板块。', 403); };
+  const writeOrder = (ids: readonly string[]) => {
+    // Use an unused positive range so UNIQUE(position) stays true, including older catalogs with gaps.
+    const offset = Number((highestPosition.get() as { position: number }).position) + 1;
+    ids.forEach((id, index) => position.run(offset + index, id));
+    ids.forEach((id, index) => position.run(index, id));
+  };
   return {
     catalog,
     list: () => catalog().items,
@@ -39,17 +46,21 @@ export function createCommunityBoards(db: DatabaseSync, tx: Transaction, isOwner
         authorize(actor);
         const name = label(input.name, 2, 24, '板块名称');
         const description = label(input.description, 2, 120, '板块说明');
-        const icon = input.icon === undefined ? 'megaphone' : input.icon;
-        const template = defaultCommunityBoards.find(board => board.icon === icon);
-        if (!template) throw fail('请选择已有的板块图标。');
         const previous = catalog();
         if (previous.items.some(board => normalize(board.zh).toLocaleLowerCase() === name.toLocaleLowerCase())) throw fail('这个板块名称已经存在。');
+        const icon = input.icon === undefined ? availableCommunityBoardIcons(previous.items)[0]?.id : input.icon;
+        const template = communityBoardIcon(icon);
+        if (!template) throw fail(input.icon === undefined ? '没有可用的板块图标，请刷新后检查板块目录。' : '请选择有效的板块图标。');
+        if (previous.items.some(board => board.icon === template.id)) throw fail('这个图标已被其他板块使用，请刷新后选择其他图标。', 409);
         const id = input.id === undefined ? `board-${randomUUID().replaceAll('-', '').slice(0, 12)}` : input.id;
         if (typeof id !== 'string' || !safeId.test(id) || id === 'home' || present.get(id)) throw fail('板块标识无效或已被使用。');
         const board: CommunityBoard = { id, zh: name, en: name, description, descriptionEn: description,
-          icon: template.icon, color: template.color, lightColor: template.lightColor, kind: '讨论帖', kindEn: 'Discussion',
+          icon: template.id, color: template.color, lightColor: template.lightColor, kind: '讨论帖', kindEn: 'Discussion',
           tips: ['围绕板块主题交流', '遵守社区公约'], tipsEn: ['Discuss the board topic', 'Follow the community convention'] };
-        insert.run(id, previous.items.length, JSON.stringify(board), now, actor.id);
+        insert.run(id, Number((highestPosition.get() as { position: number }).position) + 1, JSON.stringify(board), now, actor.id);
+        const ids = [...previous.items.filter(item => item.id !== 'vip').map(item => item.id), id,
+          ...previous.items.filter(item => item.id === 'vip').map(item => item.id)];
+        writeOrder(ids);
         if (bump.run(previous.version).changes !== 1) throw fail('板块已更新，请重新打开管理页面。', 409);
         return catalog();
       });
@@ -62,11 +73,9 @@ export function createCommunityBoards(db: DatabaseSync, tx: Transaction, isOwner
         if (previous.version !== expectedVersion) throw fail('板块已被更新，请刷新后再保存顺序。', 409);
         if (!Array.isArray(value) || value.length !== previous.items.length || new Set(value).size !== value.length
           || value.some(id => typeof id !== 'string' || !previous.items.some(board => board.id === id))) throw fail('请提交全部板块的有效排列顺序。');
+        if (previous.items.some(board => board.id === 'vip') && value.at(-1) !== 'vip') throw fail('会员茶室固定在最后，不能移动。');
         if (previous.items.every((board, index) => board.id === value[index])) return previous;
-        // Move to an unused positive range first so UNIQUE(position) stays true during swaps.
-        const offset = previous.items.length;
-        previous.items.forEach((board, index) => position.run(offset + index, board.id));
-        value.forEach((id: string, index: number) => position.run(index, id));
+        writeOrder(value);
         if (bump.run(previous.version).changes !== 1) throw fail('板块已更新，请刷新后再保存顺序。', 409);
         return catalog();
       });

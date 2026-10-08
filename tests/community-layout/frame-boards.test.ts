@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { test, type TestContext } from 'node:test';
-import { Box, CircleHelp, Coffee, Feather, Image, Megaphone, type IconNode } from 'lucide';
+import { Bot, Box, CircleHelp, Coffee, Feather, Image, Megaphone, type IconNode } from 'lucide';
+import { communityBoardIconChoices } from '../../src/community-board-icons.ts';
+import { communityBoardDrawings } from '../../src/community-board-drawings.ts';
 import { communityBoards, communityRoute } from '../../src/community.ts';
 import { createFrameBoards } from '../../src/community-layout/frame-boards.ts';
+import { readCategories } from '../../src/community-layout/board-links.ts';
 
 interface TestWindow extends Window { close(): void }
 const { JSDOM } = createRequire(import.meta.url)('jsdom') as {
@@ -152,7 +155,7 @@ test('a board order update moves existing navigation links and preserves focus, 
   container.append(...[...container.children].reverse());
   boards.sync(source, '#/community/boards/qa', false);
   const reordered = [...boards.element.querySelectorAll<HTMLAnchorElement>(':scope > a')];
-  for (const [index, link] of [...links].reverse().entries()) assert.equal(reordered[index], link);
+  for (const [index, link] of [...links.slice(0, 5).reverse(), links[5]].entries()) assert.equal(reordered[index], link);
   for (const [index, link] of links.entries()) assert.equal(link.querySelector('svg'), icons[index]);
   assert.equal(document.activeElement, focused);
   assert.equal(focused.getAttribute('aria-current'), 'page');
@@ -180,7 +183,7 @@ test('label and membership updates retain the focused board link and its icon', 
 test('new author-created boards use validated markup metadata without a shared runtime registry', t => {
   const { document, source, boards } = fixture(t);
   const container = source.querySelector('.community-boards')!;
-  container.insertAdjacentHTML('beforeend', '<a class="community-board-link" href="#/community/boards/board-10a2" data-board-id="board-10a2" data-board-icon="box" data-board-color="#8fd0c8" data-board-light-color="#2c6d65"><span>模型讨论</span><span class="community-board-count">0</span></a>');
+  container.insertAdjacentHTML('afterbegin', '<a class="community-board-link" href="#/community/boards/board-10a2" data-board-id="board-10a2" data-board-icon="bot" data-board-color="#8fd0c8" data-board-light-color="#2c6d65"><span>模型讨论</span><span class="community-board-count">0</span></a>');
   assert.equal(communityBoards.some(board => board.id === 'board-10a2'), false, 'the bundled layout may have its own unchanged registry');
   boards.sync(source, '#/community/boards/board-10a2', false);
   const link = boards.element.querySelector<HTMLAnchorElement>('a[href="#/community/boards/board-10a2"]');
@@ -189,14 +192,47 @@ test('new author-created boards use validated markup metadata without a shared r
   assert.equal(link.getAttribute('aria-current'), 'page');
   assert.equal(link.style.getPropertyValue('--board'), '#8fd0c8');
   assert.equal(link.style.getPropertyValue('--board-light'), '#2c6d65');
-  assert.equal(link.querySelector('svg')!.firstElementChild!.getAttribute('d'), Box[0][1].d);
+  assert.equal(boards.element.querySelectorAll(':scope > a').length, 6);
+  assert.equal(boards.element.querySelector(':scope > a:last-child')!.getAttribute('href'), '#/community/boards/vip');
+  const firstShape = Bot[0];
+  assert.equal(link.querySelector('svg')!.firstElementChild!.localName, firstShape[0]);
+  for (const [name, value] of Object.entries(firstShape[1])) assert.equal(link.querySelector('svg')!.firstElementChild!.getAttribute(name), String(value));
   link.focus();
   const icon = link.querySelector('svg');
-  container.prepend(container.lastElementChild!);
+  container.insertBefore(container.firstElementChild!, container.children[2]);
   boards.sync(source, '#/community/new/board-10a2', false);
-  assert.equal(boards.element.querySelector(':scope > a'), link);
+  assert.equal(boards.element.querySelectorAll(':scope > a')[1], link);
   assert.equal(link.querySelector('svg'), icon);
   assert.equal(document.activeElement, link);
+});
+
+test('every registered reserve uses the same installed Lucide drawing in the independent frame bundle', t => {
+  const { source, boards } = fixture(t);
+  const container = source.querySelector('.community-boards')!;
+  for (const choice of communityBoardIconChoices) {
+    container.insertAdjacentHTML('afterbegin', `<a class="community-board-link" href="#/community/boards/icon-check" data-board-id="icon-check" data-board-icon="${choice.id}" data-board-color="${choice.color}" data-board-light-color="${choice.lightColor}"><span>图标测试</span></a>`);
+    boards.sync(source, '#/community/boards/icon-check', false);
+    const svg = boards.element.querySelector('a[href="#/community/boards/icon-check"] > svg')!;
+    assert.ok(svg, `${choice.id} renders a drawing`);
+    const drawing = communityBoardDrawings[choice.id as keyof typeof communityBoardDrawings];
+    assert.equal(svg.children.length, drawing.length, choice.id);
+    drawing.forEach(([tag, attributes], index) => {
+      assert.equal(svg.children[index].localName, tag);
+      for (const [name, value] of Object.entries(attributes)) assert.equal(svg.children[index].getAttribute(name), String(value));
+    });
+    assert.equal(boards.element.querySelectorAll(':scope > a').length, 6);
+    assert.equal(boards.element.querySelector(':scope > a:last-child')!.getAttribute('href'), '#/community/boards/vip');
+    container.firstElementChild!.remove();
+  }
+});
+
+test('authorized category metadata retains all boards before the frame chooses its six shortcuts', t => {
+  const { source, boards } = fixture(t);
+  const container = source.querySelector('.community-boards')!;
+  for (const choice of communityBoardIconChoices) container.insertAdjacentHTML('beforeend', `<a class="community-board-link" href="#/community/boards/icon-${choice.id}" data-board-id="icon-${choice.id}" data-board-icon="${choice.id}" data-board-color="${choice.color}" data-board-light-color="${choice.lightColor}"><span>${choice.zh}</span></a>`);
+  assert.equal(readCategories(container as HTMLElement).length, 28, 'the full catalogue is available to other views');
+  boards.sync(source, '#/community/home', false);
+  assert.equal(boards.element.querySelectorAll(':scope > a').length, 6);
 });
 
 test('new board links reject unsafe ids, mismatched metadata, unsupported icons and unsafe colors', t => {

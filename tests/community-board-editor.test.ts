@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import { communityBoardEditorHTML, createCommunityBoardController, type CommunityBoardCatalog, type CommunityBoardCreateInput } from '../src/community-board-editor.ts';
 import type { Common, CommunityBoard } from '../src/community.ts';
+import { communityBoardIconChoices, availableCommunityBoardIcons } from '../src/community-board-icons.ts';
 
 const { JSDOM } = createRequire(import.meta.url)('jsdom') as { JSDOM: new (html: string) => { window: Window & { close(): void } } };
 const common: Common = { t: zh => zh, esc: value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!), icons: { plus: '<svg data-icon="plus"></svg>', help: '<svg data-icon="help"></svg>', 'chevron-up': '<svg data-icon="up"></svg>', 'chevron-down': '<svg data-icon="down"></svg>' } };
@@ -15,7 +16,7 @@ function fixture(options: { create?: (input: CommunityBoardCreateInput, version:
   const main = dom.window.document.querySelector<HTMLElement>('main')!;
   const saved: CommunityBoardCatalog[] = [], notices: string[] = [];
   const ui = createCommunityBoardController({ root: () => main, active: () => true, owner: options.owner || (() => true), ...common,
-    create: options.create || (async (input, version) => ({ version: version + 1, items: [...catalog().items, board(input.id || 'board-new', input.name)] })),
+    create: options.create || (async (input, version) => ({ version: version + 1, items: [...catalog().items, { ...board(input.id || 'board-new', input.name), icon: input.icon }] })),
     reorder: options.reorder || (async (ids, version) => catalog(version + 1, ids)), reload: options.reload, saved: value => saved.push(value), notify: value => notices.push(value) });
   ui.sync(catalog());
   main.innerHTML = communityBoardEditorHTML({ ...ui.state(), ...common });
@@ -40,7 +41,8 @@ test('board editor escapes saved data, labels every control and keeps protected 
   assert.equal(doc.querySelectorAll('form').length, 2);
   assert.equal(doc.querySelectorAll('form form').length, 0);
   for (const field of doc.querySelectorAll<HTMLInputElement>('input, textarea, select')) assert.ok(doc.querySelector(`label[for="${field.id}"]`));
-  assert.equal(doc.querySelectorAll('select.community-select option').length, 6);
+  assert.equal(doc.querySelectorAll('select.community-select option').length, communityBoardIconChoices.length - 1);
+  assert.equal(doc.querySelector('option[value="help"]'), null, 'used icons are not offered');
   assert.equal(doc.querySelector('[name="vip"]'), null);
   assert.match(doc.querySelector('[data-board-row="vip"]')!.textContent!, /VIP/);
   assert.ok(doc.querySelector('[data-board-order-status][aria-live="polite"]'));
@@ -51,10 +53,10 @@ test('reordering moves the same DOM nodes and focuses an available control on th
   const f = fixture();
   const row = f.main.querySelector<HTMLElement>('[data-board-row="tools"]')!;
   const field = f.input('name', '未提交的名字');
-  const down = row.querySelector<HTMLButtonElement>('[data-action="community-board-down"]')!;
-  down.focus();
-  f.ui.action(down);
-  assert.deepEqual(f.ui.state().draftOrder, ['qa', 'vip', 'tools']);
+  const up = row.querySelector<HTMLButtonElement>('[data-action="community-board-up"]')!;
+  up.focus();
+  f.ui.action(up);
+  assert.deepEqual(f.ui.state().draftOrder, ['tools', 'qa', 'vip']);
   assert.equal(f.main.querySelector('[data-board-row="tools"]'), row);
   assert.equal(f.main.querySelector('[name="name"]'), field);
   assert.equal(field.value, '未提交的名字');
@@ -112,13 +114,14 @@ test('cancel restores order but keeps a separate in-progress creation form', () 
 
 test('creation trims the minimal payload and keeps an unsaved order when appending the new board', async () => {
   const calls: Array<{ input: CommunityBoardCreateInput; version: number }> = [];
-  const f = fixture({ create: async (input, version) => { calls.push({ input, version }); return { version: 2, items: [...catalog().items, board('board-new', input.name)] }; } });
+  const f = fixture({ create: async (input, version) => { calls.push({ input, version }); return { version: 2, items: [...catalog().items, { ...board('board-new', input.name), icon: input.icon }] }; } });
   const row = f.main.querySelector('[data-board-row="tools"]');
   f.action('up', 'tools');
   f.input('name', '  兴趣交流  '); f.input('description', '  分享我们的兴趣  '); f.input('icon', 'feather');
   await f.ui.create();
   assert.deepEqual(calls, [{ input: { name: '兴趣交流', description: '分享我们的兴趣', icon: 'feather' }, version: 1 }]);
-  assert.deepEqual(f.ui.state().draftOrder, ['tools', 'qa', 'vip', 'board-new']);
+  assert.deepEqual(f.ui.state().draftOrder, ['tools', 'qa', 'board-new', 'vip']);
+  assert.equal(f.main.querySelector('option[value="feather"]'), null, 'the created board consumes its icon immediately');
   assert.equal(f.main.querySelector('[data-board-row="tools"]'), row);
   assert.equal(f.main.querySelector<HTMLInputElement>('[name="name"]')!.value, '');
   assert.ok(f.ui.dirty(), 'the earlier order draft still requires save');
@@ -168,7 +171,7 @@ test('background catalog updates preserve order drafts and block stale saves unt
   assert.deepEqual(f.ui.state().draftOrder, ['tools', 'qa', 'vip']);
   await f.ui.saveOrder(); assert.equal(calls, 0);
   f.action('cancel');
-  assert.deepEqual(f.ui.state().draftOrder, ['vip', 'qa', 'tools', 'board-new']);
+  assert.deepEqual(f.ui.state().draftOrder, ['qa', 'tools', 'board-new', 'vip']);
   assert.equal(f.ui.state().catalog?.version, 2);
   assert.equal(f.ui.state().conflicted, false);
   assert.equal(f.main.querySelector<HTMLInputElement>('[name="name"]')!.value, '草稿名字');
@@ -197,7 +200,7 @@ test('discarding a conflict fetches a new version and a subsequent save uses it'
   assert.equal(reloads, 1);
   assert.equal(f.ui.state().conflicted, false);
   assert.equal(f.ui.state().catalog?.version, 2);
-  assert.deepEqual(f.ui.state().draftOrder, ['vip', 'qa', 'tools']);
+  assert.deepEqual(f.ui.state().draftOrder, ['qa', 'tools', 'vip']);
   f.action('up', 'tools'); await f.ui.saveOrder();
   assert.deepEqual(versions, [1, 2]);
   f.dom.window.close();
@@ -260,9 +263,61 @@ test('non-owner identities cannot create or reorder even with manually invoked c
 test('foreign actions and boundary moves do not mutate the order', () => {
   const f = fixture();
   assert.equal(f.ui.action({ dataset: { action: 'community-banner-up', id: 'qa' } } as HTMLElement), false);
-  f.action('up', 'qa'); f.action('down', 'vip');
+  f.action('up', 'qa'); f.action('down', 'vip'); f.action('up', 'vip'); f.action('down', 'tools');
   assert.deepEqual(f.ui.state().draftOrder, ['qa', 'tools', 'vip']);
   assert.equal(f.ui.dirty(), false);
+  f.dom.window.close();
+});
+
+test('VIP stays last in legacy catalogs without implicitly saving or marking an order draft', () => {
+  const f = fixture();
+  f.ui.sync(catalog(2, ['vip', 'qa', 'tools']));
+  assert.deepEqual(f.ui.state().draftOrder, ['qa', 'tools', 'vip']);
+  assert.equal(f.ui.dirty(), false);
+  assert.equal(f.main.querySelector<HTMLButtonElement>('[data-board-row="vip"] [data-action="community-board-up"]')!.disabled, true);
+  assert.equal(f.main.querySelector<HTMLButtonElement>('[data-board-row="tools"] [data-action="community-board-down"]')!.disabled, true);
+  assert.equal(f.saved.length, 0);
+  f.dom.window.close();
+});
+
+test('catalog changes refresh unused icons while preserving fields, focus, and the native select node', () => {
+  const f = fixture();
+  assert.equal(f.ui.dirty(), false, 'an automatically selected unused icon is not a draft');
+  const select = f.main.querySelector<HTMLSelectElement>('[name="icon"]')!;
+  const field = f.input('name', 'AI 咨询');
+  field.focus();
+  f.input('icon', 'brain');
+  const updated = catalog(2);
+  updated.items.push({ ...board('ai'), icon: 'brain' });
+  f.ui.sync(updated);
+  assert.equal(f.main.querySelector('[name="icon"]'), select);
+  assert.equal(f.main.querySelector('[name="name"]'), field);
+  assert.equal(f.dom.window.document.activeElement, field);
+  assert.equal(field.value, 'AI 咨询');
+  assert.equal(select.querySelector('option[value="brain"]'), null);
+  assert.ok(availableCommunityBoardIcons(updated.items).some(item => item.id === f.ui.state().createDraft.icon));
+  assert.match(f.ui.state().createMessage, /图标/);
+  f.input('icon', 'bot');
+  f.ui.sync({ ...updated, version: 3 });
+  assert.equal(select.value, 'bot', 'an available chosen icon survives refresh');
+  f.dom.window.close();
+});
+
+test('exhausted icons disable creation with an explanation and re-enable after a catalog refresh', async () => {
+  let writes = 0;
+  const f = fixture({ create: async () => { writes++; return catalog(5); } });
+  const full = { version: 2, items: communityBoardIconChoices.map((icon, index) => ({ ...board(`board-${index}`), icon: icon.id })) };
+  f.ui.sync(full);
+  f.input('name', '新讨论'); f.input('description', '分享新的话题');
+  assert.equal(f.main.querySelector<HTMLSelectElement>('[name="icon"]')!.disabled, true);
+  assert.equal(f.main.querySelector<HTMLButtonElement>('[data-board-create]')!.disabled, true);
+  assert.match(f.main.querySelector('[data-board-create-status]')!.textContent!, /图标/);
+  await f.ui.create();
+  assert.equal(writes, 0);
+  f.ui.sync({ version: 3, items: full.items.slice(0, -1) });
+  assert.equal(f.main.querySelector<HTMLSelectElement>('[name="icon"]')!.disabled, false);
+  assert.equal(f.main.querySelector<HTMLButtonElement>('[data-board-create]')!.disabled, false);
+  assert.equal(f.ui.state().createDraft.icon, 'wrench');
   f.dom.window.close();
 });
 

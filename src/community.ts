@@ -15,6 +15,7 @@ import type { CommunityGrowthState, CommunityVIPGrowthState } from './community-
 import type { CommunityEntryState } from './community-entry.ts';
 import { communityStaffRoles, communityStaffCapabilities } from './community-staff.mjs';
 import type { CommunityStaffRole, CommunityStaffState } from './community-staff.ts';
+import { communityBoardIcon } from './community-board-icons.mjs';
 export * from './community-rules.mjs';
 
 export type Translate = (zh: string, en: string) => string;
@@ -53,9 +54,8 @@ let boardCatalogVersion = -1;
 export function installCommunityBoardCatalog(catalog: CommunityBoardCatalog): boolean {
   if (!catalog || !Number.isSafeInteger(catalog.version) || catalog.version < 0 || catalog.version <= boardCatalogVersion || !Array.isArray(catalog.items)) return false;
   const ids = new Set<string>();
-  const icons = new Set(defaultCommunityBoards.map(board => board.icon));
   for (const board of catalog.items) {
-    if (!board || !validCommunityBoardId(board.id) || ids.has(board.id) || !icons.has(board.icon)
+    if (!board || !validCommunityBoardId(board.id) || ids.has(board.id) || !communityBoardIcon(board.icon)
       || !/^#[\da-f]{6}$/i.test(board.color) || !/^#[\da-f]{6}$/i.test(board.lightColor)
       || !(['zh', 'en', 'description', 'descriptionEn', 'kind', 'kindEn'] as const).every(key => typeof board[key] === 'string')
       || !Array.isArray(board.tips) || !Array.isArray(board.tipsEn)

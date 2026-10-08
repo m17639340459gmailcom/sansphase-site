@@ -12,6 +12,7 @@ import { migrateCommunity } from '../server/payload/community-migration.ts';
 import { createCommunityStore } from '../server/community-store.ts';
 import { createCommunityService } from '../server/community-service.ts';
 import { communityBoards, defaultCommunityBoards, installCommunityBoardCatalog, resetCommunityBoardCatalog } from '../src/community.ts';
+import { availableCommunityBoardIcons } from '../src/community-board-icons.ts';
 import { bodyImageMarker } from '../src/community-body-images.ts';
 import { acceptCommunityConvention } from './fixtures/community-convention-consent.ts';
 
@@ -26,17 +27,79 @@ async function fixture(t: TestContext) {
   t.after(async () => { store.close(); await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
   return { store, directory };
 }
-const input = { name: '模型讨论', description: '交流本地模型的使用经验。', icon: 'box' };
+const input = { name: '模型讨论', description: '交流本地模型的使用经验。', icon: 'bot' };
+const reversedOrdinaryOrder = (items: readonly { id: string }[]) => items.filter(item => item.id !== 'vip').map(item => item.id).reverse().concat('vip');
+test('new boards use an unused spare icon and keep the members board last', async t => {
+  const { store } = await fixture(t);
+  const created = store.boards.create({ name: 'AI 咨询', description: '交流 AI 产品和使用方面的问题。', icon: 'bot' }, owner);
+  assert.equal(created.items.at(-1)?.id, 'vip');
+  const board = created.items.find(item => item.zh === 'AI 咨询')!;
+  assert.equal(board.icon, 'bot');
+  assert.match(board.color, /^#[0-9a-f]{6}$/i);
+  assert.match(board.lightColor, /^#[0-9a-f]{6}$/i);
+  const next = store.boards.create({ name: 'AI 模型', description: '交流 AI 模型的运行和使用经验。' }, owner);
+  const nextBoard = next.items.find(item => item.zh === 'AI 模型')!;
+  assert.equal(nextBoard.icon, 'brain', 'an omitted icon picks the first remaining spare');
+  assert.equal(next.items.at(-1)?.id, 'vip');
+});
+test('icon conflicts are rejected atomically across connections and legacy repeats remain readable', async t => {
+  const { store, directory } = await fixture(t);
+  const before = store.boards.catalog();
+  assert.throws(() => store.boards.create({ name: '已有图标', description: '这个板块申请使用已占用的图标。', icon: 'help' }, owner), { status: 409 });
+  assert.deepEqual(store.boards.catalog(), before);
+  const other = createCommunityStore(directory);
+  try {
+    const first = other.boards.create({ name: 'AI 咨询', description: '讨论 AI 工具的实际使用。', icon: 'bot' }, owner);
+    assert.throws(() => store.boards.create({ name: '另一咨询', description: '另一个窗口选择相同的图标。', icon: 'bot' }, owner), { status: 409 });
+    assert.deepEqual(store.boards.catalog(), first);
+  } finally { other.close(); }
+  const db = new DatabaseSync(resolve(directory, 'content.db'));
+  try {
+    const legacy = { ...defaultCommunityBoards[0], id: 'legacy-repeat', zh: '历史重复图标' };
+    db.prepare('UPDATE community_boards SET position=position+100').run();
+    db.prepare('INSERT INTO community_boards(id,position,definition,created_at,actor_id) VALUES(?,?,?,?,?)').run(legacy.id, 99, JSON.stringify(legacy), new Date().toISOString(), owner.id);
+    assert.equal(store.boards.catalog().items.filter(item => item.icon === 'help').length, 2, 'old catalogs are not rewritten or rejected');
+    assert.throws(() => store.boards.create({ name: '又一次重复', description: '已有重复的图标仍然不能新占用。', icon: 'help' }, owner), { status: 409 });
+  } finally { db.close(); }
+});
+test('the members board cannot be reordered and existing non-last positions change only on explicit save', async t => {
+  const { store, directory } = await fixture(t);
+  const before = store.boards.catalog();
+  assert.throws(() => store.boards.reorder(before.items.map(item => item.id).reverse(), owner, before.version), /会员茶室/);
+  assert.deepEqual(store.boards.catalog(), before);
+  const db = new DatabaseSync(resolve(directory, 'content.db'));
+  try {
+    db.prepare('UPDATE community_boards SET position=position+100').run();
+    db.prepare('UPDATE community_boards SET position=0 WHERE id=\'vip\'').run();
+    assert.equal(store.boards.catalog().items[0]?.id, 'vip', 'reading a legacy order does not write it');
+    const ids = before.items.filter(item => item.id !== 'vip').map(item => item.id).reverse().concat('vip');
+    assert.deepEqual(store.boards.reorder(ids, owner, before.version).items.map(item => item.id), ids);
+  } finally { db.close(); }
+});
+test('all spare icons can be assigned once and an exhausted catalog cannot silently reuse one', async t => {
+  const { store } = await fixture(t);
+  const spare = availableCommunityBoardIcons(store.boards.list());
+  assert.equal(spare.length, 16);
+  spare.forEach((choice, index) => {
+    const created = store.boards.create({ name: `备用板块 ${index + 1}`, description: '独立使用备用图标的普通交流板块。', icon: choice.id }, owner);
+    assert.equal(created.items.at(-1)?.id, 'vip');
+  });
+  const full = store.boards.catalog();
+  assert.equal(full.items.length, 22);
+  assert.equal(new Set(full.items.map(item => item.icon)).size, 22);
+  assert.throws(() => store.boards.create({ name: '图标已用尽', description: '不应该隐式复用任何占用的图标。' }, owner), /没有可用/);
+  assert.deepEqual(store.boards.catalog(), full);
+});
 test('migration seeds the six unchanged board definitions once and persists catalog order across stores', async t => {
   const { store, directory } = await fixture(t);
   assert.deepEqual(store.boards.catalog(), { version: 0, items: communityBoards });
   const created = store.boards.create(input, owner);
   assert.equal(created.version, 1);
   assert.equal(created.items.length, 7);
-  const next = created.items.at(-1)!;
+  const next = created.items.find(board => board.zh === input.name)!;
   assert.match(next.id, /^board-[a-z0-9]+$/);
   assert.equal(next.kind, '讨论帖');
-  const order = [...created.items].reverse().map(board => board.id);
+  const order = reversedOrdinaryOrder(created.items);
   assert.deepEqual(store.boards.reorder(order, owner, created.version).items.map(board => board.id), order);
   const other = createCommunityStore(directory);
   try { assert.deepEqual(other.boards.catalog(), store.boards.catalog()); } finally { other.close(); }
@@ -88,7 +151,11 @@ test('dynamic boards participate in scoped staff, banners, posting, moving, cont
   const response = await post('manage/boards', input);
   assert.equal(response.status, 201);
   const catalog = await response.json();
-  const board = catalog.items.at(-1).id;
+  const board = catalog.items.find((item: { zh: string }) => item.zh === input.name).id;
+  const conflict = await post('manage/boards', { ...input, name: '另一个模型板块' });
+  assert.equal(conflict.status, 409);
+  assert.match(await conflict.text(), /图标.*使用/);
+  assert.equal((await post('manage/boards/order', { ids: catalog.items.map((item: { id: string }) => item.id).reverse(), version: catalog.version })).status, 400);
   assert.deepEqual((await (await get('summary', 'reader')).json()).boardCatalog, catalog);
   const beforeBoardRead = peopleReads;
   const queue = store.queue;
@@ -100,7 +167,7 @@ test('dynamic boards participate in scoped staff, banners, posting, moving, cont
   store.staff.appoint(owner, reader, { role: 'moderator', boards: [board], permissions: ['content.inspect', 'banner.manage'], delegable: [] });
   assert.deepEqual(store.members.moderationBoards(reader), [board]);
   assert.equal((await get('manage?tab=boards', 'reader')).status, 403, 'board management remains author only');
-  assert.equal((await post('manage/boards/order', { ids: catalog.items.map((item: { id: string }) => item.id).reverse(), version: catalog.version })).status, 200);
+  assert.equal((await post('manage/boards/order', { ids: reversedOrdinaryOrder(catalog.items), version: catalog.version })).status, 200);
   assert.equal((await post('manage/boards/order', { ids: catalog.items.map((item: { id: string }) => item.id), version: catalog.version })).status, 409);
   assert.equal((await get(`topics?board=${board}`, 'reader')).status, 200);
   assert.equal((await get('topics?board=vip', 'reader')).status, 404);
@@ -132,7 +199,7 @@ test('separate connections reject stale reorder versions without restoring an ob
   const other = createCommunityStore(directory);
   try {
     const original = store.boards.catalog();
-    const ids = original.items.map(board => board.id).reverse();
+    const ids = reversedOrdinaryOrder(original.items);
     const changed = other.boards.reorder(ids, owner, original.version);
     assert.throws(() => store.boards.reorder(original.items.map(board => board.id), owner, original.version), { status: 409 });
     assert.deepEqual(store.boards.catalog(), changed);

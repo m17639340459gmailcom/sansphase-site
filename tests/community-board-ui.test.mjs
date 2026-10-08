@@ -28,7 +28,7 @@ async function setup(t, hash, handle, viewer = owner, context = {}) {
     return handle(url, init);
   };
   const ui = createCommunityUI({request});
-  const ctx = {t: zh => zh, esc, icons: {megaphone:'<svg data-announcement></svg>'}, members: true, simpleCompose: false, ...context};
+  const ctx = {t: zh => zh, esc, icons: {megaphone:'<svg data-announcement></svg>',bot:'<svg data-bot></svg>'}, members: true, simpleCompose: false, ...context};
   main.innerHTML = ui.html(ctx);
   const cleanup = ui.mount(main, ctx);
   t.after(() => { cleanup(); ui.clear(); resetCommunityBoardCatalog(); for (const [name,value] of previous) { if (value === undefined) delete globalThis[name]; else globalThis[name]=value; } w.close(); });
@@ -67,7 +67,7 @@ test('author board management consumes the light channel and saves without repla
   const {main,w,calls} = await setup(t,'#/community/manage/boards',(url,init) => {
     if (url.includes('/manage?')) return response({tab:'boards',owner:true,allowedTabs:['boards','queue','banners'],boardCatalog:catalog});
     if (url.endsWith('/manage/boards/order')) {const body=JSON.parse(init.body); assert.equal(body.version,catalog.version); catalog={version:catalog.version+1,items:body.ids.map(id=>catalog.items.find(board=>board.id===id))}; return response(catalog);}
-    if (url.endsWith('/manage/boards')) {const body=JSON.parse(init.body); catalog={version:catalog.version+1,items:[...catalog.items,{...catalog.items[4],id:'board-new-1',zh:body.name,en:body.name,description:body.description,descriptionEn:body.description}]};return response(catalog);}
+    if (url.endsWith('/manage/boards')) {const body=JSON.parse(init.body); assert.equal(body.icon,'bot');catalog={version:catalog.version+1,items:[...catalog.items.filter(board=>board.id!=='vip'),{...catalog.items[4],id:'board-new-1',zh:body.name,en:body.name,icon:body.icon,description:body.description,descriptionEn:body.description},catalog.items.find(board=>board.id==='vip')]};return response(catalog);}
     throw Error(`Unexpected ${url}`);
   });
   await until(()=>main.querySelector('[data-board-editor]'));
@@ -79,10 +79,21 @@ test('author board management consumes the light channel and saves without repla
   await until(()=>calls.some(call=>call.url.endsWith('/manage/boards/order')) && !main.querySelector('[data-board-editor][aria-busy="true"]'));
   assert.equal(main.querySelector('.community-management-page'),shell); assert.equal(main.querySelector('.community-management-nav'),sidebar); assert.equal(list.children[1],first);
   const form=main.querySelector('[data-community-form="board-create"]');
+  const iconField=form.elements.namedItem('icon');
+  assert.equal(iconField.value,'bot');
+  assert.equal(iconField.options.length,16);
+  assert.equal(form.querySelector('option[value="megaphone"]'),null);
   for (const [name,value] of [['name','摄影讨论'],['description','分享摄影作品和经验']]) {const field=form.elements.namedItem(name);field.value=value;field.dispatchEvent(new w.Event('input',{bubbles:true}));}
   form.dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
   await until(()=>list.children.length===7);
-  assert.equal(main.querySelector('.community-management-page'),shell); assert.equal(list.lastElementChild.querySelector('[data-board-name]').textContent,'摄影讨论');
-  assert.ok(list.lastElementChild.querySelector('[data-announcement]'),'appended row uses the existing icon set');
+  assert.equal(main.querySelector('.community-management-page'),shell);
+  const newRow=list.querySelector('[data-board-row="board-new-1"]');
+  assert.equal(newRow.querySelector('[data-board-name]').textContent,'摄影讨论');
+  assert.ok(newRow.querySelector('[data-bot]'),'created row uses the shared icon library');
+  assert.equal(list.lastElementChild.dataset.boardRow,'vip');
+  assert.equal(form.elements.namedItem('icon'),iconField);
+  assert.equal(iconField.options.length,15);
+  assert.equal(iconField.querySelector('option[value="bot"]'),null);
+  assert.equal(iconField.value,'brain');
   assert.equal(calls.filter(call=>call.url.includes('/manage?')).length,1);
 });

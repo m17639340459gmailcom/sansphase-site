@@ -1,7 +1,7 @@
 import { defaultCommunityBoards, validCommunityBoardId } from "../community.ts";
+import { communityBoardIcon } from '../community-board-icons.ts';
 
 type Category = { id: string; href: string; label: string; lock: string | null; icon: string; color: string; lightColor: string };
-const knownIcons = new Set(defaultCommunityBoards.map(board => board.icon));
 const validColor = (color: string) => /^#[\da-f]{6}$/i.test(color);
 
 export function readCategories(boards: HTMLElement): Category[] {
@@ -19,7 +19,7 @@ export function readCategories(boards: HTMLElement): Category[] {
     const icon = explicit ? link.dataset.boardIcon || '' : legacy!.icon;
     const color = explicit ? link.dataset.boardColor || '' : legacy!.color;
     const lightColor = explicit ? link.dataset.boardLightColor || '' : legacy!.lightColor;
-    if (!knownIcons.has(icon) || !validColor(color) || !validColor(lightColor)) continue;
+    if (!communityBoardIcon(icon) || !validColor(color) || !validColor(lightColor)) continue;
     const label = link.querySelector(":scope > span:not(.community-board-count):not(.community-board-lock)")?.textContent?.trim();
     if (!label) continue;
     const lock = link.querySelector<HTMLElement>(":scope > .community-board-lock");

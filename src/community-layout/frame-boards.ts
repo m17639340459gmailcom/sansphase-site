@@ -1,12 +1,10 @@
-import { Box, CircleHelp, Coffee, Feather, Image, Megaphone, type IconNode } from 'lucide';
+import { communityBoardDrawings } from '../community-board-drawings.ts';
+import type { IconNode } from 'lucide';
 import { readCategories } from './board-links.ts';
 import { navigationIcon } from './feed-shell.ts';
+import { sidebarCommunityBoards } from './sidebar-boards.ts';
 
-// Match the board icons already defined in community.ts and library-ui.tsx.
-const boardIcons = new Map<string, IconNode>([
-  ['help', CircleHelp], ['image', Image], ['box', Box],
-  ['feather', Feather], ['megaphone', Megaphone], ['coffee', Coffee],
-]);
+const boardIcons = new Map<string, IconNode>(Object.entries(communityBoardDrawings));
 
 /** The same authorized board links as the homepage, with stable navigation nodes. */
 export function createFrameBoards(document: Document) {
@@ -24,7 +22,7 @@ export function createFrameBoards(document: Document) {
     element: nav,
     sync(source: ParentNode, hash: string, english: boolean) {
       const boards = source.querySelector<HTMLElement>('.community-boards');
-      const items = boards ? readCategories(boards) : [];
+      const items = boards ? sidebarCommunityBoards(readCategories(boards)) : [];
       const label = english ? 'Boards' : '社区板块';
       const hint = english ? 'View all boards' : '查看所有板块';
       if (allBoards.textContent !== label) allBoards.textContent = label;

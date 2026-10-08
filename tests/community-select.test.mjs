@@ -158,6 +158,44 @@ test('native change, new categories and disabled state synchronise without remou
   env.dispose();
 });
 
+test('replacing available options while open retains the trigger and updates labels, choices and native form value', async () => {
+  const env = setup('<form><label for="board-icon">板块图标</label><select id="board-icon" name="icon"><option value="cpu">芯片</option><option value="bot">机器人</option><option value="sparkles">灵感</option></select></form>');
+  try {
+    const trigger = env.trigger();
+    await env.open();
+    const menu = env.win.document.querySelector('[role="listbox"]');
+    assert.ok(menu);
+    assert.match(trigger.textContent, /芯片/);
+
+    // A completed board creation consumes its icon. Patch the existing native
+    // field while its enhanced menu is open, then choose the next reserve.
+    env.select.replaceChildren(
+      new env.win.Option('机器人', 'bot', true, true),
+      new env.win.Option('灵感', 'sparkles'),
+    );
+    await settle();
+
+    assert.equal(env.trigger(), trigger, 'the existing trigger and its focus target remain attached');
+    assert.equal(env.win.document.querySelector('[role="listbox"]'), menu, 'the open menu updates in place');
+    assert.equal(trigger.getAttribute('aria-expanded'), 'true');
+    assert.equal(env.select.value, 'bot');
+    assert.match(trigger.textContent, /机器人/);
+    const choices = [...menu.querySelectorAll('[role="option"]')];
+    assert.deepEqual(choices.map(option => option.textContent), ['机器人', '灵感']);
+    assert.deepEqual(choices.filter(option => option.dataset.state === 'checked').map(option => option.textContent), ['机器人']);
+
+    choices.find(option => option.textContent === '灵感').click();
+    await settle();
+    assert.equal(env.trigger(), trigger);
+    assert.equal(env.select.value, 'sparkles');
+    assert.match(trigger.textContent, /灵感/);
+    assert.deepEqual([...new env.win.FormData(env.win.document.querySelector('form'))], [['icon', 'sparkles']]);
+    assert.equal(env.win.document.querySelector('[role="listbox"]'), null);
+  } finally {
+    env.dispose();
+  }
+});
+
 test('dropdown portals stay inside their enclosing dialog and option text is not HTML', async () => {
   const env = setup('<section role="dialog"><label for="item">项目</label><select id="item"><option value="a">&lt;img src=x onerror=alert(1)&gt;</option></select></section>');
   await env.open();
