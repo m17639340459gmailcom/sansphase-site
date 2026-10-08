@@ -8,8 +8,9 @@ import { communityStaffRoles } from './community-staff.mjs';
 type Mode = 'growth' | 'trust' | 'vip' | 'staff';
 export type CommunityLevelSelection = { mode: Mode; growth: number | null; trust: number | null; vip?: number | null; staff?: number | null };
 const initial = (): CommunityLevelSelection => ({ mode: 'growth', growth: null, trust: null, vip: null, staff: null });
-const staffRanks = [...communityStaffRoles].reverse();
-const bounds = (mode: Mode) => mode === 'growth' ? [1, 10] : mode === 'vip' ? [1, 8] : [0, 3];
+// The display catalogue contains appointed roles; owner authority is separate.
+const staffRanks = communityStaffRoles.filter(role => role.id !== 'owner').reverse();
+const bounds = (mode: Mode) => mode === 'growth' ? [1, 10] : mode === 'vip' ? [1, 8] : mode === 'staff' ? [0, staffRanks.length - 1] : [0, 3];
 const clamp = (value: number, mode: Mode) => {
   const [min, max] = bounds(mode);
   return Number.isFinite(value) ? Math.max(min, Math.min(max, Math.trunc(value))) : min;
@@ -40,9 +41,7 @@ function growthProgressHTML(data: CommunityStardust, common: Common, selected: n
 const levelIconHTML = (level: number, mode: Mode) => {
   if (mode === 'staff') {
     const role = staffRanks[level].id;
-    // The collaborator supplied the three appointed roles. Owner remains a
-    // distinct identity; viewing artwork never changes a member's appointment.
-    return `<span class="community-staff-art" data-staff-art-slot data-staff-role="${role}" aria-hidden="true">${role === 'owner' ? '' : `<img src="/assets/community/staff/badge-${role}.svg" width="240" height="240" alt="" decoding="async" draggable="false">`}</span>`;
+    return `<span class="community-staff-art" data-staff-art-slot data-staff-role="${role}" aria-hidden="true"><img src="/assets/community/staff/badge-${role}.svg" width="240" height="240" alt="" decoding="async" draggable="false"></span>`;
   }
   if (mode === 'growth') return communityGrowthArtHTML(level);
   if (mode === 'vip') return communityVipArtHTML(level);
@@ -91,7 +90,6 @@ function levelBodyHTML(data: CommunityStardust, common: Common, selection: Commu
       ['协助所属版主审核与推荐精选，建议通过后仍需具有最终审批权的人决定。', 'Assist the assigned moderator with review and featured recommendations; advice still needs a final decision.'],
       ['由总版主任命，管理获分配的板块；可以按上级授予的权限任命和配置协管。', 'Appointed by a general moderator to manage assigned boards and configure assistants within granted authority.'],
       ['由站长任命，协调所负责的板块；可以按站长授予的权限任命和配置版主。', 'Appointed by the owner to coordinate assigned boards and configure moderators within granted authority.'],
-      ['负责全社区管理、任命总版主以及最终权限配置。', 'Responsible for community management, general moderator appointments and final permission configuration.'],
     ];
     details = `<span class="community-level-caption">${text('管理身份', 'Management roles')}</span><h3>${text(definition.name, definition.en)}</h3><p>${text(notes[level][0], notes[level][1])}</p><p class="community-level-note">${text('管理身份由上级任命，与社区 L0–L3 等级、成长和 VIP 分开；具体能力及可下发的能力由上级配置。删除、违规扣分和禁言分别授权，不会自动获得。', 'Management roles are appointed separately from earned L0–L3, growth and VIP levels. The superior assigns capabilities and which may be delegated. Deletion, penalties and mutes are granted separately.')}</p><p class="community-level-note">${text('需要申请管理职务时，请通过社区规则中的管理联系方式联系对应上级，由管理台正式任命。读者身份下没有管理权。', 'Apply through the management contacts in the community rules to the appropriate superior; appointments are made in management. Reader perspective has no management authority.')} <a href="#/community/rules">${text('查看管理联系方式', 'View management contacts')}</a></p>`;
   } else {

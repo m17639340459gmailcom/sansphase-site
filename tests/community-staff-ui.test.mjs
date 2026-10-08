@@ -102,20 +102,28 @@ test('staff carousel navigation keeps artwork paired with role descriptions with
   const explorer = createCommunityLevelExplorer({ root: () => root, data: () => dust, common: () => common });
   const before = structuredClone(dust);
   explorer.action(root.querySelector('[data-level-mode="staff"]'));
-  for (const [level, role, title] of [[0, 'assistant', '协管'], [1, 'moderator', '版主'], [2, 'general', '总版主'], [3, 'owner', '站长']]) {
+  for (const [level, role, title] of [[0, 'assistant', '协管'], [1, 'moderator', '版主'], [2, 'general', '总版主']]) {
     if (level) explorer.action(root.querySelector('[data-level-step="1"]'));
     assert.equal(root.querySelector('[data-level-preview] [data-staff-role]').dataset.staffRole, role);
     assert.equal(root.querySelector('[data-level-detail] h3').textContent, title);
     const image = root.querySelector('[data-level-preview] img');
-    if (role === 'owner') assert.equal(image, null, 'the collaborator supplied three appointed roles, not an owner icon');
-    else assert.equal(image.getAttribute('src'), `/assets/community/staff/badge-${role}.svg`);
+    assert.equal(image.getAttribute('src'), `/assets/community/staff/badge-${role}.svg`);
     assert.match(root.querySelector('[data-level-status]').textContent, /当前管理身份：协管/);
   }
   assert.equal(root.querySelector('[data-level-step="1"]').disabled, true);
+  assert.equal(root.querySelector('[data-staff-role="owner"]'), null);
+  assert.doesNotMatch(root.querySelector('[data-level-track]').textContent, /站长/);
   const preview = root.querySelector('[data-level-preview]');
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'Element');
   Object.defineProperty(globalThis, 'Element', { configurable: true, value: dom.window.Element });
-  try { explorer.keydown({ target: preview, key: 'Home', preventDefault() {} }); }
+  try {
+    explorer.keydown({ target: preview, key: 'Home', preventDefault() {} });
+    assert.equal(root.querySelector('[data-level-preview] img').getAttribute('src'), '/assets/community/staff/badge-assistant.svg');
+    explorer.keydown({ target: root.querySelector('[data-level-preview]'), key: 'End', preventDefault() {} });
+    assert.equal(root.querySelector('[data-level-preview] img').getAttribute('src'), '/assets/community/staff/badge-general.svg');
+    assert.equal(root.querySelector('[data-level-step="1"]').disabled, true);
+    explorer.keydown({ target: root.querySelector('[data-level-preview]'), key: 'Home', preventDefault() {} });
+  }
   finally {
     if (descriptor) Object.defineProperty(globalThis, 'Element', descriptor);
     else delete globalThis.Element;
@@ -124,6 +132,23 @@ test('staff carousel navigation keeps artwork paired with role descriptions with
   assert.equal(dom.window.document.activeElement, root.querySelector('[data-level-preview]'));
   assert.deepEqual(dust, before, 'browsing role artwork grants no role or capability');
   dom.window.close();
+});
+
+test('retired fourth staff selection clamps to the last supplied emblem and owner status stays truthful', () => {
+  const owner = { ...dust, owner: true, staffRole: 'owner' };
+  const before = structuredClone(owner);
+  for (const staff of [null, 3, 999]) {
+    const dom = new JSDOM(communityLevelExplorerHTML(owner, common, { mode: 'staff', growth: null, trust: null, staff }));
+    try {
+      const root = dom.window.document.querySelector('[data-level-explorer]');
+      assert.equal(root.querySelector('[data-level-preview] img').getAttribute('src'), `/assets/community/staff/badge-${staff === null ? 'assistant' : 'general'}.svg`);
+      assert.equal(root.querySelector('[data-staff-role="owner"]'), null);
+      assert.doesNotMatch(root.querySelector('[data-level-track]').textContent, /站长/);
+      assert.match(root.querySelector('[data-level-status]').textContent, /当前管理身份：站长/);
+      if (staff !== null) assert.equal(root.querySelector('[data-level-step="1"]').disabled, true);
+    } finally { dom.window.close(); }
+  }
+  assert.deepEqual(owner, before);
 });
 
 test('a moderator can configure only an adjacent assistant with the server supplied delegable scope', () => {
