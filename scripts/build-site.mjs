@@ -5,6 +5,7 @@ import { createBuildManifest } from './build-manifest.mjs';
 import { packageStaticFiles } from './static-package.mjs';
 import { validateSceneCdnOrigin } from '../src/scene-delivery.mjs';
 import { buildCompactCommunityArt } from './community-compact-art.ts';
+import { buildCompactCommunityStaffArt } from './community-staff-compact-art.ts';
 import { resolve, sep } from "node:path";
 
 const run = promisify(execFile);
@@ -29,6 +30,7 @@ try {
   // Every build starts empty. A failed compilation leaves the running site intact.
   await run(process.execPath, ["scripts/build-cosmos.mjs", next]);
   await buildCompactCommunityArt(next);
+  await buildCompactCommunityStaffArt(next);
   await packageStaticFiles(next,validateSceneCdnOrigin(process.env.SANSPHASE_SCENE_CDN_ORIGIN));
   const { verifySite } = await import("./verify-site.mjs");
   await verifySite(next);

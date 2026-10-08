@@ -306,6 +306,9 @@ body.community-open #blog-backdrop::after { display: none; }
 }
 .community-av > img { display: block; object-fit: cover; background: var(--surface-2); }
 .community-av > img.community-frame-image { position: absolute; inset: -16%; width: 132%; height: 132%; max-width: none; border-radius: 0; object-fit: contain; background: transparent; pointer-events: none; z-index: 1; }
+/* The approved frame has a 250px avatar opening in a 400px canvas. */
+.community-av > .community-staff-frame { position: absolute; inset: -30%; display: block; width: 160%; height: 160%; border-radius: 0; background: none; line-height: 0; pointer-events: none; z-index: 1; }
+.community-staff-frame > img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .community-av.is-owner > span { border: 1px solid rgb(255 255 255 / 60%); background: linear-gradient(140deg, #f2f4f7, #8a9099); color: #0b0f17; }
 .community-av.is-guest { border: 1px solid var(--line); background: var(--surface-2); }
 .community-av-xs { width: 26px; height: 26px; font-size: 12px; }
@@ -1177,7 +1180,7 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-growth-art, .community-trust-art, .community-vip-art, .community-staff-art { position: relative; display: inline-block; flex: 0 0 auto; width: 100%; aspect-ratio: 1; isolation: isolate; line-height: 0; vertical-align: middle; background: none; border: 0; transform-origin: 50% 55%; }
 .community-growth-art-image, .community-trust-art-image, .community-vip-art-image, .community-staff-art > img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .community-level-motion-canvas { position: absolute; inset: 0; display: block; pointer-events: none; }
-[data-level-motion-ready] > :is(.community-growth-art-image, .community-trust-art-image, .community-vip-art-image) { visibility: hidden; }
+[data-level-motion-ready] > :is(.community-growth-art-image, .community-trust-art-image, .community-vip-art-image, .community-staff-art-image) { visibility: hidden; }
 .community-level-emblem .community-growth-art, .community-level-emblem .community-trust-art { width: 88%; }
 .community-growth-chip .community-growth-art { width: 20px; height: 20px; }
 /* 昵称旁的三枚等级图标。三套图形占各自画布的比例不同：成长星盘的盘面只有画布的 50%～61%，权限菱形
@@ -1187,11 +1190,13 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-level-badge.is-growth { width: 40px; height: 40px; margin: -6px; }
 .community-level-badge.is-trust { width: 30px; height: 30px; margin-inline: -2px; }
 .community-level-badge.is-vip { width: 30px; height: 30px; margin-inline: -3px; }
+.community-level-badge.is-staff { width: 36px; height: 36px; margin: -3px; }
 /* 个人主页：图标在昵称上方单独成行，按同样的比例放大。 */
 .community-level-marks.is-large { gap: 8px; justify-self: start; margin-block: 2px 4px; }
 .community-level-marks.is-large .community-level-badge.is-growth { width: 64px; height: 64px; margin: -10px; }
 .community-level-marks.is-large .community-level-badge.is-trust { width: 48px; height: 48px; margin-inline: -3px; }
 .community-level-marks.is-large .community-level-badge.is-vip { width: 48px; height: 48px; margin-inline: -5px; }
+.community-level-marks.is-large .community-level-badge.is-staff { width: 56px; height: 56px; margin: -5px; }
 /* Growth medallions and permission icons own their colour, motion and reduced-motion rule inside each SVG asset. */
 /* The VIP hexagon fills 82% of its canvas so the high ranks have room outside the frame; its box is larger to match. */
 .community-level-emblem .community-vip-art { width: 100%; }
@@ -1371,6 +1376,8 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-m-cover.is-default-cover::after { content: ""; position: absolute; inset: 0; opacity: 0.7; background: radial-gradient(1px 1px at 12% 30%, #fff, transparent), radial-gradient(1px 1px at 34% 72%, #e9d8b4, transparent), radial-gradient(1.4px 1.4px at 58% 22%, #fff, transparent), radial-gradient(1px 1px at 76% 64%, #c9d6ff, transparent), radial-gradient(1.2px 1.2px at 90% 28%, #fff, transparent); }
 .community-m-id { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: end; gap: 20px; }
 .community-m-id > .community-av { box-shadow: 0 0 0 5px #0b0f17; }
+/* Reserve the 88px avatar frame's 26.4px overhang inside the clipped profile hero. */
+.community-m-id > .community-av.is-staff-frame { margin: 27px; }
 .community-m-name { display: grid; gap: 4px; min-width: 0; }
 .community-m-name h1 { font-family: var(--font-serif); font-size: 28px; letter-spacing: 0.08em; overflow-wrap: anywhere; }
 .community-m-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }

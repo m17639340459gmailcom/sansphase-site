@@ -84,11 +84,11 @@ test('fourth role tab displays collaborator artwork in the existing carousel and
   assert.match(root.querySelector('[data-level-status]').textContent, /协管/);
   assert.ok(root.querySelector('[data-staff-art-slot]'));
   const image = root.querySelector('[data-level-preview] img');
-  assert.equal(image.getAttribute('src'), '/assets/community/staff/badge-assistant.svg');
-  assert.equal(image.getAttribute('width'), '240');
-  assert.equal(image.getAttribute('height'), '240');
-  assert.equal(root.querySelector('[data-carousel-neighbour] img').getAttribute('src'), '/assets/community/staff/badge-moderator.svg');
-  assert.equal(root.querySelector('[data-level-preview] svg'), null, 'the self-contained SVG stays in an image, outside application markup');
+  assert.equal(image.getAttribute('src'), '/assets/community/staff/compact/badge-assistant.webp?v=staff-20261009-r2');
+  assert.equal(image.getAttribute('width'), '400');
+  assert.equal(image.getAttribute('height'), '400');
+  assert.equal(root.querySelector('[data-carousel-neighbour] img').getAttribute('src'), '/assets/community/staff/compact/badge-moderator.webp?v=staff-20261009-r2');
+  assert.equal(root.querySelector('[data-level-preview] svg'), null, 'the static fallback remains outside the isolated idle animation');
   assert.match(root.querySelector('[data-level-detail]').textContent, /上级|删除|禁言|管理联系方式/);
   explorer.action(modes[1]);
   assert.match(root.querySelector('[data-level-status]').textContent, /守夜/);
@@ -107,7 +107,7 @@ test('staff carousel navigation keeps artwork paired with role descriptions with
     assert.equal(root.querySelector('[data-level-preview] [data-staff-role]').dataset.staffRole, role);
     assert.equal(root.querySelector('[data-level-detail] h3').textContent, title);
     const image = root.querySelector('[data-level-preview] img');
-    assert.equal(image.getAttribute('src'), `/assets/community/staff/badge-${role}.svg`);
+    assert.equal(image.getAttribute('src'), `/assets/community/staff/compact/badge-${role}.webp?v=staff-20261009-r2`);
     assert.match(root.querySelector('[data-level-status]').textContent, /当前管理身份：协管/);
   }
   assert.equal(root.querySelector('[data-level-step="1"]').disabled, true);
@@ -118,9 +118,9 @@ test('staff carousel navigation keeps artwork paired with role descriptions with
   Object.defineProperty(globalThis, 'Element', { configurable: true, value: dom.window.Element });
   try {
     explorer.keydown({ target: preview, key: 'Home', preventDefault() {} });
-    assert.equal(root.querySelector('[data-level-preview] img').getAttribute('src'), '/assets/community/staff/badge-assistant.svg');
+    assert.equal(root.querySelector('[data-level-preview] img').getAttribute('src'), '/assets/community/staff/compact/badge-assistant.webp?v=staff-20261009-r2');
     explorer.keydown({ target: root.querySelector('[data-level-preview]'), key: 'End', preventDefault() {} });
-    assert.equal(root.querySelector('[data-level-preview] img').getAttribute('src'), '/assets/community/staff/badge-general.svg');
+    assert.equal(root.querySelector('[data-level-preview] img').getAttribute('src'), '/assets/community/staff/compact/badge-general.webp?v=staff-20261009-r2');
     assert.equal(root.querySelector('[data-level-step="1"]').disabled, true);
     explorer.keydown({ target: root.querySelector('[data-level-preview]'), key: 'Home', preventDefault() {} });
   }
@@ -128,7 +128,7 @@ test('staff carousel navigation keeps artwork paired with role descriptions with
     if (descriptor) Object.defineProperty(globalThis, 'Element', descriptor);
     else delete globalThis.Element;
   }
-  assert.equal(root.querySelector('[data-level-preview] img').getAttribute('src'), '/assets/community/staff/badge-assistant.svg');
+  assert.equal(root.querySelector('[data-level-preview] img').getAttribute('src'), '/assets/community/staff/compact/badge-assistant.webp?v=staff-20261009-r2');
   assert.equal(dom.window.document.activeElement, root.querySelector('[data-level-preview]'));
   assert.deepEqual(dust, before, 'browsing role artwork grants no role or capability');
   dom.window.close();
@@ -141,7 +141,7 @@ test('retired fourth staff selection clamps to the last supplied emblem and owne
     const dom = new JSDOM(communityLevelExplorerHTML(owner, common, { mode: 'staff', growth: null, trust: null, staff }));
     try {
       const root = dom.window.document.querySelector('[data-level-explorer]');
-      assert.equal(root.querySelector('[data-level-preview] img').getAttribute('src'), `/assets/community/staff/badge-${staff === null ? 'assistant' : 'general'}.svg`);
+      assert.equal(root.querySelector('[data-level-preview] img').getAttribute('src'), `/assets/community/staff/compact/badge-${staff === null ? 'assistant' : 'general'}.webp?v=staff-20261009-r2`);
       assert.equal(root.querySelector('[data-staff-role="owner"]'), null);
       assert.doesNotMatch(root.querySelector('[data-level-track]').textContent, /站长/);
       assert.match(root.querySelector('[data-level-status]').textContent, /当前管理身份：站长/);

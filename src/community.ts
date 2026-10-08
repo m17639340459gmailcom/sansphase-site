@@ -14,6 +14,7 @@ import { communityGrowthArtHTML, communityTrustArtHTML, communityVipArtHTML } fr
 import type { CommunityGrowthState, CommunityVIPGrowthState } from './community-growth.ts';
 import type { CommunityEntryState } from './community-entry.ts';
 import { communityStaffRoles, communityStaffCapabilities } from './community-staff.mjs';
+import { communityStaffArtRole, communityStaffArtHTML } from './community-staff-art.mjs';
 import type { CommunityStaffRole, CommunityStaffState } from './community-staff.ts';
 import { communityBoardIcon } from './community-board-icons.mjs';
 import { communityNewsHTML } from './community-news.mjs';
@@ -293,7 +294,9 @@ export type AvatarSize = "xs" | "sm" | "md" | "lg" | "xl";
 function currentAppearance(person: CommunityPerson, common: Common): CommunityPerson {
   const viewer = common.meForSort;
   return viewer?.uid && person.uid === viewer.uid
-    ? { ...person, avatar: viewer.avatar, frame: viewer.frame, color: viewer.color, nameEffect: viewer.nameEffect, growth: viewer.growth === undefined ? person.growth : viewer.growth }
+    ? { ...person, role: viewer.role, avatar: viewer.avatar, frame: viewer.frame, color: viewer.color, nameEffect: viewer.nameEffect,
+      growth: viewer.growth === undefined ? person.growth : viewer.growth,
+      staffRole: viewer.staffRole === undefined ? person.staffRole : viewer.staffRole }
     : person;
 }
 export function avatarHTML(person: CommunityPerson | null | undefined, common: Common, size: AvatarSize = "md", link = true) {
@@ -301,13 +304,15 @@ export function avatarHTML(person: CommunityPerson | null | undefined, common: C
   if (!person) return `<span class="community-av community-av-${size} is-guest" aria-hidden="true"></span>`;
   person = currentAppearance(person, common);
   const src = person.avatar || (person.role === "owner" ? common.ownerAvatar : null);
-  const customFrame = /^image:([0-9a-f-]{36})$/.exec(person.frame || '')?.[1] || '';
-  const frame = decoration(person.frame);
-  const cls = `community-av community-av-${size}${person.role === "owner" ? " is-owner" : ""}${customFrame ? ' is-frame-image' : frame ? ` is-frame-${frame}` : ""}`;
+  const staffRole = person.role === 'owner' ? null : communityStaffArtRole(person.staffRole);
+  // The role frame takes visual priority; equipped shop frames stay stored for after revocation.
+  const customFrame = staffRole ? '' : /^image:([0-9a-f-]{36})$/.exec(person.frame || '')?.[1] || '';
+  const frame = staffRole ? '' : decoration(person.frame);
+  const cls = `community-av community-av-${size}${person.role === "owner" ? " is-owner" : ""}${staffRole ? ' is-staff-frame' : customFrame ? ' is-frame-image' : frame ? ` is-frame-${frame}` : ""}`;
   const inner = (src
     ? `<img src="${esc(src)}" alt="" loading="lazy" decoding="async">`
     : `<span style="--h:${hue(person.name)}">${esc(initial(person.name))}</span>`)
-    + (customFrame ? `<img class="community-frame-image" src="${imageSrc(customFrame)}" alt="" decoding="async">` : '');
+    + (staffRole ? communityStaffArtHTML(staffRole, 'frame') : customFrame ? `<img class="community-frame-image" src="${imageSrc(customFrame)}" alt="" decoding="async">` : '');
   // The name next to it is the link people use; the avatar link is a larger target for pointers only.
   const uid = person.uid;
   return link && uid
@@ -320,12 +325,15 @@ const levelTitle = (level: number, t: Translate) => {
 };
 export const communityLevelName = levelTitle;
 // 等级标识：站长是独立角色，协管也不是自动等级；VIP 另起一个标识。
-export function levelChipHTML(person: CommunityPerson, { t }: Common) {
+export function levelChipHTML(person: CommunityPerson, common: Common) {
+  person = currentAppearance(person, common);
+  const { t } = common;
   if (person.role === "owner") return `<span class="community-role">${t("站长", "Owner")}</span>`;
   const role = communityStaffRoles.find(item => item.id === person.staffRole);
   if (role || person.staffRole === undefined && person.steward) {
     const label = role ? t(role.name, role.nameEn) : t('协管', 'Steward');
-    return `<span class="community-lv is-steward" title="${label}"><span class="community-steward-icon" aria-hidden="true">⬟</span>${label}</span>`;
+    const legacyIcon = role ? '' : '<span class="community-steward-icon" aria-hidden="true">⬟</span>';
+    return `<span class="community-lv is-steward" title="${label}">${legacyIcon}${label}</span>`;
   }
   const level = Math.max(0, Math.min(3, person.level ?? 0));
   return `<span class="community-lv is-lv${level}" title="L${level}">${levelTitle(level, t)}</span>`;
@@ -338,8 +346,8 @@ export function growthChipHTML(person: CommunityPerson, common: Common) {
   const label = t(item.name, item.en);
   return `<span class="community-growth-chip" title="${esc(t(`成长等级：${label}`, `Growth level: ${label}`))}">${communityGrowthArtHTML(item.level, true)}<span>${esc(label)}</span></span>`;
 }
-// 昵称旁的等级图标：成长、权限、VIP 依次排列，只显示图标，名称放在 title 与无障碍标签里。
-// 站长没有等级；协管是任命，不显示权限图标；旧响应缺少成长字段时不推算成长等级。
+// 昵称旁依次显示成长、权限、VIP 与有效管理职位，名称放在 title 与无障碍标签里。
+// 站长没有等级；旧版协管响应不推算权限或职位图标；缺少成长字段时不推算成长等级。
 // 会员档位由服务端已记录的有效访问日确定；旧响应仅显示起始会员图标。
 // `large` 用于个人主页：图标单独成行放在昵称上方，尺寸加大。
 export function levelMarksHTML(person: CommunityPerson, common: Common, large = false) {
@@ -361,10 +369,23 @@ export function levelMarksHTML(person: CommunityPerson, common: Common, large = 
     const level = person.vipGrowth?.active && typeof rank === 'number' && Number.isInteger(rank) && rank >= 1 && rank <= 8 ? rank : null;
     marks += mark('vip', level ? `VIP${level}` : t('VIP 会员', 'VIP member'), communityVipArtHTML(level ?? 1, true));
   }
+  marks += staffMarkHTML(person, common);
   return marks ? `<span class="community-level-marks${large ? ' is-large' : ''}">${marks}</span>` : '';
 }
-// 站长与协管没有对应的图标，仍用文字标识。
-export const roleChipHTML = (person: CommunityPerson, common: Common) => person.role === "owner" || person.staffRole || person.staffRole === undefined && person.steward ? levelChipHTML(person, common) : "";
+export function staffMarkHTML(person: CommunityPerson, common: Common): string {
+  person = currentAppearance(person, common);
+  const staffRole = person.role === 'owner' ? null : communityStaffArtRole(person.staffRole);
+  if (!staffRole) return '';
+  const role = communityStaffRoles.find(item => item.id === staffRole)!;
+  const { t, esc } = common;
+  const label = t(`管理身份：${role.name}`, `Management role: ${role.nameEn}`);
+  return `<span class="community-level-badge is-staff" role="img" aria-label="${esc(label)}" title="${esc(label)}">${communityStaffArtHTML(staffRole, 'badge')}</span>`;
+}
+export function roleChipHTML(person: CommunityPerson, common: Common): string {
+  person = currentAppearance(person, common);
+  return person.role === 'owner' || communityStaffRoles.some(role => role.id === person.staffRole) || person.staffRole === undefined && person.steward
+    ? levelChipHTML(person, common) : '';
+}
 function nameWithMarksHTML(label: string, person: CommunityPerson, common: Common, marked = true) {
   const marks = marked ? levelMarksHTML(person, common) : '';
   return marks ? `<span class="community-name">${label}${marks}</span>` : label;
@@ -651,7 +672,7 @@ function communityCuratedHTML(items: readonly CommunityTopic[], common: Common, 
   const { t, esc, now = Date.now(), icons = {} } = common;
   const rows = items.map((topic, index) => {
     const title = topic.board === 'moments' && !topic.hasTitle ? plainText(topic.excerpt || topic.title) : topic.title;
-    const authorLabel = nameLabelHTML(topic.author, common, false);
+    const authorLabel = nameLabelHTML(topic.author, common, false) + staffMarkHTML(topic.author, common);
     const author = topic.author.uid ? `<a class="community-curated-author" href="${memberHref(topic.author.uid)}">${avatarHTML(topic.author, common, 'xs', false)}${authorLabel}</a>`
       : `<span class="community-curated-author">${avatarHTML(topic.author, common, 'xs', false)}${authorLabel}</span>`;
     return `<li class="community-curated-row${topic.glow ? ' is-glow' : ''}" data-topic-id="${esc(topic.id)}"><span class="community-curated-rank${index < 3 ? ' is-top' : ''}" aria-hidden="true">${String(index + 1).padStart(2, '0')}</span>`

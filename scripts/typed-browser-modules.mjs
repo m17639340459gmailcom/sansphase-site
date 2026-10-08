@@ -10,6 +10,7 @@ export const typedBrowserModules = new Set([
   'community-ui.mjs',
   'community-passive-refresh.mjs',
   'community-staff.mjs',
+  'community-staff-art.mjs',
   'community-write-request.mjs',
   'community-editor-size.mjs',
   'community-post.mjs',

@@ -1,4 +1,4 @@
-import { avatarHTML, boardHref, memberHref, nameLabelHTML, postHref } from './community.mjs';
+import { avatarHTML, boardHref, memberHref, nameLabelHTML, postHref, staffMarkHTML } from './community.mjs';
 import type { Common, CommunityBoard, CommunityListing, CommunityLoad } from './community.ts';
 
 const normalizedName = (name: string) => name.replace(/\s+/gu, '').toLowerCase();
@@ -42,7 +42,7 @@ export function communityNewsHTML({ board, list, catalogPending = false, ...comm
     // A mismatched DTO must not silently substitute another board's content.
     const items = list.data.items.filter(topic => topic.board === actual.id).slice(0, 6);
     content = items.length ? `<ol class="community-news-list">${items.map((topic, index) => {
-      const label = avatarHTML(topic.author, common, 'xs', false) + nameLabelHTML(topic.author, common, false);
+      const label = avatarHTML(topic.author, common, 'xs', false) + nameLabelHTML(topic.author, common, false) + staffMarkHTML(topic.author, common);
       const author = topic.author.uid ? `<a class="community-news-author" href="${esc(memberHref(topic.author.uid))}">${label}</a>` : `<span class="community-news-author">${label}</span>`;
       return `<li class="community-news-row${topic.glow ? ' is-glow' : ''}" data-topic-id="${esc(topic.id)}"><span class="community-news-rank${index < 3 ? ' is-top' : ''}" aria-hidden="true">${String(index + 1).padStart(2, '0')}</span>`
         + `<div class="community-news-main"><a class="community-news-title" href="${esc(postHref(topic.id))}" title="${esc(topic.title)}">${esc(topic.title)}</a>`

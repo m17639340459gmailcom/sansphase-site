@@ -4,6 +4,7 @@ import { communityLevels, communityLevelPerks } from './community-rules.mjs';
 import type { Common } from './community.ts';
 import type { CommunityStardust } from './community-pages.ts';
 import { communityStaffRoles } from './community-staff.mjs';
+import { communityStaffArtRole, communityStaffArtHTML } from './community-staff-art.mjs';
 
 type Mode = 'growth' | 'trust' | 'vip' | 'staff';
 export type CommunityLevelSelection = { mode: Mode; growth: number | null; trust: number | null; vip?: number | null; staff?: number | null };
@@ -40,8 +41,8 @@ function growthProgressHTML(data: CommunityStardust, common: Common, selected: n
 
 const levelIconHTML = (level: number, mode: Mode) => {
   if (mode === 'staff') {
-    const role = staffRanks[level].id;
-    return `<span class="community-staff-art" data-staff-art-slot data-staff-role="${role}" aria-hidden="true"><img src="/assets/community/staff/badge-${role}.svg" width="240" height="240" alt="" decoding="async" draggable="false"></span>`;
+    const role = communityStaffArtRole(staffRanks[level].id);
+    return role ? communityStaffArtHTML(role, 'badge') : '';
   }
   if (mode === 'growth') return communityGrowthArtHTML(level);
   if (mode === 'vip') return communityVipArtHTML(level);

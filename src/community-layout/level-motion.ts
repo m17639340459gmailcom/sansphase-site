@@ -1,16 +1,22 @@
-// Only approved, same-origin level artwork is enhanced. Static images remain
+// Only approved, same-origin level and staff artwork is enhanced. Static images remain
 // the fallback; animation never changes their source or the surrounding layout.
-const markSelector = '.community-level-marks [data-level-icon]';
+import { communityStaffArtSource } from '../community-staff-art.mjs';
+
+const markSelector = '.community-level-marks [data-level-icon], .community-staff-art[data-staff-art], .community-staff-frame[data-staff-art]';
 const approvedSlug = /^(?:constellation-g(?:[1-9]|10)|trust-l[0-3]|vip-[1-8])$/;
+const approvedStaffSlug = /^(?:badge|frame)-(?:assistant|moderator|general)$/;
 const svgNamespace = 'http://www.w3.org/2000/svg';
 const svgElements = new Set(['svg', 'style', 'defs', 'linearGradient', 'stop', 'radialGradient', 'clipPath', 'circle', 'g', 'ellipse', 'path', 'rect', 'filter', 'feGaussianBlur', 'feDiffuseLighting', 'feDistantLight', 'feComposite', 'feSpecularLighting', 'feTurbulence', 'feColorMatrix']);
+const staffSvgElements = new Set([...svgElements, 'image', 'use', 'mask']);
 const maxArtworkBytes = 128 * 1024;
+const maxStaffArtworkBytes = 160 * 1024;
 const warmOffscreenMax = 18;
 const playbackStyle = `:host { display: block; width: 100%; height: 100%; }
 svg { display: block; width: 100%; height: 100%; }
 :host svg[data-level-motion-svg], :host svg[data-level-motion-svg] * { animation-play-state: var(--community-level-play-state, paused); }`;
 
-type Mark = { element: HTMLElement; slug: string; visible: boolean; lastVisible: number; pending: boolean; template: Element | null; canvas: HTMLElement | null };
+type ArtworkKind = 'levels' | 'staff';
+type Mark = { element: HTMLElement; kind: ArtworkKind; slug: string; visible: boolean; lastVisible: number; pending: boolean; template: Element | null; canvas: HTMLElement | null };
 type MotionController = { pause: () => void; resume: () => void; release: () => void };
 
 /** Compare application markup without this module's reversible enhancement. */
@@ -37,14 +43,35 @@ export function createCommunityLevelMotion(document: Document, request?: typeof 
   let released = false;
   let visibilityOrder = 0;
   const eligible = (mark: Mark) => !released && mark.visible && !paused && !document.hidden && !motion?.matches && mark.element.isConnected;
-  const validate = (body: string): Element => {
+  const validate = (body: string, kind: ArtworkKind): Element => {
     const parsed = new window.DOMParser().parseFromString(body, 'image/svg+xml');
     const svg = parsed.documentElement;
     if (parsed.querySelector('parsererror') || svg.localName !== 'svg' || svg.namespaceURI !== svgNamespace) throw Error('Invalid level artwork');
+    const allowedElements = kind === 'staff' ? staffSvgElements : svgElements;
+    const localShapes = new Map([...svg.querySelectorAll('[id]')].map(element => [element.id, element]));
+    const checkStaffHref = (element: Element, attribute: Attr) => {
+      if (attribute.name !== 'href' || attribute.namespaceURI !== null) throw Error('Unexpected staff artwork reference');
+      if (element.localName === 'image' && /^data:image\/webp;base64,[A-Za-z0-9+/]+={0,2}$/.test(attribute.value)) {
+        const encoded = attribute.value.slice('data:image/webp;base64,'.length);
+        const bitmap = window.atob(encoded);
+        if (bitmap.slice(0, 4) === 'RIFF' && bitmap.slice(8, 12) === 'WEBP') return;
+      }
+      if (element.localName === 'use' && /^#[\w-]+$/.test(attribute.value)) {
+        const target = localShapes.get(attribute.value.slice(1));
+        // The submitted artwork reuses only inert image and path shapes.
+        // Referencing other use/group nodes could introduce recursive trees.
+        if (target?.localName === 'image' || target?.localName === 'path') return;
+      }
+      throw Error('External staff artwork reference');
+    };
     for (const element of [svg, ...svg.querySelectorAll('*')]) {
-      if (element.namespaceURI !== svgNamespace || !svgElements.has(element.localName)) throw Error('Unexpected level artwork element');
+      if (element.namespaceURI !== svgNamespace || !allowedElements.has(element.localName)) throw Error('Unexpected level artwork element');
       for (const attribute of element.attributes) {
-        if (/^on/i.test(attribute.name) || /href$/i.test(attribute.name)) throw Error('Active level artwork attribute');
+        if (/^on/i.test(attribute.name)) throw Error('Active level artwork attribute');
+        if (/href$/i.test(attribute.name)) {
+          if (kind !== 'staff') throw Error('Active level artwork attribute');
+          checkStaffHref(element, attribute);
+        }
         checkReferences(attribute.value);
       }
       if (element.localName === 'style') checkReferences(element.textContent || '');
@@ -69,29 +96,34 @@ export function createCommunityLevelMotion(document: Document, request?: typeof 
       if (!/^#[\w-]+$/.test(match[1].trim().replace(/^(['"])(.*)\1$/, '$2'))) throw Error('External level artwork URL');
     }
   };
-  const load = (slug: string): Promise<Element> => {
-    const existing = templates.get(slug);
+  const load = (kind: ArtworkKind, slug: string): Promise<Element> => {
+    const source = kind === 'staff' ? communityStaffArtSource(slug, false) : `/assets/community/levels/${slug}.svg`;
+    if (!source) return Promise.reject(Error('Unapproved staff artwork'));
+    const key = source;
+    const existing = templates.get(key);
     if (existing) return existing;
     const pending = (async () => {
       const timeout = new AbortController();
       const timer = window.setTimeout(() => timeout.abort(), 10000);
       try {
-        const response = await fetcher(`/assets/community/levels/${slug}.svg`, {
+        const response = await fetcher(source, {
           credentials: 'omit', cache: 'force-cache', redirect: 'error', signal: AbortSignal.any([lifetime.signal, timeout.signal]),
         });
         if (!response.ok || response.redirected || response.headers.get('content-type')?.split(';')[0].trim() !== 'image/svg+xml') throw Error('Level artwork unavailable');
+        const maxBytes = kind === 'staff' ? maxStaffArtworkBytes : maxArtworkBytes;
         const statedBytes = Number(response.headers.get('content-length') || 0);
-        if (statedBytes > maxArtworkBytes) throw Error('Level artwork too large');
+        if (statedBytes > maxBytes) throw Error('Level artwork too large');
         const body = await response.text();
-        if (lifetime.signal.aborted || timeout.signal.aborted || new TextEncoder().encode(body).length > maxArtworkBytes) throw Error('Level artwork unavailable');
-        return validate(body);
+        if (lifetime.signal.aborted || timeout.signal.aborted || new TextEncoder().encode(body).length > maxBytes) throw Error('Level artwork unavailable');
+        return validate(body, kind);
       } finally { window.clearTimeout(timer); }
     })();
-    templates.set(slug, pending);
-    void pending.catch(() => { if (templates.get(slug) === pending) templates.delete(slug); });
+    templates.set(key, pending);
+    void pending.catch(() => { if (templates.get(key) === pending) templates.delete(key); });
     return pending;
   };
-  const current = (mark: Mark) => !released && mark.element.isConnected && marks.get(mark.element) === mark && mark.element.dataset.levelIcon === mark.slug;
+  const current = (mark: Mark) => !released && mark.element.isConnected && marks.get(mark.element) === mark &&
+    (mark.kind === 'staff' ? mark.element.dataset.staffArt : mark.element.dataset.levelIcon) === mark.slug;
   const mount = (mark: Mark, svg: Element) => {
     if (!current(mark) || !eligible(mark) || mark.canvas) return;
     const canvas = document.createElement('span');
@@ -109,6 +141,13 @@ export function createCommunityLevelMotion(document: Document, request?: typeof 
     mark.element.dataset.levelMotionReady = 'true';
   };
   const update = (mark: Mark) => {
+    if (mark.kind === 'staff' && motion?.matches) {
+      // Their white-light layer gets its transparent baseline from keyframes.
+      // Disabling animation inside the SVG would leave that layer opaque.
+      // Restore the frozen image while retaining the approved shared template.
+      if (mark.canvas) removeCanvas(mark);
+      return;
+    }
     const state = eligible(mark) ? 'running' : 'paused';
     if (mark.canvas) {
       if (mark.canvas.style.getPropertyValue('--community-level-play-state') !== state) mark.canvas.style.setProperty('--community-level-play-state', state);
@@ -117,7 +156,7 @@ export function createCommunityLevelMotion(document: Document, request?: typeof 
     if (state !== 'running' || mark.pending) return;
     if (mark.template) { mount(mark, mark.template); return; }
     mark.pending = true;
-    void load(mark.slug).then(svg => {
+    void load(mark.kind, mark.slug).then(svg => {
       if (!current(mark)) return;
       mark.template = svg;
       mount(mark, svg);
@@ -146,10 +185,13 @@ export function createCommunityLevelMotion(document: Document, request?: typeof 
     if (node.matches(markSelector)) elements.unshift(node as HTMLElement);
     for (const element of elements) {
       if (marks.has(element)) continue;
-      const slug = element.dataset.levelIcon || '';
+      const kind: ArtworkKind = element.hasAttribute('data-staff-art') ? 'staff' : 'levels';
+      const slug = (kind === 'staff' ? element.dataset.staffArt : element.dataset.levelIcon) || '';
       const image = element.querySelector('img');
-      if (!approvedSlug.test(slug) || image?.getAttribute('src') !== `/assets/community/levels/compact/${slug}.webp` || !element.isConnected) continue;
-      const mark: Mark = { element, slug, visible: false, lastVisible: 0, pending: false, template: null, canvas: null };
+      const approved = kind === 'staff' ? approvedStaffSlug.test(slug) && element.classList.contains(slug.startsWith('frame-') ? 'community-staff-frame' : 'community-staff-art') : approvedSlug.test(slug);
+      const source = kind === 'staff' ? communityStaffArtSource(slug, true) : `/assets/community/levels/compact/${slug}.webp`;
+      if (!approved || !source || image?.getAttribute('src') !== source || !element.isConnected) continue;
+      const mark: Mark = { element, kind, slug, visible: false, lastVisible: 0, pending: false, template: null, canvas: null };
       marks.set(element, mark); intersection.observe(element);
     }
   };

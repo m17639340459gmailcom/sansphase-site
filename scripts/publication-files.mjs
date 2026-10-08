@@ -25,7 +25,7 @@ export async function publicationFiles(root=resolve('.')) {
   result.push('scripts/build-growth-constellation.mjs', 'scripts/growth-constellation.ts', 'docs/COMMUNITY-STARDUST-RULES.md');
   result.push('scripts/build-trust-moon.mjs', 'scripts/trust-moon.ts');
   result.push('scripts/build-vip-badge.mjs', 'scripts/vip-badge.ts', 'scripts/vip-badge-glyphs.ts');
-  result.push('scripts/community-compact-art.ts');
+  result.push('scripts/community-compact-art.ts', 'scripts/community-staff-compact-art.ts');
   async function visit(directory) {
     for(const entry of await readdir(directory,{withFileTypes:true})) {
       const path=resolve(directory,entry.name);

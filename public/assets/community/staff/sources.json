@@ -1,10 +1,11 @@
 {
-  "description": "Three collaborator management identity emblems, reconstructed for local integration from the existing owner-provided transparent reference. The SVGs embed WebP artwork and CSS motion; they are not pure vector assets. Owner artwork was not supplied.",
+  "description": "Three collaborator management identity emblems and matching avatar frames, reconstructed from the existing owner-provided transparent reference. The self-contained SVGs embed WebP artwork and original CSS motion; they are not pure vector assets. Owner artwork was not supplied.",
   "collaboratorCommit": "099f293c3f8ea7ed4abd1d385e98b55e84c1b859",
   "generator": "drafts/staff-icons-v8/build.mjs",
   "sourceImageSha256": "1c1ba16ee0ac397111d994bf6b97c1fb5420dee4e0172acab0690e44e3a6152f",
   "reconstructedAt": "2026-10-09",
-  "scope": "Local management role explorer preview; no appointment, permission or member-avatar changes.",
+  "assetRevision": "staff-20261009-r2",
+  "scope": "Public management role explorer and automatic staff avatar/badge display for effective appointments. Artwork grants no management permission.",
   "icons": [
     {
       "role": "assistant",
@@ -27,5 +28,71 @@
       "sha256": "a9d28889c568c26ecff35632065c8d3a97634e30ca1fae4de8704630be0728e0",
       "kind": "animated-svg-with-embedded-webp"
     }
-  ]
+  ],
+  "frames": [
+    {
+      "role": "assistant",
+      "file": "frame-assistant.svg",
+      "bytes": 79542,
+      "sha256": "9a54b4b00875216c72e12c378141efd39acb849c629aff4d6f894ce8206b3972",
+      "kind": "animated-svg-with-embedded-webp-and-outlined-lettering"
+    },
+    {
+      "role": "moderator",
+      "file": "frame-moderator.svg",
+      "bytes": 83179,
+      "sha256": "cd910f5a000d96d32ec8ddedc5d09919395cf4790478634742629905b84d60fb",
+      "kind": "animated-svg-with-embedded-webp-and-outlined-lettering",
+      "correction": {
+        "kind": "radial-backdrop-alpha-fade",
+        "originalSha256": "61c63740996113f0370f3ab55316d43912a0a5af83d681d73be5f996689e5df7",
+        "reason": "The original prismatic bloom and gem backlights reached the square SVG viewport edge. A radial alpha mask is applied only to the background light group, preserving all original embedded images, foreground frame/jewels, lettering and CSS animation bytes.",
+        "maskCenter": [
+          200,
+          200
+        ],
+        "maskRadius": 200,
+        "fadeStart": 0.78,
+        "correctedAt": "2026-10-09"
+      }
+    },
+    {
+      "role": "general",
+      "file": "frame-general.svg",
+      "bytes": 134367,
+      "sha256": "0c82068c13215436f1d628459b01f4170ba9c3a23ad94b15b877ee6c9948ac0f",
+      "kind": "animated-svg-with-embedded-webp-and-outlined-lettering",
+      "correction": {
+        "kind": "radial-backdrop-alpha-fade",
+        "originalSha256": "cdfb48866bf44b8e9227e9ea2baed76431ccf9b888967dc8e998f851a10ff2d1",
+        "reason": "The original prismatic bloom and gem backlights reached the square SVG viewport edge. A radial alpha mask is applied only to the background light group, preserving all original embedded images, foreground frame/jewels, lettering and CSS animation bytes.",
+        "maskCenter": [
+          200,
+          200
+        ],
+        "maskRadius": 200,
+        "fadeStart": 0.78,
+        "correctedAt": "2026-10-09"
+      }
+    }
+  ],
+  "fontOutline": {
+    "name": "Ma Shan Zheng Regular",
+    "copyright": "Copyright 2018 The Ma Shan Zheng Project Authors (https://github.com/googlefonts/mashanzheng)",
+    "license": "SIL Open Font License 1.1",
+    "fontSource": "https://raw.githubusercontent.com/google/fonts/main/ofl/mashanzheng/MaShanZheng-Regular.ttf",
+    "fontSha256": "6d2546bb189c732a8ca29af9e22457b152387d158aa459e4ac2ce1e51788b7fb",
+    "licenseSource": "https://raw.githubusercontent.com/google/fonts/main/ofl/mashanzheng/OFL.txt",
+    "licenseFile": "LICENSE-MaShanZheng.txt",
+    "licenseSha256": "d7bdb1cee215b689e23c2f95672a6084c790542170648267a55114103d756a08",
+    "distribution": "Role lettering is stored as SVG path outlines; the font file is not distributed."
+  },
+  "staticDerivatives": {
+    "generator": "scripts/community-staff-compact-art.ts",
+    "directory": "compact",
+    "format": "lossless-webp",
+    "badgePixels": 192,
+    "framePixels": 256,
+    "baseline": "Embedded WebP images are converted losslessly to PNG for librsvg on an in-memory SVG copy, then the original CSS initial keyframe appearance is frozen. Approved animated SVG files remain unchanged."
+  }
 }

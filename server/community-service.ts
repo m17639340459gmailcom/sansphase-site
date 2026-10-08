@@ -113,6 +113,22 @@ export function createCommunityService(options: ServiceOptions) {
     const canModerateBoard = (board: string) => canStaff('content.inspect', board);
     viewer = { ...viewer, vip: ownerReaderPreview !== null || viewer.vip && !browsingAsReader };
     const canSeeBoard = (board: string) => live.boards.has(board) && (board !== membersBoard || viewer.vip || owner || moderationBoards().includes(board));
+    // Public staff appearance needs the same active account chain as authority.
+    // Fetch shared ancestors with the authors in one batch, never once per avatar.
+    const presentationPeople = (authors: CommunityAuthor[]) => {
+      const related = new Map(authors.map(author => [memberKey(author), author]));
+      for (const author of [...related.values()]) for (const ancestor of live.staff.ancestors(author))
+        if (ancestor.kind === 'reader') related.set(memberKey(ancestor), ancestor);
+      return people([...related.values()]);
+    };
+    const presentationStaffRole = (author: CommunityAuthor, map: Map<string, PersonInfo>) => {
+      const current = live.staff.state(author);
+      if (!current || author.kind === 'owner') return current?.role ?? null;
+      // Re-read the appointment after asynchronous profiles resolve: a revoked
+      // chain or a newly appointed, unverified ancestor must not keep its badge.
+      return [author, ...live.staff.ancestors(author)].filter(member => member.kind === 'reader')
+        .every(member => map.get(memberKey(member))?.active === true) ? current.role : null;
+    };
     const person = (author: CommunityAuthor, map: Map<string, PersonInfo>) => {
       const info = map.get(memberKey(author));
       if (!info) return { name: '已注销用户', role: author.kind, uid: null, avatar: null, vip: false, level: 0, growth: null, vipGrowth: null, frame: null, color: null };
@@ -128,7 +144,7 @@ export function createCommunityService(options: ServiceOptions) {
         growth: preview?.growth ?? live.experience.state(author), vipGrowth: preview?.vipGrowth ?? live.experience.vipState(author, info.vip),
         avatar: communityApprovedAvatarURL(info.uid, info.avatar),
         vip: preview ? true : info.vip, level: preview?.trustLevel ?? live.members.level(author), steward: preview ? false : steward,
-        staffRole: preview ? null : live.staff.state(author)?.role ?? null,
+        staffRole: preview ? null : presentationStaffRole(author, map),
         ...(steward ? { moderationBoards: live.members.moderationBoards(author) } : {}), frame: decorations.frame, color: decorations.color, ...(nameEffect ? { nameEffect } : {}),
       };
     };
@@ -162,10 +178,10 @@ export function createCommunityService(options: ServiceOptions) {
       canSeeBoard, get hiddenBoard() { return canSeeBoard(membersBoard) ? '' : membersBoard; },
       send: (value, status) => { options.assertActive?.(req); sendTo(res, value, status); },
       json: async () => { const value = await (body ||= readJson(req)); await refreshStaff(); requireConsent(); return value; },
-      people: async authors => { const map = await people(authors); await refreshStaff(); requireConsent(); return map; }, person, topicDTO,
+      people: async authors => { const map = await presentationPeople(authors); await refreshStaff(); requireConsent(); return map; }, person, topicDTO,
       requireConsent,
       topicsDTO: async topics => {
-        const map = await people(peopleIn(topics)); await refreshStaff(); options.assertActive?.(req);
+        const map = await presentationPeople(peopleIn(topics)); await refreshStaff(); options.assertActive?.(req);
         return topics.filter(topic => {
           const current = live.topic(topic.id);
           return current && current.board === topic.board && canSeeBoard(current.board)

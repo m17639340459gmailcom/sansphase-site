@@ -1,8 +1,11 @@
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { readFile } from 'node:fs/promises';
 import { createStableCommunityFrame } from '../../src/community-layout/stable-frame.ts';
 import { nameLabelHTML, whoHTML, type CommunityPerson } from '../../src/community.ts';
+import { communityLevelExplorerHTML } from '../../src/community-level-explorer.ts';
+import type { CommunityStardust } from '../../src/community-pages.ts';
 
 interface TestWindow extends Window {
   close(): void;
@@ -19,14 +22,17 @@ const person: CommunityPerson = { name: '测试读者', uid: '10001', role: 'rea
   growth: { level: 10, points: 72000, configured: true },
   vipGrowth: { active: true, level: 8, days: 365, nextDays: null, remaining: 0, multiplier: 1, progress: 1 } };
 const common = { t: (zh: string) => zh, esc: (value?: unknown) => String(value ?? ''), icons: {} };
-const headerTemplate = (name = person.name, unread = 0) => `<header id="site-header"><div class="community-brand-group">社区</div><nav id="navigation" class="nav community-nav"><a href="#/community/home">首页</a></nav><div class="header-actions">${nameLabelHTML({ ...person, name }, common)}<button aria-label="通知">通知<span class="community-nav-dot">${unread}</span></button></div></header>`;
+const staffDecoration = '<span class="community-av"><span class="community-staff-frame" data-staff-art="frame-general"><img class="community-staff-art-image" src="/assets/community/staff/compact/frame-general.webp?v=staff-20261009-r2"></span></span><span class="community-staff-art" data-staff-art="badge-general"><img class="community-staff-art-image" src="/assets/community/staff/compact/badge-general.webp?v=staff-20261009-r2"></span>';
+const headerTemplate = (name = person.name, unread = 0, staff = false) => `<header id="site-header"><div class="community-brand-group">社区</div><nav id="navigation" class="nav community-nav"><a href="#/community/home">首页</a></nav><div class="header-actions">${staff ? staffDecoration : ''}${nameLabelHTML({ ...person, name }, common)}<button aria-label="通知">通知<span class="community-nav-dot">${unread}</span></button></div></header>`;
 const header = headerTemplate();
 const page = `<section data-community="member"><p>${whoHTML(person, common)}</p><form><textarea>未发送的回复</textarea></form></section>`;
 const summary = '<section data-community="home"><div class="community-banner-side"><dl class="community-stats"><dd>1</dd></dl></div></section>';
 
-function setup(t: TestContext, mobile: boolean, supplied?: typeof fetch) {
+function setup(t: TestContext, mobile: boolean, supplied?: typeof fetch, staff = false, catalogue = '') {
   t.mock.timers.enable({ apis: ['setTimeout'] });
-  const { window } = new JSDOM(`<body class="community-open">${header}<main id="main"></main></body>`, { url: 'http://localhost/#/community/u/10001/badges', pretendToBeVisual: true });
+  const suppliedHeader = staff ? headerTemplate(person.name, 0, true) : header;
+  const suppliedPage = (staff ? page.replace('<p>', `<p>${staffDecoration}`) : page).replace('</section>', `${catalogue}</section>`);
+  const { window } = new JSDOM(`<body class="community-open">${suppliedHeader}<main id="main"></main></body>`, { url: 'http://localhost/#/community/u/10001/badges', pretendToBeVisual: true });
   window.matchMedia = (query: string) => ({
     matches: mobile && query.includes('max-width'), media: query, onchange: null,
     addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => true,
@@ -55,7 +61,7 @@ function setup(t: TestContext, mobile: boolean, supplied?: typeof fetch) {
   const request: typeof fetch = async (input, init) => { calls.push(String(input)); return supplied ? supplied(input, init) : reply(); };
   const frame = createStableCommunityFrame(window.document, window, request);
   const main = window.document.getElementById('main')!;
-  frame.render(main, page, summary);
+  frame.render(main, suppliedPage, summary);
   const marks = [...window.document.querySelectorAll<HTMLElement>('.community-level-marks [data-level-icon]')];
   assert.equal(marks.length, 6, 'the fixture includes growth, trust and VIP marks in both the real header and content');
   const images = marks.map(mark => mark.querySelector('img')!);
@@ -70,13 +76,76 @@ function setup(t: TestContext, mobile: boolean, supplied?: typeof fetch) {
   };
   const enter = async () => {
     await turn();
-    assert.equal(observers.reduce((count, observer) => count + observer.targets.size, 0), 6, 'the frame observes compact header and content marks');
+    assert.equal(observers.reduce((count, observer) => count + observer.targets.size, 0), (staff ? 10 : 6) + (catalogue ? 3 : 0), 'the frame observes compact header and content marks, staff frames and adjacent role art');
     for (const observer of observers) observer.enter();
     await turn(); await turn();
   };
   t.after(() => { frame.dispose(); window.close(); });
-  return { window, frame, main, marks, images, canvas, states, host, input, scroll, enter, calls, observers };
+  return { window, frame, main, marks, images, canvas, states, host, input, scroll, enter, calls, observers, suppliedHeader };
 }
+
+for (const mobile of [false, true]) test(`${mobile ? 'mobile document' : 'desktop center'} movement pauses the actual role carousel alongside the account badge and avatar frame`, async t => {
+  const data: CommunityStardust = { balance: 0, gainedToday: 0, behaviourToday: 0, dailyCap: 6, checkedIn: false,
+    month: { gained: 0, spent: 0 }, flow: 'all', ledger: [], level: 1, owner: false, steward: false, vip: false, stats: {}, progress: null };
+  const catalogue = communityLevelExplorerHTML(data, common, { mode: 'staff', growth: null, trust: null, staff: 1 });
+  const sources = new Map(await Promise.all(['badge-assistant', 'badge-moderator', 'badge-general', 'frame-general'].map(async slug =>
+    [`/assets/community/staff/${slug}.svg?v=staff-20261009-r2`, await readFile(`public/assets/community/staff/${slug}.svg`, 'utf8')] as const)));
+  const x = setup(t, mobile, async input => new Response(sources.get(String(input)) || svg, { headers: { 'Content-Type': 'image/svg+xml' } }), true, catalogue);
+  await x.enter();
+  const carousel = [...x.main.querySelectorAll<HTMLElement>('[data-level-carousel] [data-staff-art]')];
+  assert.equal(carousel.length, 3);
+  const allStaff = [...x.window.document.querySelectorAll<HTMLElement>('[data-staff-art]')];
+  const canvases = allStaff.map(mark => x.canvas(mark)!);
+  const images = allStaff.map(mark => mark.querySelector('img'));
+  assert.equal(x.calls.length, 7, 'the role carousel shares the general badge with header and replies');
+  assert.ok(carousel.every(mark => x.canvas(mark)?.style.getPropertyValue('--community-level-play-state') === 'running'));
+  x.input(); x.scroll(180);
+  assert.ok(canvases.every(canvas => canvas.style.getPropertyValue('--community-level-play-state') === 'paused'));
+  t.mock.timers.tick(599);
+  assert.ok(canvases.every(canvas => canvas.style.getPropertyValue('--community-level-play-state') === 'paused'));
+  t.mock.timers.tick(1);
+  for (let i = 0; i < allStaff.length; i++) {
+    assert.equal(x.canvas(allStaff[i]), canvases[i]);
+    assert.equal(allStaff[i].querySelector('img'), images[i]);
+    assert.equal(canvases[i].style.getPropertyValue('--community-level-play-state'), 'running');
+  }
+  assert.equal(x.host.scrollTop, 180);
+  assert.equal(x.calls.length, 7);
+});
+
+for (const mobile of [false, true]) test(`${mobile ? 'mobile document' : 'desktop center'} scrolling and header reconciliation keep staff badges and avatar frames in the same idle cycle`, async t => {
+  const x = setup(t, mobile, undefined, true);
+  await x.enter();
+  const staff = [...x.window.document.querySelectorAll<HTMLElement>('[data-staff-art]')];
+  assert.equal(staff.length, 4);
+  const canvases = staff.map(mark => x.canvas(mark)!);
+  const images = staff.map(mark => mark.querySelector('img'));
+  const actions = x.window.document.querySelector('.header-actions');
+  assert.equal(x.calls.length, 5, 'header and body share the two staff sources and three level sources');
+  for (const canvas of canvases) assert.equal(canvas.style.getPropertyValue('--community-level-play-state'), 'running');
+  assert.equal(x.frame.header(x.suppliedHeader), true);
+  assert.equal(x.window.document.querySelector('.header-actions'), actions, 'staff enhancements cannot make an unchanged account header appear different');
+  x.input(); x.scroll(180);
+  assert.deepEqual(x.states(), Array(6).fill('paused'));
+  for (const canvas of canvases) assert.equal(canvas.style.getPropertyValue('--community-level-play-state'), 'paused');
+  t.mock.timers.tick(599);
+  for (const canvas of canvases) assert.equal(canvas.style.getPropertyValue('--community-level-play-state'), 'paused');
+  t.mock.timers.tick(1);
+  assert.deepEqual(x.states(), Array(6).fill('running'));
+  for (let i = 0; i < staff.length; i++) {
+    assert.equal(x.canvas(staff[i]), canvases[i]);
+    assert.equal(staff[i].querySelector('img'), images[i]);
+    assert.equal(canvases[i].style.getPropertyValue('--community-level-play-state'), 'running');
+  }
+  assert.equal(x.host.scrollTop, 180);
+  assert.equal(x.calls.length, 5);
+  assert.equal(x.frame.header(headerTemplate()), true);
+  await turn();
+  assert.equal(x.window.document.querySelector('.header-actions [data-staff-art]'), null, 'a revoked role removes its badge and frame during an ordinary account refresh');
+  for (let i = 0; i < 2; i++) assert.equal(x.canvas(staff[i]), null, 'detached staff account decorations release their SVG trees');
+  for (const observer of x.observers) observer.enter(staff.slice(0, 2));
+  assert.equal(x.window.document.querySelector('.header-actions [data-staff-art]'), null, 'old visibility callbacks cannot revive a revoked role');
+});
 
 for (const mobile of [false, true]) test(`${mobile ? 'mobile document' : 'desktop center'} scrolling pauses header and content marks together, then resumes after the last 600ms`, async t => {
   const x = setup(t, mobile);
