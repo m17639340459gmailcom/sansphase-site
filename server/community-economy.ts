@@ -120,10 +120,10 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
     if (monthBonus(member, month) || !monthAttendance(member, month).complete) return 0;
     return ledger.credit(member, rules.monthBonus, 'checkin-month', { kind: 'month', id: month }, at);
   }
-  function nextCheckinReward(member: CommunityAuthor, now = Date.now()) {
+  function nextCheckinReward(member: CommunityAuthor, now = Date.now(), vip = false) {
     const today = beijingDay(now), nextDay = checked(member, today) ? beijingDay(now + day) : today;
     const month = nextDay.slice(0, 7);
-    return checkinReward(!monthBonus(member, month) && monthAttendance(member, month, nextDay).complete);
+    return checkinReward(!monthBonus(member, month) && monthAttendance(member, month, nextDay).complete, vip);
   }
   function makeupState(member: CommunityAuthor, { vip = false, now = Date.now() }: { vip?: boolean; now?: number } = {}) {
     const month = beijingDay(now).slice(0, 7);
@@ -201,13 +201,13 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
     monthBonus,
     nextCheckinReward,
     checked: (member: CommunityAuthor, now = Date.now()) => checked(member, beijingDay(now)),
-    checkin(member: CommunityAuthor, { now = Date.now() }: { vip?: boolean; now?: number } = {}) {
+    checkin(member: CommunityAuthor, { vip = false, now = Date.now() }: { vip?: boolean; now?: number } = {}) {
       return tx(() => {
         if (member.kind === 'owner') throw fail('站长不参与签到。', 403);
         const today = beijingDay(now), at = iso(now);
         if (checked(member, today)) throw fail('今天已经签到过了。', 409);
         const streak = streakEnding(member, previousDay(today)) + 1;
-        const reward = checkinReward();
+        const reward = checkinReward(false, vip);
         // Makeups are attendance only and never consume a real check-in ranking position.
         const position = Number(nextCheckinPosition.get(today)?.count);
         insertCheckin.run(member.kind, member.id, today, streak, reward.total, at);

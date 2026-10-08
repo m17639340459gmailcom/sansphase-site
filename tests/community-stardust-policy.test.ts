@@ -126,24 +126,28 @@ test('repeated reward references stay spent across days and reversals while exis
   try { assert.equal(second.ledger.balance(author), 800); } finally { second.close(); }
 });
 
-test('complete calendar-month issuance is bounded at 231, 238, 245 and 252 independently of legitimate transfers', async t => {
+test('complete calendar-month issuance adds one VIP star per actual sign-in and preserves contribution caps and transfers', async t => {
   const { store } = await open(t);
+  assert.equal(communityRules.checkinVipBonus, 1);
   for (const [month, days, expected] of [['2027-02', 28, 231], ['2028-02', 29, 238], ['2026-04', 30, 245], ['2026-10', 31, 252]] as const) {
-    const member = reader(month);
-    for (let d = 1; d <= days; d++) {
-      const now = `${month}-${String(d).padStart(2, '0')}T02:00:00.000Z`;
-      store.economy.checkin(member, { now: Date.parse(now) });
-      const own = topic(store, member, now);
-      const question = topic(store, reader(`${month}-asker-${d}`), now);
-      const reply = answer(store, question.id, member, now);
-      assert.equal(own.earned, 2);
-      assert.equal(reply.earned, 1);
-      assert.equal(store.accept(reply.id, now), 3);
-      assert.equal(store.ledger.behaviourToday(member, Date.parse(now)), 6);
-      store.setFeatured(own.id, true, { actor: owner, now });
+    for (const vip of [false, true]) {
+      const member = reader(`${month}-${vip ? 'vip' : 'ordinary'}`);
+      for (let d = 1; d <= days; d++) {
+        const now = `${month}-${String(d).padStart(2, '0')}T02:00:00.000Z`;
+        store.economy.checkin(member, { now: Date.parse(now), vip });
+        const own = topic(store, member, now);
+        const question = topic(store, reader(`${month}-${vip}-asker-${d}`), now);
+        const reply = answer(store, question.id, member, now);
+        assert.equal(own.earned, 2);
+        assert.equal(reply.earned, 1);
+        assert.equal(store.accept(reply.id, now), 3);
+        assert.equal(store.ledger.behaviourToday(member, Date.parse(now)), 6);
+        store.setFeatured(own.id, true, { actor: owner, now });
+      }
+      const issuance = expected + (vip ? days : 0);
+      assert.equal(store.ledger.balance(member), issuance, `${month} ${vip ? 'VIP' : 'ordinary'}`);
+      store.ledger.credit(member, 8, 'thank-in', null, `${month}-28T02:00:00.000Z`, 'in');
+      assert.equal(store.ledger.balance(member), issuance + 8, 'legitimate transfers are not new system issuance');
     }
-    assert.equal(store.ledger.balance(member), expected, month);
-    store.ledger.credit(member, 8, 'thank-in', null, `${month}-28T02:00:00.000Z`, 'in');
-    assert.equal(store.ledger.balance(member), expected + 8, 'legitimate transfers are not new system issuance');
   }
 });

@@ -313,7 +313,7 @@ test('natural-month attendance pays one daily and five once for 28, 29, 30 and 3
     for (let d = 1; d <= length; d++) {
       const now = Date.parse(`${month}-${String(d).padStart(2, '0')}T04:00:00Z`);
       assert.equal(store.economy.nextCheckinReward(me, now).total, d === length ? 6 : 1);
-      const result = store.economy.checkin(me, { now, vip: true });
+      const result = store.economy.checkin(me, { now });
       assert.equal(result.reward, d === length ? 6 : 1);
       assert.equal(result.bonus, d === length ? 5 : 0);
       assert.throws(() => store.economy.checkin(me, { now }), /已经签到/);
@@ -327,6 +327,38 @@ test('natural-month attendance pays one daily and five once for 28, 29, 30 and 3
     assert.equal(store.economy.nextCheckinReward(me, nextDay).total, 1, 'new month resets bonus eligibility');
     assert.equal(store.economy.checkin(me, { now: nextDay }).reward, 1);
   }
+});
+
+test('VIP actual check-ins pay two per Beijing day and the calendar-month bonus stays five', async t => {
+  const store = await open(t);
+  for (const [month, length] of [['2027-02', 28], ['2028-02', 29], ['2026-04', 30], ['2026-12', 31]]) {
+    const me = reader(`vip-${month}`);
+    for (let d = 1; d <= length; d++) {
+      const now = Date.parse(`${month}-${String(d).padStart(2, '0')}T04:00:00Z`);
+      assert.deepEqual(store.economy.nextCheckinReward(me, now, true), { base: 2, bonus: d === length ? 5 : 0, total: d === length ? 7 : 2 });
+      const result = store.economy.checkin(me, { now, vip: true });
+      assert.equal(result.reward, d === length ? 7 : 2);
+      assert.equal(result.bonus, d === length ? 5 : 0);
+      assert.throws(() => store.economy.checkin(me, { now, vip: true }), /已经签到/);
+    }
+    assert.equal(store.ledger.balance(me), length * 2 + 5);
+    const ledger = store.ledger.history(me);
+    assert.equal(ledger.filter(row => row.reason === 'checkin-month').length, 1);
+    assert.ok(ledger.filter(row => row.reason === 'checkin').every(row => row.amount === 2));
+    assert.equal(store.economy.nextCheckinReward(me, Date.parse(`${month}-${length}T04:00:00Z`), true).total, 2, 'next Beijing month keeps the VIP daily reward but resets attendance');
+  }
+});
+
+test('VIP changes never top up an existing check-in and Beijing midnight opens only one new reward', async t => {
+  const store = await open(t), me = reader('vip-change');
+  const now = Date.parse('2026-10-06T15:59:00Z');
+  assert.equal(store.economy.checkin(me, { now, vip: false }).reward, 1);
+  assert.throws(() => store.economy.checkin(me, { now: now + 30_000, vip: true }), /已经签到/);
+  assert.equal(store.ledger.balance(me), 1);
+  assert.equal(store.economy.checkin(me, { now: now + 60_000, vip: true }).reward, 2);
+  assert.throws(() => store.economy.checkin(me, { now: now + 120_000, vip: false }), /已经签到/);
+  assert.equal(store.economy.checkin(me, { now: now + 86400e3 + 60_000, vip: false }).reward, 1);
+  assert.equal(store.ledger.balance(me), 4, 'expiration affects the next actual sign-in without reversing or topping up historical rewards');
 });
 
 test('a makeup can complete the previous calendar month and grants its bonus only once', async (t) => {
@@ -361,7 +393,7 @@ test("签到 and 补签: streaks from the actual days, bonuses, early birds, bad
   assert.deepEqual(store.members.badges(me), [], "new grants do not fabricate legacy history");
   const checkinHonors = store.members.badgeState(me, { now: start + 29 * 86400e3 });
   assert.deepEqual(checkinHonors.families.slice(0, 2).map(item => item.tier), ["gold", "gold"]);
-  assert.equal(store.economy.checkin(reader("v"), { vip: true, now: start }).reward, 1);
+  assert.equal(store.economy.checkin(reader("v"), { vip: true, now: start }).reward, 2);
   assert.equal(store.economy.checkinsToday(start), 2);
   assert.deepEqual(store.economy.earlyBirds(start).map((bird) => bird.member.id), ["r1", "v"]);
   assert.deepEqual(store.economy.checkinDays(me, "2026-09-01", "2026-09-04"), ["2026-09-02", "2026-09-03", "2026-09-04"]);
@@ -386,7 +418,9 @@ test("签到 and 补签: streaks from the actual days, bonuses, early birds, bad
   store.economy.checkin(vip, { vip: true, now: later - 3 * 86400e3 });
   store.economy.checkin(vip, { vip: true, now: later });
   assert.equal(store.economy.makeupState(vip, { vip: true, now: later }).allowed, 3, "VIPs get one more a month");
+  const vipBalance = store.ledger.balance(vip);
   assert.equal(store.economy.makeup(vip, beijingDay(later - 86400e3), { vip: true, now: later }).cost, "free", "and the first is free");
+  assert.equal(store.ledger.balance(vip), vipBalance, 'VIP makeup awards neither the daily reward nor the additional VIP star');
   const empty = reader("empty");
   store.economy.checkin(empty, { now: later });
   assert.throws(() => store.economy.makeup(empty, beijingDay(later - 86400e3), { now: later }), /星尘不足/);

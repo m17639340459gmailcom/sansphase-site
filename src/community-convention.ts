@@ -29,7 +29,7 @@ export const communityConventionText = `## 交流与内容
 
 星尘主要奖励内容贡献，签到只提供少量奖励。奖励按北京时间结算，满足条件后才入账。
 
-- 签到每天 +${r.checkinBase}，自然月满勤另 +${r.monthBonus}；主题 +${r.topicReward}、有效回复 +${r.replyReward}、采纳 +${r.acceptReward}，各每天最多奖励一次，三项合计最多 ${r.dailyCap}。
+- 签到每天 +${r.checkinBase}，有效 VIP 每日签到额外 +${r.checkinVipBonus}，自然月满勤另 +${r.monthBonus}；主题 +${r.topicReward}、有效回复 +${r.replyReward}、采纳 +${r.acceptReward}，各每天最多奖励一次，三项合计最多 ${r.dailyCap}。
 - 有效回复需至少 ${r.replyMinLength} 个可见字符，且不在自己的主题中；首次精华 +${r.featureReward}，每人每月最多奖励 ${r.featureMonthly} 篇。
 - 点赞、举报、浏览和管理操作不发星尘；补签不补发当天星尘。删除或撤销奖励不恢复领奖名额。
 - 禁止脚本刷取、多账号互刷、虚假采纳和串通领奖。感谢、提示词解锁等正常转入与系统奖励分别记录。

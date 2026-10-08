@@ -40,7 +40,7 @@ test.before(async () => {
 test.after(() => cleanup(template));
 
 // r1, r2, v1 and s1 have agreed to the guidelines and reached 巡天 (L1); r3 is brand new.
-async function setup(t, { store: withStore = true, simplePosting = false, useDefault = false, identifyOverride, avatarBytes, profile } = {}) {
+async function setup(t, { store: withStore = true, simplePosting = false, useDefault = false, identifyOverride, ownerReaderIdentityOverride, peopleOverride, vipOverride, avatarBytes, profile } = {}) {
   const reservation = createServer();
   await new Promise((done) => reservation.listen(0, "127.0.0.1", done));
   const port = reservation.address().port;
@@ -62,6 +62,7 @@ async function setup(t, { store: withStore = true, simplePosting = false, useDef
   const store = withStore ? createCommunityPreviewStore(directory) : null;
   if (store) acceptCommunityConvention(store, [{ kind: 'owner', id: 'owner' }, ...Object.keys(members).map(id => ({ kind: 'reader', id }))]);
   const audits = [];
+  const actualVip = id => vipOverride?.[id] ?? members[id].vip;
   const communityService = createCommunityService({
     store, siteOrigin, directory, ownerId: "owner", ...(useDefault ? {} : { simplePosting }),
     identify: async (req) => {
@@ -69,13 +70,16 @@ async function setup(t, { store: withStore = true, simplePosting = false, useDef
       const cookies = new Map(String(req.headers.cookie || '').split(';').map(part => part.trim().split('=')));
       if (cookies.get('owner') === 'yes') return { kind: "owner", id: "owner", name: "無相", vip: true };
       const id = cookies.get('reader');
-      return members[id] ? { kind: "reader", id, name: members[id].name, vip: members[id].vip } : null;
+      return members[id] ? { kind: "reader", id, name: members[id].name, vip: actualVip(id) } : null;
     },
-    ownerReaderIdentity: async req => /(?:^|;\s*)owner=yes(?:;|$)/.test(String(req.headers.cookie || '')) ? {kind:'reader',id:'p1',name:members.p1.name,vip:false} : null,
-    people: async (authors) => new Map(authors.flatMap((author) => {
-      const info = author.kind === "owner" ? { name: "無相", uid: "owner", vip: true } : members[author.id];
-      return info ? [[`${author.kind}:${author.id}`, { name: info.name, uid: info.uid, avatar: info.avatar || null, vip: info.vip,active:true, joinedAt: author.kind === "owner" ? null : "2026-01-01T00:00:00.000Z", bio: info.bio || "", ...(info.ownerReader ? {ownerReader:true} : {}) }]] : [];
-    })),
+    ownerReaderIdentity: async req => ownerReaderIdentityOverride ? ownerReaderIdentityOverride(req) : /(?:^|;\s*)owner=yes(?:;|$)/.test(String(req.headers.cookie || '')) ? {kind:'reader',id:'p1',name:members.p1.name,vip:actualVip('p1')} : null,
+    people: async (authors) => {
+      const map = new Map(authors.flatMap((author) => {
+        const info = author.kind === "owner" ? { name: "無相", uid: "owner", vip: true } : members[author.id];
+        return info ? [[`${author.kind}:${author.id}`, { name: info.name, uid: info.uid, avatar: info.avatar || null, vip: author.kind === 'owner' ? info.vip : actualVip(author.id),active:true, joinedAt: author.kind === "owner" ? null : "2026-01-01T00:00:00.000Z", bio: info.bio || "", ...(info.ownerReader ? {ownerReader:true} : {}) }]] : [];
+      }));
+      return peopleOverride ? peopleOverride(authors, map) : map;
+    },
     findMember: async (uid) => authorOf(uid),
     findByNames: async (names) => new Map([...Object.entries(members).map(([id, m]) => [m.name, { kind: "reader", id }]), ["無相", { kind: "owner", id: "owner" }]].filter(([name]) => names.includes(name))),
     ...(avatarBytes ? { avatarBytes } : { avatarFile: async (uid) => uid === "u1" ? resolve(directory, "uploads", `reader-avatar-${avatarId}.webp`) : null }),
@@ -104,6 +108,97 @@ async function setup(t, { store: withStore = true, simplePosting = false, useDef
   return { get, post, upload, siteOrigin, store, audits, setLevel, credit, directory };
 }
 const json = async (response) => (await response).json();
+
+test('VIP daily check-in responses use authoritative membership and ignore client reward and VIP fields', async t => {
+  const { get, post, store } = await setup(t);
+  for (const [cookie, base] of [['reader=r1', 1], ['reader=v1', 2]]) {
+    const me = await json(get('me', cookie)), page = await json(get('checkin', cookie));
+    assert.equal(me.nextReward.base, base);
+    assert.equal(page.dailyReward, base);
+    const result = await json(post('checkin', { vip: base === 1, reward: 999999, bonus: 999999 }, cookie));
+    assert.equal(result.reward, base);
+    assert.equal(result.bonus, 0);
+    assert.equal((await post('checkin', { vip: true }, cookie)).status, 409);
+    const member = { kind: 'reader', id: cookie.slice('reader='.length) };
+    assert.equal(store.ledger.balance(member), base);
+    assert.equal(store.ledger.history(member).filter(row => row.reason === 'checkin').length, 1);
+    assert.equal((await json(get('me', cookie))).nextReward.base, base);
+  }
+});
+
+test('VIP expiration and upgrade affect new daily eligibility without topping up an existing sign-in', async t => {
+  const vipOverride = { v1: false, r1: false, r2: false };
+  const { get, post, store } = await setup(t, { vipOverride });
+  assert.equal((await json(get('checkin', 'reader=v1'))).dailyReward, 1, 'an expired VIP is ordinary');
+  assert.equal((await json(post('checkin', { vip: true }, 'reader=v1'))).reward, 1);
+  assert.equal((await json(post('checkin', {}))).reward, 1);
+  vipOverride.r1 = true;
+  assert.equal((await json(get('me'))).nextReward.base, 2);
+  assert.equal((await post('checkin', {})).status, 409, 'same-day upgrade cannot top up the previous sign-in');
+  assert.equal(store.ledger.balance({ kind: 'reader', id: 'r1' }), 1);
+  vipOverride.r2 = true;
+  assert.equal((await json(get('checkin', 'reader=r2'))).dailyReward, 2);
+  assert.equal((await json(post('checkin', { vip: false }, 'reader=r2'))).reward, 2);
+});
+
+test('check-in rechecks membership and authentication after asynchronous request work', async t => {
+  let calls = 0;
+  const expired = await setup(t, { vipOverride: { v1: false }, identifyOverride: async () => { calls++; return { kind: 'reader', id: 'v1', name: '墨白', vip: true }; } });
+  assert.equal((await json(expired.post('checkin', { vip: true }, 'reader=v1'))).reward, 1, 'the original VIP snapshot cannot override expiry at commit');
+  assert.equal(calls, 2);
+  const upgraded = await setup(t, { identifyOverride: async () => ({ kind: 'reader', id: 'v1', name: '墨白', vip: false }) });
+  assert.equal((await json(upgraded.get('me', 'reader=v1'))).nextReward.base, 2);
+  assert.equal((await json(upgraded.post('checkin', { vip: false }, 'reader=v1'))).reward, 2, 'fresh account VIP qualification supersedes an older non-VIP request snapshot');
+  calls = 0;
+  const revoked = await setup(t, { identifyOverride: async () => ++calls === 1 ? { kind: 'reader', id: 'v1', name: '墨白', vip: true } : null });
+  assert.equal((await revoked.post('checkin', {}, 'reader=v1')).status, 401);
+  assert.equal(revoked.store.ledger.balance({ kind: 'reader', id: 'v1' }), 0);
+  calls = 0;
+  const changed = await setup(t, { identifyOverride: async () => ({ kind: 'reader', id: ++calls === 1 ? 'v1' : 'r2', name: '读者', vip: true }) });
+  assert.equal((await changed.post('checkin', {}, 'reader=v1')).status, 401);
+  assert.equal(changed.store.ledger.balance({ kind: 'reader', id: 'v1' }), 0);
+});
+
+test('check-in never consumes a daily slot when the authoritative account is missing or inactive', async t => {
+  for (const missing of [true, false]) {
+    const { post, store } = await setup(t, { peopleOverride: async (_authors, map) => missing ? new Map() : new Map([...map].map(([key, info]) => [key, { ...info, active: false }])) });
+    assert.equal((await post('checkin', { vip: true }, 'reader=v1')).status, 401);
+    const member = { kind: 'reader', id: 'v1' };
+    assert.equal(store.economy.checked(member), false);
+    assert.equal(store.ledger.balance(member), 0);
+  }
+});
+
+test('owner personal reader uses real VIP qualification instead of the full-level display projection', async t => {
+  for (const [vip, reward] of [[false, 1], [true, 2]]) {
+    const { get, post, store } = await setup(t, { vipOverride: { p1: vip } });
+    const cookie = 'owner=yes; community_browse=reader';
+    const me = await json(get('me', cookie)), page = await json(get('checkin', cookie));
+    assert.equal(me.vip, true, 'the display stays full-level in owner reader mode');
+    assert.equal(me.nextReward.base, reward);
+    assert.equal(page.dailyReward, reward);
+    assert.equal((await json(post('checkin', { vip: !vip }, cookie))).reward, reward);
+    assert.equal(store.ledger.balance({ kind: 'reader', id: 'p1' }), reward);
+    assert.equal(store.ledger.balance({ kind: 'owner', id: 'owner' }), 0);
+    assert.equal((await post('checkin', {}, 'owner=yes')).status, 403);
+  }
+  let personalCalls = 0;
+  const revoked = await setup(t, { ownerReaderIdentityOverride: async () => ++personalCalls === 1 ? { kind: 'reader', id: 'p1', name: '無相', vip: true } : null });
+  assert.equal((await revoked.post('checkin', {}, 'owner=yes; community_browse=reader')).status, 401);
+  assert.equal(revoked.store.ledger.balance({ kind: 'reader', id: 'p1' }), 0);
+});
+
+test('VIP free makeup never reissues the daily or VIP stardust reward', async t => {
+  const { get, post, store } = await setup(t);
+  const cookie = 'reader=v1', member = { kind: 'reader', id: 'v1' };
+  assert.equal((await json(post('checkin', {}, cookie))).reward, 2);
+  const page = await json(get('checkin', cookie));
+  assert.equal(page.makeup.free, true);
+  const balance = store.ledger.balance(member);
+  const result = await json(post('checkin/makeup', { day: page.makeup.days[0], vip: true, reward: 999999 }, cookie));
+  assert.equal(result.cost, 'free'); assert.equal(result.bonus, 0); assert.equal(result.balance, balance);
+  assert.equal(store.ledger.history(member).filter(row => row.reason === 'checkin').length, 1);
+});
 
 test('remote approved avatar bytes stay private and authority outages remain unavailable', async t => {
   let offline = false;
@@ -1213,7 +1308,7 @@ test("likes, bookmarks, views, thanks, check-ins and the viewer's own state", as
   setLevel("r2", 1);
   await post("checkin", {}, "reader=v1");
   await post("checkin", {}, "reader=v1");
-  assert.equal((await json(get("me", "reader=v1"))).balance, 1, "VIP daily check-in reward is also one");
+  assert.equal((await json(get("me", "reader=v1"))).balance, 2, "VIP daily check-in earns its additional star only once");
   assert.equal((await post("topics", { ...topicBody, tags: ["不存在的标签"] })).status, 400);
   assert.equal((await post("topics", { ...topicBody, tags: ["新手", "提示词", "工作流", "Claude"] })).status, 400, "at most three tags");
 });

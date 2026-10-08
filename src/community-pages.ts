@@ -44,7 +44,7 @@ export type CommunityEarlyBird = { person: CommunityPerson; at: string };
 export type CommunityMakeup = { used: number; allowed: number; left: number; free: boolean; cards: number; cost: number; days: string[] };
 export type CommunityCheckin = {
   badgeState?: CommunityBadgeState;
-  checkedIn: boolean; streak: number; balance: number; gainedToday: number; behaviourToday: number; vip: boolean; owner?: boolean; browsingAsReader?: boolean; readOnly?: boolean; uid?: string | null;
+  checkedIn: boolean; streak: number; balance: number; gainedToday: number; behaviourToday: number; vip: boolean; dailyReward?: number; owner?: boolean; browsingAsReader?: boolean; readOnly?: boolean; uid?: string | null;
   month: string; days: string[]; monthBonus?: number; checkinsToday: number; earlyBirds: CommunityEarlyBird[]; makeup: CommunityMakeup; badges: string[];
 };
 export type CommunityLedgerRow = {
@@ -177,13 +177,14 @@ export function communityCheckinHTML({ checkin, me = null, ...common }: Common &
   if (!data) return pageOf("checkin", common, checkin);
   const today = beijingDay(now);
   const month = checkinMonth(data.month, data.days);
+  const dailyReward = data.dailyReward ?? me?.nextReward?.base ?? r.checkinBase;
   const managementRole = communityManagementRole(me);
   const previewText = managementRole === 'owner' ? t('当前是只读的读者浏览视角；作者不参与签到。', 'This reader preview is read-only. The owner does not check in.')
     : managementRole === 'steward' ? t('当前是只读的读者浏览视角；返回版主身份后可以签到。', 'This reader preview is read-only. Restore your moderator perspective to check in.')
     : t('当前是只读的读者浏览视角；请先返回管理身份。', 'This reader preview is read-only. Restore management first.');
   const text = data.owner ? t("站长不参与签到；这里保留签到星图和日历供查看。", "The owner does not check in; the star map and calendar remain viewable.")
     : (data.readOnly ?? Boolean(data.browsingAsReader && (!me || communityReaderReadOnly(me)))) ? previewText
-    : t(`每日签到 +${r.checkinBase} 星尘，自然月满勤额外 +${r.monthBonus}。补签计入满勤，北京时间 0 点换日。`, `Daily check-in +${r.checkinBase} stardust; full calendar month +${r.monthBonus} extra. Make-ups count. Days change at midnight Beijing time.`);
+    : t(`每日签到 +${dailyReward} 星尘。普通读者每日 +${r.checkinBase}，有效 VIP 额外 +${r.checkinVipBonus}；自然月满勤额外 +${r.monthBonus}。补签计入满勤，北京时间 0 点换日。`, `Daily check-in +${dailyReward} stardust. Regular readers earn +${r.checkinBase} daily. Active VIP members earn +${r.checkinVipBonus} extra; full calendar month +${r.monthBonus} extra. Make-ups count. Days change at midnight Beijing time.`);
   const early = data.earlyBirds.length
     ? `<ol class="community-rank">${data.earlyBirds.map((bird, i) => `<li><span class="community-hot-rank${i < 3 ? " is-top" : ""}">${i + 1}</span>${avatarHTML(bird.person, common, "sm")}${whoHTML(bird.person, common)}<span class="community-rank-count">${esc(beijingTime(bird.at).slice(6))}</span></li>`).join("")}</ol>`
     : `<p class="community-muted">${t("今天还没有人签到。", "No check-ins yet today.")}</p>`;
@@ -238,7 +239,7 @@ function ledgerHTML(data: CommunityStardust, { t, esc }: Common) {
 function stardustRulesHTML({ t, icons = {} }: Common) {
   const r = communityRules;
   const earn: Array<[string, string, string]> = [
-    [t("签到", "Check-in"), `+${r.checkinBase}`, t(`读者每天 1 次；自然月满勤额外 +${r.monthBonus}，补签计入满勤；作者不签到`, `Readers once daily; full calendar month +${r.monthBonus} extra. Make-ups count; the owner does not check in.`)],
+    [t("签到", "Check-in"), t(`普通 +${r.checkinBase} / VIP +${r.checkinBase + r.checkinVipBonus}`, `Regular +${r.checkinBase} / VIP +${r.checkinBase + r.checkinVipBonus}`), t(`读者每天 1 次；有效 VIP 每日额外 +${r.checkinVipBonus}，已计入每日奖励；自然月满勤额外 +${r.monthBonus}，补签计入满勤；作者不签到`, `Readers once daily; active VIP members earn +${r.checkinVipBonus} extra, included in the daily reward; full calendar month +${r.monthBonus} extra. Make-ups count; the owner does not check in.`)],
     [t("发主题", "New topic"), `+${r.topicReward}`, t(`每天前 ${r.topicDaily} 个；审核通过才入账`, `First ${r.topicDaily} a day; after review if needed`)],
     [t("有效回复", "Reply"), `+${r.replyReward}`, t(`每天 ${r.replyDaily} 次；${r.replyMinLength} 字以上，不在自己帖里`, `${r.replyDaily} a day; ${r.replyMinLength}+ characters, not on your own topic`)],
     [t("收到赞", "Like received"), String(r.likeReward), t("表达认可，不发星尘", "Appreciation without stardust")],
@@ -256,7 +257,7 @@ function stardustRulesHTML({ t, icons = {} }: Common) {
   ];
   const table = (head: string[], rows: Array<[string, string, string]>, flow: "in" | "out" = "in") => `<div class="community-table-wrap"><table class="community-table"><thead><tr>${head.map((cell, i) => `<th${i === 1 ? ' class="is-right"' : ""}>${cell}</th>`).join("")}</tr></thead><tbody>${rows.map(([a, b, c]) => `<tr><td>${a}</td><td class="is-right is-mono ${flow === "in" ? "is-plus" : "is-minus"}">${b}</td><td>${c}</td></tr>`).join("")}</tbody></table></div>`;
   return `<div class="community-pt-grid">`
-    + `<section class="community-card">${cardHead(t("怎么挣", "Earning"))}${table([t("行为", "What"), t("星尘", "Stardust"), t("限制", "Limits")], earn)}<p class="community-muted">${t(`主题、有效回复、采纳合计每人每天最多 ${r.dailyCap}；签到、满勤和精华另计。未满足条件不发放，补签不补发每日星尘。感谢、悬赏和解锁收入来自其他用户，不占系统奖励额度。`, `Topics, eligible replies and accepted answers share a ${r.dailyCap}-a-day cap. Attendance and first-feature awards are separate. Only eligible actions earn; make-ups do not earn daily stardust. Thanks, bounties and unlock income come from other members.`)}</p></section>`
+    + `<section class="community-card">${cardHead(t("怎么挣", "Earning"))}${table([t("行为", "What"), t("星尘", "Stardust"), t("限制", "Limits")], earn)}<p class="community-muted">${t(`主题、有效回复、采纳合计每人每天最多 ${r.dailyCap}；签到、满勤和精华另计。未满足条件不发放，补签不补发每日星尘或 VIP 额外奖励。感谢、悬赏和解锁收入来自其他用户，不占系统奖励额度。`, `Topics, eligible replies and accepted answers share a ${r.dailyCap}-a-day cap. Attendance and first-feature awards are separate. Only eligible actions earn; make-ups do not earn daily stardust or the VIP extra. Thanks, bounties and unlock income come from other members.`)}</p></section>`
     + `<section class="community-card">${cardHead(t("怎么花", "Spending"))}${table([t("用途", "What"), t("星尘", "Stardust"), t("去向", "Where it goes")], spend, "out")}</section>`
     + `<section class="community-card community-span-2">${cardHead(t("防刷规则", "Fair play"))}<ul class="community-ticks">`
     + [t(`所有星尘变动都记在流水里，内容被删会按流水收回，违规再扣 ${r.penalty}，余额最低到 0。`, `Every change is in the ledger; removed content gives its stardust back, a violation costs ${r.penalty} more, and balances stop at 0.`),

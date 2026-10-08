@@ -994,6 +994,9 @@ test("rules, reward table and Beijing day", () => {
   assert.equal(beijingDay(Date.parse("2026-09-30T16:00:00Z")), "2026-10-01", "midnight in Beijing");
   assert.deepEqual(checkinReward(), { base: 1, bonus: 0, total: 1 });
   assert.deepEqual(checkinReward(true), { base: 1, bonus: 5, total: 6 });
+  assert.deepEqual(checkinReward(false, true), { base: 2, bonus: 0, total: 2 });
+  assert.deepEqual(checkinReward(true, true), { base: 2, bonus: 5, total: 7 });
+  assert.equal(communityRules.checkinVipBonus, 1);
   assert.deepEqual(['2027-02', '2028-02', '2026-04', '2026-10'].map(month => checkinMonth(month, []).totalDays), [28, 29, 30, 31]);
   assert.deepEqual(checkinMonth('2026-04', ['2026-04-01', '2026-04-01', '2026-04-31', '2026-05-01']).signed, ['2026-04-01']);
   assert.equal(communityRules.thankCost - communityRules.thankToAuthor, 2, "thanking destroys 2");

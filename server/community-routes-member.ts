@@ -1,4 +1,4 @@
-import { communityRules, communityShopCats, beijingDay, communityReportReasons } from '../src/community-rules.mjs';
+import { communityRules, communityShopCats, beijingDay, communityReportReasons, checkinReward } from '../src/community-rules.mjs';
 import { experienceCatalogue, vipCatalogue } from './community-experience.ts';
 import { fail, same, memberKey } from './community-db.ts';
 import type { CommunityAuthor } from './community-db.ts';
@@ -53,7 +53,7 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
           ...(ctx.actualOwner && ctx.browsingAsReader && !ctx.readOnly ? { interactive: true } : {}) } : null,
         moderationContact: members.moderationContact(me),
         convention: live.convention.state(me),
-        checkedIn: checked, streak, nextReward: economy.nextCheckinReward(me),
+        checkedIn: checked, streak, nextReward: economy.nextCheckinReward(me, Date.now(), map.get(memberKey(me))?.vip === true),
         gainedToday: ledger.gainedToday(me), behaviourToday: ledger.behaviourToday(me), dailyCap: r.dailyCap,
         unread: members.unread(me), agreed: members.agreed(me), inventory: economy.inventory(me),
         muted: muted ? { until: muted.until, reason: muted.reason } : null,
@@ -69,7 +69,7 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
       const streak = economy.currentStreak(me);
       const checkedIn = economy.checked(me);
       ctx.send({
-        checkedIn, streak, balance: ledger.balance(me), gainedToday: ledger.gainedToday(me), behaviourToday: ledger.behaviourToday(me), vip: viewer.vip, owner: ctx.owner, browsingAsReader: ctx.browsingAsReader, readOnly: ctx.readOnly, uid: ctx.person(me, map).uid,
+        checkedIn, streak, dailyReward: checkinReward(false, map.get(memberKey(me))?.vip === true).base, balance: ledger.balance(me), gainedToday: ledger.gainedToday(me), behaviourToday: ledger.behaviourToday(me), vip: viewer.vip, owner: ctx.owner, browsingAsReader: ctx.browsingAsReader, readOnly: ctx.readOnly, uid: ctx.person(me, map).uid,
         month, days: economy.checkinDays(me, `${month}-01`, `${month}-31`), monthBonus: economy.monthBonus(me, month), checkinsToday: economy.checkinsToday(),
         earlyBirds: early.map(bird => ({ person: ctx.person(bird.member, map), at: bird.at })),
         makeup: economy.makeupState(me, { vip: viewer.vip }), badges: members.badges(me), badgeState: ctx.ownerReaderPreview?.badgeState ?? members.badgeState(me, { joinedAt: map.get(memberKey(me))?.joinedAt }),
@@ -217,7 +217,21 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
       ctx.send(contact);
       return true;
     }
-    case 'checkin': ctx.throttle('action'); ctx.send(economy.checkin(me, { vip: viewer.vip })); return true;
+    case 'checkin': {
+      // Full-level owner reader visuals are not account membership. Query the
+      // real profile, then recheck the authenticated execution identity at use.
+      const profile = (await ctx.people([me])).get(memberKey(me));
+      if (!profile || profile.active === false) throw fail('请重新登录后签到。', 401);
+      let current = await ctx.options.identify(ctx.req);
+      if (viewer.ownerAccountId) {
+        if (!current || current.kind !== 'owner' || current.id !== viewer.ownerAccountId) throw fail('请重新登录后签到。', 401);
+        current = await ctx.options.ownerReaderIdentity?.(ctx.req) ?? null;
+      }
+      if (!current || current.kind !== me.kind || current.id !== me.id) throw fail('请重新登录后签到。', 401);
+      ctx.throttle('action');
+      ctx.send(economy.checkin(me, { vip: profile.vip === true }));
+      return true;
+    }
     case 'checkin/makeup': ctx.throttle('action'); ctx.send(economy.makeup(me, String(body.day || ''), { vip: viewer.vip })); return true;
     case 'inbox/read-all': ctx.send({ read: members.readAll(me) }); return true;
     case 'inbox/read': {

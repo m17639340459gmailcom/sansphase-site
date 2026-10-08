@@ -261,7 +261,7 @@ export type CommunityMe = CommunityPerson & {
   staff?: CommunityStaffState | null;
   moderationContact?: CommunityModerationContact | null;
   owner: boolean; mod: boolean; trustLevel?: number; balance: number; checkedIn: boolean; streak: number;
-  nextReward: { total: number; bonus: number }; gainedToday: number; behaviourToday: number; dailyCap: number;
+  nextReward: { base?: number; total: number; bonus: number }; gainedToday: number; behaviourToday: number; dailyCap: number;
   unread: CommunityUnread; agreed: boolean; inventory: CommunityInventory; muted: { until: string; reason: string } | null; manageTodo?: number;
 };
 export type CommunityBoardStats = { topics: number; repliesToday: number; latest: { id: string; title: string; lastActivityAt: string } | null };

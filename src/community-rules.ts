@@ -4,7 +4,7 @@ import { uploadLimits, readerImageBytes } from './upload-policy.mjs';
 
 export const communityRules = {
   // 签到与补签（第 5 节）
-  checkinBase: 1, monthBonus: 5,
+  checkinBase: 1, checkinVipBonus: 1, monthBonus: 5,
   makeupCost: 30, makeupPerMonth: 2, makeupWindow: 7,
   // 已确认的获取规则：docs/COMMUNITY-STARDUST-RULES.md；三项贡献奖励合计每日最多 6。
   dailyCap: 6,
@@ -35,9 +35,9 @@ export type PromptMode = "public" | "hidden" | "paid";
 
 // 北京时间的日期（YYYY-MM-DD），签到、每日上限和等级重算都按它换日。
 export const beijingDay = (ms: number) => new Date(ms + 8 * 3600 * 1000).toISOString().slice(0, 10);
-// 每人每天 1 星尘；自然月满勤另得 5，是否已发放由服务端流水判断。
-export function checkinReward(completesMonth = false) {
-  const base = communityRules.checkinBase, bonus = completesMonth ? communityRules.monthBonus : 0;
+// 普通读者每天 1 星尘，有效 VIP 额外 1；满勤另得 5，由服务端核验资格及防重。
+export function checkinReward(completesMonth = false, vip = false) {
+  const base = communityRules.checkinBase + (vip ? communityRules.checkinVipBonus : 0), bonus = completesMonth ? communityRules.monthBonus : 0;
   return { base, bonus, total: base + bonus };
 }
 export function checkinMonth(month: string, days: readonly string[]) {
