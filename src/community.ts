@@ -621,7 +621,7 @@ export function communityTopicsHTML(items: readonly CommunityTopic[], common: Co
   return `<div class="community-topics">${items.map((topic, i) => {
     const when = topic.lastReply
       ? `<time datetime="${esc(topic.lastReply.at)}">${t(`${nameLabelHTML(topic.lastReply.author, common)} ${relativeTime(topic.lastReply.at, now, t)}回复`, `${nameLabelHTML(topic.lastReply.author, common)} replied ${relativeTime(topic.lastReply.at, now, t)}`)}</time>`
-      : `<time datetime="${esc(topic.createdAt)}">${relativeTime(topic.createdAt, now, t)}</time>`;
+      : `<time datetime="${esc(topic.createdAt)}" data-relative-time="true">${relativeTime(topic.createdAt, now, t)}</time>`;
     const previewImages = topic.thumbs?.slice(0, common.showTopicCovers ? 1 : 4) || [];
     const thumbs = previewImages.length && (common.showTopicCovers || topic.board === "showcase" || topic.board === "moments")
       ? `<a class="community-topic-thumbs" href="${postHref(topic.id)}" tabindex="-1" aria-hidden="true">${previewImages.map((id) => `<img src="${imageSrc(id, previewImages.length > 1)}" alt="" loading="lazy" decoding="async" width="84" height="60">`).join("")}</a>`
@@ -657,7 +657,7 @@ function communityCuratedHTML(items: readonly CommunityTopic[], common: Common, 
     return `<li class="community-curated-row${topic.glow ? ' is-glow' : ''}" data-topic-id="${esc(topic.id)}"><span class="community-curated-rank${index < 3 ? ' is-top' : ''}" aria-hidden="true">${String(index + 1).padStart(2, '0')}</span>`
       + `<div class="community-curated-main"><div class="community-curated-heading">${topic.featured ? `<span class="community-curated-featured">${t('精华', 'Featured')}</span>` : ''}<a class="community-curated-title" href="${postHref(topic.id)}" title="${esc(title)}">${esc(title)}</a></div>`
       + `<div class="community-curated-meta">${author}${showBoard ? boardChip(topic.board, t, esc) : ''}</div></div>`
-      + `<div class="community-curated-aside"><span class="community-curated-counts"><span>${icons.like || ''}${topic.likes || 0}<span class="sr-only">${t(' 个赞', ' likes')}</span></span><span>${icons.reply || ''}${topic.replies}<span class="sr-only">${t(' 条回复', ' replies')}</span></span></span><time datetime="${esc(topic.createdAt)}">${relativeTime(topic.createdAt, now, t)}</time></div></li>`;
+      + `<div class="community-curated-aside"><span class="community-curated-counts"><span>${icons.like || ''}${topic.likes || 0}<span class="sr-only">${t(' 个赞', ' likes')}</span></span><span>${icons.reply || ''}${topic.replies}<span class="sr-only">${t(' 条回复', ' replies')}</span></span></span><time datetime="${esc(topic.createdAt)}" data-relative-time="true">${relativeTime(topic.createdAt, now, t)}</time></div></li>`;
   });
   return `<section class="community-curated" aria-label="${t('精选榜单', 'Curated discussions')}"><header class="community-curated-head"><h2>${t('精选榜单', 'Curated discussions')}</h2><p>${t('精华优先 · 热门补充', 'Featured first · popular discussions next')}</p></header><ol class="community-curated-list" role="list">${rows.join('')}</ol></section>`;
 }

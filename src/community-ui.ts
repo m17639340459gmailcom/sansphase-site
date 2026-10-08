@@ -76,6 +76,11 @@ const length = (value: string) => [...value.trim()].length;
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 // Attribute values in selectors (ids are server UUIDs, but stay safe).
 const quoted = (value: string) => `"${value.replace(/["\\]/g, '\\$&')}"`;
+// Only pure clock labels can be ignored in a generated snapshot. Keep the
+// datetime and every other attribute; reply times containing an author and
+// absolute news dates remain part of the content comparison.
+const withoutRelativeTime = (markup: string | null | undefined) => markup?.replace(
+  /(<time datetime="[^"]*" data-relative-time="true">)[^<]*(<\/time>)/g, '$1$2');
 const enc = encodeURIComponent;
 const changesDiscussionListing = (path: string) => path === 'topics' || path === 'reports' || path === 'manage/review'
   || /^(?:topics|replies)\/[^/]+\/(?:replies|edit|retag|delete|like|accept|paid-pin|highlight|pin|lock|move|approve|restore|feature)$/.test(path)
@@ -776,7 +781,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   }
 
   // Passive reads never call loadMe/refresh: those are real entrances and may
-  // award a daily visit. DTOs stay local until the entire selected batch is safe.
+  // award a daily visit. Primary DTOs stage together; the independent news
+  // commit is guarded by the same identity, interaction and route checks.
   function passiveSelection() {
     const current = route();
     return JSON.stringify([location.hash, sort, queryOf(scopeOf(current)), flow, checkinMonth, replySort,
@@ -804,11 +810,13 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const selection = window.getSelection();
     return !selection || selection.isCollapsed;
   }
-  async function passiveResources(current: CommunityRoute, init: RequestInit, deny: (apply: () => void) => void): Promise<() => void> {
+  async function passiveResources(current: CommunityRoute, init: RequestInit, deny: (apply: () => void) => void, expire: (error: ReturnType<typeof failure>) => void) {
     const stages: Array<Promise<() => void>> = [];
-    const stage = <T>(path: string, apply: (value: CommunityLoad<T>) => void, core = true) => {
+    const independentStages: Array<Promise<() => void>> = [];
+    const retryErrors: unknown[] = [];
+    const stage = <T>(path: string, apply: (value: CommunityLoad<T>) => void, core = true, independent = false) => {
       const commit = (value: CommunityLoad<T>) => { resourceReads.delete(path); apply(value); };
-      stages.push(requestAPI<T>(path, init).then(data => () => commit({ state: 'ready', data }), error => {
+      const read = requestAPI<T>(path, init).then(data => () => commit({ state: 'ready', data }), error => {
         const rejected = failure(error);
         // These are decisions about this resource, not the viewer's login.
         // A hidden or deleted thread must stop displaying its previous pixels.
@@ -817,8 +825,20 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
           if (core) deny(retire);
           return retire;
         }
+        if (independent && rejected.status === 401) {
+          expire(rejected);
+          return () => {};
+        }
+        // A transient failure of the auxiliary news board keeps its confirmed
+        // snapshot without discarding successful discussion/account updates.
+        // Report the error after those commits so normal retry backoff remains.
+        if (independent && rejected.status !== 401) {
+          retryErrors.push(error);
+          return () => {};
+        }
         throw error;
-      }));
+      });
+      (independent ? independentStages : stages).push(read);
     };
     stage<CommunitySummary>('summary', value => { summary = value; syncBoardCatalog(readyData(value)?.boardCatalog); }, current.view === 'boards');
     switch (current.view) {
@@ -839,7 +859,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         if (board) stage<CommunityListing>(newsPath(board.id), value => {
           listRequests.delete(newsKey(board.id));
           if (newsBoard()?.id === board.id) lists.set(newsKey(board.id), value);
-        });
+        }, true, true);
         break;
       }
       case 'post': stage<CommunityThread>(`topics/${enc(current.id)}`, value => { threads.set(current.id, value); }); break;
@@ -868,15 +888,22 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         stage<CommunityModerationContacts>('moderation-contacts', value => { moderationContacts = value; });
         stage<CommunityConvention>('convention', value => { convention = value; }); break;
     }
-    const apply = await Promise.all(stages);
-    return () => { for (const commit of apply) commit(); };
+    // Handle auxiliary rejection immediately, even while a primary read waits.
+    // A slow news request cannot hold up successfully staged primary results.
+    const independent = independentStages.length ? Promise.all(independentStages).then(
+      commits => ({ apply: () => { for (const commit of commits) commit(); }, retryErrors }),
+      error => ({ apply: () => {}, retryErrors: [error] }),
+    ) : null;
+    const commits = await Promise.all(stages);
+    return { apply: () => { for (const commit of commits) commit(); }, independent };
   }
   async function readPassive(signal: AbortSignal) {
     if (!passiveAllowed()) return false;
     const hash = location.hash, reads = foregroundRevision, writes = writeRevision, edits = editingRevision;
     let selected = passiveSelection();
     let identity = frameIdentity, revision = permissionRevision, authority = meRequest;
-    const valid = () => !signal.aborted && Boolean(mounted) && location.hash === hash && selected === passiveSelection()
+    let running = true;
+    const valid = () => running && !signal.aborted && Boolean(mounted) && location.hash === hash && selected === passiveSelection()
       && identity === frameIdentity && revision === permissionRevision && authority === meRequest
       && reads === foregroundRevision && writes === writeRevision && edits === editingRevision;
     const init: RequestInit = { headers: { 'X-Community-Passive': '1' }, signal };
@@ -893,7 +920,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         selected = passiveSelection();
         passiveRecovery = { hash, frame: identity, revision };
       }
-      const apply = await passiveResources(route(), init, retire => {
+      const resources = await passiveResources(route(), init, retire => {
         if (!valid() || !passiveAllowed(!changed)) return;
         if (!changed) commitMe(next, hash);
         retire(); coreRoute = { hash, frame: frameIdentity, request: meRequest }; passiveRecovery = null;
@@ -901,19 +928,29 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         // A definite resource decision retires pixels before slow support, but
         // the same timed batch still owns support failure/backoff. Its staged
         // core is this failure, so it cannot put the retired body back.
+      }, rejected => {
+        if (valid() && passiveAllowed(!changed)) rejectViewer(rejected);
       });
       if (!valid() || !passiveAllowed(!changed)) return false;
       if (!changed) commitMe(next, hash);
-      apply(); coreRoute = { hash, frame: frameIdentity, request: meRequest };
+      resources.apply(); coreRoute = { hash, frame: frameIdentity, request: meRequest };
       passiveRecovery = null;
-      paint(true); return true;
+      paint(true);
+      if (resources.independent) {
+        const independent = await resources.independent;
+        if (!valid() || !passiveAllowed(!changed)) return false;
+        independent.apply();
+        paintNews();
+        if (independent.retryErrors.length) throw independent.retryErrors[0];
+      }
+      return true;
     } catch (error) {
       if (!valid()) return false;
       const rejected = failure(error);
       if (rejected.status === 401 || rejected.status === 403) { rejectViewer(rejected); return true; }
       // An outage is not a sign-out and never erases the confirmed readable page.
       throw error;
-    }
+    } finally { running = false; }
   }
   const onPassiveEditing = () => { editingRevision++; passiveRefresh?.invalidate(); };
   const onCompositionStart = () => { composing = true; onPassiveEditing(); };
@@ -1333,15 +1370,23 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       const view = route().view;
       const core = section.querySelector('.community-main'), nextCore = next.querySelector('.community-main');
       const nextNews = nextCore?.querySelector('.community-news');
-      const samePrimary = core && nextCore && (paintedPage.main === nextCore.outerHTML
+      const samePrimary = core && nextCore && (withoutRelativeTime(paintedPage.main) === withoutRelativeTime(nextCore.outerHTML)
         || view === 'home' && paintedPage.news && nextNews
-          && paintedPage.main?.replace(paintedPage.news, '') === nextCore.outerHTML.replace(nextNews.outerHTML, ''));
+          && withoutRelativeTime(paintedPage.main?.replace(paintedPage.news, '')) === withoutRelativeTime(nextCore.outerHTML.replace(nextNews.outerHTML, '')));
       if (['home', 'board', 'tag'].includes(view) && core && nextCore && samePrimary
         && paintedPage.style === next.getAttribute('style')
         && ['.community-banner, .community-board-hero', '.community-aside'].every(selector => Boolean(section.querySelector(selector)) === Boolean(next.querySelector(selector)))) {
         const restoreView = mounted.ctx.beforePaint?.();
         const previousBanner = paintedPage.banner, previousAside = paintedPage.aside, previousNews = paintedPage.news;
         rememberPaint(markup, next);
+        // Time passing updates text in place, without detaching readable rows,
+        // avatars, focused links or an expanded list's scroll anchor.
+        const times = [...core.querySelectorAll<HTMLTimeElement>('time[data-relative-time="true"]')];
+        [...nextCore.querySelectorAll<HTMLTimeElement>('time[data-relative-time="true"]')].forEach((source, index) => {
+          const current = times[index];
+          if (current && current.dateTime === source.dateTime && current.textContent !== source.textContent)
+            current.textContent = source.textContent;
+        });
         // Only these existing list-page supporting areas can change here. The
         // results, editor, focus and text selection remain attached in place.
         for (const [selector, previous] of [['.community-banner, .community-board-hero', previousBanner], ['.community-aside', previousAside], ['.community-news', previousNews]] as const) {

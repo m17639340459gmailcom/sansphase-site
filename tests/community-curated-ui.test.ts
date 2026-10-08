@@ -178,10 +178,11 @@ test('newest retains the regular post flow and returning to curated immediately 
 
 test('idle curated first-page refresh uses the same scoped endpoint and applies complete staged data without blanking existing rows', async t => {
   const f = await fixture(t), support = deferred<Response>(), originalRows = curatedRows(f.main);
+  const updated = initial.map(item => ({ ...item, title: `已更新-${item.id}`, likes: item.likes + 100, replies: item.replies + 50 }));
   f.intercept((url, init) => {
     if (!passive(init)) return null;
     if (url.endsWith('/summary')) return support.promise;
-    if (url.startsWith('/api/community/topics?')) return response(listing(initial.map(item => ({ ...item, title: `已更新-${item.id}` }))));
+    if (url.startsWith('/api/community/topics?')) return response(listing(updated));
     return null;
   });
   await f.tick(15000);
@@ -196,6 +197,13 @@ test('idle curated first-page refresh uses the same scoped endpoint and applies 
   support.resolve(response({ ...summary, repliesToday: 9 })); await flush();
   assert.deepEqual(titles(f.main), initial.map(item => `已更新-${item.id}`));
   assert.equal(curatedRows(f.main).length, 6);
+  assert.match(curatedRows(f.main)[0].querySelector('.community-curated-counts')?.textContent || '', /101\s*个赞/);
+  assert.match(curatedRows(f.main)[0].querySelector('.community-curated-counts')?.textContent || '', /52\s*条回复/);
+  const updatedRows = curatedRows(f.main), list = f.main.querySelector('.community-curated-list');
+  f.data.set('curated|1', listing(updated)); f.intercept(() => null);
+  await f.tick(15000);
+  assert.equal(f.main.querySelector('.community-curated-list'), list, 'the next unchanged batch does not redraw confirmed ranks repeatedly');
+  assert.deepEqual(curatedRows(f.main), updatedRows);
   assert.equal(f.calls.some(call => call.url.endsWith('/active/visit')), false, 'passive refresh cannot award an active visit');
 });
 

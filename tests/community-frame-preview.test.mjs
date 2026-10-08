@@ -54,8 +54,9 @@ async function setup(t, firstHash = '#/community/home', intercept = () => null, 
     if (url.endsWith('/topics/p1')) return response(thread);
     if (url.includes('/banners?')) return response(bannerConfig(new URL(url, w.location.origin).searchParams.get('scope')));
     if (url.includes('/topics?')) {
-      const board = new URL(url, w.location.origin).searchParams.get('board');
-      return response(board ? boardListing(board) : listing);
+      const params = new URL(url, w.location.origin).searchParams;
+      const board = params.get('board'), data = board ? boardListing(board) : listing;
+      return response({ ...data, pageSize: params.get('sort') === 'curated' ? 6 : 20 });
     }
     if (url.endsWith('/bookmarks')) return response(listing);
     if (url.endsWith('/like')) return response({ likes: 2 });
@@ -98,7 +99,8 @@ for (const width of [1600, 390]) for (const first of ['identity', 'content']) te
     return null;
   });
   resizeWidth(width); await turn();
-  const source = main.querySelector('[data-community="home"]'), title = source.querySelector('.community-topic a[href^="#/post/"]');
+  const source = main.querySelector('[data-community="home"]'), title = source.querySelector('.community-curated-title[href^="#/post/"]');
+  assert.ok(title, 'the initial curated page has a real readable post link');
   const sideAction = main.querySelector('[data-action="community-checkin"]');
   const scroll = width === 390 ? w.document.documentElement : frame.center();
   scroll.dispatchEvent(new w.Event('wheel', { bubbles: true })); scroll.scrollTop = 280;
@@ -231,6 +233,8 @@ for (const count of [1, 2]) for (const outcome of ['ready', 'abort', 'denied']) 
       return response({ ...listing, items: [{ ...topic('p1'), board: count === 2 ? 'showcase' : 'qa', thumbs: Array(count).fill(imageId) }] });
     return null;
   }, count === 1);
+  const newest = main.querySelector('[data-action="community-sort"][data-sort="newest"]'); assert.ok(newest);
+  newest.click(); await turn();
   const source = main.querySelector('[data-community="home"]'), image = source.querySelector('.community-topic-thumbs img');
   assert.ok(image); assert.equal(image.getAttribute('src'), `/api/community/images/${imageId}.webp`);
   let releases = 0; const setAttribute = image.setAttribute.bind(image);
@@ -784,14 +788,15 @@ test('cancelled draft navigation keeps its route, draft and current reading posi
 
 for (const board of communityBoards) test(`${board.zh}: sorting, searching and pagination keep the reading frame stable`, async t => {
   let deferred;
+  const data = boardListing(board.id);
+  const firstPage = { ...data, pageSize: 6, total: 12, items: [...data.items, ...data.items.map(item => ({ ...item, id: `${item.id}-extra`, title: `${item.title} 附加讨论` }))] };
   const { w, main, frame } = await setup(t, `#/community/boards/${board.id}`, url => {
     if (!url.includes('/topics?')) return null;
     const params = new URL(url, 'http://localhost').searchParams;
     if (params.get('board') !== board.id) return null;
     if (deferred) return deferred.promise;
     const page = Number(params.get('page'));
-    const data = boardListing(board.id);
-    return response({ ...data, page, pageSize: 3, total: 6, items: page === 2 ? data.items.map(item => ({ ...item, id: `${item.id}-next` })) : data.items });
+    return response({ ...firstPage, page, items: page === 2 ? firstPage.items.map(item => ({ ...item, id: `${item.id}-next` })) : firstPage.items });
   });
   const center = frame.center(), right = main.querySelector('[data-frame-right]');
   const rail = main.querySelector('.community-feed-rail');
@@ -811,31 +816,40 @@ for (const board of communityBoards) test(`${board.zh}: sorting, searching and p
     assert.equal(main.querySelector('#community-search'), search);
   };
   center.dispatchEvent(new w.Event('wheel')); center.scrollTop = 240; right.scrollTop = 55; rail.scrollTop = 35;
-  for (const sort of ['newest', 'hot', 'featured', 'following', 'active']) {
+  for (const sort of ['newest', 'active', 'following']) {
     center.dispatchEvent(new w.Event('wheel'));
     center.scrollTop = 240;
     let resolve;
     deferred = { promise: new Promise(done => { resolve = done; }) };
-    const oldRows = results.querySelector('.community-topics');
+    const oldRows = results.querySelector('.community-topics, .community-curated-list'); assert.ok(oldRows);
     const button = main.querySelector(`[data-sort="${sort}"]`);
+    assert.ok(button, 'exercise a real current sorting control');
     button.click(); steady();
-    assert.equal(results.querySelector('.community-topics'), oldRows, 'pending requests must keep the old rows');
-    resolve(response({ ...boardListing(board.id), pageSize: 3, total: 6 })); deferred = null;
+    assert.equal(results.querySelector('.community-topics, .community-curated-list'), oldRows, 'pending requests must keep the old rows');
+    resolve(response(firstPage)); deferred = null;
     await turn(); steady();
     assert.equal(w.document.activeElement, button);
   }
+  const curated = main.querySelector('[data-sort="curated"]'); assert.ok(curated);
+  curated.click(); steady();
+  assert.deepEqual([...results.querySelectorAll('.community-curated-row')].map(row => row.dataset.topicId), firstPage.items.map(item => item.id), 'returning to the cached curated page displays its confirmed ranks immediately');
+  assert.equal(results.querySelector('[data-content-state="loading"]'), null);
+  await turn(); steady();
+  assert.equal(w.document.activeElement, curated);
   center.scrollTop = 240;
   search.value = '测试'; search.focus(); search.setSelectionRange?.(1, 1);
   search.form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await turn(); steady();
   assert.equal(w.document.activeElement, search);
   center.scrollTop = 240;
   main.querySelector('[data-action="community-search-clear"]').click(); await turn(); steady();
-  const rows = [...results.querySelector('.community-topics').children];
+  const ranked = results.querySelector('.community-curated-list'); assert.ok(ranked);
+  const rows = [...ranked.children];
   center.dispatchEvent(new w.Event('wheel'));
   center.scrollTop = 240;
   main.querySelector('[data-action="community-more"]').click(); await turn(); steady(240);
-  assert.deepEqual([...results.querySelector('.community-topics').children].slice(0, 3), rows);
-  assert.equal(results.querySelector('.community-topics').children.length, 6);
+  assert.equal(results.querySelector('.community-curated-list'), ranked, 'expanded ranked rows retain their original container');
+  assert.deepEqual([...ranked.children].slice(0, 6), rows);
+  assert.equal(ranked.children.length, 12);
 });
 
 test('late calendar responses cannot replace the selected month or disturb a newly opened board', async t => {

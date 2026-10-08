@@ -44,7 +44,7 @@ const publishedCalls = (calls: Call[]) => calls.filter(call => call.url.startsWi
 
 // A small real UI fixture, with the public catalog supplied by the same summary
 // endpoint as production. It imports no test suite or imitation UI renderer.
-async function fixture(t: TestContext, options: { catalog?: boolean; intercept?: Intercept; viewer?: CommunityMe } = {}) {
+async function fixture(t: TestContext, options: { catalog?: boolean; intercept?: Intercept; viewer?: CommunityMe; items?: CommunityTopic[] } = {}) {
   resetCommunityBoardCatalog();
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: Date.UTC(2026, 9, 9, 3) });
   const { window } = new JSDOM('<main></main>', { url: 'http://localhost/#/community/home', pretendToBeVisual: true });
@@ -57,7 +57,7 @@ async function fixture(t: TestContext, options: { catalog?: boolean; intercept?:
   const catalog = { version: 1, items: [...defaultCommunityBoards, ...(options.catalog === false ? [] : [board])] };
   const summary: CommunitySummary = { total: 12, repliesToday: 4, checkinsToday: 2, boards: {}, tags: {}, hot: [], boardCatalog: catalog };
   const data = new Map<string, CommunityListing>([
-    ['curated|1', listing(initial, 1, 12)],
+    ['curated|1', listing(options.items || initial, 1, 12)],
     ['curated|2', listing(Array.from({ length: 6 }, (_, i) => topic(i + 7)), 2, 12)],
     ['newest|1', listing(initial)],
     ['published|1', listing([topic(1, true), topic(2, true)])],
@@ -173,6 +173,118 @@ test('passive news refresh still updates an expanded curated page without reload
   assert.deepEqual(curatedRows(f.main), rows);
   assert.deepEqual(newsRows(f.main).map(row => row.dataset.topicId), ['n3']);
   assert.equal(f.calls.some(call => call.url.endsWith('/active/visit')), false, 'supporting updates cannot award an active visit');
+});
+
+test('a passive news 401 retires the viewer immediately even while a primary summary read waits', async t => {
+  const f = await fixture(t), held = deferred<Response>();
+  f.intercept((url, init) => {
+    if (!passive(init)) return null;
+    if (url.endsWith('/summary')) return held.promise;
+    if (params(url).get('sort') === 'published') return Response.json({ error: '登录已过期。' }, { status: 401 });
+    return null;
+  });
+  await f.tick(15000);
+  assert.equal(f.ui.me(), null);
+  assert.equal(newsRows(f.main).length, 0);
+  assert.equal(curatedRows(f.main).length, 0, 'expired authority removes protected pixels without waiting for supporting reads');
+  held.resolve(response(f.summary)); await flush();
+  assert.equal(newsRows(f.main).length, 0);
+  assert.equal(curatedRows(f.main).length, 0, 'the late primary read cannot restore an expired session');
+});
+
+test('an independent news denial arriving after a failed primary batch cannot mutate its retired batch', async t => {
+  const f = await fixture(t), held = deferred<Response>();
+  f.intercept((url, init) => {
+    if (!passive(init)) return null;
+    if (url.endsWith('/summary')) return Response.json({ error: '统计暂时不可用。' }, { status: 503 });
+    if (params(url).get('sort') === 'published') return held.promise;
+    return null;
+  });
+  await f.tick(15000);
+  assert.deepEqual(newsRows(f.main).map(row => row.dataset.topicId), ['n1', 'n2']);
+  held.resolve(Response.json({ error: '旧批次资讯不可读。' }, { status: 403 })); await flush();
+  assert.deepEqual(newsRows(f.main).map(row => row.dataset.topicId), ['n1', 'n2'], 'an ended batch has no permission to change the currently confirmed page');
+  f.intercept(() => null);
+  f.data.set('published|1', listing([topic(3, true)]));
+  await f.tick(15000);
+  assert.deepEqual(newsRows(f.main).map(row => row.dataset.topicId), ['n3']);
+});
+
+test('a transient passive news outage keeps confirmed news while independent viewer, summary and curated changes still apply', async t => {
+  const f = await fixture(t);
+  assert.deepEqual(newsRows(f.main).map(row => row.dataset.topicId), ['n1', 'n2']);
+  f.data.set('curated|1', listing([topic(7), topic(8)]));
+  f.identity({ ...reader, balance: 11, checkedIn: false, unread: { all: 2, reply: 2, thanks: 0, system: 0 } });
+  Object.assign(f.summary, { total: 14, repliesToday: 9, checkinsToday: 7 });
+  f.intercept((url, init) => passive(init) && params(url).get('sort') === 'published'
+    ? Response.json({ error: '资讯服务临时不可用。' }, { status: 503 }) : null);
+  await f.tick(15000);
+  const reads = f.calls.filter(call => passive(call.init));
+  assert.equal(publishedCalls(reads).length, 1, 'only the separate news resource failed during a real passive batch');
+  assert.equal(reads.filter(call => call.url.endsWith('/me')).length, 1);
+  assert.equal(reads.filter(call => call.url.endsWith('/summary')).length, 1);
+  assert.equal(reads.filter(call => call.url.startsWith('/api/community/topics?') && params(call.url).get('sort') === 'curated').length, 1);
+  assert.deepEqual(curatedRows(f.main).map(row => row.dataset.topicId), ['p7', 'p8'], 'an auxiliary outage cannot block confirmed primary changes');
+  assert.equal(f.ui.me()?.balance, 11);
+  assert.equal(f.ui.me()?.checkedIn, false);
+  assert.equal(f.ui.me()?.unread.all, 2, 'successfully read unread counts remain current without a manual reload');
+  const stats = new Map([...f.main.querySelectorAll('[data-frame-overview] .community-stats > div')]
+    .map(row => [row.querySelector('dt')?.textContent, row.querySelector('dd')?.textContent]));
+  assert.deepEqual([...stats], [['主题', '14'], ['24 小时回复', '9'], ['今日签到', '7']]);
+  assert.deepEqual(newsRows(f.main).map(row => row.dataset.topicId), ['n1', 'n2'], 'a temporary outage preserves already confirmed news rather than clearing it');
+  assert.equal(f.main.querySelector('[data-news-state="loading"]'), null);
+  assert.equal(f.calls.some(call => call.url.endsWith('/active/visit')), false);
+  f.data.set('curated|1', listing([topic(9)]));
+  await f.tick(15000);
+  assert.deepEqual(curatedRows(f.main).map(row => row.dataset.topicId), ['p9'], 'continued news errors still allow successful primary updates');
+  assert.equal(publishedCalls(f.calls.filter(call => passive(call.init))).length, 2);
+  f.intercept(() => null);
+  f.data.set('published|1', listing([topic(3, true)]));
+  await f.tick(15000);
+  assert.equal(publishedCalls(f.calls.filter(call => passive(call.init))).length, 2, 'a focus or clock tick cannot bypass the existing increasing outage backoff');
+  await f.tick(15000);
+  assert.deepEqual(newsRows(f.main).map(row => row.dataset.topicId), ['n3'], 'normal polling recovers automatically after the outage');
+});
+
+test('a slow passive news read does not delay successful primary updates and its later response changes only news', async t => {
+  const f = await fixture(t), held = deferred<Response>();
+  f.data.set('curated|1', listing([topic(7), topic(8)]));
+  f.identity({ ...reader, balance: 11, checkedIn: false, unread: { all: 2, reply: 2, thanks: 0, system: 0 } });
+  Object.assign(f.summary, { total: 14, repliesToday: 9, checkinsToday: 7 });
+  f.intercept((url, init) => passive(init) && params(url).get('sort') === 'published' ? held.promise : null);
+  await f.tick(15000);
+  assert.equal(publishedCalls(f.calls.filter(call => passive(call.init))).length, 1, 'only the auxiliary news read remains pending');
+  assert.deepEqual(curatedRows(f.main).map(row => row.dataset.topicId), ['p7', 'p8'], 'confirmed primary discussions become current before the news response arrives');
+  assert.equal(f.ui.me()?.balance, 11);
+  assert.equal(f.ui.me()?.checkedIn, false);
+  assert.equal(f.ui.me()?.unread.all, 2);
+  const stats = new Map([...f.main.querySelectorAll('[data-frame-overview] .community-stats > div')]
+    .map(row => [row.querySelector('dt')?.textContent, row.querySelector('dd')?.textContent]));
+  assert.deepEqual([...stats], [['主题', '14'], ['24 小时回复', '9'], ['今日签到', '7']]);
+  assert.deepEqual(newsRows(f.main).map(row => row.dataset.topicId), ['n1', 'n2'], 'confirmed news stays visible while its own replacement is pending');
+  assert.equal(f.main.querySelector('[data-news-state="loading"]'), null);
+  const rows = curatedRows(f.main), list = f.main.querySelector('.community-curated-list');
+  held.resolve(response(listing([topic(3, true)]))); await flush();
+  assert.deepEqual(newsRows(f.main).map(row => row.dataset.topicId), ['n3']);
+  assert.equal(f.main.querySelector('.community-curated-list'), list, 'the late auxiliary commit cannot rebuild the already updated primary region');
+  assert.deepEqual(curatedRows(f.main), rows);
+  assert.equal(f.ui.me()?.unread.all, 2);
+  assert.equal(f.calls.some(call => call.url.endsWith('/active/visit')), false);
+});
+
+test('an unchanged passive news batch crossing a relative-time boundary updates time without rebuilding expanded curated rows', async t => {
+  const recent = initial.map(item => ({ ...item, createdAt: '2026-10-09T02:59:10Z' }));
+  const f = await fixture(t, { items: recent }); await f.more();
+  (f.window.document.activeElement as HTMLElement | null)?.blur(); await flush(); await f.tick(0);
+  const rows = curatedRows(f.main), list = f.main.querySelector('.community-curated-list');
+  assert.equal(rows[0].querySelector('time')?.textContent, '刚刚');
+  await f.tick(15000);
+  assert.equal(curatedRows(f.main)[0].querySelector('time')?.textContent, '1 分钟前', 'the elapsed publication time remains accurate');
+  assert.equal(f.main.querySelector('.community-curated-list'), list, 'a clock label is insufficient reason to detach the accumulated reading region');
+  assert.deepEqual(curatedRows(f.main), rows);
+  const reads = f.calls.filter(call => passive(call.init));
+  assert.equal(publishedCalls(reads).length, 1);
+  assert.equal(reads.filter(call => call.url.startsWith('/api/community/topics?') && params(call.url).get('sort') === 'curated').length, 0);
 });
 
 test('passive news updates preserve keyboard focus on the same post, or the news header when that post disappears', async t => {

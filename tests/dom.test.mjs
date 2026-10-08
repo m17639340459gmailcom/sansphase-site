@@ -260,13 +260,12 @@ for (const mode of [null, false, true, 'hk', 'hk-reduced']) test(typeof mode ===
     if (dependency.status === 'linked') await dependency.evaluate();
     return dependency;
   }
-  function loadLibrary(url, chain = new Set()) {
-    // Register synchronously before recursive linking. Two concurrent imports
-    // must share one module (especially React's hook dispatcher). A module
-    // shared by two branches is handed over once it is linked, or a branch can
-    // be instantiated before it; only an import cycle gets it while linking.
+  function libraryModule(url) {
+    // Register one module per URL, then let the VM link the complete graph.
+    // Recursively awaiting separately linked branches breaks legal ESM cycles
+    // when the same dependency is also shared by another branch.
     const cached = libraryModules.get(url.href);
-    if (cached) return chain.has(url.href) ? cached.module : cached.linked;
+    if (cached) return cached.module;
     const module = new vm.SourceTextModule(readFileSync(url, "utf8"), {
       context,
       identifier: url.href,
@@ -278,30 +277,39 @@ for (const mode of [null, false, true, 'hk', 'hk-reduced']) test(typeof mode ===
     });
     const entry = { module, linked: null };
     libraryModules.set(url.href, entry);
-    const inner = new Set([...chain, url.href]);
-    entry.linked = module.link((specifier) => loadLibrary(new URL(specifier, url), inner)).then(() => module);
-    return entry.linked;
+    return module;
+  }
+  async function loadLibrary(url) {
+    const module = libraryModule(url), entry = libraryModules.get(url.href);
+    if (module.status === 'unlinked')
+      entry.linked = module.link((specifier, referencing) => libraryModule(new URL(specifier, referencing.identifier)));
+    if (entry.linked) await entry.linked;
+    return module;
   }
   const mod = new vm.SourceTextModule(
     await readFile(new URL("../dist/app.mjs", import.meta.url), "utf8"),
-    { context, importModuleDynamically: loadDynamicModule },
+    { context, identifier: new URL('../dist/app.mjs', import.meta.url).href, importModuleDynamically: loadDynamicModule },
   );
-  await mod.link((specifier) => {
+  await mod.link((specifier, referencing) => {
+    // This linker is also called for the real dependencies' static imports.
+    // Only the app entry receives the explicitly declared environment stubs;
+    // dependencies resolve from their own URL within the single VM graph.
+    if (referencing !== mod) return libraryModule(new URL(specifier, referencing.identifier));
     if (specifier === "./ui.bundle.mjs")
-      return loadLibrary(new URL("../dist/ui.bundle.mjs", import.meta.url));
+      return libraryModule(new URL("../dist/ui.bundle.mjs", import.meta.url));
     if (specifier === './book-shell.mjs' || specifier === './vip-book-prompt.mjs')
-      return loadLibrary(new URL('../dist/' + specifier.slice(2), import.meta.url));
+      return libraryModule(new URL('../dist/' + specifier.slice(2), import.meta.url));
     if (['./community.mjs', './community-ui.mjs', './community-sky.mjs', './community-layout.mjs', './community-landing.mjs', './community-entry.mjs'].includes(specifier))
-      return loadLibrary(new URL('../dist/' + specifier.slice(2), import.meta.url));
+      return libraryModule(new URL('../dist/' + specifier.slice(2), import.meta.url));
     if (specifier === './catalog.mjs')
-      return loadLibrary(new URL('../dist/catalog.mjs', import.meta.url));
+      return libraryModule(new URL('../dist/catalog.mjs', import.meta.url));
     if (specifier === './content-images.mjs')
-      return loadLibrary(new URL('../dist/content-images.mjs', import.meta.url));
+      return libraryModule(new URL('../dist/content-images.mjs', import.meta.url));
     // jsdom has no native Element.animate, so route changes take the plain path.
     if (['./route-transition.mjs', './journey.mjs', './nav-slider.mjs'].includes(specifier))
-      return loadLibrary(new URL('../dist/' + specifier.slice(2), import.meta.url));
-    if (['./reader-ui.mjs','./admin-readers.mjs','./access-policy.mjs'].includes(specifier))
-      return loadLibrary(new URL('../dist/' + specifier.slice(2), import.meta.url));
+      return libraryModule(new URL('../dist/' + specifier.slice(2), import.meta.url));
+    if (['./reader-ui.mjs','./reader-membership.mjs','./admin-readers.mjs','./access-policy.mjs'].includes(specifier))
+      return libraryModule(new URL('../dist/' + specifier.slice(2), import.meta.url));
     const exports =
       specifier === './navigation-prefetch.mjs' ? {...navigationPrefetch,mountNavigationPrefetch:(...args)=>{homeActivity.navigationPrefetch++;return navigationPrefetch.mountNavigationPrefetch(...args);}} :
       specifier === './content-reader.mjs' ? contentReader :
@@ -342,7 +350,8 @@ for (const mode of [null, false, true, 'hk', 'hk-reduced']) test(typeof mode ===
                 });
               },
             }
-          : data;
+          : specifier === './data.mjs' ? data : null;
+    if (!exports) throw Error(`Unregistered app dependency: ${specifier}`);
     return new vm.SyntheticModule(
       Object.keys(exports),
       function () {
@@ -1004,13 +1013,15 @@ for (const mode of [null, false, true, 'hk', 'hk-reduced']) test(typeof mode ===
       assert.equal(d.querySelectorAll('.community-board-link').length,6);
       assert.ok(q('.community-board-link[href="#/community/boards/vip"] .community-board-lock'),'non-members see the members board locked');
       assert.ok(community.requests.includes('GET summary'));
-      assert.ok(community.requests.includes('GET topics?sort=active&page=1'));
-      click('[data-action="community-sort"][data-sort="hot"]');
-      assert.equal(q('[data-action="community-sort"][aria-pressed="true"]').dataset.sort,'hot');
-      await until(()=>community.requests.includes('GET topics?sort=hot&page=1'),'sorting asks the server');
+      assert.ok(community.requests.includes('GET topics?sort=curated&page=1'));
+      assert.equal(q('[data-action="community-sort"][aria-pressed="true"]').dataset.sort,'curated');
+      click('[data-action="community-sort"][data-sort="newest"]');
+      assert.equal(q('[data-action="community-sort"][aria-pressed="true"]').dataset.sort,'newest');
+      await until(()=>community.requests.includes('GET topics?sort=newest&page=1'),'sorting asks the server');
       await until(()=>d.querySelector('.community-empty'),'the sorted list renders');
-      assert.equal(d.activeElement,q('[data-action="community-sort"][data-sort="hot"]'),'focus stays on the chosen sort');
+      assert.equal(d.activeElement,q('[data-action="community-sort"][data-sort="newest"]'),'focus stays on the chosen sort');
       click('[data-action="community-sort"][data-sort="active"]');
+      await until(()=>community.requests.includes('GET topics?sort=active&page=1') && !q('.community-results').hasAttribute('aria-busy'),'latest replies finishes its server read');
     });
     await t.test('posting: validation, publish, then the post page with replies and deletion', async()=>{
       await navigate('community/boards/qa');
@@ -1092,7 +1103,9 @@ for (const mode of [null, false, true, 'hk', 'hk-reduced']) test(typeof mode ===
       assert.equal(q('[data-community="board"]').dataset.board,'qa');
       assert.equal(q('[data-frame-boards] [aria-current="page"]').getAttribute('href'),'#/community/boards/qa');
       assert.equal(q('.community-post').getAttribute('href'),'#/community/new/qa','posting from a board goes to that board');
-      await until(()=>d.querySelectorAll('.community-topic').length===2,'the first page shows');
+      click('[data-action="community-sort"][data-sort="newest"]');
+      await until(()=>community.requests.includes('GET topics?board=qa&sort=newest&page=1')
+        && !q('.community-results').hasAttribute('aria-busy') && d.querySelectorAll('.community-topic').length===2,'the newest first page finishes loading');
       await until(()=>/主题4/.test(q('.community-board-hero .community-stats').textContent),'the board hero shows its numbers');
       assert.doesNotMatch(q('[data-frame-right]').textContent,/发帖须知|本版活跃/);
       assert.match(q('[data-action="community-more"]').textContent,/还有 2 个/);
@@ -1103,7 +1116,7 @@ for (const mode of [null, false, true, 'hk', 'hk-reduced']) test(typeof mode ===
       input('#community-search','第三');
       submit('form[data-community-form="search"]');
       await until(()=>d.querySelectorAll('.community-topic').length===1,'searching narrows the board');
-      assert.ok(community.requests.includes('GET topics?board=qa&q=%E7%AC%AC%E4%B8%89&sort=active&page=1'));
+      assert.ok(community.requests.includes('GET topics?board=qa&q=%E7%AC%AC%E4%B8%89&sort=newest&page=1'));
       assert.match(q('.community-search-summary').textContent,/搜索“第三”，找到 1 个主题/);
       assert.equal(q('#community-search').value,'第三');
       click('[data-action="community-search-clear"]');
@@ -1322,6 +1335,8 @@ for (const mode of [null, false, true, 'hk', 'hk-reduced']) test(typeof mode ===
         assert.match(q(".community-enter").textContent, /Enter the community/);
         await navigate("community/home");
         assert.match(q(".community-sort").textContent, /Latest replies/);
+        click('[data-action="community-sort"][data-sort="newest"]');
+        await until(()=>d.querySelector('.community-topic-meta'),'the ordinary translated topic flow finishes loading');
         assert.match(q(".community-topic-meta").textContent, /Q&A/, "board names follow the language");
         await navigate("community/shop");
         assert.match(q("main h1").textContent, /Exchange/);

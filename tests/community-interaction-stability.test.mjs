@@ -1652,11 +1652,11 @@ test('changing list sort keeps current results while waiting and preserves the s
   const pending = deferred();
   const { main, w } = await setup(t, '#/community/home', url => url.includes('sort=newest') ? pending.promise : null);
   const section = main.querySelector('[data-community]'), banner = main.querySelector('.community-banner');
-  const results = main.querySelector('.community-results'), topics = main.querySelector('.community-topics');
+  const results = main.querySelector('.community-results'), topics = main.querySelector('.community-curated-list'); assert.ok(topics);
   const field = main.querySelector('#community-search');
   const button = main.querySelector('[data-action="community-sort"][data-sort="newest"]');
   button.focus(); button.click();
-  assert.equal(main.querySelector('.community-topics'), topics, 'pending sort must not replace a long list with a short loading placeholder');
+  assert.equal(main.querySelector('.community-curated-list'), topics, 'pending sort must not replace a long list with a short loading placeholder');
   assert.equal(results.getAttribute('aria-busy'), 'true');
   assert.equal(button.getAttribute('aria-pressed'), 'true');
   pending.resolve(response(listing(['p3', 'p4'])));
@@ -1673,14 +1673,17 @@ test('changing list sort keeps current results while waiting and preserves the s
 test('load more appends new rows without detaching existing rows or the surrounding page', async t => {
   const pending = deferred();
   const { main } = await setup(t, '#/community/home', url => url.includes('page=2') ? pending.promise : null);
+  const newest = main.querySelector('[data-action="community-sort"][data-sort="newest"]'); assert.ok(newest);
+  newest.click(); await turn();
   const section = main.querySelector('[data-community]'), topics = main.querySelector('.community-topics');
+  assert.ok(topics, 'this case exercises pagination in the normal post flow');
   const rows = [...topics.children];
   const button = main.querySelector('[data-action="community-more"]');
   button.focus(); button.click();
   assert.equal(main.querySelector('[data-community]'), section);
   assert.equal(button.disabled, true);
   assert.deepEqual([...topics.children], rows);
-  pending.resolve(response(listing(['p3', 'p4'])));
+  pending.resolve(response({ ...listing(['p3', 'p4']), page: 2 }));
   await turn();
   assert.equal(main.querySelector('.community-topics'), topics);
   assert.deepEqual([...topics.children].slice(0, 2), rows);
@@ -1690,10 +1693,10 @@ test('load more appends new rows without detaching existing rows or the surround
 test('search retains typed input, focus and old rows until the replacement result arrives', async t => {
   const pending = deferred();
   const { main, w } = await setup(t, '#/community/home', url => url.includes('q=needle') ? pending.promise : null);
-  const field = main.querySelector('#community-search'), rows = main.querySelector('.community-topics');
+  const field = main.querySelector('#community-search'), rows = main.querySelector('.community-curated-list'); assert.ok(rows);
   field.value = 'needle'; field.focus(); field.setSelectionRange(2, 4);
   field.form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
-  assert.equal(main.querySelector('.community-topics'), rows);
+  assert.equal(main.querySelector('.community-curated-list'), rows);
   pending.resolve(response(listing(['match'])));
   await turn();
   assert.equal(main.querySelector('#community-search'), field);
@@ -1708,13 +1711,16 @@ test('rapid sort changes ignore an earlier request for the same final sort', asy
   let newestCalls = 0;
   const { main } = await setup(t, '#/community/home', url => {
     if (url.includes('sort=newest')) return ++newestCalls === 1 ? first.promise : final.promise;
-    if (url.includes('sort=hot')) return second.promise;
+    if (url.includes('sort=active')) return second.promise;
     return null;
   });
-  const rows = main.querySelector('.community-topics');
-  for (const sort of ['newest', 'hot', 'newest']) main.querySelector(`[data-action="community-sort"][data-sort="${sort}"]`).click();
+  const rows = main.querySelector('.community-curated-list'); assert.ok(rows);
+  for (const sort of ['newest', 'active', 'newest']) {
+    const control = main.querySelector(`[data-action="community-sort"][data-sort="${sort}"]`); assert.ok(control);
+    control.click();
+  }
   first.resolve(response(listing(['old']))); await turn();
-  assert.equal(main.querySelector('.community-topics'), rows);
+  assert.equal(main.querySelector('.community-curated-list'), rows);
   assert.equal(main.querySelector('.community-results').getAttribute('aria-busy'), 'true');
   final.resolve(response(listing(['final']))); await turn();
   second.resolve(response(listing(['wrong-sort']))); await turn();

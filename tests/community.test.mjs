@@ -284,7 +284,7 @@ test("topic rows follow the demo: avatars, level and VIP marks, decorations, fla
   assert.match(rows, /<span class="community-who"><a class="community-uname" href="#\/community\/u\/owner">無相<\/a><span class="community-role">站长<\/span><\/span>/);
   assert.match(rows, /<span class="community-uname">&lt;b&gt;x&lt;\/b&gt;<\/span><span class="community-level-marks"><span class="community-level-badge is-trust" role="img" aria-label="权限等级：L1 巡天" title="权限等级：L1 巡天">/);
   assert.equal(textAt(rows, 'time[datetime="2026-09-30T11:30:00Z"]'), '远山 30 分钟前回复', 'the latest replier');
-  assert.match(rows, /<time datetime="2026-09-29T08:00:00Z">1 天前<\/time>/, "otherwise when it was posted");
+  assert.equal(textAt(rows, 'time[datetime="2026-09-29T08:00:00Z"]'), '1 天前', "otherwise when it was posted");
   assert.match(rows, /class="community-topic-replies" href="#\/post\/a" tabindex="-1" aria-label="3 条回复，0 个赞"><small>0 赞<\/small><span><i-reply><\/i-reply>3<\/span>/);
   assert.match(html, /<dd>25<\/dd><\/div><div><dt>24 小时回复<\/dt><dd>4<\/dd>/);
   assert.match(html, /--w:100%"><i aria-hidden="true"><\/i><span>学习问答<\/span><span class="community-board-count">24</, "the busiest board has the full bar");

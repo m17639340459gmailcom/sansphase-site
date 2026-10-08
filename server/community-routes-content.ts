@@ -286,10 +286,31 @@ export async function contentRoutes(ctx: Ctx): Promise<boolean> {
         counts.set(memberKey(topic.author), entry);
       }
       const posters = [...counts.values()].sort((a, b) => b.topics - a.topics).slice(0, 5);
-      const map = await ctx.people([...items.flatMap((topic: StoredTopic) => topic.lastReply ? [topic.author, topic.lastReply.author] : [topic.author]), ...posters.map(poster => poster.author)]);
-      if (board && !ctx.canSeeBoard(board)) throw fail('没有这个版块。', 404);
-      const currentVisible = visible.filter(topic => { const current = live.topic(topic.id); return current && current.board === topic.board && ctx.canSeeBoard(current.board) && !current.pending && !current.hidden; });
-      const currentItems = currentVisible.slice((page - 1) * listingPageSize, page * listingPageSize);
+      const pagePeople = (topics: readonly StoredTopic[]) => topics.flatMap(topic => topic.lastReply ? [topic.author, topic.lastReply.author] : [topic.author]);
+      const initialPeople = [...pagePeople(items), ...posters.map(poster => poster.author)];
+      const queriedPeople = new Set(initialPeople.map(memberKey));
+      const map = await ctx.people(initialPeople);
+      const recheckVisible = () => {
+        if (board && !ctx.canSeeBoard(board)) throw fail('没有这个版块。', 404);
+        // Recheck public summaries after asynchronous identity work; complete
+        // threads would load every candidate's body and replies just to page six.
+        const currentById = new Map(live.topics(visible.map(topic => topic.id)).map(topic => [topic.id, topic]));
+        return visible.filter(topic => { const current = currentById.get(topic.id); return current && current.board === topic.board && ctx.canSeeBoard(current.board); });
+      };
+      let currentVisible = recheckVisible();
+      let currentItems = currentVisible.slice((page - 1) * listingPageSize, page * listingPageSize);
+      for (let attempts = 0; ; attempts++) {
+        const missing = new Map(pagePeople(currentItems).filter(person => !queriedPeople.has(memberKey(person))).map(person => [memberKey(person), person]));
+        if (!missing.size) break;
+        if (attempts >= 2) throw fail('帖子列表正在更新，请重新加载后重试。', 409);
+        for (const key of missing.keys()) queriedPeople.add(key);
+        const additional = await ctx.people([...missing.values()]);
+        for (const [key, person] of additional) map.set(key, person);
+        // A replacement person's lookup can itself overlap moderation or a
+        // scope change. Recheck again rather than showing an unqueried fallback.
+        currentVisible = recheckVisible();
+        currentItems = currentVisible.slice((page - 1) * listingPageSize, page * listingPageSize);
+      }
       ctx.send({
         items: currentItems.map(topic => ctx.topicDTO(topic, map)), total: currentVisible.length, page, pageSize: listingPageSize,
         ...(following ? { followingCount: following.length } : {}),
