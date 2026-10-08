@@ -33,21 +33,33 @@ test('draft navigation confirms once, loads the destination and preserves cancel
     }
     w.close();
   });
-  const settle = () => new Promise(resolve => setTimeout(resolve, 120));
+  let confirmations = 0;
+  const waitFor = async (condition, description) => {
+    const deadline = performance.now() + 5000;
+    while (!condition()) {
+      assert.ok(performance.now() < deadline,
+        `${description}: hash=${w.location.hash}, page=${main.querySelector('[data-community]')?.dataset.community || 'none'}, confirmations=${confirmations}, requests=${requests.join(', ')}`);
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+  };
+  const homeReady = () => main.querySelector('[data-community="home"] .community-results .community-empty:not([data-content-state]) h3')?.textContent === '这里还没有帖子';
   render();
-  await settle();
+  await waitFor(() => Boolean(main.querySelector('#community-title')), 'the draft editor becomes ready');
   const title = main.querySelector('#community-title');
   title.value = '未发送的标题';
   title.dispatchEvent(new w.Event('input', { bubbles: true }));
-  let confirmations = 0;
   w.confirm = () => { confirmations++; return true; };
+  const beforeHomeRequests = requests.length;
   main.querySelector('a[href="#/community/home"]').click();
-  await settle();
+  await waitFor(() => confirmations === 1 && homeReady()
+    && requests.slice(beforeHomeRequests).some(url => url.endsWith('/summary'))
+    && requests.slice(beforeHomeRequests).some(url => url.includes('/topics?')), 'the accepted destination loads after one confirmation');
   assert.equal(confirmations, 1, 'the link and history event share one confirmation');
-  assert.ok(requests.some(url => url.endsWith('/summary')), `the accepted destination refreshes its API data: ${requests.join(', ')}`);
+  assert.ok(requests.slice(beforeHomeRequests).some(url => url.endsWith('/summary')), `the accepted destination refreshes its API data: ${requests.join(', ')}`);
   assert.equal(main.querySelector('[data-community]')?.dataset.community, 'home');
   w.location.hash = '#/community/new';
-  await settle();
+  await waitFor(() => w.location.hash === '#/community/new' && main.querySelector('#community-title')?.value === '未发送的标题',
+    'returning to the editor restores the saved draft');
   assert.equal(main.querySelector('#community-title').value, '未发送的标题');
   const length = w.history.length;
   const state = structuredClone(w.history.state);
@@ -57,7 +69,10 @@ test('draft navigation confirms once, loads the destination and preserves cancel
   confirmations = 0;
   w.confirm = () => { confirmations++; return false; };
   w.history.back();
-  await settle();
+  // JSDOM traverses back and forward through separate queued tasks. A fixed
+  // delay can finish after cancellation but before the original entry returns.
+  await waitFor(() => confirmations === 1 && w.location.hash === '#/community/new'
+    && main.querySelector('#community-title')?.value === '未发送的标题', 'cancelled history navigation restores the original draft entry');
   assert.equal(confirmations, 1, 'back navigation asks once');
   assert.equal(w.location.hash, '#/community/new');
   assert.equal(w.history.length, length);
@@ -65,6 +80,7 @@ test('draft navigation confirms once, loads the destination and preserves cancel
   assert.equal(replacements, 0, 'cancel returns to the original entry without overwriting any entry');
   w.confirm = () => true;
   w.history.back();
-  await settle();
+  await waitFor(() => w.location.hash === '#/community/home' && homeReady(),
+    'the preceding destination remains reachable after cancellation');
   assert.equal(w.location.hash, '#/community/home', 'the preceding entry survives cancellation');
 });
