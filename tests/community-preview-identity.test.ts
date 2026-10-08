@@ -73,7 +73,8 @@ test('local role picker switches fixture identities and keeps management permiss
     }
     assert.equal(me.previewIdentityHref, undefined);
     assert.equal((await read('manage', cookie)).status, mod ? 200 : 403);
-    assert.equal((await read('manage?tab=items', cookie)).status, owner ? 200 : 403);
+    assert.equal((await read('manage?tab=items', cookie)).status, owner || role === 'general' ? 200 : 403);
+    if (role === 'general') assert.deepEqual([me.level, me.trustLevel], [3, 3], 'the local preview uses the same effective general level as production');
     assert.equal((await read('manage?tab=orders', cookie)).status, owner ? 200 : 403);
     const profile = await (await read('members/10002', cookie)).json();
     assert.equal(profile.canAppoint, ['owner', 'general', 'steward'].includes(role));
