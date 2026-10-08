@@ -18,6 +18,7 @@ import { isCommunityPassiveRead } from './community-passive-request.ts';
 import { communityApprovedAvatarURL } from './community-avatar-url.ts';
 import { communityLevelRules } from '../src/community-rules.ts';
 import type { CommunityStaffRole } from '../src/community-staff.ts';
+import { canManageCommunityShop } from './community-shop-access.ts';
 
 export { communityContactReason } from './community-context.ts';
 export type { CommunityViewer, PersonInfo } from './community-context.ts';
@@ -249,7 +250,8 @@ export function createCommunityService(options: ServiceOptions) {
         return Boolean(topic && ctx.canSeeBoard(topic.board) && (!topic.pending && !topic.hidden || ctx.canModerateBoard(topic.board) || !ctx.readOnly && same(topic.author, ctx.me))
           && (!image.reply_id || reply && (!reply.hidden || ctx.canModerateBoard(topic.board) || !ctx.readOnly && same(reply.author, ctx.me))));
       }
-      return same(ctx.me, { kind: image.uploader_kind, id: image.uploader_id }) || image.purpose === 'shop' && ctx.live.economy.imageVisible(id, ctx.me);
+      return same(ctx.me, { kind: image.uploader_kind, id: image.uploader_id }) || image.purpose === 'shop'
+        && (ctx.live.economy.imageVisible(id, ctx.me) || canManageCommunityShop(ctx) && ctx.live.economy.customItems().some(item => item.image === id));
     };
     if (!allowed() || !uploads) throw fail('图片不存在。', 404);
     let data: Buffer;

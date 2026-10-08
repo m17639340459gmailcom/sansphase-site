@@ -6,6 +6,7 @@ import { communityImageBytes } from '../src/community-rules.ts';
 import { withStreamUpload } from './stream-upload.ts';
 import { fail } from './community-db.ts';
 import type { Ctx } from './community-context.ts';
+import { requireCommunityShopManagement } from './community-shop-access.ts';
 
 async function usableFrame(image: Buffer, width: number, height: number) {
   if (width !== height) return false;
@@ -26,6 +27,8 @@ async function usableFrame(image: Buffer, width: number, height: number) {
 // Product artwork uses the existing private image store. GIF and animated WebP
 // stay animated; forum attachments keep their existing static image rules.
 export async function saveCommunityImage(ctx: Ctx, shop = false, bannerScope?: string, profile = false) {
+  const requireShop = () => { if (shop) requireCommunityShopManagement(ctx); };
+  requireShop();
   if (profile && ctx.me.kind !== 'reader') throw fail('作者品牌资料不能通过读者编辑器修改。', 403);
   const bannerAccess = { actor: ctx.me, browsingAsReader: ctx.browsingAsReader, canSeeBoard: ctx.canSeeBoard };
   const requireBanner = () => { if(bannerScope !== undefined && bannerScope !== 'home')ctx.requireStaff('banner.manage',bannerScope); };
@@ -37,8 +40,9 @@ export async function saveCommunityImage(ctx: Ctx, shop = false, bannerScope?: s
   ctx.throttle('image');
   const formats: Record<string, string> = { 'image/jpeg': 'jpeg', 'image/png': 'png', 'image/webp': 'webp', ...(shop ? { 'image/gif': 'gif' } : {}) };
   const label = shop ? 'JPG、PNG、WebP 或 GIF' : 'JPG、PNG 或 WebP';
-  const bytes = communityImageBytes(ctx.owner), uploads = resolve(directory, 'uploads');
+  const bytes = communityImageBytes(shop || ctx.owner), uploads = resolve(directory, 'uploads');
   return withStreamUpload(ctx.req, directory, async (file: { mimetype: string; tempFilePath: string }) => {
+    if (shop) { await ctx.refreshStaff(); requireShop(); }
     if (!formats[file.mimetype]) throw fail(`图片只支持 ${label}。`, 415);
     let full: Buffer, thumb: Buffer, width: number, height: number;
     try {
@@ -57,6 +61,7 @@ export async function saveCommunityImage(ctx: Ctx, shop = false, bannerScope?: s
       throw fail(`图片无法读取，请换一张 ${label} 图片。`);
     }
     const frameReady = shop && await usableFrame(full, width, height);
+    if (shop) { await ctx.refreshStaff(); requireShop(); }
     const id = randomUUID(), imagePath = resolve(uploads, `community-image-${id}.webp`), thumbPath = resolve(uploads, `community-thumb-${id}.webp`);
     await mkdir(uploads, { recursive: true });
     try {
@@ -65,6 +70,7 @@ export async function saveCommunityImage(ctx: Ctx, shop = false, bannerScope?: s
       // Re-encoding and disk writes yield; recheck the real appointment before
       // recording a completed upload, and remove the files when access changed.
       await ctx.refreshStaff();
+      requireShop();
       requireBanner();
       if (bannerScope !== undefined) ctx.live.banners.authorize(bannerScope, bannerAccess);
       ctx.requireConsent();

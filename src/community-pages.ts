@@ -12,7 +12,7 @@ import {
   communityShopCats, communityReportReasons, communityReviewReasons, checkinMonth, beijingDay,
 } from './community-rules.mjs';
 import type { ShopItem, ShopCategory } from './community-rules.ts';
-import { communityManagementShellHTML } from './community-management.mjs';
+import { communityManagementShellHTML, communityCanManageItems } from './community-management.mjs';
 import { communityProfileReviewsHTML, profileImageURL } from './community-profile.mjs';
 import type { CommunityProfileImage, CommunityProfileReview, CommunityBackgroundReview } from './community-profile.ts';
 import { communityStewardsHTML } from './community-stewards.mjs';
@@ -701,6 +701,7 @@ export function communityManageHTML({ manage, tab, itemEditing = null, shippingO
   const mayManage = Boolean(data || me?.owner || me?.mod);
   const owner = data?.owner ?? (mayManage ? Boolean(me?.owner) : null);
   const staff = data?.actorStaff ?? me?.staff;
+  const manageItems = communityCanManageItems(data, me);
   const permitted = (capability: CommunityStaffPermission, board?: string | null) => staff === undefined ? true : Boolean(staff?.permissions.includes(capability) && (!board || staff.boards.includes(board)));
   const staffRole = communityStaffRoles.find(item => item.id === staff?.role);
   const head = pageHead('', staffRole ? t(`${staffRole.name}社区管理`, `${staffRole.nameEn} community management`) : owner === true ? t('作者社区管理', 'Owner community management') : owner === false ? t('版主社区管理', 'Moderator community management') : t('社区管理', 'Community management'), t('处理社区内容与事务，管理操作会留下记录。', 'Manage community content and operations. Actions are recorded.'));
@@ -712,7 +713,8 @@ export function communityManageHTML({ manage, tab, itemEditing = null, shippingO
     ...(permitted('content.inspect') ? [["content", manageHref("content"), t("帖子管理", "Posts")]] as Array<[string, string, string, number?]> : []),
     ...(staff !== undefined && permitted('feature.decide') ? [["features", manageHref("features"), t("精选推荐", "Featured recommendations")]] as Array<[string, string, string, number?]> : []),
     ...(permitted('banner.manage') ? [["banners", manageHref("banners"), t("横幅设置", "Banners")]] as Array<[string, string, string, number?]> : []),
-    ...(owner ? [["boards", manageHref("boards"), t("板块管理", "Boards")], ["orders", manageHref("orders"), t("兑换发货", "Orders"), data?.counts.orders], ["items", manageHref("items"), t("兑换所上架", "Shop items")]] as Array<[string, string, string, number?]> : []),
+    ...(owner ? [["boards", manageHref("boards"), t("板块管理", "Boards")], ["orders", manageHref("orders"), t("兑换发货", "Orders"), data?.counts.orders]] as Array<[string, string, string, number?]> : []),
+    ...(manageItems ? [["items", manageHref("items"), t("兑换所上架", "Shop items")]] as Array<[string, string, string, number?]> : []),
     ...((staff === undefined ? owner : permitted('staff.appoint')) ? [["stewards", manageHref("stewards"), t("管理成员", "Staff")]] as Array<[string, string, string, number?]> : []),
     ...(staff === undefined || permitted('member.mute') || permitted('member.unmute') ? [["sanctions", manageHref("sanctions"), t("处罚记录", "Sanctions")]] as Array<[string, string, string, number?]> : []),
     ...(permitted('content.inspect') ? [["data", manageHref("data"), t("数据", "Data")]] as Array<[string, string, string, number?]> : []),
@@ -780,7 +782,7 @@ export function communityManageHTML({ manage, tab, itemEditing = null, shippingO
           + `<td data-label="${t("状态", "Status")}"><span class="community-kind ${cls}">${label}</span></td><td class="is-right" data-label="${t("操作", "Actions")}">${order.status === "pending" ? `<div class="community-action-group community-order-actions"><button type="button" class="community-button is-small is-good" data-action="community-ship" data-id="${esc(order.id)}">${icons.truck || ""}<span>${t("标记已发货", "Shipped")}</span></button> <button type="button" class="community-button is-small" data-action="community-cancel-order" data-id="${esc(order.id)}"><span>${t("取消并退回", "Cancel & refund")}</span></button></div>` : ""}</td></tr>`;
       }).join("")}</tbody></table></div><p class="community-muted">${t("收货信息只给站长看，发货或取消后自动删除。", "Shipping details are only for the owner and are deleted once shipped or cancelled.")}</p>`
       : emptyHTML(common, t("没有实物兑换", "No goods orders"));
-  } else if (tab === "items" && data.owner) {
+  } else if (tab === "items" && manageItems) {
     const editing = itemEditing ? (itemEditing.id ? data.items.find((item) => item.id === itemEditing.id) || null : null) : undefined;
     const itemType = (item: CommunityManagedItem) => item.kind === 'card' ? t('补签卡', 'Make-up card') : item.kind === 'frame' ? t('头像框', 'Avatar frame') : item.kind === 'color' ? t('昵称特效', 'Name effect') : item.kind === 'cover' ? t('主页背景', 'Profile background') : item.cat === 'digital' ? t('数字资源', 'Digital resource') : t('实物周边', 'Physical goods');
     const itemCategory = (item: CommunityManagedItem) => data.categories?.find(category => category.id === item.category)?.name || t('默认分组', 'Default collection');

@@ -10,24 +10,37 @@ import { communityBadgeFamilies, communityBadgeTiers } from '../src/community-ba
 import type { BadgeFamilyId, BadgeTier } from '../src/community-badge-policy.ts';
 import type { BadgeReview, BadgeSource } from './community-badges.ts';
 import { communityProfileReviews } from './community-routes-profile.ts';
+import { canManageCommunityShop, requireCommunityShopManagement } from './community-shop-access.ts';
 
 const tabs = ['queue', 'reports', 'content', 'orders', 'items', 'stewards', 'sanctions', 'data', 'banners', 'contact', 'convention', 'profiles', 'features', 'boards'] as const;
-// Commerce and the convention stay owner-only; staff tools use individual grants.
-const ownerTabs = new Set(['orders', 'items', 'convention', 'boards']);
-const canTab=(ctx:Ctx,tab:string)=>ctx.owner || !ownerTabs.has(tab) && (tab==='contact' || (tab==='stewards'?ctx.canStaff('staff.appoint'):tab==='sanctions'?ctx.canStaff('member.mute')||ctx.canStaff('member.unmute'):tab==='profiles'?ctx.staff?.permissions.some(cap=>cap.startsWith('profile.')):ctx.moderationBoards.some(board=>ctx.canStaff(tab==='reports'?'report.review':tab==='banners'?'banner.manage':tab==='features'?'feature.decide':'content.inspect',board)) && (tab!=='features'||ctx.staff?.role!=='assistant')));
+// Orders and the convention stay owner-only; product management follows the effective role.
+const ownerTabs = new Set(['orders', 'convention', 'boards']);
+const canTab = (ctx: Ctx, tab: string) => ctx.owner || (tab === 'items' ? canManageCommunityShop(ctx)
+  : !ownerTabs.has(tab) && (tab === 'contact' || (tab === 'stewards' ? ctx.canStaff('staff.appoint')
+    : tab === 'sanctions' ? ctx.canStaff('member.mute') || ctx.canStaff('member.unmute')
+    : tab === 'profiles' ? ctx.staff?.permissions.some(cap => cap.startsWith('profile.'))
+    : ctx.moderationBoards.some(board => ctx.canStaff(tab === 'reports' ? 'report.review' : tab === 'banners' ? 'banner.manage' : tab === 'features' ? 'feature.decide' : 'content.inspect', board))
+      && (tab !== 'features' || ctx.staff?.role !== 'assistant'))));
 const whole = (value: unknown, label: string, min: number, max: number) => {
   const number = Number(value);
   if (!Number.isInteger(number) || number < min || number > max) throw fail(`${label}需要是 ${min} 到 ${max} 之间的整数。`);
   return number;
 };
 function itemInput(ctx: Ctx, body: Body, id?: string): CustomItemInput {
+  const previous = id ? ctx.live.economy.item(id) : null;
+  const usableImage = (image: string) => {
+    const upload = /^[0-9a-f-]{36}$/.test(image) ? ctx.live.image(image) : null;
+    if (!upload || upload.deleted_at || upload.purpose !== 'shop' || upload.topic_id || upload.reply_id) return null;
+    // Editing may keep this product's existing artwork regardless of uploader.
+    // A replacement or new product must use this actor's own shop upload.
+    if (previous?.image !== image && (upload.uploader_kind !== ctx.me.kind || upload.uploader_id !== ctx.me.id)) return null;
+    return upload;
+  };
   let image: string | null | undefined;
   if (body.image !== undefined) {
     image = body.image === null || body.image === '' ? null : String(body.image);
     if (image) {
-      const upload = /^[0-9a-f-]{36}$/.test(image) ? ctx.live.image(image) : null;
-      if (!upload || upload.deleted_at || upload.purpose !== 'shop' || upload.uploader_kind !== ctx.me.kind || upload.uploader_id !== ctx.me.id || upload.topic_id)
-        throw fail('商品图片已失效，请重新上传。');
+      if (!usableImage(image)) throw fail('商品图片已失效，请重新上传。');
     }
   }
   const cat = body.cat === 'goods' ? 'goods' : body.cat === 'digital' ? 'digital' : body.cat === 'look' ? 'look' : body.cat === 'card' ? 'card' : null;
@@ -38,7 +51,6 @@ function itemInput(ctx: Ctx, body: Body, id?: string): CustomItemInput {
   const kind = card || (cat === 'look' && (body.kind === 'frame' || body.kind === 'color' || body.kind === 'cover') ? body.kind : undefined);
   if (cat === 'look' && !kind) throw fail('请选择头像框、昵称特效或主页背景。');
   if (cat !== 'look' && cat !== 'card' && body.kind !== undefined && body.kind !== cat) throw fail('物品类型与用途不匹配。');
-  const previous = id ? ctx.live.economy.item(id) : null;
   if (kind === 'frame') {
     const assetId = image === undefined ? previous?.image : image;
     const upload = assetId ? ctx.live.image(assetId) : null;
@@ -47,9 +59,7 @@ function itemInput(ctx: Ctx, body: Body, id?: string): CustomItemInput {
   }
   if (kind === 'cover') {
     const assetId = image === undefined ? previous?.image : image;
-    const upload = assetId ? ctx.live.image(assetId) : null;
-    if (!upload || upload.deleted_at || upload.purpose !== 'shop' || upload.uploader_kind !== ctx.me.kind || upload.uploader_id !== ctx.me.id || upload.topic_id)
-      throw fail('主页背景需要使用作者上传的商品图片，请重新上传。');
+    if (!assetId || !usableImage(assetId)) throw fail('主页背景需要使用有效商品图片，请重新上传。');
   }
   const effect = kind === 'color' ? communityNameEffect(body.effect === undefined ? previous?.effect : body.effect) : null;
   if (kind === 'color' && !effect) throw fail('请选择昵称特效，单色需一种颜色，渐变或流光需两种颜色（格式如 #976223）。');
@@ -188,8 +198,8 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
         },
       })),
       orders: orders.map(order => ({ ...order, member: ctx.person(order.member, map) })),
-      items: ctx.owner ? live.economy.customItems() : [],
-      categories: ctx.owner ? live.economy.categories() : [],
+      items: ctx.owner || tab === 'items' && canManageCommunityShop(ctx) ? live.economy.customItems() : [],
+      categories: ctx.owner || tab === 'items' && canManageCommunityShop(ctx) ? live.economy.categories() : [],
       sanctions: sanctions.map(sanction => ({ ...sanction, member: ctx.person(sanction.member, map) })),
       data: tab === 'data' ? { flow: ctx.owner ? live.ledger.flow(7) : [], boards: live.boards.list().filter(board => ctx.canModerateBoard(board.id)).map(board => ({ id: board.id, topics: activity.boards[board.id] || 0 })) } : null,
     });
@@ -202,7 +212,7 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
     return true;
   }
   if (path === 'manage/item-image') {
-    if (!ctx.owner) throw fail('只有作者能上传商品图片。', 403);
+    requireCommunityShopManagement(ctx);
     ctx.send(await saveCommunityImage(ctx, true), 201);
     return true;
   }
@@ -336,16 +346,20 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
       return live.featureRecommendations.decide(ctx.me,recommendation[1],approve,reason,id=>live.setFeatured(id,true,{actor:ctx.me}));
     },{recommendation:recommendation[1],reason});ctx.send({ok:true});return true;
   }
-  if (!ctx.owner) throw fail('只有站长能管理兑换所。', 403);
   if (path === 'manage/categories') {
+    requireCommunityShopManagement(ctx);
     const name = ctx.clean(body.name, [2, 20], '类别名称', false);
     if (communityShopCats.some(category => category.name === name)) throw fail('这个名称是兑换所的内置类别，请换一个名称。');
-    const category = await ctx.auditMutation('category-create', () => live.economy.saveCategory(name), saved => ({ category: saved.id, name }));
+    const category = await ctx.auditMutation('category-create', () => {
+      requireCommunityShopManagement(ctx);
+      return live.economy.saveCategory(name);
+    }, saved => ({ category: saved.id, name }));
     ctx.send(category, 201);
     return true;
   }
   const order = /^manage\/orders\/([^/]+)\/(ship|cancel)$/.exec(path);
   if (order) {
+    if (!ctx.owner) throw fail('只有作者能处理兑换订单。', 403);
     let tracking = null;
     if (order[2] === 'ship') {
       const company = typeof body.company === 'string' ? body.company.trim() : '';
@@ -354,6 +368,7 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
       tracking = company || number ? { company, number } : null;
     }
     await ctx.auditMutation(`order-${order[2]}`, () => {
+      if (!ctx.owner) throw fail('只有作者能处理兑换订单。', 403);
       const result = order[2] === 'ship' ? live.economy.ship(order[1], Date.now(), tracking) : live.economy.cancel(order[1]);
       live.members.notify(result.member, { type: 'system', text: order[2] === 'ship' ? '你兑换的物品已经发货' : '你兑换的物品已取消，星尘已退回', data: { order: order[2] === 'ship' ? 'shipped' : 'cancelled', item: result.itemName, amount: result.price, ...(result.tracking?.number ? { tracking: result.tracking.number, company: result.tracking.company } : {}) } });
       return result;
@@ -363,16 +378,23 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
   }
   const item = /^manage\/items(?:\/([^/]+))?$/.exec(path);
   if (item) {
+    requireCommunityShopManagement(ctx);
     const fields = Object.keys(body);
     if (fields.length === 1 && fields[0] === 'active') {
       if (!item[1] || typeof body.active !== 'boolean') throw fail('请选择已有物品并设置正确的上架状态。');
       const active = body.active;
-      const id = await ctx.auditMutation('item-update', () => live.economy.setItemActive(item[1], active), saved => ({ item: saved, active }));
+      const id = await ctx.auditMutation('item-update', () => {
+        requireCommunityShopManagement(ctx);
+        return live.economy.setItemActive(item[1], active);
+      }, saved => ({ item: saved, active }));
       ctx.send({ id }, 200);
       return true;
     }
     const id = await ctx.auditMutation(item[1] ? 'item-update' : 'item-create',
-      () => live.economy.saveItem(item[1] || null, itemInput(ctx, body, item[1])), saved => ({ item: saved }));
+      () => {
+        requireCommunityShopManagement(ctx);
+        return live.economy.saveItem(item[1] || null, itemInput(ctx, body, item[1]));
+      }, saved => ({ item: saved }));
     ctx.send({ id }, item[1] ? 200 : 201);
     return true;
   }

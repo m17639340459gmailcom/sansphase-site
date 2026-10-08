@@ -1,10 +1,20 @@
 import { communityHomeHref } from './community.mjs';
-import type { Common } from './community.ts';
+import type { Common, CommunityMe } from './community.ts';
+import type { CommunityManage } from './community-pages.ts';
 import { communityStaffRoles } from './community-staff.mjs';
 import type { CommunityStaffRole } from './community-staff.ts';
 
 export type ManagementSection = [id: string, href: string, label: string, count?: number];
 const sectionIcons: Record<string, string> = { review: 'check', profiles: 'user', content: 'reply', features: 'award', banners: 'image', boards: 'grid', orders: 'truck', items: 'box', stewards: 'users', sanctions: 'shield', data: 'trending', contact: 'mail', convention: 'bookmark' };
+
+// Presentation follows the latest management response. Server authorization
+// remains final, including a role change while an operation is in flight.
+export function communityCanManageItems(data: Pick<CommunityManage, 'owner' | 'actorStaff' | 'allowedTabs'> | null, me: CommunityMe | null): boolean {
+  if (me?.management?.browsingAsReader) return false;
+  const owner = data ? data.owner : me?.owner;
+  const staff = data ? data.actorStaff : me?.staff;
+  return Boolean((owner || staff?.role === 'general') && (!data?.allowedTabs || data.allowedTabs.includes('items')));
+}
 
 export function communityManagementShellHTML(owner: boolean | null, tab: string, sections: ManagementSection[], content: string, { t, esc, icons = {} }: Common, canBrowseAsReader = true, staffRole?: CommunityStaffRole | null) {
   const definition = communityStaffRoles.find(item => item.id === staffRole);

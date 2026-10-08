@@ -16,6 +16,7 @@ import { bodyImageContent } from './community-body-images.mjs';
 import { communityImageBytes, communityNameEffect } from './community-rules.mjs';
 import { communityNewsBoard } from './community-news.mjs';
 import { readNameEffectFile } from './community-equipment-import.mjs';
+import { communityCanManageItems } from './community-management.mjs';
 import type { ShopCategory } from './community-rules.ts';
 import { autosizeCommunityTextarea } from './community-editor-size.mjs';
 import { createCommunityBannerController } from './community-banner-controller.mjs';
@@ -1979,7 +1980,13 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       await reload();
     });
   }
+  function canManageItems() {
+    const current = route();
+    return current.view === 'manage' && current.tab === 'items'
+      && communityCanManageItems(readyData(manages.get('items')), readyData(me));
+  }
   async function submitItem(form: Form) {
+    if (!canManageItems()) return status(form, tr('当前身份不能管理兑换商品，请刷新身份。', 'Refresh your account; this role cannot manage shop items.'));
     if (form.dataset.uploading === 'true') return status(form, tr('请等待素材处理完成。', 'Wait for the asset to finish processing.'));
     const id = form.dataset.id || '';
     const number = (name: string) => valueOf(form, name) === '' ? null : Number(valueOf(form, name));
@@ -2005,6 +2012,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     });
   }
   async function submitCategory(form: Form) {
+    if (!canManageItems()) return status(form, tr('当前身份不能管理商品分组，请刷新身份。', 'Refresh your account; this role cannot manage shop collections.'));
     const name = valueOf(form, 'name').trim();
     if (length(name) < 2 || length(name) > 20) return invalid(form, fieldOf(form, 'name'), tr('分类名称需要 2–20 个字。', 'Category names require 2–20 characters.'));
     await busy(form, tr('正在添加…', 'Adding…'), async () => {
@@ -2678,9 +2686,11 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         if (!confirmed(target, tr('确认取消并退回', 'Confirm cancel'))) return;
         void act(target, async () => { await send(`manage/orders/${enc(id)}/cancel`); notify(tr('已取消，星尘已退回。', 'Cancelled and refunded.')); await reload(); });
         return;
-      case 'community-item-edit': itemEditing = { id: id || null }; openPanel('form[data-community-form="item"]'); return;
+      case 'community-item-edit':
+        if (!canManageItems()) return;
+        itemEditing = { id: id || null }; openPanel('form[data-community-form="item"]'); return;
       case 'community-item-active': {
-        if (!id || !readyData(me)?.owner || route().view !== 'manage' || route().tab !== 'items') return;
+        if (!id || !canManageItems()) return;
         const active = target.dataset.active === 'true';
         void act(target, async () => { await send(`manage/items/${enc(id)}`, { active }); notify(active ? tr('已重新上架。', 'Item relisted.') : tr('已下架，既有兑换记录和权益保留。', 'Item unlisted. Existing redemptions are retained.')); await reload(); });
         return;
@@ -2873,6 +2883,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     form.querySelectorAll<HTMLInputElement | HTMLButtonElement>('[data-community-item-upload], [data-community-effect-upload], button[type="submit"]').forEach(field => { field.disabled = value; });
   }
   async function uploadProduct(form: Form, file?: File) {
+    if (!canManageItems()) return;
     if (!file || form.dataset.uploading === 'true' || form.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled) return;
     const line = form.querySelector<HTMLElement>('[data-item-upload-status]');
     const say = (text: string) => { if (line) line.textContent = text; };
@@ -2892,6 +2903,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     finally { if (form.isConnected) setEquipmentBusy(form, false); }
   }
   async function importNameEffect(form: Form, file?: File) {
+    if (!canManageItems()) return;
     if (!file || form.dataset.uploading === 'true' || form.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled) return;
     const identity = frameIdentity;
     setEquipmentBusy(form, true);
@@ -2913,8 +2925,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     finally { if (form.isConnected) setEquipmentBusy(form, false); }
   }
   function equipmentForm() {
-    if (routeHandoffPending()) return null;
-    // Only an open author product editor accepts desktop files. Other page
+    if (routeHandoffPending() || !canManageItems()) return null;
+    // Only an open product manager's editor accepts desktop files. Other page
     // editors retain their own drag handlers, including inline reply images.
     return mounted?.main.querySelector<Form>('form[data-community-form="item"]') || null;
   }

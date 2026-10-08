@@ -1680,7 +1680,7 @@ test("stewards, mutes, moderated deletions, tag edits and the audit log", async 
   assert.equal((await json(post("members/u5/steward", { on: true,role:"general", boards: allModerationBoards,permissions:communityLegacyStaffPermissions,delegable:[] }, "owner=yes"))).staff.role,"general");
   assert.deepEqual([(await json(get("me", "reader=s1"))).mod, (await json(get("me", "reader=s1"))).level], [true, 3]);
   assert.equal((await get("manage", "reader=s1")).status, 200);
-  assert.equal((await get("manage?tab=items", "reader=s1")).status, 403, "the shop is the owner's");
+  assert.equal((await get("manage?tab=items", "reader=s1")).status, 200, "an active general can manage shop products");
   assert.equal((await get("manage?tab=orders", "reader=s1")).status, 403);
 
   const { id } = await json(post("topics", topicBody));

@@ -73,6 +73,50 @@ async function setup(t, hash, handle = () => null, ctxOptions = {}) {
 const managementViewer = { ...person, name: '無相', uid: 'owner', role: 'owner', owner: true, mod: true, management: { role: 'owner', browsingAsReader: false } };
 const managementData = { owner: true, tab: 'items', counts: { queue: 0, reports: 0, orders: 0, sanctions: 0 }, kpis: { topics24h: 1, replies24h: 2 }, queue: { topics: [], replies: [] }, reports: [], content: [topic('p1')], items: [], orders: [], sanctions: [], data: null };
 
+const generalShopStaff = { role: 'general', boards: ['qa'], permissions: [], delegable: [], parent: { kind: 'owner', id: 'owner' } };
+const generalShopViewer = { ...person, mod: true, staffRole: 'general', staff: generalShopStaff, level: 3, trustLevel: 3 };
+const generalShopData = { ...managementData, owner: false, actorStaff: generalShopStaff, allowedTabs: ['items', 'contact'] };
+
+test('an existing general sees the shared product editor and submits edits and categories without owner-only sections', async t => {
+  const item = { id: 'general-edit', cat: 'digital', kind: 'digital', name: '社区工作流', desc: '供社区读者兑换的工作流。', price: 8, stock: null, active: true, delivery: '兑换后内容', builtin: false };
+  const f = await setup(t, '#/community/manage/items', url => {
+    if (url.endsWith('/me')) return response(generalShopViewer);
+    if (url.includes('/manage?')) return response({ ...generalShopData, items: [item] });
+    if (url.endsWith('/manage/items/general-edit')) return response({ id: item.id });
+    if (url.endsWith('/manage/categories')) return response({ id: 'new-category', name: '工作流' });
+    return null;
+  });
+  assert.ok(f.main.querySelector('.community-management-nav a[href="#/community/manage/items"]'));
+  for (const tab of ['orders', 'boards', 'convention']) assert.equal(f.main.querySelector(`.community-management-nav a[href="#/community/manage/${tab}"]`), null);
+  f.main.querySelector('[data-action="community-item-edit"][data-id="general-edit"]').click();
+  const form = f.main.querySelector('[data-community-form="item"]');
+  assert.ok(form); form.elements.namedItem('name').value = '更新后的社区工作流';
+  form.dispatchEvent(new f.w.Event('submit', { bubbles: true, cancelable: true })); await turn(); await turn();
+  const saved = f.requests.find(call => call.url.endsWith('/manage/items/general-edit'));
+  assert.equal(JSON.parse(saved.init.body).name, '更新后的社区工作流');
+  const category = f.main.querySelector('[data-community-form="category"]');
+  assert.ok(category); category.elements.namedItem('name').value = '工作流';
+  category.dispatchEvent(new f.w.Event('submit', { bubbles: true, cancelable: true })); await turn();
+  assert.deepEqual(JSON.parse(f.requests.find(call => call.url.endsWith('/manage/categories')).init.body), { name: '工作流' });
+});
+
+test('a general publication shortcut submits the exact unlist patch once and preserves pending-button feedback', async t => {
+  const pending = deferred(), item = { id: 'general-unlist', cat: 'digital', kind: 'digital', name: '社区资源', desc: '资源说明', price: 8, stock: null, active: true, delivery: '', builtin: false };
+  const f = await setup(t, '#/community/manage/items', url => {
+    if (url.endsWith('/me')) return response(generalShopViewer);
+    if (url.includes('/manage?')) return response({ ...generalShopData, items: [item] });
+    if (url.endsWith('/manage/items/general-unlist')) return pending.promise;
+    return null;
+  });
+  const button = f.main.querySelector('[data-action="community-item-active"]');
+  assert.ok(button); button.click(); button.click();
+  const writes = f.requests.filter(call => call.url.endsWith('/manage/items/general-unlist'));
+  assert.equal(writes.length, 1); assert.deepEqual(JSON.parse(writes[0].init.body), { active: false });
+  assert.equal(button.disabled, true);
+  item.active = false; pending.resolve(response({ id: item.id })); await turn(); await turn();
+  assert.match(f.main.querySelector('[data-action="community-item-active"]').textContent, /重新上架/);
+});
+
 test('authors correct an unredeemed product into a make-up card without replacing its image or draft', async t => {
   const item = { id: 'wrong-kind', cat: 'digital', kind: 'digital', name: '补签卡', desc: '补签漏签的一天。', price: 8, stock: 99, left: 99, active: true, delivery: '原来的错误资源说明', image: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', canChangeKind: true };
   const fixture = await setup(t, '#/community/manage/items', (url, init) => {
