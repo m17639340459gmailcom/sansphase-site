@@ -275,7 +275,8 @@ test('text fallback submits once and an explicit retry cannot unlock or restart 
 
 test('fallback write retains its submit lock and retry ownership through quote and unquote repaint', async t => {
   const write = deferred(); const f = await setup(t, deferred(), (url, init) => url.endsWith('/topics/p1/replies') && init.method === 'POST' ? write.promise : null);
-  f.load.reject(Error('offline')); await flush(); const root = f.root(); f.type('等待提交中的回复'); f.send(); await flush();
+  f.load.reject(Error('offline')); await flush(); const root = f.root(); f.type('等待提交中的回复'); f.send();
+  await waitFor(() => f.calls.some(call => call.url.endsWith('/topics/p1/replies') && call.init.method === 'POST'), 'quote repaint starts after the pending request has reached the transport');
   const originalButton = root.closest('form').querySelector('button[type=submit]');
   f.main.querySelector('[data-action="community-quote"]').click(); await flush();
   assert.equal(f.root(), root); assert.equal(root.closest('form').querySelector('button[type=submit]').disabled, true);
@@ -292,7 +293,8 @@ test('fallback write retains its submit lock and retry ownership through quote a
 
 test('failed fallback write after quote reports to the retained form and never retries an unknown POST', async t => {
   const write = deferred(); const f = await setup(t, deferred(), (url, init) => url.endsWith('/topics/p1/replies') && init.method === 'POST' ? write.promise : null);
-  f.load.reject(Error('offline')); await flush(); const root = f.root(); f.type('失败也保留草稿'); f.send(); await flush();
+  f.load.reject(Error('offline')); await flush(); const root = f.root(); f.type('失败也保留草稿'); f.send();
+  await waitFor(() => f.calls.some(call => call.url.endsWith('/topics/p1/replies') && call.init.method === 'POST'), 'the deferred failure belongs to an already started request');
   f.main.querySelector('[data-action="community-quote"]').click(); await flush();
   write.resolve({ ok: false, status: 503, json: async () => ({ error: '服务稍后恢复' }) }); await flush();
   assert.match(root.closest('form').querySelector('.community-form-status').textContent, /服务稍后恢复/);
@@ -304,7 +306,8 @@ test('failed fallback write after quote reports to the retained form and never r
 for (const changed of ['identity', 'hash']) {
   test(`late fallback write failure cannot transfer feedback after ${changed} changes while the old root is connected`, async t => {
     const write = deferred(); const f = await setup(t, deferred(), (url, init) => url.endsWith('/topics/p1/replies') && init.method === 'POST' ? write.promise : null);
-    f.load.reject(Error('offline')); await flush(); const root = f.root(); f.type('原账号提交'); f.send(); await flush();
+    f.load.reject(Error('offline')); await flush(); const root = f.root(); f.type('原账号提交'); f.send();
+    await waitFor(() => f.calls.some(call => call.url.endsWith('/topics/p1/replies') && call.init.method === 'POST'), 'identity changes only after the late-response scenario has started its request');
     const line = root.closest('form').querySelector('.community-form-status'), before = line.textContent;
     if (changed === 'identity') f.ui.clear(); else f.w.history.replaceState(null, '', '#/post/p2');
     assert.equal(root.isConnected, true);
