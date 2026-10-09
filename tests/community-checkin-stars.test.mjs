@@ -159,6 +159,21 @@ test('check-in panels retain date actions and earned badges within the new prese
   dom.window.close();
 });
 
+test('check-in halos, blinking status and board glow share the existing scroll pause', () => {
+  const css = postcss.parse(readFileSync(new URL('../src/community.css', import.meta.url), 'utf8'));
+  for (const selector of ['.community-ck-dot', '.community-bh-glow',
+    '.community-star-map .community-cs.is-on .community-star-aura', '.community-star-map .community-cs.is-now .community-star-aura']) {
+    const rule = css.nodes.find(node => node.type === 'rule' && node.selector === selector);
+    assert.ok(rule, `${selector} retains its original animation rule`);
+    const animation = rule.nodes.findIndex(node => node.type === 'decl' && node.prop === 'animation');
+    const pause = rule.nodes.findIndex(node => node.type === 'decl' && node.prop === 'animation-play-state');
+    assert.ok(animation >= 0);
+    assert.ok(pause > animation, `${selector} must set play-state after the animation shorthand resets it`);
+    assert.equal(rule.nodes[pause].value, 'var(--community-decoration-play-state, running)');
+    assert.equal(Boolean(rule.nodes[pause].important), false);
+  }
+});
+
 test('the marked header, status and month controls retain meaning without decorative button clutter', () => {
   const css = postcss.parse(readFileSync(new URL('../src/community.css', import.meta.url), 'utf8'));
   const centering = new Map();

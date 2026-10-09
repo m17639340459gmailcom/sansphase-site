@@ -2,6 +2,97 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { communitySkyFixture as fixture } from './helpers/community-sky.mjs';
 
+test('live reduced-motion changes stop the current loop and resume through one media controller', t => {
+  const view = fixture(t, undefined, { parallax: () => false });
+  view.step(1000);
+  assert.equal(view.queued(), 1);
+  view.motion(true);
+  const frozen = view.records.length;
+  assert.equal(view.queued(), 0, 'enabling reduced motion cancels the next animated paint immediately');
+  view.step(1100);
+  assert.equal(view.records.length, frozen);
+  view.motion(false);
+  assert.equal(view.queued(), 1);
+  view.step(1200);
+  assert.equal(view.records.length, frozen + 1);
+  assert.equal(view.mediaReads(), 1, 'a mounted background retains one media query instead of creating it per frame');
+  assert.equal(view.motionListeners(), 1);
+  view.dispose();
+  const disposed = view.records.length;
+  assert.equal(view.motionListeners(), 0);
+  view.motion(true); view.motion(false); view.step(1300);
+  assert.equal(view.records.length, disposed);
+  assert.equal(view.queued(), 0);
+});
+
+test('an initially reduced background starts animating when the live preference is cleared', t => {
+  const view = fixture(t, undefined, { reduced: true, parallax: () => false });
+  assert.equal(view.queued(), 0);
+  const frozen = view.records.length;
+  view.motion(false);
+  assert.equal(view.queued(), 1);
+  view.step(1000);
+  assert.equal(view.records.length, frozen + 1);
+});
+
+test('changing the motion preference never bypasses the last scrolling deadline', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const view = fixture(t, undefined, { parallax: () => false, skyOptions: { pauseWhileScrolling: true } });
+  view.step(1000);
+  view.host.dispatchEvent(new view.win.Event('scroll'));
+  const frozen = view.records.length;
+  t.mock.timers.tick(200);
+  view.motion(true); view.motion(false);
+  assert.equal(view.records.length, frozen, 'preference changes preserve the last canvas while scrolling');
+  assert.equal(view.queued(), 0);
+  t.mock.timers.tick(399);
+  assert.equal(view.queued(), 0);
+  t.mock.timers.tick(1);
+  assert.equal(view.queued(), 1);
+  view.step(1700);
+  view.host.dispatchEvent(new view.win.Event('scroll'));
+  const reduced = view.records.length;
+  view.motion(true);
+  t.mock.timers.tick(599);
+  assert.equal(view.records.length, reduced);
+  t.mock.timers.tick(1);
+  assert.equal(view.queued(), 0, 'a reduced preference stays static after the idle deadline');
+  assert.equal(view.records.length, reduced + 1);
+});
+
+test('motion changes while hidden do not paint or queue work and showing respects the final preference', t => {
+  const view = fixture(t, undefined, { parallax: () => false });
+  view.visible(false); view.step(1000);
+  const hidden = view.records.length;
+  view.motion(true); view.motion(false); view.motion(true);
+  assert.equal(view.records.length, hidden);
+  assert.equal(view.queued(), 0);
+  view.visible(true);
+  assert.equal(view.records.length, hidden + 1);
+  assert.equal(view.queued(), 0);
+  view.visible(false); view.motion(false);
+  assert.equal(view.records.length, hidden + 1);
+  assert.equal(view.queued(), 0);
+  view.visible(true);
+  assert.equal(view.queued(), 1);
+});
+
+test('sky backing pixels stay within budget while normal DPR, logical dimensions and resize remain intact', t => {
+  const painted = [];
+  const view = fixture(t, undefined, { width: 800, height: 600, pixelRatio: 2, skyOptions: {
+    meteorPainter: () => (_ctx, frame) => painted.push({ ...frame }),
+  } });
+  const canvas = view.host.querySelector('canvas');
+  assert.deepEqual([canvas.width, canvas.height], [1600, 1200], 'an ordinary viewport retains its original DPR');
+  view.resize(3840, 2160, 2); view.step(1000);
+  assert.ok(canvas.width * canvas.height <= 2_000_000, '4K displays cannot allocate a 33-million-pixel backing canvas');
+  const ratio = Math.sqrt(2_000_000 / (3840 * 2160));
+  assert.deepEqual([canvas.width, canvas.height], [Math.floor(3840 * ratio), Math.floor(2160 * ratio)]);
+  assert.deepEqual(painted.at(-1), { width: 3840, height: 2160, seconds: 1 }, 'renderers keep logical viewport coordinates');
+  view.resize(800, 600, 1.5); view.step(1100);
+  assert.deepEqual([canvas.width, canvas.height], [1200, 900], 'shrinking the viewport restores the normal device ratio');
+});
+
 test('reading scroll freezes backdrop drawing until scrolling settles and disposal cancels resumption', t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const view = fixture(t, undefined, { parallax: () => false, skyOptions: { pauseWhileScrolling: true } });

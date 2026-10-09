@@ -321,7 +321,7 @@ export function avatarHTML(person: CommunityPerson | null | undefined, common: C
   const inner = (frameOnly ? '' : src
     ? `<img src="${esc(src)}" alt="" loading="lazy" decoding="async">`
     : `<span style="--h:${hue(person.name)}">${esc(initial(person.name))}</span>`)
-    + (staffRole ? communityStaffArtHTML(staffRole, 'frame') : customFrame ? `<img class="community-frame-image" src="${imageSrc(customFrame)}" alt=""${frameOnly ? ' loading="lazy"' : ''} decoding="async">` : '');
+    + (staffRole ? communityStaffArtHTML(staffRole, 'frame') : customFrame ? `<img class="community-frame-image" src="${imageSrc(customFrame)}" alt="" loading="lazy" decoding="async">` : '');
   // The name next to it is the link people use; the avatar link is a larger target for pointers only.
   const uid = person.uid;
   return link && uid

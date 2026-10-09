@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { avatarHTML, nameHTML } from '../src/community.mjs';
-import { communityManageHTML, communityShopHTML } from '../src/community-pages.mjs';
+import { communityManageHTML, communityShopHTML, communityShopDetailHTML } from '../src/community-pages.mjs';
 const common = { t: zh => zh, esc: value => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;'), icons: {} };
 const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const person = { name: '装扮预览', uid: 'u1', role: 'reader', frame: `image:${id}`, color: `effect:${id}`, nameEffect: { style: 'shimmer', colors: ['#976223', '#236A7B'] } };
@@ -10,6 +10,12 @@ test('custom frames overlay real avatars and safe nickname effects appear throug
   const dom = new JSDOM(avatarHTML({ ...person, avatar: '/avatar.webp' }, common) + nameHTML(person, common));
   assert.equal(dom.window.document.querySelectorAll('.community-av img').length, 2);
   assert.match(dom.window.document.querySelector('.community-frame-image').src, new RegExp(id));
+  for (const image of dom.window.document.querySelectorAll('.community-av img')) {
+    assert.equal(image.getAttribute('loading'), 'lazy');
+    assert.equal(image.getAttribute('decoding'), 'async');
+  }
+  assert.equal(dom.window.document.querySelector('.community-frame-image').getAttribute('src'), `/api/community/images/${id}.webp`);
+  assert.equal(dom.window.document.querySelector('.community-av').getAttribute('href'), '#/community/u/u1');
   assert.equal(dom.window.document.querySelector('.community-uname').dataset.nameEffect, 'shimmer');
   assert.match(nameHTML(person, common), /#976223/);
   assert.doesNotMatch(nameHTML({ ...person, nameEffect: { style: 'shimmer', colors: ['red;position:fixed', '#236A7B'] } }, common), /position:fixed/);
@@ -39,7 +45,16 @@ test('custom shop category filters show assigned products without duplicating th
   assert.match(html, /星海系列/);
   assert.match(html, /动态星环/);
   const all = communityShopHTML({ ...common, shop, tab: 'all' });
-  assert.equal(new JSDOM(all).window.document.querySelectorAll('.community-sitem').length, 1);
+  const dom = new JSDOM(all + communityShopDetailHTML({ item, shop: shop.data, showPrice: true, common }));
+  assert.equal(dom.window.document.querySelectorAll('.community-sitem').length, 1);
+  const frames = [...dom.window.document.querySelectorAll('.community-frame-image')];
+  assert.equal(frames.length, 2, 'the uploaded frame remains present in both the catalogue and detail');
+  for (const image of frames) {
+    assert.equal(image.getAttribute('loading'), 'lazy');
+    assert.equal(image.getAttribute('decoding'), 'async');
+    assert.equal(image.getAttribute('src'), `/api/community/images/${id}.webp`);
+  }
+  dom.window.close();
 });
 test('management loading retains its navigation, statistic slots and content shell', () => {
   const me = { name: '作者', uid: 'owner', role: 'owner', owner: true, mod: true };

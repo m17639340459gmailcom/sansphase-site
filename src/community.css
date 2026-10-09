@@ -673,7 +673,7 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-ck-pill.is-done:hover { border-color: var(--cm-signal-edge); color: var(--text); }
 .community-ck-pill .ui-icon { width: 18px; height: 18px; }
 .community-ck-pill.is-done .ui-icon:first-child { color: var(--cm-good); }
-.community-ck-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--signal); box-shadow: 0 0 10px var(--signal); animation: community-blink 2s infinite; }
+.community-ck-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--signal); box-shadow: 0 0 10px var(--signal); animation: community-blink 2s infinite; animation-play-state: var(--community-decoration-play-state, running); }
 @keyframes community-blink { 50% { opacity: 0.35; } }
 
 /* 版块目录 */
@@ -713,7 +713,7 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 /* 单个版块的头部 */
 .community-board-hero { position: relative; overflow: hidden; display: grid; gap: 14px; padding: 22px 26px 26px; border: 1px solid color-mix(in srgb, var(--board) 26%, transparent); border-radius: 22px; background: radial-gradient(50% 120% at 0% 0%, color-mix(in srgb, var(--board) 16%, transparent), transparent 70%), var(--cm-panel); }
 .community-board-hero > *:not(.community-bh-glow) { position: relative; }
-.community-bh-glow { position: absolute; right: -10%; top: -70%; width: 60%; aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--board) 30%, transparent), transparent 65%); filter: blur(10px); pointer-events: none; animation: community-drift 12s ease-in-out infinite alternate; }
+.community-bh-glow { position: absolute; right: -10%; top: -70%; width: 60%; aspect-ratio: 1; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--board) 30%, transparent), transparent 65%); filter: blur(10px); pointer-events: none; animation: community-drift 12s ease-in-out infinite alternate; animation-play-state: var(--community-decoration-play-state, running); }
 @keyframes community-drift { to { transform: translate(-40px, 30px) scale(1.12); } }
 .community-crumb { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--dim); }
 .community-crumb a:hover { color: var(--text); }
@@ -1066,13 +1066,13 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-star-map .community-cs.is-on { --star-light: 244 220 175; color: #fbe9c7; }
 .community-star-map .community-cs.is-on .community-star-heart { fill: #fffdf8; }
 .community-star-map .community-cs.is-on .community-star-rays { opacity: .9; }
-.community-star-map .community-cs.is-on .community-star-aura { opacity: .9; animation: community-starlight var(--star-duration) ease-in-out var(--star-delay) infinite alternate; }
+.community-star-map .community-cs.is-on .community-star-aura { opacity: .9; animation: community-starlight var(--star-duration) ease-in-out var(--star-delay) infinite alternate; animation-play-state: var(--community-decoration-play-state, running); }
 .community-star-map .community-cs.is-bonus { --optical-size: 25px; }
 .community-star-map .community-cs.is-big { --optical-size: 32px; }
 .community-star-map .community-cs.is-now { --optical-size: 34px; --star-light: 255 232 188; color: #fff2d5; }
 .community-star-map .community-cs:is(.is-bonus, .is-big, .is-now) .community-star-glyph { width: var(--optical-size); height: var(--optical-size); }
 .community-star-map .community-cs:is(.is-bonus, .is-big, .is-now) .community-star-aura { width: calc(var(--optical-size) * 2.6); height: calc(var(--optical-size) * 2.6); }
-.community-star-map .community-cs.is-now .community-star-aura { opacity: 1; animation: community-starlight 4.5s ease-in-out infinite alternate; }
+.community-star-map .community-cs.is-now .community-star-aura { opacity: 1; animation: community-starlight 4.5s ease-in-out infinite alternate; animation-play-state: var(--community-decoration-play-state, running); }
 .community-star-map .community-cs.is-now .community-star-rays { opacity: 1; }
 .community-star-cursor { position: absolute; left: 9px; bottom: -14px; width: 4px; height: 4px; border-right: 1px solid var(--signal); border-bottom: 1px solid var(--signal); transform: rotate(45deg); }
 .community-star-map .community-cs:is(:hover, :focus-visible) { z-index: 2; }

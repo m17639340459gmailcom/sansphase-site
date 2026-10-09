@@ -39,7 +39,8 @@ export function mountCommunitySky(host: HTMLElement, win: Window = window, optio
   if (!ctx) return () => canvas.remove();
   const context = ctx;
 
-  const reduced = () => Boolean(win.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+  const motion = win.matchMedia?.('(prefers-reduced-motion: reduce)');
+  const reduced = () => Boolean(motion?.matches);
   const parallax = () => options.parallax?.() ?? true;
   const mouse = { x: 0.5, y: 0.5, tx: 0.5, ty: 0.5 };
   let stars: Star[] = [], w = 0, h = 0, dpr = 1;
@@ -48,8 +49,9 @@ export function mountCommunitySky(host: HTMLElement, win: Window = window, optio
   let shoot: Shoot | null = null, nextShoot = 2500, frame = 0, running = false;
 
   function resize() {
-    dpr = Math.min(2, win.devicePixelRatio || 1); w = win.innerWidth; h = win.innerHeight;
-    canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+    w = win.innerWidth; h = win.innerHeight;
+    dpr = Math.min(2, win.devicePixelRatio || 1, Math.sqrt(2_000_000 / (w * h)));
+    canvas.width = Math.max(1, Math.floor(w * dpr)); canvas.height = Math.max(1, Math.floor(h * dpr));
     stars = Array.from({ length: Math.round(w * h / 4000) }, () => {
       const depth = Math.random();
       return {
@@ -121,6 +123,12 @@ export function mountCommunitySky(host: HTMLElement, win: Window = window, optio
     running = true;
     frame = win.requestAnimationFrame(loop);
   }
+  const onMotion = () => {
+    running = false;
+    win.cancelAnimationFrame(frame);
+    // start also preserves hidden/disposed states and the last scroll deadline.
+    start();
+  };
   const onPointer = (event: PointerEvent) => {
     if (!parallax()) return;
     mouse.tx = event.clientX / w; mouse.ty = event.clientY / h;
@@ -135,6 +143,7 @@ export function mountCommunitySky(host: HTMLElement, win: Window = window, optio
   win.addEventListener('resize', resize);
   win.addEventListener('pointermove', onPointer, { passive: true });
   doc.addEventListener('visibilitychange', onVisible);
+  motion?.addEventListener?.('change', onMotion);
   if (options.pauseWhileScrolling) doc.addEventListener('scroll', onScroll, { capture: true, passive: true });
   resize();
   start();
@@ -148,6 +157,7 @@ export function mountCommunitySky(host: HTMLElement, win: Window = window, optio
     win.removeEventListener('resize', resize);
     win.removeEventListener('pointermove', onPointer);
     doc.removeEventListener('visibilitychange', onVisible);
+    motion?.removeEventListener?.('change', onMotion);
     canvas.remove();
   };
 }
