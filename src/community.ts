@@ -398,7 +398,7 @@ export function communityNameIconHTML(person: CommunityPerson, common: Common): 
   // it does not change the membership flag used for actual operations.
   const vipAppearance = person.vipGrowth?.active ?? person.vip;
   const vipRank = person.vipGrowth?.active && Number.isInteger(person.vipGrowth.level) && (person.vipGrowth.level ?? 0) >= 1 && (person.vipGrowth.level ?? 0) <= 8 ? person.vipGrowth.level : 1;
-  const fallback = role ? `staff:${role}` : vipAppearance && person.role !== 'owner' ? `vip:${vipRank}` : null;
+  const fallback = role ? `staff:${role}` : person.vip && person.role !== 'owner' ? `vip:${vipRank}` : null;
   const icon = communityIconDefinition(person.icon === undefined ? fallback : person.icon);
   if (!icon || icon.kind === 'staff' && icon.role !== role || icon.kind === 'vip' && !vipAppearance) return '';
   const label = t(icon.name, icon.en);

@@ -143,12 +143,15 @@ test('VIP expiration and upgrade affect new daily eligibility without topping up
 
 test('check-in rechecks membership and authentication after asynchronous request work', async t => {
   let calls = 0;
-  const expired = await setup(t, { vipOverride: { v1: false }, identifyOverride: async () => { calls++; return { kind: 'reader', id: 'v1', name: '墨白', vip: true }; } });
+  const expired = await setup(t, { vipOverride: { v1: false }, identifyOverride: async () => { calls++; return { kind: 'reader', id: 'v1', name: '墨白', vip: calls === 1 }; } });
   assert.equal((await json(expired.post('checkin', { vip: true }, 'reader=v1'))).reward, 1, 'the original VIP snapshot cannot override expiry at commit');
   assert.equal(calls, 2);
-  const upgraded = await setup(t, { identifyOverride: async () => ({ kind: 'reader', id: 'v1', name: '墨白', vip: false }) });
+  calls = 0;
+  const upgraded = await setup(t, { identifyOverride: async () => ({ kind: 'reader', id: 'v1', name: '墨白', vip: ++calls > 1 }) });
   assert.equal((await json(upgraded.get('me', 'reader=v1'))).nextReward.base, 2);
+  calls = 0;
   assert.equal((await json(upgraded.post('checkin', { vip: false }, 'reader=v1'))).reward, 2, 'fresh account VIP qualification supersedes an older non-VIP request snapshot');
+  assert.equal(calls, 2);
   calls = 0;
   const revoked = await setup(t, { identifyOverride: async () => ++calls === 1 ? { kind: 'reader', id: 'v1', name: '墨白', vip: true } : null });
   assert.equal((await revoked.post('checkin', {}, 'reader=v1')).status, 401);
