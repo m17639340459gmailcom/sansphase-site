@@ -282,11 +282,17 @@ export async function contentRoutes(ctx: Ctx): Promise<boolean> {
       // Members-only topics are dropped before paging, so counts stay honest.
       const following = sort === 'following' ? live.members.followingOf(me) : undefined;
       const all = live.listTopics({ board: board || undefined, tag: tag || undefined, query: query || undefined, author: author || undefined, following, sort, page: 1, pageSize: Number.MAX_SAFE_INTEGER });
-      const visible = all.items.filter(topic => ctx.canSeeBoard(topic.board));
+      // Reuse board decisions only inside this synchronous stage. Every later
+      // people await is followed by a new set from the current authority.
+      const visibleBoardsFor = (topics: readonly StoredTopic[], checkedBoard?: string) => new Set(
+        [...new Set([...topics.map(topic => topic.board), ...(board ? [board] : [])])].filter(id => id === checkedBoard || ctx.canSeeBoard(id)),
+      );
+      const initialVisibleBoards = visibleBoardsFor(all.items);
+      const visible = all.items.filter(topic => initialVisibleBoards.has(topic.board));
       const items = visible.slice((page - 1) * listingPageSize, page * listingPageSize);
       const withPosters = board && !query && !tag && !author && page === 1;
       const counts = new Map<string, { author: CommunityAuthor; topics: number }>();
-      const boardTopics = withPosters && following ? live.listTopics({ board, sort: 'active', page: 1, pageSize: Number.MAX_SAFE_INTEGER }).items.filter(topic => ctx.canSeeBoard(topic.board)) : visible;
+      const boardTopics = withPosters && following ? live.listTopics({ board, sort: 'active', page: 1, pageSize: Number.MAX_SAFE_INTEGER }).items.filter(topic => initialVisibleBoards.has(topic.board)) : visible;
       if (withPosters) for (const topic of boardTopics) {
         const entry = counts.get(memberKey(topic.author)) || { author: topic.author, topics: 0 };
         entry.topics++;
@@ -301,8 +307,10 @@ export async function contentRoutes(ctx: Ctx): Promise<boolean> {
         if (board && !ctx.canSeeBoard(board)) throw fail('没有这个版块。', 404);
         // Recheck public summaries after asynchronous identity work; complete
         // threads would load every candidate's body and replies just to page six.
-        const currentById = new Map(live.topics(visible.map(topic => topic.id)).map(topic => [topic.id, topic]));
-        return visible.filter(topic => { const current = currentById.get(topic.id); return current && current.board === topic.board && ctx.canSeeBoard(current.board); });
+        const currentTopics = live.topics(visible.map(topic => topic.id));
+        const currentVisibleBoards = visibleBoardsFor(currentTopics, board || undefined);
+        const currentById = new Map(currentTopics.map(topic => [topic.id, topic]));
+        return visible.filter(topic => { const current = currentById.get(topic.id); return current && current.board === topic.board && currentVisibleBoards.has(current.board); });
       };
       let currentVisible = recheckVisible();
       let currentItems = currentVisible.slice((page - 1) * listingPageSize, page * listingPageSize);

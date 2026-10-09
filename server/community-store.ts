@@ -112,6 +112,12 @@ export function createCommunityStore(directory: string, { previewCatalog = false
     AND ($authorKind IS NULL OR (t.author_kind = $authorKind AND t.author_id = $authorId))
     AND ($pattern IS NULL OR t.title LIKE $pattern ESCAPE '\\' OR t.body LIKE $pattern ESCAPE '\\')`;
   const liveTopics = db.prepare(`SELECT ${topicColumns} ${listedTopicScope}`);
+  // One JSON parameter keeps caller order and duplicate ids without a variable
+  // limit; summaries never need the complete body used by detail readers.
+  const topicSummaries = db.prepare(`SELECT ${topicColumns} FROM json_each(?) requested
+    JOIN community_topics t ON t.id = requested.value
+    WHERE t.deleted_at IS NULL AND t.pending = 0 AND t.hidden_at IS NULL
+    ORDER BY CAST(requested.key AS INTEGER)`);
   const oneTopic = db.prepare(`SELECT ${topicColumns}, t.body FROM community_topics t WHERE t.id = ? AND t.deleted_at IS NULL`);
   const queuedTopics = db.prepare(`SELECT ${topicColumns}, t.body FROM community_topics t WHERE t.deleted_at IS NULL AND (t.pending = 1 OR t.hidden_at IS NOT NULL) ORDER BY t.created_at`);
   const topicReplies = db.prepare(`SELECT r.id, r.topic_id, r.author_kind, r.author_id, r.body, r.created_at, r.edited_at, r.quote_id, r.hidden_at,
@@ -418,7 +424,8 @@ export function createCommunityStore(directory: string, { previewCatalog = false
       return { items: sorted.slice(start, start + pageSize), total: sorted.length, page, pageSize };
     },
     topics(ids: readonly string[]) {
-      return ids.map(id => topicRow(id)).filter((row): row is TopicRow & { body: string } => Boolean(row && !row.pending && !row.hidden_at)).map(row => listed(row));
+      if (!ids.length) return [];
+      return (topicSummaries.all(JSON.stringify(ids)) as TopicRow[]).map(row => listed(row));
     },
     topic(id: string) {
       const row = topicRow(id);
