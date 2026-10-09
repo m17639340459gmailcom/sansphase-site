@@ -88,6 +88,64 @@ test('management routes do not use the ordinary three-column reading frame', () 
     assert.equal(window.document.querySelector('[data-community-frame]'), null);
   } finally { frame.dispose(); window.close(); }
 });
+
+test('crossing between the reading frame and management preserves the document scrollbar gutter', async () => {
+  const foundation = await readFile(new URL('../../src/styles-foundation.css', import.meta.url), 'utf8');
+  const stable = await readFile(new URL('../../src/community-layout/stable-frame.css', import.meta.url), 'utf8');
+  const { window } = new JSDOM(`<style>${foundation}\n${stable}</style><body class="community-open community-frame-open"></body>`, { url: 'http://localhost/#/community/home' });
+  try {
+    const root = window.document.documentElement;
+    root.classList.add('community-frame-document');
+    const reading = window.getComputedStyle(root);
+    const gutter = reading.scrollbarGutter, width = reading.scrollbarWidth;
+    assert.equal(gutter, 'stable', 'reserve the outer gutter even while the center owns scrolling');
+    assert.equal(width, 'auto', 'a hidden-width scrollbar would remove that reservation');
+    root.classList.remove('community-frame-document');
+    window.document.body.classList.replace('community-frame-open', 'community-management-open');
+    const management = window.getComputedStyle(root);
+    assert.equal(management.scrollbarGutter, gutter);
+    assert.equal(management.scrollbarWidth, width);
+    window.document.body.classList.replace('community-management-open', 'community-frame-open');
+    root.classList.add('community-frame-document');
+    assert.equal(window.getComputedStyle(root).scrollbarGutter, gutter);
+  } finally { window.close(); }
+});
+
+for (const mobile of [false, true]) test(`${mobile ? 'mobile document' : 'desktop center'} keeps a visible member tab stationary when its ready content is empty`, () => {
+  const { window } = new JSDOM('<main></main>', { url: 'http://localhost/#/community/u/10009/badges' });
+  Object.defineProperty(window, 'matchMedia', { value: (query: string) => ({ matches: mobile && query.includes('max-width'), addEventListener() {}, removeEventListener() {} }) });
+  const callbacks = new Map<number, FrameRequestCallback>(); let sequence = 0;
+  window.requestAnimationFrame = callback => { callbacks.set(++sequence, callback); return sequence; };
+  window.cancelAnimationFrame = id => { callbacks.delete(id); };
+  const flush = () => { const pending = [...callbacks.values()]; callbacks.clear(); pending.forEach(callback => callback(0)); };
+  const frame = createStableCommunityFrame(window.document, window), main = window.document.querySelector('main')!;
+  const member = (height: number) => `<section class="community-member" data-community="member" data-test-height="${height}"><header>统筹</header><nav>头像框</nav><div></div></section>`;
+  try {
+    frame.render(main, member(2000), summary); flush();
+    const slot = main.querySelector<HTMLElement>('[data-frame-route]')!;
+    const host = mobile ? window.document.documentElement : frame.center()!;
+    const height = () => Math.max(Number(slot.firstElementChild?.getAttribute('data-test-height') || 0), parseFloat(slot.style.minHeight) || 0);
+    let top = 400;
+    Object.defineProperty(host, 'clientHeight', { get: () => 600 });
+    Object.defineProperty(host, 'scrollTop', { get: () => top = Math.min(top, Math.max(0, height() - 600)), set: (value: number) => { top = Math.min(value, Math.max(0, height() - 600)); } });
+    frame.center()!.getBoundingClientRect = () => ({ top: 0, height: 600, bottom: 600, left: 0, right: 640, width: 640, x: 0, y: 0, toJSON() {} });
+    slot.getBoundingClientRect = () => ({ top: -host.scrollTop, height: height(), bottom: height() - host.scrollTop, left: 0, right: 640, width: 640, x: 0, y: -host.scrollTop, toJSON() {} });
+    window.history.replaceState(null, '', '#/community/u/10009/frames');
+    frame.render(main, member(450), summary); flush();
+    assert.equal(host.scrollTop, 400, 'empty frames must not clamp the clicked tab back down the viewport');
+    assert.equal(slot.style.minHeight, '1000px', 'reserve only this viewport, rather than the full old badge page');
+    host.dispatchEvent(new window.Event('pointerdown', { bubbles: true }));
+    assert.equal(host.scrollTop, 400, 'pressing another tab must not remove its reading floor before the click');
+    host.dispatchEvent(new window.Event('wheel', { bubbles: true })); host.scrollTop = 250;
+    const restore = frame.preserveReadingPosition(); slot.innerHTML = member(450); restore(); flush();
+    assert.equal(host.scrollTop, 250, 'a user scroll takes priority over the earlier tab position');
+    assert.equal(slot.style.minHeight, '850px');
+    window.history.replaceState(null, '', '#/community/u/10001/frames');
+    frame.render(main, member(450), summary); flush();
+    assert.equal(host.scrollTop, 0, 'another member starts at the top');
+    assert.equal(slot.style.minHeight, '', 'another member does not inherit empty space from the old page');
+  } finally { frame.dispose(); window.close(); }
+});
 test('in-page category and profile tab navigation retains scroll, including clicking the current tab', () => {
   const { window } = new JSDOM(`<header id="site-header">${header}</header><main id="main"></main>`, { url: 'http://localhost:4214/#/community/shop' });
   const main = window.document.getElementById('main')!;
@@ -377,7 +435,8 @@ test('the combined style cascade gives long center pages natural height inside t
   const aside = window.getComputedStyle(window.document.querySelector('[data-frame-right]')!);
   assert.equal(aside.overflow, 'auto');
   assert.equal(aside.scrollbarWidth, 'none');
-  assert.equal(window.getComputedStyle(window.document.documentElement).scrollbarWidth, 'none');
+  assert.equal(window.getComputedStyle(window.document.documentElement).scrollbarWidth, 'auto');
+  assert.equal(window.getComputedStyle(window.document.documentElement).scrollbarGutter, 'stable');
   frame.dispose();
   assert.equal(window.document.documentElement.classList.contains('community-frame-document'), false);
   window.close();

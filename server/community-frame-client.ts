@@ -1,4 +1,4 @@
-import { communityFrameBridgePath, communityFrameBytes, validCommunityFrame } from './community-frame-authority.ts';
+import { communityFrameBridgePath, communityFrameBytes, validCommunityFrame, vipCommunityFrame } from './community-frame-authority.ts';
 import type { CommunityFrameAccess, CommunityFrameState } from './community-frame-authority.ts';
 import { IdentityBridgeError, signIdentityRequest, identityResponseBytes } from './community-identity-protocol.ts';
 
@@ -6,6 +6,13 @@ type Options = { origin: string; secret: string; fetch?: typeof fetch };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const framePath = /^\/api\/reader\/frame\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.webp$/;
 const unavailable = () => new IdentityBridgeError('头像框暂不可用，请稍后再试。', 503);
+const currentProjection = (value: CommunityFrameState): CommunityFrameState => value.vipUntil && Date.parse(value.vipUntil) > Date.now() ? value : {
+  ...value, frame: value.frame === vipCommunityFrame ? null : value.frame, items: value.items.filter(item => item.ref !== vipCommunityFrame),
+};
+const projectionDeadline = (value: CommunityFrameState) => {
+  const until = value.vipUntil ? Date.parse(value.vipUntil) : NaN;
+  return Number.isFinite(until) && until > Date.now() ? Math.min(Date.now() + 5000, until) : Date.now() + 5000;
+};
 function validatedState(value: unknown): CommunityFrameState {
   if (!value || typeof value !== 'object' || !('frame' in value) || !validCommunityFrame(value.frame) || !('frameImage' in value)
     || !(value.frameImage === null || typeof value.frameImage === 'string' && framePath.test(value.frameImage)) || !('items' in value) || !Array.isArray(value.items)
@@ -20,7 +27,11 @@ function validatedState(value: unknown): CommunityFrameState {
     return { id: item.id, name: item.name, ref: item.ref, image: item.image };
   });
   if (frame && !items.some(item => item.ref === frame)) throw unavailable();
-  return { frame, frameImage, items, available: true };
+  const hasExpiry = 'vipUntil' in value;
+  if (hasExpiry && !(value.vipUntil === null || typeof value.vipUntil === 'string' && Number.isFinite(Date.parse(value.vipUntil)))) throw unavailable();
+  if (items.some(item => item.ref === vipCommunityFrame) && (!hasExpiry || typeof value.vipUntil !== 'string')) throw unavailable();
+  return currentProjection({ frame, frameImage, items, available: true,
+    ...(hasExpiry ? { vipUntil: value.vipUntil as string | null } : {}) });
 }
 
 /** Fixed signed peer only; no caller-supplied URL or general HTTP proxy. */
@@ -66,9 +77,9 @@ export function createCommunityFrameClient({ origin, secret, fetch: transport = 
     async state(readerId) {
       checkedReader(readerId);
       const saved = projections.get(readerId);
-      if (saved?.pending) return saved.pending;
+      if (saved?.pending) return saved.pending.then(currentProjection);
       if (saved && saved.expiresAt > Date.now()) {
-        if (saved.value) return saved.value;
+        if (saved.value) return currentProjection(saved.value);
         if (saved.error) throw saved.error;
       }
       const entry: Projection = { expiresAt: 0 };
@@ -76,22 +87,22 @@ export function createCommunityFrameClient({ origin, secret, fetch: transport = 
       entry.pending = request('frame-state', { readerId }).then(result => {
         const value = result as CommunityFrameState;
         const latest = projections.get(readerId);
-        if (latest !== entry) return latest?.value ?? value;
-        entry.value = value; entry.expiresAt = Date.now() + 5000;
-        return value;
+        if (latest !== entry) return currentProjection(latest?.value ?? value);
+        entry.value = value; entry.expiresAt = projectionDeadline(value);
+        return currentProjection(value);
       }, error => {
         const latest = projections.get(readerId);
-        if (latest !== entry && latest?.value) return latest.value;
+        if (latest !== entry && latest?.value) return currentProjection(latest.value);
         if (latest === entry) { entry.error = error instanceof IdentityBridgeError ? error : unavailable(); entry.expiresAt = Date.now() + 1000; }
         throw error;
       }).finally(() => { entry.pending = undefined; });
-      return entry.pending;
+      return entry.pending.then(currentProjection);
     },
     async equip(readerId, ref) {
       checkedReader(readerId); if (!validCommunityFrame(ref)) throw new IdentityBridgeError('请选择已拥有的头像框。', 400);
       const value = await request('frame-equip', { readerId, ref }) as CommunityFrameState;
-      remember(readerId, { value, expiresAt: Date.now() + 5000 });
-      return value;
+      remember(readerId, { value, expiresAt: projectionDeadline(value) });
+      return currentProjection(value);
     },
     async image(readerId, imageId) { checkedReader(readerId); if (!uuid.test(imageId)) throw new IdentityBridgeError('头像框图片不存在。', 404); return await request('frame-image', { readerId, imageId }) as Buffer; },
   };

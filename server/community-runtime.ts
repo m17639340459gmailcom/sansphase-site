@@ -11,6 +11,9 @@ import type { CommunityViewer, PersonInfo } from './community-service.ts';
 import type { CommunityProfileAccess } from './community-profile-access.ts';
 import { membershipState } from './reader-membership.ts';
 import type { ApprovedAvatarRead } from './community-identity-protocol.ts';
+import type { IdentityFrameEligibility } from './community-identity-protocol.ts';
+import { createCommunityFrameAuthority } from './community-frame-authority.ts';
+import { fail } from './community-db.ts';
 
 type ReaderIdentity = { id: string; nickname: string; vip?: boolean } | null;
 type ReaderRow = { id: string | number; nickname?: string; avatar?: string | null; signature?: string | null; createdAt?: string; vip_until?: string | null; disabled?: boolean; _verified?: boolean };
@@ -47,15 +50,28 @@ export function createCommunityDirectory({ payload, directory, ownerName, ownerA
   const readers = async (where: Where, limit: number) =>
     (await payload.find({ collection: 'readers', where, limit, depth: 0, pagination: false, overrideAccess: true })).docs as unknown as ReaderRow[];
   const uidOf = (id: string) => uidStore.get(id);
+  const frameEligibility = async (readerId: string): Promise<IdentityFrameEligibility> => {
+    if (!uuid.test(readerId)) throw fail('读者身份无效。');
+    const found = await payload.find({ collection: 'readers', where: { id: { equals: readerId } }, select: { _verified: true, disabled: true, vip_until: true },
+      limit: 1, depth: 0, pagination: false, overrideAccess: true });
+    const row = found.docs[0] as unknown as ReaderRow | undefined;
+    if (!row || String(row.id) !== readerId) return { active: false, vip: false, vipUntil: null };
+    if (row._verified !== true || row.disabled) return { active: false, vip: false, vipUntil: null };
+    const active = true;
+    const membership = membershipState(row);
+    return { active, vip: active && membership.vip, vipUntil: membership.vipUntil && Number.isFinite(Date.parse(membership.vipUntil)) ? membership.vipUntil : null };
+  };
   // Only approved values leave the reader account: the approved avatar and signature.
   const people = async (authors: CommunityAuthor[]) => {
     const map = new Map<string, PersonInfo>();
     const readerIds = [...new Set(authors.filter(author => author.kind === 'reader').map(author => author.id))];
     if (readerIds.length) for (const row of await readers({ id: { in: readerIds } }, readerIds.length)) {
       if (!row.nickname) continue;
+      const membership = membershipState(row);
       map.set(`reader:${row.id}`, {
         name: row.nickname, uid: uidOf(String(row.id)), avatar: uuid.test(row.avatar || '') ? row.avatar! : null,
-        vip: membershipState(row).vip, joinedAt: row.createdAt || null, bio: row.signature || '', active: row._verified === true && !row.disabled,
+        vip: membership.vip, vipUntil: membership.vipUntil && Number.isFinite(Date.parse(membership.vipUntil)) ? membership.vipUntil : null,
+        joinedAt: row.createdAt || null, bio: row.signature || '', active: row._verified === true && !row.disabled,
         ...(String(row.id) === ownerReaderId && !row.disabled ? { ownerReader: true as const } : {}),
       });
     }
@@ -114,7 +130,7 @@ export function createCommunityDirectory({ payload, directory, ownerName, ownerA
   // Local callers keep their Buffer/null API. Only the bridge opts into
   // conditional reads, and both forms retain the final target-source check.
   const avatar = async (uid: string) => { const result = await approvedAvatar(uid, null); return result && 'bytes' in result ? result.bytes : null; };
-  return { people, findMember, findByNames, avatarFile, avatar, approvedAvatar };
+  return { people, findMember, findByNames, avatarFile, avatar, approvedAvatar, frameEligibility };
 }
 
 // The community store opens only after `node scripts/migrate-community.mjs`.
@@ -139,6 +155,7 @@ export function createCommunityRuntime(options: Options) {
   return {
     store,
     directory: profiles,
+    frames: store ? createCommunityFrameAuthority({ store, directory, frameEligibility: profiles.frameEligibility }) : undefined,
     purgeReaderData(readerId: string, queueFile: (filename: string, reason: string) => void) {
       if (store) return store.purgeReaderData(readerId, queueFile);
       const db = new DatabaseSync(resolve(directory, 'content.db'), { readOnly: true });

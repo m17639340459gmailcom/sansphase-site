@@ -129,7 +129,8 @@ export function createCommunityHostRuntime(config: CommunityHostConfig, client: 
     if (files.retained) throw failure('Community image cleanup is queued for retry.');
     return { ...result, filesRemoved: files.removed };
   };
-  const frameAuthority = createCommunityFrameAuthority({ store, directory, readerDeleted: id => hostStore.readerDeleted(id) });
+  const frameAuthority = createCommunityFrameAuthority({ store, directory, readerDeleted: id => hostStore.readerDeleted(id),
+    frameEligibility: id => client.request('frame-eligibility', { readerId: id }) });
   const profileReviewer = createCommunityProfileReviewerAuthority({ store, ownerId: authorId, readerDeleted: id => hostStore.readerDeleted(id) });
   const frameBridge = createCommunityFrameBridge({ authority: frameAuthority, secret: config.bridgeSecret, consumeNonce: (nonce, expiresAt) => hostStore.consumeNonce(nonce, expiresAt), profileReviewer });
   const access = createCommunityHostAccess({ store: hostStore, client, siteOrigin, mainSiteOrigin, secret: config.bridgeSecret, purge, decorations: frameBridge.handle });

@@ -18,7 +18,7 @@ const path = '/api/community-identity/bridge';
 const reader = { id: 'reader-a', uid: '10001', nickname: '测试读者', role: 'reader' as const, signature: '已审核签名', avatar: null, vip: true, vipStartedAt: '2026-10-01T00:00:00Z', vipUntil: '2026-12-01T00:00:00Z', email: 'private@example.invalid', phone: '13800138000', pendingSignature: '未审核签名' };
 const person = { name: reader.nickname, uid: reader.uid, avatar: null, vip: true, joinedAt: '2026-01-01T00:00:00Z', bio: reader.signature };
 
-async function fixture(t: test.TestContext, avatar?: () => Promise<Buffer | null>) {
+async function fixture(t: test.TestContext, avatar?: () => Promise<Buffer | null>, frameEligibility?: (id: string) => Promise<{ active: boolean; vip: boolean; vipUntil: string | null }>) {
   const directory = await mkdtemp(resolve(tmpdir(), 'community-identity-'));
   prepareIdentityStore(directory);
   const state = { at: Date.now(), enabled: true, vip: true, unavailable: false, purges: [] as string[] };
@@ -29,6 +29,7 @@ async function fixture(t: test.TestContext, avatar?: () => Promise<Buffer | null
     findMember: async uid => uid === reader.uid ? { kind: 'reader', id: reader.id } : null,
     findByNames: async names => new Map(names.filter(name => name === reader.nickname).map(name => [name, { kind: 'reader' as const, id: reader.id }])),
     avatar: avatar || (async () => Buffer.from('approved avatar')),
+    frameEligibility,
     purgeRemote: async id => { state.purges.push(id); },
   });
   const server = http.createServer((req, res) => { void (req.url === '/api/community-entry' ? authority.handleEntry(req, res) : authority.handleBridge(req, res)); });
@@ -50,6 +51,30 @@ async function fixture(t: test.TestContext, avatar?: () => Promise<Buffer | null
   const exchange = async () => { const issued = await entry(); const response = await bridge('exchange', { ticket: issued.ticket, binding: issued.binding }); assert.equal(response.status, 200); return await response.json() as { sessionRef: string; identity: typeof reader }; };
   return { authority, directory, state, local, entry, bridge, exchange };
 }
+
+test('frame eligibility is an exact signed singleton projection without a browser session or public profile lookup', async t => {
+  const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', ids: string[] = [];
+  const source = { active: true, vip: true, vipUntil: new Date(Date.now() + 60_000).toISOString() };
+  const f = await fixture(t, undefined, async requested => { ids.push(requested); return { ...source }; });
+  const response = await f.bridge('frame-eligibility', { readerId: id });
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.deepEqual(await response.json(), source);
+  assert.deepEqual(ids, [id]);
+  assert.equal((await f.bridge('people', { authors: [{ kind: 'reader', id }] })).status, 401, 'the new projection does not loosen people/session access');
+  for (const input of [{ readerId: id, vip: true }, { readerId: id, sessionRef: 'unused' }, { readerIds: [id] }, { readerId: [id] }, { readerId: '../private' }, {}]) {
+    assert.equal((await f.bridge('frame-eligibility', input)).status, 400);
+  }
+  assert.deepEqual(ids, [id], 'malformed requests never call the account source');
+  const body = JSON.stringify({ operation: 'frame-eligibility', input: { readerId: id } });
+  assert.equal((await fetch(f.local + path, { method: 'POST', body })).status, 401);
+  const headers = signIdentityRequest({ secret, method: 'POST', path, body, timestamp: String(f.state.at) });
+  assert.equal((await fetch(f.local + path, { method: 'POST', body, headers })).status, 200);
+  assert.equal((await fetch(f.local + path, { method: 'POST', body, headers })).status, 401);
+  source.active = false;
+  assert.equal((await (await f.bridge('frame-eligibility', { readerId: id })).json()).vip, false);
+  source.active = true; source.vipUntil = new Date(f.state.at).toISOString();
+  assert.equal((await (await f.bridge('frame-eligibility', { readerId: id })).json()).vip, false, 'expiry equality is already expired');
+});
 
 test('approved avatar bridge rechecks its source session after awaiting image bytes', async t => {
   let started!: () => void, release!: () => void;

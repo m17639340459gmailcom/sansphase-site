@@ -20,6 +20,7 @@ import { communityBadgeFamilies } from '../src/community-badge-policy.ts';
 import { acceptCommunityConvention } from './fixtures/community-convention-consent.ts';
 import { communityBoards } from '../src/community.ts';
 import { communityStaffCapabilities } from '../src/community-staff.ts';
+import type { CommunityProfile } from '../src/community-profile.ts';
 
 const owner: CommunityAuthor = { kind: 'owner', id: 'owner' };
 const reader: CommunityAuthor = { kind: 'reader', id: 'reader' };
@@ -101,6 +102,20 @@ async function setup(t: TestContext) {
     onIdentify(hook: () => void) { identifyLookup = hook; },
   };
 }
+
+test('top owner-reader preview and brand VIP cosmetics never grant the real optional membership frame', async t => {
+  const f = await setup(t);
+  f.store.members.equip(personal, 'frame', 'vipmoon');
+  const profile = await f.json<CommunityProfile>('profile');
+  assert.equal(profile.person.vip, true, 'the already approved highest preview appearance stays intact');
+  assert.equal(profile.person.frame, null, 'a preview cannot turn a retained selection into real membership');
+  assert.equal(profile.frames.some(item => item.ref === 'vipmoon'), false);
+  assert.equal((await f.post('shop/equip', { kind: 'frame', ref: 'vipmoon' })).status, 403);
+  const brand = await f.json<CommunityProfile>('profile', 'owner');
+  assert.equal(brand.frames.some(item => item.ref === 'vipmoon'), false);
+  assert.equal((await f.post('shop/equip', { kind: 'frame', ref: 'vipmoon' }, 'owner')).status, 403);
+  assert.equal(f.store.members.storedDecorations(personal)?.frame, 'vipmoon');
+});
 
 test('owner reader perspective uses the same reader DTO with top growth, VIP and ordinary trust', async t => {
   const { json } = await setup(t);

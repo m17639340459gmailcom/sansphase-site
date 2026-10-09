@@ -52,7 +52,7 @@ test('shared directory exposes only approved records and reads avatars through t
   const payload = { find: async options => { queries.push(options); return { docs: [row] }; } };
   const source = createCommunityDirectory({ payload, directory, authorId: 'owner-a', uidStore: { get: () => '10001', readerId: uid => uid === '10001' ? id : null }, ownerName: async () => '作者' });
   const profiles = await source.people([{ kind: 'reader', id }]);
-  assert.deepEqual(profiles.get(`reader:${id}`), { name: '读者', uid: '10001', avatar, vip: true, joinedAt: row.createdAt, bio: row.signature, active: true });
+  assert.deepEqual(profiles.get(`reader:${id}`), { name: '读者', uid: '10001', avatar, vip: true, vipUntil: row.vip_until, joinedAt: row.createdAt, bio: row.signature, active: true });
   assert.deepEqual(await source.findMember('10001'), { kind: 'reader', id });
   assert.deepEqual(await source.findMember('owner'), { kind: 'owner', id: 'owner-a' });
   assert.deepEqual([...await source.findByNames(['读者'])], [['读者', { kind: 'reader', id }]]);
@@ -64,6 +64,32 @@ test('shared directory exposes only approved records and reads avatars through t
   assert.equal((await source.people([{ kind: 'owner', id: 'forged-owner' }])).size, 0);
   payload.find = async () => { throw Error('directory unavailable'); };
   await assert.rejects(source.people([{ kind: 'reader', id }]), /directory unavailable/);
+});
+
+test('frame eligibility reads only the real verified account membership and never allocates UID or copies private profile data', async t => {
+  const directory = await mkdtemp(resolve(tmpdir(), 'community-frame-source-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const id = randomUUID(), queries = [];
+  let row = { id, _verified: true, disabled: false, vip_until: new Date(Date.now() + 60_000).toISOString(), email: 'private@example.invalid', nickname: '私有资料' };
+  const payload = { find: async query => { queries.push(query); return { docs: row ? [row] : [] }; } };
+  const source = createCommunityDirectory({ payload, directory, authorId: randomUUID(), ownerName: async () => assert.fail('brand profile must not be read'), uidStore: { get: () => assert.fail('UID allocation must not run'), readerId: () => assert.fail('public UID lookup must not run') } });
+  assert.deepEqual(await source.frameEligibility(id), { active: true, vip: true, vipUntil: row.vip_until });
+  assert.equal(queries.length, 1);
+  assert.deepEqual(queries[0].where, { id: { equals: id } });
+  assert.deepEqual(queries[0].select, { _verified: true, disabled: true, vip_until: true });
+  assert.equal(queries[0].limit, 1);
+  for (const key of ['_verified', 'disabled']) {
+    const old = row[key]; row[key] = key === 'disabled';
+    const state = await source.frameEligibility(id); assert.deepEqual(state, { active: false, vip: false, vipUntil: null });
+    row[key] = old;
+  }
+  for (const expiry of [new Date(Date.now() - 1).toISOString(), 'not-a-date', null]) {
+    row.vip_until = expiry; assert.equal((await source.frameEligibility(id)).vip, false);
+  }
+  row = null; assert.deepEqual(await source.frameEligibility(id), { active: false, vip: false, vipUntil: null });
+  row = { id: randomUUID(), _verified: true, vip_until: new Date(Date.now() + 60_000).toISOString() };
+  assert.deepEqual(await source.frameEligibility(id), { active: false, vip: false, vipUntil: null }, 'an unexpected account result cannot disclose another membership or authorize it');
+  await assert.rejects(source.frameEligibility('../private'), { status: 400 });
 });
 
 test('owner brand avatar reads approved author media independently of the linked personal reader avatar', async t => {
@@ -140,6 +166,11 @@ test('real main runtime optionally constructs the authority and keeps a migrated
         assert.equal(entry.status,200); const data=await entry.json(),ticket=new URL(data.url).hash.slice('#community-entry='.length);
         const binding=/sansphase_community_handoff=([^;]+)/.exec(entry.headers.get('set-cookie'))[1];
         const client=createIdentityClient({origin:runtime.settings.siteOrigin,secret:runtime.settings.communityIdentity.bridgeSecret,fetch:(input,options)=>fetch(base+new URL(String(input)).pathname,options)});
+        const until=new Date(Date.now()+60000).toISOString();
+        const account=await runtime.payload.create({collection:'readers',disableVerificationEmail:true,data:{email:'qualified@example.invalid',password:'test-reader-password',nickname:'资格读者',_verified:true,disabled:false,vip_until:until}});
+        assert.deepEqual(await client.request('frame-eligibility',{readerId:account.id}),{active:true,vip:true,vipUntil:until},'actual Payload select includes the verified membership source without session/profile lookup');
+        await runtime.payload.update({collection:'readers',id:account.id,data:{disabled:true}});
+        assert.deepEqual(await client.request('frame-eligibility',{readerId:account.id}),{active:false,vip:false,vipUntil:null});
         const {sessionRef}=await client.request('exchange',{ticket,binding});
         const people=await client.request('people',{sessionRef,authors:[{kind:'owner',id:runtime.settings.authorId}]});
         assert.equal(people[0][1].avatar,media.id); assert.equal(people[0][1].uid,'owner');

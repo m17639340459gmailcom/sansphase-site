@@ -1,21 +1,25 @@
 // Only approved, same-origin level and staff artwork is enhanced. Static images remain
 // the fallback; animation never changes their source or the surrounding layout.
 import { communityStaffArtSource } from '../community-staff-art.mjs';
+import { communityVipFrameSource } from '../community-vip-frame.mjs';
 
-const markSelector = '.community-level-marks [data-level-icon], .community-staff-art[data-staff-art], .community-staff-frame[data-staff-art]';
+const markSelector = '.community-level-marks [data-level-icon], .community-staff-art[data-staff-art], .community-staff-frame[data-staff-art], .community-vip-frame[data-vip-frame]';
 const approvedSlug = /^(?:constellation-g(?:[1-9]|10)|trust-l[0-3]|vip-[1-8])$/;
 const approvedStaffSlug = /^(?:badge|frame)-(?:assistant|moderator|general)$/;
 const svgNamespace = 'http://www.w3.org/2000/svg';
 const svgElements = new Set(['svg', 'style', 'defs', 'linearGradient', 'stop', 'radialGradient', 'clipPath', 'circle', 'g', 'ellipse', 'path', 'rect', 'filter', 'feGaussianBlur', 'feDiffuseLighting', 'feDistantLight', 'feComposite', 'feSpecularLighting', 'feTurbulence', 'feColorMatrix']);
 const staffSvgElements = new Set([...svgElements, 'image', 'use', 'mask']);
+const vipSvgElements = new Set([...staffSvgElements, 'feImage', 'feOffset', 'feDisplacementMap', 'animate']);
 const maxArtworkBytes = 128 * 1024;
 const maxStaffArtworkBytes = 160 * 1024;
+const maxVipArtworkBytes = 768 * 1024;
+const maxAnimatedVipFrames = 4;
 const warmOffscreenMax = 18;
 const playbackStyle = `:host { display: block; width: 100%; height: 100%; }
 svg { display: block; width: 100%; height: 100%; }
 :host svg[data-level-motion-svg], :host svg[data-level-motion-svg] * { animation-play-state: var(--community-level-play-state, paused); }`;
 
-type ArtworkKind = 'levels' | 'staff';
+type ArtworkKind = 'levels' | 'staff' | 'vip-frame';
 type Mark = { element: HTMLElement; kind: ArtworkKind; slug: string; visible: boolean; lastVisible: number; pending: boolean; template: Element | null; canvas: HTMLElement | null };
 type MotionController = { pause: () => void; resume: () => void; release: () => void };
 
@@ -42,12 +46,21 @@ export function createCommunityLevelMotion(document: Document, request?: typeof 
   let paused = false;
   let released = false;
   let visibilityOrder = 0;
-  const eligible = (mark: Mark) => !released && mark.visible && !paused && !document.hidden && !motion?.matches && mark.element.isConnected;
+  let animatedVipFrames = new Set<HTMLElement>();
+  const available = (mark: Mark) => !released && mark.visible && !paused && !document.hidden && !motion?.matches && mark.element.isConnected;
+  const eligible = (mark: Mark) => {
+    if (!available(mark)) return false;
+    if (mark.kind !== 'vip-frame') return true;
+    // Repeated complex ribbon scenes retain their exact static artwork once
+    // this budget is full. Prefer large profile previews and recent visibility.
+    return animatedVipFrames.has(mark.element);
+  };
   const validate = (body: string, kind: ArtworkKind): Element => {
     const parsed = new window.DOMParser().parseFromString(body, 'image/svg+xml');
     const svg = parsed.documentElement;
     if (parsed.querySelector('parsererror') || svg.localName !== 'svg' || svg.namespaceURI !== svgNamespace) throw Error('Invalid level artwork');
-    const allowedElements = kind === 'staff' ? staffSvgElements : svgElements;
+    const allowedElements = kind === 'vip-frame' ? vipSvgElements : kind === 'staff' ? staffSvgElements : svgElements;
+    if (kind === 'vip-frame' && svg.getAttribute('viewBox') !== '0 0 1265 1265') throw Error('Invalid VIP frame canvas');
     const localShapes = new Map([...svg.querySelectorAll('[id]')].map(element => [element.id, element]));
     const checkStaffHref = (element: Element, attribute: Attr) => {
       if (attribute.name !== 'href' || attribute.namespaceURI !== null) throw Error('Unexpected staff artwork reference');
@@ -55,6 +68,11 @@ export function createCommunityLevelMotion(document: Document, request?: typeof 
         const encoded = attribute.value.slice('data:image/webp;base64,'.length);
         const bitmap = window.atob(encoded);
         if (bitmap.slice(0, 4) === 'RIFF' && bitmap.slice(8, 12) === 'WEBP') return;
+      }
+      if (kind === 'vip-frame' && ['image', 'feImage'].includes(element.localName) && /^data:image\/(?:png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(attribute.value)) {
+        const bitmap = window.atob(attribute.value.slice(attribute.value.indexOf(',') + 1));
+        if (attribute.value.startsWith('data:image/png;') && bitmap.slice(0, 8) === '\x89PNG\r\n\x1a\n'
+          || attribute.value.startsWith('data:image/webp;') && bitmap.slice(0, 4) === 'RIFF' && bitmap.slice(8, 12) === 'WEBP') return;
       }
       if (element.localName === 'use' && /^#[\w-]+$/.test(attribute.value)) {
         const target = localShapes.get(attribute.value.slice(1));
@@ -66,10 +84,15 @@ export function createCommunityLevelMotion(document: Document, request?: typeof 
     };
     for (const element of [svg, ...svg.querySelectorAll('*')]) {
       if (element.namespaceURI !== svgNamespace || !allowedElements.has(element.localName)) throw Error('Unexpected level artwork element');
+      if (element.localName === 'animate' && (kind !== 'vip-frame' || element.parentElement?.localName !== 'feOffset'
+        || element.getAttribute('attributeName') !== 'dx' || element.getAttribute('from') !== '0'
+        || element.getAttribute('to') !== String(-1265 / 3) || element.getAttribute('dur') !== '6s'
+        || element.getAttribute('repeatCount') !== 'indefinite'
+        || [...element.attributes].some(attribute => !['attributeName', 'from', 'to', 'dur', 'repeatCount'].includes(attribute.name)))) throw Error('Unapproved frame timeline');
       for (const attribute of element.attributes) {
         if (/^on/i.test(attribute.name)) throw Error('Active level artwork attribute');
         if (/href$/i.test(attribute.name)) {
-          if (kind !== 'staff') throw Error('Active level artwork attribute');
+          if (kind !== 'staff' && kind !== 'vip-frame') throw Error('Active level artwork attribute');
           checkStaffHref(element, attribute);
         }
         checkReferences(attribute.value);
@@ -97,7 +120,7 @@ export function createCommunityLevelMotion(document: Document, request?: typeof 
     }
   };
   const load = (kind: ArtworkKind, slug: string): Promise<Element> => {
-    const source = kind === 'staff' ? communityStaffArtSource(slug, false) : `/assets/community/levels/${slug}.svg`;
+    const source = kind === 'vip-frame' ? communityVipFrameSource(false) : kind === 'staff' ? communityStaffArtSource(slug, false) : `/assets/community/levels/${slug}.svg`;
     if (!source) return Promise.reject(Error('Unapproved staff artwork'));
     const key = source;
     const existing = templates.get(key);
@@ -110,7 +133,7 @@ export function createCommunityLevelMotion(document: Document, request?: typeof 
           credentials: 'omit', cache: 'force-cache', redirect: 'error', signal: AbortSignal.any([lifetime.signal, timeout.signal]),
         });
         if (!response.ok || response.redirected || response.headers.get('content-type')?.split(';')[0].trim() !== 'image/svg+xml') throw Error('Level artwork unavailable');
-        const maxBytes = kind === 'staff' ? maxStaffArtworkBytes : maxArtworkBytes;
+        const maxBytes = kind === 'vip-frame' ? maxVipArtworkBytes : kind === 'staff' ? maxStaffArtworkBytes : maxArtworkBytes;
         const statedBytes = Number(response.headers.get('content-length') || 0);
         if (statedBytes > maxBytes) throw Error('Level artwork too large');
         const body = await response.text();
@@ -123,7 +146,7 @@ export function createCommunityLevelMotion(document: Document, request?: typeof 
     return pending;
   };
   const current = (mark: Mark) => !released && mark.element.isConnected && marks.get(mark.element) === mark &&
-    (mark.kind === 'staff' ? mark.element.dataset.staffArt : mark.element.dataset.levelIcon) === mark.slug;
+    (mark.kind === 'vip-frame' ? mark.element.dataset.vipFrame : mark.kind === 'staff' ? mark.element.dataset.staffArt : mark.element.dataset.levelIcon) === mark.slug;
   const mount = (mark: Mark, svg: Element) => {
     if (!current(mark) || !eligible(mark) || mark.canvas) return;
     const canvas = document.createElement('span');
@@ -142,7 +165,7 @@ export function createCommunityLevelMotion(document: Document, request?: typeof 
     mark.element.dataset.levelMotionReady = 'true';
   };
   const update = (mark: Mark) => {
-    if (mark.kind === 'staff' && motion?.matches) {
+    if ((mark.kind === 'staff' || mark.kind === 'vip-frame') && motion?.matches) {
       // Their white-light layer gets its transparent baseline from keyframes.
       // Disabling animation inside the SVG would leave that layer opaque.
       // Restore the frozen image while retaining the approved shared template.
@@ -153,6 +176,10 @@ export function createCommunityLevelMotion(document: Document, request?: typeof 
     if (mark.canvas) {
       if (mark.canvas.style.getPropertyValue('--community-level-play-state') !== state) {
         mark.canvas.style.setProperty('--community-level-play-state', state);
+        if (mark.kind === 'vip-frame') {
+          const artwork = mark.canvas.shadowRoot?.querySelector<SVGSVGElement>('svg');
+          if (state === 'running') artwork?.unpauseAnimations?.(); else artwork?.pauseAnimations?.();
+        }
         mark.canvas.hidden = state !== 'running';
         mark.element.dataset.levelMotionReady = state === 'running' ? 'true' : 'paused';
       }
@@ -167,7 +194,14 @@ export function createCommunityLevelMotion(document: Document, request?: typeof 
       mount(mark, svg);
     }).catch(() => { /* Keep the static fallback; visibility changes may retry. */ }).finally(() => { mark.pending = false; });
   };
-  const refresh = () => { for (const mark of marks.values()) update(mark); trimOffscreen(); };
+  const refresh = () => {
+    const candidates = [...marks.values()].filter(mark => mark.kind === 'vip-frame' && available(mark))
+      .map(mark => ({ mark, width: mark.element.getBoundingClientRect().width }));
+    candidates.sort((a, b) => b.width - a.width || b.mark.lastVisible - a.mark.lastVisible);
+    animatedVipFrames = new Set(candidates.slice(0, maxAnimatedVipFrames).map(candidate => candidate.mark.element));
+    for (const mark of marks.values()) update(mark);
+    trimOffscreen();
+  };
   const intersection = new window.IntersectionObserver(entries => {
     if (released) return;
     for (const entry of entries) {
@@ -175,9 +209,8 @@ export function createCommunityLevelMotion(document: Document, request?: typeof 
       if (!mark) continue;
       mark.visible = entry.isIntersecting && entry.intersectionRatio > 0;
       if (mark.visible) mark.lastVisible = ++visibilityOrder;
-      update(mark);
     }
-    trimOffscreen();
+    refresh();
   }, { threshold: 0.01 });
   const forget = (mark: Mark) => {
     intersection.unobserve(mark.element);
@@ -190,11 +223,11 @@ export function createCommunityLevelMotion(document: Document, request?: typeof 
     if (node.matches(markSelector)) elements.unshift(node as HTMLElement);
     for (const element of elements) {
       if (marks.has(element)) continue;
-      const kind: ArtworkKind = element.hasAttribute('data-staff-art') ? 'staff' : 'levels';
-      const slug = (kind === 'staff' ? element.dataset.staffArt : element.dataset.levelIcon) || '';
+      const kind: ArtworkKind = element.hasAttribute('data-vip-frame') ? 'vip-frame' : element.hasAttribute('data-staff-art') ? 'staff' : 'levels';
+      const slug = (kind === 'vip-frame' ? element.dataset.vipFrame : kind === 'staff' ? element.dataset.staffArt : element.dataset.levelIcon) || '';
       const image = element.querySelector('img');
-      const approved = kind === 'staff' ? approvedStaffSlug.test(slug) && element.classList.contains(slug.startsWith('frame-') ? 'community-staff-frame' : 'community-staff-art') : approvedSlug.test(slug);
-      const source = kind === 'staff' ? communityStaffArtSource(slug, true) : `/assets/community/levels/compact/${slug}.webp`;
+      const approved = kind === 'vip-frame' ? slug === 'frame-moon' && element.classList.contains('community-vip-frame') : kind === 'staff' ? approvedStaffSlug.test(slug) && element.classList.contains(slug.startsWith('frame-') ? 'community-staff-frame' : 'community-staff-art') : approvedSlug.test(slug);
+      const source = kind === 'vip-frame' ? communityVipFrameSource(true) : kind === 'staff' ? communityStaffArtSource(slug, true) : `/assets/community/levels/compact/${slug}.webp`;
       if (!approved || !source || image?.getAttribute('src') !== source || !element.isConnected) continue;
       const mark: Mark = { element, kind, slug, visible: false, lastVisible: 0, pending: false, template: null, canvas: null };
       marks.set(element, mark); intersection.observe(element);
@@ -203,7 +236,12 @@ export function createCommunityLevelMotion(document: Document, request?: typeof 
   const changes = new window.MutationObserver(records => {
     if (released) return;
     for (const record of records) for (const node of record.addedNodes) collect(node);
-    for (const mark of marks.values()) if (!mark.element.isConnected) forget(mark);
+    let vipRemoved = false;
+    for (const mark of marks.values()) if (!mark.element.isConnected) {
+      if (mark.kind === 'vip-frame') vipRemoved = true;
+      forget(mark);
+    }
+    if (vipRemoved) refresh();
   });
   changes.observe(document.body, { childList: true, subtree: true });
   collect(document.body);

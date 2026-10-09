@@ -302,6 +302,15 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
         return true;
       }
       if (!['frame', 'color', 'cover'].includes(kind)) throw fail('装扮类型无效。');
+      if (kind === 'frame' && body.ref === 'vipmoon') {
+        if (Object.keys(body).some(key => !['kind', 'ref'].includes(key))) throw fail('请选择当前可佩戴的头像框。');
+        const map = await ctx.people([me]);
+        const info = map.get(memberKey(me));
+        if (!info || info.active === false || me.kind !== 'reader' || !ctx.membershipVip) throw fail('这个头像框仅限有效 VIP 会员佩戴。', 403);
+        ctx.throttle('action');
+        ctx.send(live.transaction(() => { members.equip(me, 'frame', 'vipmoon'); return members.decorations(me); }));
+        return true;
+      }
       if (kind === 'cover' && body.ref !== null && typeof body.ref !== 'string') throw fail('请选择已拥有的主页背景，或恢复默认背景。');
       const ref = typeof body.ref === 'string' && body.ref ? body.ref : null;
       ctx.send(live.transaction(() => {

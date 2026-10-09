@@ -54,6 +54,7 @@ async function fixture(t:test.TestContext,options:{ownerReader?:boolean}={}){
   };
   let reviewForwarded:(()=>void)|undefined;
   const authority=createIdentityAuthority({directory,siteOrigin,communityOrigin,ownerId,secret,stateEncryptionKey:'separate-main-encryption-key-at-least-32-characters',profiles:commands,
+    frameEligibility:async id=>{const row=rows.get(id);return{active:Boolean(row&&row._verified&&!row.disabled),vip:false,vipUntil:null};},
     profileReviewer:(actor,role,operation)=>checkReviewer(actor,role,operation),
     readerIdentity:async req=>{if(!enabled)return null;const token=/sansphase_reader_session=([^;]+)/.exec(String(req.headers.cookie))?.[1],row=token?sessions.get(token):null;return row&&!row.disabled&&row._verified?{...row,avatar:row.avatar?`/api/reader/avatar/${row.avatar}.webp`:null}:null;},
     ownerIdentity:async req=>ownerActive&&req.headers.cookie==='sansphase_author_session=owner.token'?{name:'站长'}:null,
@@ -189,6 +190,11 @@ test('real HK runtime accepts only signed main-server decoration requests, indep
   assert.equal(response.status,403);
   const client=createCommunityFrameClient({origin:communityOrigin,secret,fetch:(input,options)=>fetch(hk.base+new URL(String(input)).pathname,options)});
   const state=await client.state(f.readerId);assert.equal(state.available,true);assert.equal(state.frame,null);assert.deepEqual(state.items,[]);
+  assert.equal(state.vipUntil,null);
+  await assert.rejects(client.state(randomUUID()),{status:403},'an unknown reader cannot borrow another account projection');
+  f.rows.get(f.readerId)!.disabled=true;
+  const freshClient=createCommunityFrameClient({origin:communityOrigin,secret,fetch:(input,options)=>fetch(hk.base+new URL(String(input)).pathname,options)});
+  await assert.rejects(freshClient.state(f.readerId),{status:403},'a fresh signed projection rechecks revocation independently of browser sessions');
   assert.equal((await fetch(endpoint)).status,404);
 });
 

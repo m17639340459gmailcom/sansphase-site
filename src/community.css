@@ -128,8 +128,8 @@ body.community-open #blog-backdrop::after { display: none; }
 .community-account .account-button { display: inline-grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; min-width: 0; max-width: min(46vw, 420px); }
 .community-account .account-button.has-avatar { grid-template-columns: auto minmax(0, 1fr) auto; min-height: 44px; padding-inline: 12px; }
 /* Reserve the frame's painted radius; it must never overlap the name column. */
-.community-account .account-button > .community-av.is-staff-frame { margin: 8px; }
-.community-account .account-button > .community-av:is(.is-frame-image, .is-frame-orbit) { margin: 5px; }
+.community-account .account-button > .community-av:is(.is-staff-frame, .has-vip-frame-space) { margin: 8px; }
+.community-account .account-button > .community-av:is(.is-frame-image, .is-frame-orbit):not(.has-vip-frame-space) { margin: 5px; }
 .community-account .account-button > span:not(.community-av) { max-width: 10em; overflow: hidden; text-overflow: ellipsis; }
 .community-account .account-button > .community-name { display: inline-grid; grid-template-columns: minmax(3em, 1fr) auto; align-items: center; gap: 8px; min-width: 0; max-width: none; overflow: visible; }
 .community-account .account-button .community-uname { min-width: 0; max-width: 10em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -314,6 +314,9 @@ body.community-open #blog-backdrop::after { display: none; }
 /* The approved frame has a 250px avatar opening in a 400px canvas. */
 .community-av > .community-staff-frame { position: absolute; inset: -30%; display: block; width: 160%; height: 160%; border-radius: 0; background: none; line-height: 0; pointer-events: none; z-index: 1; }
 .community-staff-frame > img { display: block; width: 100%; height: 100%; object-fit: contain; }
+/* The collaborator's centred opening occupies 60.1% of the moon-frame canvas. */
+.community-av > .community-vip-frame { position: absolute; inset: -33.2%; display: block; width: 166.4%; height: 166.4%; border-radius: 0; background: none; line-height: 0; pointer-events: none; z-index: 1; }
+.community-vip-frame > img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .community-av.is-owner > span { border: 1px solid rgb(255 255 255 / 60%); background: linear-gradient(140deg, #f2f4f7, #8a9099); color: #0b0f17; }
 .community-av.is-guest { border: 1px solid var(--line); background: var(--surface-2); }
 .community-av-xs { width: 26px; height: 26px; font-size: 12px; }
@@ -1185,7 +1188,7 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-growth-art-image, .community-trust-art-image, .community-vip-art-image, .community-staff-art > img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .community-level-motion-canvas { position: absolute; inset: 0; display: block; pointer-events: none; }
 .community-level-motion-canvas[hidden] { display: none; }
-[data-level-motion-ready="true"] > :is(.community-growth-art-image, .community-trust-art-image, .community-vip-art-image, .community-staff-art-image) { visibility: hidden; }
+[data-level-motion-ready="true"] > :is(.community-growth-art-image, .community-trust-art-image, .community-vip-art-image, .community-staff-art-image, .community-vip-frame-image) { visibility: hidden; }
 .community-level-emblem .community-growth-art, .community-level-emblem .community-trust-art { width: 88%; }
 .community-growth-chip .community-growth-art { width: 20px; height: 20px; }
 /* 昵称旁的单枚图标。三套图形占各自画布的比例不同：成长星盘的盘面只有画布的 50%～61%，权限菱形
@@ -1246,7 +1249,9 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-sec-h { display: grid; gap: 4px; margin-bottom: 12px; }
 .community-sec-h h2 { font-family: var(--font-serif); font-size: 19px; letter-spacing: 0.06em; }
 .community-shop-sec .community-sec-h { margin-bottom: 0; }
-.community-shop-grid, .community-inv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 176px), 176px)); grid-auto-rows: 1fr; align-items: stretch; gap: 12px; }
+.community-shop-grid, .community-inv-grid { display: grid; grid-auto-rows: 1fr; align-items: stretch; gap: 12px; }
+.community-shop-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 208px), 208px)); }
+.community-inv-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 176px), 176px)); }
 .community-sitem { min-width: 0; min-height: 236px; height: 100%; overflow: hidden; display: grid; grid-template-rows: auto minmax(0, 1fr); border: 1px solid var(--line); border-radius: 12px; background: var(--cm-panel); transition: border-color 0.25s, box-shadow 0.25s; }
 .community-sitem:hover { border-color: var(--line-strong); box-shadow: 0 8px 18px rgb(0 0 0 / 24%); }
 .community-sitem.is-off { opacity: 0.6; }
@@ -1396,6 +1401,8 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-icon-panel .community-badge-art::before, .community-icon-panel .community-badge-art::after { animation: none; }
 .community-frame-grid { grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); }
 .community-frame-choice-preview { display: grid; place-items: center; width: 110px; height: 120px; }
+.community-frame-grid:has(.community-vip-frame) { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+.community-frame-choice-preview:has(.community-vip-frame) { width: 160px; height: 160px; }
 .community-frame-grid .community-av.is-frame-orbit::after { animation: none; }
 .community-page.community-member { width: min(1000px, calc(100% - 32px)); }
 .community-m-hero { overflow: hidden; border: 1px solid var(--line); border-radius: 24px; background: var(--community-reading-card, var(--cm-panel)); }
@@ -1407,6 +1414,7 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-m-id > .community-av { box-shadow: 0 0 0 5px #0b0f17; }
 /* Reserve the 88px avatar frame's 26.4px overhang inside the clipped profile hero. */
 .community-m-id > .community-av.is-staff-frame { margin: 27px; }
+.community-m-id > .community-av.has-vip-frame-space { margin: 30px; }
 .community-m-name { display: grid; gap: 4px; min-width: 0; }
 .community-m-name h1 { font-family: var(--font-serif); font-size: 28px; letter-spacing: 0.08em; overflow-wrap: anywhere; }
 .community-m-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
@@ -1597,7 +1605,7 @@ a.community-queue-title:hover { text-decoration: underline; text-underline-offse
   .community-kpis div { min-width: 0; padding: 9px 6px; border-radius: 10px; }
   .community-kpis dt { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
   .community-kpis dd { font-size: 17px; }
-  .community-shop-grid { grid-template-columns: repeat(2, minmax(0, 176px)); gap: 8px; }
+  .community-shop-grid { grid-template-columns: repeat(2, minmax(0, 208px)); gap: 8px; }
   .community-shop-cats { max-width: 100%; flex-wrap: nowrap; overflow-x: auto; border-radius: 0; }
   .community-sitem-body { gap: 5px; padding: 9px 10px 11px; }
   .community-shop-dialog { padding: 12px; }

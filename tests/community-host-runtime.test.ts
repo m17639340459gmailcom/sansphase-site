@@ -9,6 +9,7 @@ import { createPreviewServer } from '../server.mjs';
 import { createIdentityAuthority } from '../server/community-identity-authority.ts';
 import { prepareIdentityStore } from '../server/community-identity-store.ts';
 import { createIdentityClient, signIdentityRequest } from '../server/community-identity-protocol.ts';
+import { createCommunityFrameClient } from '../server/community-frame-client.ts';
 import { createCommunityHostStore, prepareCommunityHostDirectory } from '../server/community-host-store.ts';
 import { communityHostProductionOptions, createCommunityHostRuntime } from '../server/community-host-runtime.ts';
 import { createCommunityStore } from '../server/community-store.ts';
@@ -35,7 +36,7 @@ async function fixture(t: test.TestContext, withOwner = false) {
   await copyFile(resolve(template, 'community-host.db'), resolve(directory, 'community-host.db'));
   await writeFile(resolve(root, 'index.html'), '<!doctype html><html><head></head><body><main id="app"></main></body></html>');
   prepareIdentityStore(mainDirectory);
-  const state = { enabled: true, vip: true, unavailable: false, subject: readerId, ownerPersonal: readerId, inactiveReaders: new Set<string>() };
+  const state = { enabled: true, vip: true, vipUntil: reader.vipUntil, unavailable: false, subject: readerId, ownerPersonal: readerId, inactiveReaders: new Set<string>() };
   const calls: string[] = [];
   const ownerReaderFlags: boolean[] = [];
   let paused: { operation: string; remaining: number; started: () => void; release: Promise<void> } | null = null;
@@ -43,12 +44,16 @@ async function fixture(t: test.TestContext, withOwner = false) {
     readerIdentity: async req => { if (state.unavailable) throw Error('private source failure'); const account = req.headers.cookie === 'sansphase_reader_session=main.token' ? state.subject === readerId ? reader : observer : req.headers.cookie === 'sansphase_reader_session=main.observer' ? observer : null; return state.enabled && account ? { ...account, vip: state.vip } : null; },
     ownerIdentity: async req => withOwner && req.headers.cookie === 'sansphase_author_session=main.owner' ? { name: '测试作者' } : null,
     ownerReaderIdentity: async () => withOwner ? { ...(state.ownerPersonal === readerId ? reader : observer), vip: state.vip } : null,
-    people: async authors => new Map(authors.flatMap(author => { const account = [reader, observer].find(item => item.id === author.id); return account ? [[`${author.kind}:${author.id}`, { name: account.nickname, uid: account.uid, avatar: avatarId, bio: account.signature, vip: state.vip, active: state.enabled, joinedAt: '2026-01-01T00:00:00Z',
+    people: async authors => new Map(authors.flatMap(author => { const account = [reader, observer].find(item => item.id === author.id); return account ? [[`${author.kind}:${author.id}`, { name: account.nickname, uid: account.uid, avatar: avatarId, bio: account.signature, vip: state.vip, vipUntil: state.vipUntil, active: state.enabled, joinedAt: '2026-01-01T00:00:00Z',
       ...(state.inactiveReaders.has(account.id) ? { active: false } : {}),
       ...(withOwner && account.id === state.ownerPersonal ? { ownerReader: true as const } : {}) }] as const] : []; })),
     findMember: async uid => { const account = [reader, observer].find(item => item.uid === uid); return account ? { kind: 'reader', id: account.id } : null; },
     findByNames: async names => new Map(names.filter(name => name === reader.nickname).map(name => [name, { kind: 'reader' as const, id: readerId }])),
     avatar: async () => Buffer.from('approved-avatar'),
+    frameEligibility: async id => {
+      if (state.unavailable) throw Error('private source failure');
+      return { active: state.enabled && [readerId, observer.id].includes(id) && !state.inactiveReaders.has(id), vip: state.vip, vipUntil: state.vipUntil };
+    },
   });
   const mainServer = createServer((req, res) => { void (req.url === '/api/community-entry' ? authority.handleEntry(req, res) : authority.handleBridge(req, res)); });
   await new Promise<void>(done => mainServer.listen(0, '127.0.0.1', done));
@@ -97,6 +102,34 @@ async function fixture(t: test.TestContext, withOwner = false) {
   };
   return { directory, runtime, local, state, entry, pause, purge, calls, ownerReaderFlags };
 }
+
+test('main frame projection uses a finite signed HK to main qualification lookup without a community session', async t => {
+  const f = await fixture(t);
+  const client = createCommunityFrameClient({ origin: community, secret, fetch: (input, init) => fetch(f.local + new URL(String(input)).pathname, init) });
+  const before = f.calls.length;
+  const initial = await client.state(readerId);
+  assert.deepEqual(f.calls.slice(before), ['frame-eligibility'], 'display must not recurse through session or people');
+  assert.equal(initial.items.some(item => item.ref === 'vipmoon'), true);
+  const row = (sql: string, id?: string) => {
+    const db = new DatabaseSync(resolve(f.directory, 'content.db'), { readOnly: true });
+    try { return id ? db.prepare(sql).get(id) : db.prepare(sql).get(); } finally { db.close(); }
+  };
+  assert.equal(Number(row('SELECT COUNT(*) AS n FROM community_members')?.n), 0);
+  assert.equal(Number(row('SELECT COUNT(*) AS n FROM community_owned')?.n), 0);
+  seedIconConsent(f.directory);
+  assert.equal((await client.equip(readerId, 'vipmoon')).frame, 'vipmoon');
+  assert.equal(f.calls.at(-1), 'frame-eligibility');
+  f.state.vipUntil = new Date(Date.now() - 1).toISOString();
+  const fresh = createCommunityFrameClient({ origin: community, secret, fetch: (input, init) => fetch(f.local + new URL(String(input)).pathname, init) });
+  assert.equal((await fresh.state(readerId)).frame, null);
+  assert.equal(row("SELECT frame FROM community_members WHERE member_kind='reader' AND member_id=?", readerId)?.frame, 'vipmoon');
+  f.state.vipUntil = new Date(Date.now() + 60_000).toISOString();
+  const renewed = createCommunityFrameClient({ origin: community, secret, fetch: (input, init) => fetch(f.local + new URL(String(input)).pathname, init) });
+  assert.equal((await renewed.state(readerId)).frame, 'vipmoon');
+  f.state.inactiveReaders.add(readerId);
+  await assert.rejects(renewed.equip(readerId, 'vipmoon'), { status: 403 });
+  assert.equal(Number(row('SELECT COUNT(*) AS n FROM community_owned')?.n), 0);
+});
 
 function seedIconConsent(directory: string) {
   const seed = createCommunityStore(directory);

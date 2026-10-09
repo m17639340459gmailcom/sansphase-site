@@ -18,6 +18,7 @@ import type { CommunityGrowthState, CommunityVIPGrowthState } from './community-
 import type { CommunityEntryState } from './community-entry.ts';
 import { communityStaffRoles, communityStaffCapabilities } from './community-staff.mjs';
 import { communityStaffArtRole, communityStaffArtHTML } from './community-staff-art.mjs';
+import { communityVipFrameRef, communityVipFrameHTML } from './community-vip-frame.mjs';
 import type { CommunityStaffRole, CommunityStaffState } from './community-staff.ts';
 import { communityBoardIcon } from './community-board-icons.mjs';
 import { communityNewsHTML } from './community-news.mjs';
@@ -315,13 +316,17 @@ export function avatarHTML(person: CommunityPerson | null | undefined, common: C
   const src = person.avatar || (person.role === "owner" ? common.ownerAvatar : null);
   const staffRole = person.role === 'owner' ? null : communityStaffArtRole(person.staffRole);
   // The role frame takes visual priority; equipped shop frames stay stored for after revocation.
+  // Reserve the approved frame's footprint while qualified, independently of
+  // selection, so wearing/removing it cannot move the profile or account name.
+  const vipFrameSpace = !staffRole && person.role !== 'owner' && person.vip === true && person.vipGrowth?.active !== false;
+  const vipFrame = vipFrameSpace && person.frame === communityVipFrameRef;
   const customFrame = staffRole ? '' : /^image:([0-9a-f-]{36})$/.exec(person.frame || '')?.[1] || '';
-  const frame = staffRole ? '' : decoration(person.frame);
-  const cls = `community-av community-av-${size}${person.role === "owner" ? " is-owner" : ""}${staffRole ? ' is-staff-frame' : customFrame ? ' is-frame-image' : frame ? ` is-frame-${frame}` : ""}${frameOnly ? ' is-frame-preview' : ''}`;
+  const frame = staffRole || person.frame === communityVipFrameRef ? '' : decoration(person.frame);
+  const cls = `community-av community-av-${size}${person.role === "owner" ? " is-owner" : ""}${vipFrameSpace ? ' has-vip-frame-space' : ''}${staffRole ? ' is-staff-frame' : vipFrame ? ' is-vip-frame' : customFrame ? ' is-frame-image' : frame ? ` is-frame-${frame}` : ""}${frameOnly ? ' is-frame-preview' : ''}`;
   const inner = (frameOnly ? '' : src
     ? `<img src="${esc(src)}" alt="" loading="lazy" decoding="async">`
     : `<span style="--h:${hue(person.name)}">${esc(initial(person.name))}</span>`)
-    + (staffRole ? communityStaffArtHTML(staffRole, 'frame') : customFrame ? `<img class="community-frame-image" src="${imageSrc(customFrame)}" alt="" loading="lazy" decoding="async">` : '');
+    + (staffRole ? communityStaffArtHTML(staffRole, 'frame') : vipFrame ? communityVipFrameHTML() : customFrame ? `<img class="community-frame-image" src="${imageSrc(customFrame)}" alt="" loading="lazy" decoding="async">` : '');
   // The name next to it is the link people use; the avatar link is a larger target for pointers only.
   const uid = person.uid;
   return link && uid

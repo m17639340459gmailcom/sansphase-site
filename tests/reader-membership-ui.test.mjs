@@ -9,6 +9,27 @@ import {
 import { readerPage } from "../src/reader-ui.ts";
 
 const now = Date.parse("2026-09-30T08:00:00Z");
+
+test('the account membership clock removes only the expired VIP frame without rebuilding unsaved controls or clearing stored selection', () => {
+  const currentTime = Date.now(), expiry = currentTime + 60000;
+  for (const frame of ['vipmoon', 'gold']) {
+    const reader = { uid: '10001', nickname: 'VIP读者', email: 'vip@example.test', vip: true, vipUntil: new Date(expiry).toISOString(), frame, frameImage: null };
+    const dom = new JSDOM(readerPage('account', '', reader));
+    try {
+      const doc = dom.window.document, input = doc.querySelector('[name="nickname"]');
+      input.value = '未保存昵称';
+      const avatar = doc.querySelector('[data-reader-avatar-trigger]');
+      refreshMembership(doc, false, expiry - 1);
+      assert.ok(avatar.classList.contains(`reader-avatar-frame-${frame}`));
+      assert.equal(refreshMembership(doc, false, expiry).active, false);
+      assert.equal(avatar.classList.contains(`reader-avatar-frame-${frame}`), frame !== 'vipmoon');
+      if (frame === 'vipmoon') assert.equal(avatar.querySelector('.reader-profile-frame-image'), null);
+      assert.equal(doc.querySelector('[name="nickname"]'), input);
+      assert.equal(input.value, '未保存昵称');
+      assert.equal(reader.frame, frame, 'expiry is a local display projection, never a persistence mutation');
+    } finally { dom.window.close(); }
+  }
+});
 test("account page includes membership without adding checkout or replacing profile controls", () => {
   const html = readerPage("account", "", {
     nickname: "测试读者",

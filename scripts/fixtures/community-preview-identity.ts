@@ -6,6 +6,7 @@ import type { CommunityService } from '../../server/community-service.ts';
 export const previewIdentityPath = '/api/community/preview-identity';
 const roles = [
   { id: 'demo', label: '读者', name: '预览读者', detail: '浏览、发帖、回复、签到、兑换；没有社区管理权限。' },
+  { id: 'mobai', label: 'VIP 读者', name: '墨白', detail: '有效 VIP 样例，可在个人主页的头像框分区佩戴月相头像框；没有社区管理权限。' },
   { id: 'owner', label: '作者 / 站长', name: '無相', detail: '审核、举报、处罚，可任命总版主、版主、协管，以及兑换物品上架和发货。' },
   { id: 'general', label: '总版主', name: '统筹', detail: '已明确授予任命和可下发权限；从管理成员中添加或配置版主。' },
   { id: 'steward', label: '版主', name: '守望', detail: '负责学习问答、工具资源，已明确授予任命和可下发权限；从管理成员中添加或配置协管，不能上架、发货或任命版主。' },

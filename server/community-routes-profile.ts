@@ -26,7 +26,7 @@ export async function communityProfileDTO(ctx: Ctx, changed?: ReaderProfileState
   }
   return { person, signature: state?.signature ?? info?.bio ?? '', pendingSignature: state?.pendingSignature ?? null, pendingNickname: state?.pendingNickname ?? null,
     pendingAvatar: state?.pendingAvatar ?? false, canEditProfile: ctx.me.kind === 'reader' && Boolean(ctx.options.profile),
-    frames: communityFrameItems(ctx.live, ctx.me), background: ctx.live.profileBackgrounds.state(ctx.me), ...ctx.live.economy.coverDecoration(ctx.me) };
+    frames: communityFrameItems(ctx.live, ctx.me, undefined, ctx.membershipVip), background: ctx.live.profileBackgrounds.state(ctx.me), ...ctx.live.economy.coverDecoration(ctx.me) };
 }
 const image = (ctx: Ctx, bytes: Buffer) => {
   ctx.requireConsent();

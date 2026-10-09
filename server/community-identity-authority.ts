@@ -15,6 +15,8 @@ import type { CommunityProfileReviewOperation } from './community-profile-review
 import { communityStaffRoles } from '../src/community-staff.mjs';
 import type { CommunityProfileReviewerRole } from './community-profile-reviewer.ts';
 import { readerProfileReason } from './reader-profile-commands.ts';
+import { validatedFrameEligibility } from './community-frame-authority.ts';
+import type { IdentityFrameEligibility } from './community-identity-protocol.ts';
 
 type ReaderSource = { id: string; uid?: string | null; nickname: string; signature?: string | null; avatar?: string | null; vip?: boolean; vipStartedAt?: string | null; vipUntil?: string | null };
 export type IdentityAuthorityOptions = {
@@ -27,6 +29,7 @@ export type IdentityAuthorityOptions = {
   findByNames: (names: string[]) => Promise<Map<string, CommunityAuthor>>;
   avatar: (uid: string) => Promise<Buffer | null>;
   approvedAvatar?: (uid: string, knownVersion: string | null) => Promise<ApprovedAvatarRead | null>;
+  frameEligibility?: (readerId: string) => Promise<IdentityFrameEligibility>;
   purgeRemote?: (readerId: string) => Promise<unknown>;
   profiles?: ReaderProfileCommands;
   profileReviewer?: CommunityProfileReviewerCheck;
@@ -108,6 +111,12 @@ export function createIdentityAuthority(options: IdentityAuthorityOptions) {
         try { value = objectValue(JSON.parse(body.toString('utf8'))); } catch { throw invalidInput(); }
         const input = objectValue(value.input);
         if (avatarEnvelope && value.operation !== 'profile-avatar' || !avatarEnvelope && body.length > identityRequestBytes) throw invalidInput();
+        if (value.operation === 'frame-eligibility') {
+          exactKeys(value, ['operation', 'input']); exactKeys(input, ['readerId']);
+          if (typeof input.readerId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(input.readerId)) throw invalidInput();
+          if (!options.frameEligibility) throw new IdentityBridgeError('会员资格服务尚未配置。', 503);
+          send(res, validatedFrameEligibility(await options.frameEligibility(input.readerId), now())); return;
+        }
         if (value.operation === 'exchange') {
           if (typeof input.ticket !== 'string' || typeof input.binding !== 'string') throw invalidSession();
           const source = store.ticket(input.ticket, input.binding, now()); if (!source) throw invalidSession();
@@ -185,7 +194,8 @@ export function createIdentityAuthority(options: IdentityAuthorityOptions) {
           const authors = input.authors.map(memberValue), map = await options.people(authors);
           const requested = new Set(authors.map(author => `${author.kind}:${author.id}`));
           send(res, [...map].filter(([key]) => requested.has(key)).map(([key, info]) => [key, { name: info.name, uid: info.uid, avatar: info.avatar, vip: info.vip === true, joinedAt: info.joinedAt, bio: info.bio, active: info.active === true,
-            ownerReader: info.ownerReader === true }])); return;
+            ownerReader: info.ownerReader === true,
+            ...(Object.hasOwn(info, 'vipUntil') ? { vipUntil: typeof info.vipUntil === 'string' && Number.isFinite(Date.parse(info.vipUntil)) ? info.vipUntil : null } : {}) }])); return;
         }
         if (value.operation === 'member' || value.operation === 'avatar') {
           if (typeof input.uid !== 'string' || !/^[0-9a-z]{1,15}$/.test(input.uid)) throw invalidInput();

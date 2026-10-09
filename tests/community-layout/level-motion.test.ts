@@ -1,11 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { readFile, readdir } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 import postcss from 'postcss';
 import { createCommunityLevelMotion } from '../../src/community-layout/level-motion.ts';
 import { communityGrowthArtHTML, communityTrustArtHTML } from '../../src/community-growth-art.ts';
 import { communityLevelExplorerHTML } from '../../src/community-level-explorer.ts';
+import { communityVipFrameHTML, communityVipFrameSource } from '../../src/community-vip-frame.ts';
+import { buildCommunityVipFrameArt } from '../../scripts/community-vip-frame-art.ts';
 import type { CommunityStardust } from '../../src/community-pages.ts';
 
 interface TestWindow extends Window {
@@ -40,7 +44,7 @@ function setup(html: string, fetcher: typeof fetch = async () => reply()) {
   let hidden = false;
   Object.defineProperty(window.document, 'hidden', { get: () => hidden });
   const controller = createCommunityLevelMotion(window.document, fetcher);
-  const mark = (index = 0) => window.document.querySelectorAll<HTMLElement>('[data-level-icon], [data-staff-art]')[index];
+  const mark = (index = 0) => window.document.querySelectorAll<HTMLElement>('[data-level-icon], [data-staff-art], [data-vip-frame]')[index];
   const canvas = (index = 0) => mark(index).querySelector<HTMLElement>('.community-level-motion-canvas');
   const visible = (target: Element, value: boolean) => notify([{ target, isIntersecting: value, intersectionRatio: value ? 1 : 0 } as IntersectionObserverEntry], {} as IntersectionObserver);
   return { window, controller, mark, canvas, targets, disconnected: () => disconnected,
@@ -51,6 +55,86 @@ function setup(html: string, fetcher: typeof fetch = async () => reply()) {
 const marks = (art: string) => `<span class="community-level-marks">${art}</span>`;
 const staffSource = (slug: string, compact = false) => `/assets/community/staff/${compact ? 'compact/' : ''}${slug}.${compact ? 'webp' : 'svg'}?v=staff-20261009-r2`;
 const staffMark = (slug: string) => `<span class="${slug.startsWith('frame-') ? 'community-staff-frame' : 'community-staff-art'}" data-staff-art="${slug}"><img class="community-staff-art-image" src="${staffSource(slug, true)}"></span>`;
+const vipSVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1265 1265"><defs><filter id="wave"><feOffset dx="0"><animate attributeName="dx" from="0" to="-421.6666666666667" dur="6s" repeatCount="indefinite"/></feOffset></filter></defs><circle cx="632" cy="632" r="380" filter="url(#wave)"/></svg>';
+
+test('selected VIP frames share a lazy source and pause the original ribbon timeline while scrolling', async () => {
+  const calls: string[] = [];
+  const x = setup(communityVipFrameHTML().repeat(2), async input => { calls.push(String(input)); return reply(vipSVG); });
+  try {
+    assert.equal(x.targets.size, 2);
+    assert.equal(calls.length, 0);
+    x.visible(x.mark(), true); x.visible(x.mark(1), true); await turn();
+    assert.deepEqual(calls, [communityVipFrameSource(false)]);
+    const canvas = x.canvas()!, svg = canvas.shadowRoot!.querySelector('svg')!;
+    assert.ok(canvas);
+    assert.equal(svg.querySelector('animate')?.getAttribute('attributeName'), 'dx');
+    let pauses = 0, resumes = 0;
+    Object.assign(svg, { pauseAnimations: () => { pauses++; }, unpauseAnimations: () => { resumes++; } });
+    x.controller.pause();
+    assert.equal(canvas.hidden, true);
+    assert.equal(pauses, 1);
+    assert.equal(x.mark().dataset.levelMotionReady, 'paused');
+    x.controller.resume();
+    assert.equal(x.canvas(), canvas, 'scrolling retains the decoded canvas');
+    assert.equal(resumes, 1);
+    assert.equal(canvas.hidden, false);
+    assert.equal(calls.length, 1);
+    x.motion(true);
+    assert.equal(x.canvas(), null, 'reduced motion restores the transparent static frame');
+    assert.equal(x.mark().querySelector('img')?.getAttribute('src'), communityVipFrameSource(true));
+  } finally { x.close(); }
+});
+
+test('a long VIP list bounds animated frames and promotes a visible fallback without more downloads', async () => {
+  const calls: string[] = [];
+  const x = setup(communityVipFrameHTML().repeat(12), async input => { calls.push(String(input)); return reply(vipSVG); });
+  try {
+    for (let index = 0; index < 12; index++) x.visible(x.mark(index), true);
+    await turn();
+    assert.equal(calls.length, 1);
+    const running = () => x.window.document.querySelectorAll('[data-vip-frame][data-level-motion-ready="true"]').length;
+    assert.equal(running(), 4, 'complex ribbon/filter scenes have a bounded visible budget');
+    const active = [...x.window.document.querySelectorAll<HTMLElement>('[data-vip-frame][data-level-motion-ready="true"]')];
+    for (const mark of active) x.visible(mark, false);
+    await turn();
+    assert.equal(running(), 4);
+    assert.equal(calls.length, 1);
+    x.window.document.querySelector('[data-vip-frame][data-level-motion-ready="true"]')!.remove();
+    await turn();
+    assert.equal(running(), 4, 'removing an active avatar immediately promotes a still-visible fallback');
+    assert.equal(calls.length, 1);
+  } finally { x.close(); }
+});
+
+test('VIP animation support does not permit redirects, external rasters or arbitrary SMIL', async () => {
+  for (const unsafe of [vipSVG.replace('attributeName="dx"', 'attributeName="href"'), vipSVG.replace('dur="6s"', 'dur="0.01s"'), vipSVG.replace('</svg>', '<image href="https://outside.example/frame.png"/></svg>')]) {
+    const x = setup(communityVipFrameHTML(), async () => reply(unsafe));
+    try { x.visible(x.mark(), true); await turn(); assert.equal(x.canvas(), null); }
+    finally { x.close(); }
+  }
+});
+
+test('the actual self-contained moon artwork passes the bounded validator and preserves its raster, masks and ribbon animation', async () => {
+  const root = await mkdtemp(resolve(tmpdir(), 'vip-motion-original-'));
+  try {
+    await cp('public/assets/community/vip-frame', resolve(root, 'assets/community/vip-frame'), { recursive: true });
+    await buildCommunityVipFrameArt(root);
+    const original = await readFile(resolve(root, 'assets/community/vip-frame/frame-moon.svg'), 'utf8');
+    const x = setup(communityVipFrameHTML(), async () => reply(original));
+    try {
+      x.visible(x.mark(), true); await turn();
+      const artwork = x.canvas()?.shadowRoot?.querySelector('svg');
+      assert.ok(artwork, 'the approved original is playable rather than silently rejected');
+      assert.equal(artwork.querySelectorAll('image').length, 5);
+      assert.equal(artwork.querySelectorAll('feImage').length, 2);
+      assert.equal(artwork.querySelectorAll('animate').length, 1);
+      assert.ok(artwork.querySelector('style')?.textContent.includes('mf-fl'));
+      x.controller.pause();
+      assert.equal(x.canvas()?.hidden, true);
+      assert.equal(x.mark().querySelectorAll(':scope > img').length, 1);
+    } finally { x.close(); }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 const catalogueData: CommunityStardust = { balance: 0, gainedToday: 0, behaviourToday: 0, dailyCap: 6, checkedIn: false,
   month: { gained: 0, spent: 0 }, flow: 'all', ledger: [], level: 1, owner: false, steward: false, vip: false, stats: {}, progress: null };
 const catalogueCommon = { t: (zh: string) => zh, esc: (value?: unknown) => String(value ?? ''), icons: {} };

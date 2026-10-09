@@ -71,7 +71,8 @@ for (const theme of ['light', 'dark'] as const) {
       for (const grid of window.document.querySelectorAll('.community-shop-grid, .community-inv-grid')) {
         const columns = style(grid).gridTemplateColumns;
         assert.doesNotMatch(columns, /1fr/, 'a short category must not stretch its cards across the whole row');
-        assert.match(columns, /176px/, 'desktop cards follow the compact inventory reference');
+        assert.match(columns, grid.classList.contains('community-shop-grid') ? /208px/ : /176px/,
+          'merchandise cards gain readable width while the owned inventory retains its compact layout');
         assert.equal(style(grid).alignItems, 'stretch', 'items in the same collection must share the row height');
         assert.equal(style(grid).gridAutoRows, '1fr', 'separate rows must follow the same height rule');
       }
@@ -186,7 +187,7 @@ test('narrow screens retain compact artwork and stack complete product details w
       narrow.set(rule.selector, declarations);
     });
   });
-  assert.match(narrow.get('.community-shop-grid')?.get('grid-template-columns') || '', /repeat\(2, minmax\(0, 176px\)\)/);
+  assert.match(narrow.get('.community-shop-grid')?.get('grid-template-columns') || '', /repeat\(2, minmax\(0, 208px\)\)/);
   assert.equal(narrow.get('.community-sitem-art')?.get('height'), undefined, 'mobile must not restore the old 156px stage');
   assert.equal(narrow.get('.community-sitem-art .community-sart')?.get('transform'), undefined, 'individual objects now have the correct dimensions without shrinking their text again');
   assert.equal(narrow.get('.community-sitem-body p')?.get('-webkit-line-clamp'), undefined, 'opening a description must reveal all of it');

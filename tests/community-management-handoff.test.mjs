@@ -183,6 +183,8 @@ test('cold management entry displays only a loading state until its own identity
     '#/community/manage', 1600, false);
   assert.ok(main.querySelector('.community-status[aria-busy="true"]'));
   assert.equal(main.querySelector('.community-management-nav'), null);
+  assert.ok(main.querySelector('.community-management-page > .community-management-content'), 'cold loading must already reserve the real workspace columns');
+  assert.ok(main.querySelector('.community-management-placeholder[aria-hidden="true"]'), 'reserve only geometry, without exposing stale role navigation');
   content.resolve(response(management('queue'))); await turn();
   assert.equal(main.querySelector('[data-action="community-approve"]'), null);
   identity.resolve(response(owner)); await until(() => main.querySelector('[data-action="community-approve"]'), 'cold entry completes');

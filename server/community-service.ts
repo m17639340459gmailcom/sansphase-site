@@ -97,6 +97,8 @@ export function createCommunityService(options: ServiceOptions) {
     let staffAccountsValid = true;
     let membershipVip = viewer.vip;
     let currentSelfInfo: PersonInfo | undefined;
+    const currentMembership = (info: PersonInfo) => info.vip === true && (!Object.hasOwn(info, 'vipUntil')
+      || typeof info.vipUntil === 'string' && Date.parse(info.vipUntil) > Date.now());
     const setMembership = (vip: boolean) => {
       membershipVip = vip;
       // Keep the object shared with route destructuring. Preview cosmetics
@@ -124,7 +126,7 @@ export function createCommunityService(options: ServiceOptions) {
         const info=map.get(memberKey(me));
         if(!info||info.active===false||viewer.ownerAccountId&&info.ownerReader===false)throw fail('请重新登录后进入社区。',401);
         currentSelfInfo=info;
-        setMembership(info.vip===true);
+        setMembership(currentMembership(info));
       }
       const current = live.staff.ancestors(me).filter(member => member.kind === 'reader');
       staffAccountsValid = staffReaders.every(member=>map.get(memberKey(member))?.active===true) && current.length === ancestors.length
@@ -174,7 +176,8 @@ export function createCommunityService(options: ServiceOptions) {
     let ownerAppearance = ownerReaderPreview;
     const personInfo = (author: CommunityAuthor, map: Map<string, PersonInfo>) => {
       const info=map.get(memberKey(author));
-      return info&&same(author,me) ? { ...info, ...currentSelfInfo, vip: membershipVip } : info;
+      const current = info&&same(author,me) ? { ...info, ...currentSelfInfo, vip: membershipVip } : info;
+      return current && Object.hasOwn(current, 'vipUntil') ? { ...current, vip: currentMembership(current) } : current;
     };
     const appearancePreview = (author: CommunityAuthor, map: Map<string, PersonInfo>) => {
       const info = personInfo(author,map);
@@ -221,7 +224,9 @@ export function createCommunityService(options: ServiceOptions) {
         vip: preview ? true : info.vip, level: preview?.trustLevel ?? (same(author, me) && browsingAsReader ? trustLevel() : ordinaryTrust(author, staffRole)), steward: preview ? false : steward,
         staffRole,
         icon,
-        ...(steward ? { moderationBoards: live.members.moderationBoards(author) } : {}), frame: decorations.frame, color: decorations.color, ...(nameEffect ? { nameEffect } : {}),
+        ...(steward ? { moderationBoards: live.members.moderationBoards(author) } : {}),
+        frame: decorations.frame === 'vipmoon' && !(author.kind === 'reader' && info.active !== false && info.vip === true) ? null : decorations.frame,
+        color: decorations.color, ...(nameEffect ? { nameEffect } : {}),
       };
     };
     const peopleIn = (topics: StoredTopic[]) => topics.flatMap(topic => topic.lastReply ? [topic.author, topic.lastReply.author] : [topic.author]);
@@ -253,7 +258,7 @@ export function createCommunityService(options: ServiceOptions) {
       get moderationBoards() { return moderationBoards(); },
       get staff() { return browsingAsReader || !staffAccountsValid ? null : live.staff.state(me); },
       canStaff, requireStaff, refreshStaff, refreshViewer,
-      get membershipVip() { return membershipVip; },
+      get membershipVip() { return membershipVip && (!currentSelfInfo || currentMembership({ ...currentSelfInfo, vip: membershipVip })); },
       canSeeBoard, get hiddenBoard() { return canSeeBoard(membersBoard) ? '' : membersBoard; },
       send: (value, status) => { options.assertActive?.(req); sendTo(res, value, status); },
       json: () => body ||= (async () => { const value = await readJson(req); await refreshViewer(); requireConsent(); return value; })(),

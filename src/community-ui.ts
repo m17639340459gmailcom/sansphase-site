@@ -1079,8 +1079,14 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (current.view === 'manage' && viewerVerified && viewerHash === location.hash
       && (!(identity?.owner || identity?.mod) || identity.management?.browsingAsReader))
       return `<section class="page community-page" data-community="manage">${communityStatusHTML({ state: 'error', status: 403, message: '' }, common)}</section>`;
-    if ((viewerHash !== location.hash || !coreRoute && confirmedPage?.hash !== location.hash) && current.view !== 'unknown' && current.view !== 'landing')
-      return `<section class="page community-page" data-community="${current.view}">${communityStatusHTML(loading, common)}</section>`;
+    if ((viewerHash !== location.hash || !coreRoute && confirmedPage?.hash !== location.hash) && current.view !== 'unknown' && current.view !== 'landing') {
+      const status = communityStatusHTML(loading, common);
+      // Reserve the workspace columns before authority arrives. This is only
+      // geometry: no cached role, sidebar links or business controls are shown.
+      return current.view === 'manage'
+        ? `<section class="page community-page community-management-page" data-community="manage" data-tab="${ctx.esc(current.tab)}"><div class="community-management-placeholder" aria-hidden="true"></div><div class="community-management-content">${status}</div></section>`
+        : `<section class="page community-page" data-community="${current.view}">${status}</section>`;
+    }
     const viewer = readyData(me);
     const savedCompose = draftComposeValues(current);
     if (!ctx.simpleCompose && current.view === 'new' && composeBoard === null && !current.board && savedCompose?.board) composeBoard = savedCompose.board;
@@ -1427,6 +1433,11 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const sameAccount = currentAccount !== null && paintedAccount === currentAccount;
     const preserveControls = sameAccount && !section.hasAttribute('data-community-pending-route');
     const samePage = paintedPage?.hash === location.hash && paintedPage.frame === frameIdentity;
+    const previousMember = confirmedPage && sameAccount && confirmedPage.account === currentAccount
+      && confirmedPage.frame === frameIdentity && confirmedPage.revision === permissionRevision
+      && route().view === 'member' && communityRoute(confirmedPage.hash).view === 'member'
+      && communityRoute(confirmedPage.hash).id === route().id && next.matches('.community-member')
+      ? confirmedPage.markup : null;
     if (sameAccount && samePage && route().view === 'member' && ['icons', 'frames'].includes(route().tab || '') && paintedPage) {
       const frames = route().tab === 'frames', selector = frames ? '[data-community-frames]' : '[data-community-icons]';
       const panel = section.querySelector<HTMLElement>(selector), nextPanel = next.querySelector<HTMLElement>(selector);
@@ -1538,8 +1549,22 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       ? focusSource.id ? `[id=${quoted(focusSource.id)}]`
         : data?.action ? `[data-action=${quoted(data.action)}]${data.sort ? `[data-sort=${quoted(data.sort)}]` : ''}${data.kind ? `[data-kind=${quoted(data.kind)}]` : ''}${data.id ? `[data-id=${quoted(data.id)}]` : ''}${data.value ? `[data-value=${quoted(data.value)}]` : ''}${data.board !== undefined ? `[data-board=${quoted(data.board)}]` : ''}${data.uid ? `[data-uid=${quoted(data.uid)}]` : ''}${data.index !== undefined ? `[data-index=${quoted(data.index)}]` : ''}${data.scope ? `[data-scope=${quoted(data.scope)}]` : ''}` : ''
       : '';
+    let retainedFocus: HTMLElement | null = null;
+    if (previousMember) {
+      const previous = document.createElement('template'); previous.innerHTML = previousMember;
+      for (const selector of [':scope > .community-m-hero', ':scope > .community-me-quick']) {
+        const old = section.querySelector(selector), replacement = next.querySelector(selector);
+        const snapshot = previous.content.firstElementChild?.querySelector(selector);
+        // Compare trusted generated markup; motion-enhanced live DOM may have
+        // extra state. Changed identity, permissions or appearance never reuse it.
+        if (old && replacement && snapshot?.outerHTML === replacement.outerHTML) {
+          if (preserveControls && active && old.contains(active)) retainedFocus = active;
+          replacement.replaceWith(old);
+        }
+      }
+    }
     const images = new Map<string, HTMLImageElement[]>();
-    for (const image of sameAccount && samePage ? section.querySelectorAll<HTMLImageElement>('img[src]') : []) {
+    for (const image of sameAccount && (samePage || previousMember) ? section.querySelectorAll<HTMLImageElement>('img[src]') : []) {
       const key = imageKey(image);
       const group = images.get(key) || []; group.push(image); images.set(key, group);
     }
@@ -1603,6 +1628,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     for (const field of next.querySelectorAll<HTMLTextAreaElement>('textarea')) autosize(field);
     const focused = focusSelector ? next.querySelector<HTMLInputElement>(focusSelector) : null;
     if (!editorPreparation.focus(focused)) focused?.focus({ preventScroll: true });
+    if (!focused && retainedFocus?.isConnected && next.contains(retainedFocus)) retainedFocus.focus({ preventScroll: true });
     if (focused && caret) try { focused.setSelectionRange(...caret); } catch { /* not a text field */ }
     for (const field of next.querySelectorAll<HTMLElement>('textarea[id]')) field.scrollTop = fieldScroll.get(field.id) || 0;
     mounted?.ctx.painted?.();
@@ -2808,7 +2834,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
               await send('shop/equip', { kind: 'frame', ref: ref || null });
               if (identity !== frameIdentity) return;
               invalidateMemberProfile(viewer.uid);
-              notify(ref ? tr('头像框已设置。', 'Avatar frame selected.') : tr('已取下商城头像框。', 'Shop frame removed.'));
+              notify(ref ? tr('头像框已设置。', 'Avatar frame selected.') : tr('已取下头像框。', 'Avatar frame removed.'));
               await reload();
             });
           } finally {

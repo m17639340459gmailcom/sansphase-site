@@ -7,47 +7,67 @@ import { fail } from './community-db.ts';
 import type { CommunityAuthor } from './community-db.ts';
 import type { CommunityStore } from './community-store.ts';
 import { verifyIdentityRequest } from './community-identity-protocol.ts';
+import type { IdentityFrameEligibility } from './community-identity-protocol.ts';
 import { validCommunityProfileReviewerInput } from './community-profile-reviewer.ts';
 import type { CommunityProfileReviewerAuthority } from './community-profile-reviewer.ts';
 
 export const communityFrameBridgePath = '/api/community-identity/decorations';
 export const communityFrameBytes = uploadLimits.maxImageBytes;
-export type CommunityFrameState = { frame: string | null; frameImage: string | null; items: CommunityProfileFrame[]; available: boolean };
+export type CommunityFrameState = { frame: string | null; frameImage: string | null; items: CommunityProfileFrame[]; available: boolean; vipUntil?: string | null };
 export type CommunityFrameAccess = {
   state: (readerId: string) => CommunityFrameState | Promise<CommunityFrameState>;
   equip: (readerId: string, ref: string | null) => CommunityFrameState | Promise<CommunityFrameState>;
   image: (readerId: string, imageId: string) => Promise<Buffer>;
 };
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+export const vipCommunityFrame = 'vipmoon';
+export function validatedFrameEligibility(value: unknown, now = Date.now()): IdentityFrameEligibility {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !('active' in value) || typeof value.active !== 'boolean'
+    || !('vip' in value) || typeof value.vip !== 'boolean' || !('vipUntil' in value)
+    || !(value.vipUntil === null || typeof value.vipUntil === 'string' && Number.isFinite(Date.parse(value.vipUntil)))
+    || Object.keys(value).some(key => !['active', 'vip', 'vipUntil'].includes(key))) throw fail('会员资格暂不可用。', 503);
+  return { active: value.active, vip: value.active && value.vip && value.vipUntil !== null && Date.parse(value.vipUntil) > now, vipUntil: value.vipUntil };
+}
 export const validCommunityFrame = (ref: unknown): ref is string | null => ref === null || typeof ref === 'string' &&
-  (['gold', 'orbit', 'nebula'].includes(ref) || ref.startsWith('image:') && uuid.test(ref.slice(6)));
+  (['gold', 'orbit', 'nebula', vipCommunityFrame].includes(ref) || ref.startsWith('image:') && uuid.test(ref.slice(6)));
 const frameImageId = (ref: string | null) => ref?.startsWith('image:') && uuid.test(ref.slice(6)) ? ref.slice(6) : null;
 
-/** Frame ownership and equipped state have one authority: the community economy. */
-export function communityFrameItems(store: CommunityStore, member: CommunityAuthor, imagePrefix = '/api/community/images/'): CommunityProfileFrame[] {
+/** Permanent frames use inventory; the optional VIP frame is a current qualification projection. */
+export function communityFrameItems(store: CommunityStore, member: CommunityAuthor, imagePrefix = '/api/community/images/', membershipVip = false): CommunityProfileFrame[] {
   const owned = store.economy.owned(member);
-  return store.economy.items().flatMap(item => {
-    if (item.kind !== 'frame' || !owned.has(item.id) || !item.ref || !validCommunityFrame(item.ref)) return [];
+  const items = store.economy.items().flatMap(item => {
+    if (item.kind !== 'frame' || !owned.has(item.id) || !item.ref || item.ref === vipCommunityFrame || !validCommunityFrame(item.ref)) return [];
     const id = frameImageId(item.ref), image = id ? store.image(id) : null;
     if (id && (!image || image.deleted_at || image.purpose !== 'shop' || !image.frame_ready)) return [];
     return [{ id: item.id, name: item.name, ref: item.ref, image: id ? `${imagePrefix}${id}.webp` : null }];
   });
+  if (member.kind === 'reader' && membershipVip) items.push({ id: 'frame-vipmoon', name: 'VIP 月相头像框', ref: vipCommunityFrame, image: null });
+  return items;
 }
 
-type AuthorityOptions = { store: CommunityStore; directory: string; readerDeleted?: (id: string) => boolean };
-export function createCommunityFrameAuthority({ store, directory, readerDeleted = () => false }: AuthorityOptions) {
+type AuthorityOptions = { store: CommunityStore; directory: string; readerDeleted?: (id: string) => boolean; frameEligibility?: (id: string) => Promise<IdentityFrameEligibility> };
+export function createCommunityFrameAuthority({ store, directory, readerDeleted = () => false, frameEligibility }: AuthorityOptions) {
   const member = (readerId: string): CommunityAuthor => {
     if (!uuid.test(readerId)) throw fail('读者身份无效。');
     if (readerDeleted(readerId)) throw fail('读者账号已不存在。', 404);
     return { kind: 'reader', id: readerId };
   };
-  const state = (readerId: string): CommunityFrameState => {
-    const reader = member(readerId), items = communityFrameItems(store, reader, '/api/reader/frame/');
+  const eligibility = async (readerId: string) => {
+    const current = validatedFrameEligibility(await frameEligibility!(readerId));
+    member(readerId);
+    if (!current.active) throw fail('读者账号已停用或不存在。', 403);
+    return current;
+  };
+  const project = (readerId: string, proof: IdentityFrameEligibility | null): CommunityFrameState => {
+    const current = proof && validatedFrameEligibility(proof);
+    const reader = member(readerId), items = communityFrameItems(store, reader, '/api/reader/frame/', current?.vip === true);
     const equipped = store.members.storedDecorations(reader)?.frame ?? null;
     const frame = items.some(item => item.ref === equipped) ? equipped : null;
     const imageId = frameImageId(frame);
-    return { frame, frameImage: imageId ? `/api/reader/frame/${imageId}.webp` : null, items, available: true };
+    return { frame, frameImage: imageId ? `/api/reader/frame/${imageId}.webp` : null, items, available: true,
+      ...(frameEligibility ? { vipUntil: current?.vipUntil ?? null } : {}) };
   };
+  const state = (readerId: string) => { member(readerId); return frameEligibility ? eligibility(readerId).then(proof => project(readerId, proof)) : project(readerId, null); };
   return {
     state,
     equip(readerId: string, ref: string | null) {
@@ -55,12 +75,15 @@ export function createCommunityFrameAuthority({ store, directory, readerDeleted 
       if (!validCommunityFrame(ref)) throw fail('请选择已拥有的头像框。');
       store.convention.assertAgreed(reader);
       store.rateLimits.consume(reader, 'action', Number(store.members.storedLevel(reader) ?? 0));
-      return store.audit.run(reader, 'community-frame-equip', () => {
+      const save = (proof: IdentityFrameEligibility | null) => store.audit.run(reader, 'community-frame-equip', () => {
         member(readerId); store.convention.assertAgreed(reader);
-        if (ref && !communityFrameItems(store, reader).some(item => item.ref === ref)) throw fail('还没有这个装扮。', 403);
-        store.economy.equip(reader, 'frame', ref);
-        return state(readerId);
+        const current = proof && validatedFrameEligibility(proof);
+        if (ref && !communityFrameItems(store, reader, undefined, current?.vip === true).some(item => item.ref === ref)) throw fail('还没有这个装扮。', 403);
+        if (ref === vipCommunityFrame) store.members.equip(reader, 'frame', ref);
+        else store.economy.equip(reader, 'frame', ref);
+        return project(readerId, current);
       }, { ref, source: 'main-site' });
+      return frameEligibility ? eligibility(readerId).then(save) : save(null);
     },
     async image(readerId: string, imageId: string): Promise<Buffer> {
       const allowed = () => {
@@ -111,8 +134,8 @@ export function createCommunityFrameBridge({ authority, secret, consumeNonce, pr
         }
         if (!input || typeof input !== 'object' || Array.isArray(input) || !('readerId' in input) || typeof input.readerId !== 'string') throw fail('请求内容无效。');
         const keys = Object.keys(input);
-        if (operation === 'frame-state' && keys.every(key => key === 'readerId')) send(res, authority.state(input.readerId));
-        else if (operation === 'frame-equip' && keys.every(key => ['readerId', 'ref'].includes(key)) && 'ref' in input && validCommunityFrame(input.ref)) send(res, authority.equip(input.readerId, input.ref));
+        if (operation === 'frame-state' && keys.every(key => key === 'readerId')) send(res, await authority.state(input.readerId));
+        else if (operation === 'frame-equip' && keys.every(key => ['readerId', 'ref'].includes(key)) && 'ref' in input && validCommunityFrame(input.ref)) send(res, await authority.equip(input.readerId, input.ref));
         else if (operation === 'frame-image' && keys.every(key => ['readerId', 'imageId'].includes(key)) && 'imageId' in input && typeof input.imageId === 'string') {
           const data = await authority.image(input.readerId, input.imageId);
           res.writeHead(200, { 'Content-Type': 'image/webp', 'Content-Length': data.length, 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' }); res.end(data);

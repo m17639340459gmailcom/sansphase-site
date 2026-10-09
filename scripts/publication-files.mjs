@@ -26,6 +26,7 @@ export async function publicationFiles(root=resolve('.')) {
   result.push('scripts/build-trust-moon.mjs', 'scripts/trust-moon.ts');
   result.push('scripts/build-vip-badge.mjs', 'scripts/vip-badge.ts', 'scripts/vip-badge-glyphs.ts');
   result.push('scripts/community-compact-art.ts', 'scripts/community-staff-compact-art.ts');
+  result.push('scripts/community-vip-frame-art.ts', 'scripts/vip-moon-frame.ts');
   async function visit(directory) {
     for(const entry of await readdir(directory,{withFileTypes:true})) {
       const path=resolve(directory,entry.name);

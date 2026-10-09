@@ -38,6 +38,7 @@ test('local role picker switches fixture identities and keeps management permiss
   assert.match(html, /本地身份预览/);
   assert.match(html, /作者.*無相/s);
   assert.match(html, /版主.*守望/s);
+  assert.match(html, /VIP 读者.*墨白/s);
   assert.match(html, /method="post"/);
   assert.doesNotMatch(html, /作者和协管会直接进入/);
   assert.equal(picker.headers.get('set-cookie'), null, 'opening the picker never changes the sample account');
@@ -52,7 +53,7 @@ test('local role picker switches fixture identities and keeps management permiss
   assert.equal((await read('manage')).status, 403);
 
   for (const [role, name, owner, mod] of [
-    ['owner', '無相', true, true], ['general', '统筹', false, true], ['steward', '守望', false, true], ['assistant', '协助', false, true], ['demo', '预览读者', false, false],
+    ['owner', '無相', true, true], ['general', '统筹', false, true], ['steward', '守望', false, true], ['assistant', '协助', false, true], ['demo', '预览读者', false, false], ['mobai', '墨白', false, false],
   ] as const) {
     const response = await switchRole(role);
     assert.equal(response.status, 303);
@@ -63,6 +64,7 @@ test('local role picker switches fixture identities and keeps management permiss
     const me = await (await read('me', cookie)).json();
     assert.equal(me.convention.agreed, false, 'switching sample identity does not fabricate consent');
     assert.deepEqual([me.name, me.owner, me.mod], [name, owner, mod]);
+    if (role === 'mobai') assert.equal(me.vip, true, 'the VIP example is an ordinary reader with verified membership');
     if (role === 'steward') assert.deepEqual(me.moderationBoards, ['qa', 'tools'], 'the sample moderator demonstrates explicit board assignments');
     if (role === 'general' || role === 'steward' || role === 'assistant') {
       assert.equal(me.staff.role, role === 'steward' ? 'moderator' : role);

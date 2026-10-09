@@ -11,6 +11,24 @@ const account = { uid: '10001', nickname: '读者', email: 'reader@example.test'
 const state = (frame = null, extra = {}) => ({ frame, frameImage: frame === `image:${uuid}` ? image : null, available: true, items: [{ id: 'frame-gold', name: '金环', ref: 'gold', image: null }, { id: uuid, name: '自定义星光', ref: `image:${uuid}`, image }], ...extra });
 const turn = () => new Promise(resolve => setImmediate(resolve));
 
+test('the VIP moon frame joins the existing main-site owned selector and equips without replacing profile inputs', async t => {
+  const s = setup(t, { ...account, vip: true });
+  s.respond(async (_url, init) => state(init?.method === 'POST' ? JSON.parse(init.body).ref : null, {
+    items: [{ id: 'frame-vipmoon', name: 'VIP 月相头像框', ref: 'vipmoon', image: null }],
+  }));
+  const nickname = s.doc.querySelector('[name="nickname"]');
+  nickname.value = '未保存昵称';
+  s.open(); await turn();
+  assert.ok(s.doc.querySelector('[data-reader-frame-select] option[value="vipmoon"]'));
+  s.select('vipmoon'); s.save(); await turn();
+  assert.ok(s.doc.querySelector('.reader-profile-avatar.reader-avatar-frame-vipmoon'));
+  assert.equal(s.doc.querySelector('.reader-profile-frame-image')?.getAttribute('src'), '/assets/community/vip-frame/compact/frame-moon.webp?v=vip-moon-c78bcdb-r1');
+  assert.equal(s.doc.querySelector('[name="nickname"]'), nickname);
+  assert.equal(nickname.value, '未保存昵称');
+  assert.equal(s.renderCount(), 0);
+  assert.equal(s.calls.filter(call => call.init?.method === 'POST').length, 1);
+});
+
 test('an owner with a separate real reader account sees the existing editable personal account instead of the author gate', () => {
   const doc = new JSDOM(readerPage('account', '', account, false, true, { name: '博客品牌' })).window.document;
   assert.equal(doc.querySelector('[data-author-login]'), null);

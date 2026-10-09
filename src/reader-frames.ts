@@ -1,18 +1,23 @@
 import { escapeHTML as esc } from './core.mjs';
+import { communityVipFrameRef, communityVipFrameSource } from './community-vip-frame.mjs';
 
-export type ReaderFrameIdentity = { uid?: string; email: string; frame?: string | null; frameImage?: string | null };
-type FrameRef = 'gold' | 'orbit' | 'nebula' | `image:${string}`;
+export type ReaderFrameIdentity = { uid?: string; email: string; frame?: string | null; frameImage?: string | null; vip?: boolean; vipUntil?: string | null };
+type FrameRef = 'gold' | 'orbit' | 'nebula' | typeof communityVipFrameRef | `image:${string}`;
 type FrameItem = { id: string; name: string; ref: FrameRef; image: string | null };
 export type ReaderFrameState = { frame: FrameRef | null; frameImage: string | null; items: FrameItem[]; available: boolean };
 const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const customRef = new RegExp(`^image:${uuid}$`);
 const framePath = new RegExp(`^/api/reader/frame/${uuid}\\.webp$`);
 function frameRef(value: unknown): FrameRef | null {
-  return typeof value === 'string' && (['gold', 'orbit', 'nebula'].includes(value) || customRef.test(value)) ? value as FrameRef : null;
+  return typeof value === 'string' && (['gold', 'orbit', 'nebula', communityVipFrameRef].includes(value) || customRef.test(value)) ? value as FrameRef : null;
 }
 function frameImage(ref: FrameRef | null, value: unknown): string | null {
   return ref?.startsWith('image:') && typeof value === 'string' && framePath.test(value) &&
     value === `/api/reader/frame/${ref.slice(6)}.webp` ? value : null;
+}
+function vipFrameCurrent(reader: Pick<ReaderFrameIdentity, 'vip' | 'vipUntil'> | null): boolean {
+  return reader !== null && reader.vip !== false && (reader.vipUntil === undefined
+    || reader.vipUntil !== null && Number.isFinite(Date.parse(reader.vipUntil)) && Date.parse(reader.vipUntil) > Date.now());
 }
 export function readerFrameOwner(reader: ReaderFrameIdentity | null): string {
   if (!reader?.email) return '';
@@ -22,11 +27,13 @@ export function readerFrameOwner(reader: ReaderFrameIdentity | null): string {
 export function retainReaderFrame<T extends ReaderFrameIdentity>(next: T, current: ReaderFrameIdentity | null): T {
   const owner = readerFrameOwner(current);
   if (!owner || owner !== readerFrameOwner(next) || Object.hasOwn(next, 'frame') || Object.hasOwn(next, 'frameImage')) return next;
-  return { ...next, frame: current?.frame ?? null, frameImage: current?.frameImage ?? null };
+  const expiredVipFrame = current?.frame === communityVipFrameRef && !vipFrameCurrent(next);
+  return { ...next, frame: expiredVipFrame ? null : current?.frame ?? null, frameImage: expiredVipFrame ? null : current?.frameImage ?? null };
 }
-export function readerFrameDecoration(reader: Pick<ReaderFrameIdentity, 'frame' | 'frameImage'>): { className: string; image: string | null } {
+export function readerFrameDecoration(reader: Pick<ReaderFrameIdentity, 'frame' | 'frameImage' | 'vip' | 'vipUntil'>): { className: string; image: string | null } {
   const ref = frameRef(reader.frame);
-  return { className: ref ? `reader-avatar-frame-${ref.startsWith('image:') ? 'custom' : ref}` : '', image: frameImage(ref, reader.frameImage) };
+  if (ref === communityVipFrameRef && !vipFrameCurrent(reader)) return { className: '', image: null };
+  return { className: ref ? `reader-avatar-frame-${ref.startsWith('image:') ? 'custom' : ref}` : '', image: ref === communityVipFrameRef ? communityVipFrameSource(true) : frameImage(ref, reader.frameImage) };
 }
 export function readerFrameSettingsHTML(english: boolean): string {
   const tr = (zh: string, en: string) => english ? en : zh;
@@ -77,7 +84,8 @@ export function mountReaderFrames({ readIdentity, equipped, post, english, doc =
     const save = settings?.querySelector<HTMLButtonElement>('[data-reader-frame-save]');
     const allowed = Boolean(state?.available && !loading && !saving);
     if (select) select.disabled = !allowed;
-    if (save) save.disabled = !allowed || !select || (select.value || null) === state?.frame;
+    if (save) save.disabled = !allowed || !select || (select.value || null) === state?.frame
+      || select.value === communityVipFrameRef && !vipFrameCurrent(readIdentity());
   };
   const fill = (root: HTMLElement) => {
     const select = root.querySelector<HTMLSelectElement>('[data-reader-frame-select]');
@@ -93,8 +101,9 @@ export function mountReaderFrames({ readIdentity, equipped, post, english, doc =
   const paint = (root: HTMLElement) => {
     const avatar = root.closest('.reader-avatar-anchor')?.querySelector<HTMLButtonElement>('[data-reader-avatar-trigger]');
     if (!avatar || !state) return;
-    const decoration = readerFrameDecoration(state);
-    for (const name of ['gold', 'orbit', 'nebula', 'custom']) avatar.classList.remove(`reader-avatar-frame-${name}`);
+    const identity = readIdentity();
+    const decoration = readerFrameDecoration({ ...state, vip: identity?.vip, vipUntil: identity?.vipUntil });
+    for (const name of ['gold', 'orbit', 'nebula', 'vipmoon', 'custom']) avatar.classList.remove(`reader-avatar-frame-${name}`);
     if (decoration.className) avatar.classList.add(decoration.className);
     avatar.querySelector('.reader-profile-frame-image')?.remove();
     if (decoration.image) {
@@ -133,7 +142,7 @@ export function mountReaderFrames({ readIdentity, equipped, post, english, doc =
     if (!current(token, root)) return;
     const select = root.querySelector<HTMLSelectElement>('[data-reader-frame-select]');
     const ref = select?.value || null;
-    if (ref && !state.items.some(item => item.ref === ref)) return;
+    if (ref && !state.items.some(item => item.ref === ref) || ref === communityVipFrameRef && !vipFrameCurrent(readIdentity())) return;
     saving = true; controls(); status(root, tr('正在保存头像框…', 'Saving avatar frame…'));
     try {
       const value = await post(ref);

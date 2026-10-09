@@ -90,6 +90,8 @@
 .reader-profile-avatar.reader-avatar-frame-orbit { padding: 2px; background: rgb(159 184 224 / 55%); }
 .reader-profile-avatar.reader-avatar-frame-orbit::after { content: ''; position: absolute; inset: -5px; border-radius: 50%; background: radial-gradient(circle at 50% 0, #fff 0 2.2px, rgb(159 184 224 / 80%) 2.6px, transparent 4px); animation: reader-frame-orbit 9s linear infinite; pointer-events: none; }
 .reader-profile-frame-image { position: absolute; inset: -16%; display: block; width: 132%; height: 132%; max-width: none; border-radius: 0; object-fit: contain; background: transparent; pointer-events: none; z-index: 1; }
+.reader-profile-avatar.reader-avatar-frame-space { margin: 20px; }
+.reader-avatar-frame-vipmoon > .reader-profile-frame-image { inset: -33.2%; width: 166.4%; height: 166.4%; }
 @keyframes reader-frame-orbit { to { transform: rotate(360deg); } }
 .reader-profile-avatar-image { display: block; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
 .reader-profile-person > div { display: grid; min-width: 0; gap: 5px; }

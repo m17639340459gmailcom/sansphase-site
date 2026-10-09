@@ -17,12 +17,12 @@ const reader = { kind: 'reader' as const, id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaa
 const other = { kind: 'reader' as const, id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb' };
 const secret = 'limited-frame-bridge-secret-with-32-characters';
 const path = '/api/community-identity/decorations';
-async function fixture(t: test.TestContext) {
+async function fixture(t: test.TestContext, frameEligibility?: (id: string) => Promise<{ active: boolean; vip: boolean; vipUntil: string | null }>) {
   const directory = await mkdtemp(resolve(tmpdir(), 'community-frame-'));
   new DatabaseSync(resolve(directory, 'content.db')).close(); await migrateCommunity(directory); await mkdir(resolve(directory, 'uploads'));
   const store = createCommunityStore(directory), db = new DatabaseSync(resolve(directory, 'content.db'));
   const deleted = new Set<string>();
-  const authority = createCommunityFrameAuthority({ store, directory, readerDeleted: id => deleted.has(id) });
+  const authority = createCommunityFrameAuthority({ store, directory, readerDeleted: id => deleted.has(id), frameEligibility });
   const used = new Set<string>();
   const bridge = createCommunityFrameBridge({ authority, secret, consumeNonce: nonce => { if (used.has(nonce)) return false; used.add(nonce); return true; } });
   const server = createServer((req, res) => { void bridge.handle(req, res).then(handled => { if (!handled) { res.writeHead(404); res.end(); } }); });
@@ -141,4 +141,61 @@ test('display projection cache is bounded across accounts and never mixes reader
   assert.equal(calls, 258, 'the oldest entry must leave the 256-account bound');
   await client.state(ids[256]);
   assert.equal(calls, 258, 'recent independent entries remain cached');
+});
+
+test('signed frame bridge exposes qualified VIP choice without inventory writes, and preserves it across expiry and renewal', async t => {
+  const source = { active: true, vip: true, vipUntil: new Date(Date.now() + 60_000).toISOString() };
+  const f = await fixture(t, async () => ({ ...source }));
+  assert.equal((await f.authority.state(reader.id)).items.some(item => item.ref === 'vipmoon'), true);
+  assert.equal(Number(f.db.prepare('SELECT COUNT(*) AS n FROM community_members').get()?.n), 0);
+  assert.equal(Number(f.db.prepare('SELECT COUNT(*) AS n FROM community_owned').get()?.n), 0);
+  acceptCommunityConvention(f.store, [reader]);
+  const selected = await f.client.equip(reader.id, 'vipmoon');
+  assert.equal(selected.frame, 'vipmoon');
+  assert.equal(selected.vipUntil, source.vipUntil);
+  source.vipUntil = new Date(Date.now() - 1).toISOString();
+  const expired = await f.authority.state(reader.id);
+  assert.equal(expired.frame, null);
+  assert.equal(expired.items.some(item => item.ref === 'vipmoon'), false);
+  assert.equal(f.store.members.storedDecorations(reader)?.frame, 'vipmoon');
+  await assert.rejects(async () => f.authority.equip(reader.id, 'vipmoon'), { status: 403 });
+  source.vipUntil = new Date(Date.now() + 60_000).toISOString();
+  assert.equal((await f.authority.state(reader.id)).frame, 'vipmoon');
+  for (const table of ['community_owned', 'community_ledger', 'community_experience_ledger']) assert.equal(Number(f.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()?.n), 0);
+});
+
+for (const change of ['expired', 'disabled', 'deleted'] as const) test(`frame equip rechecks ${change} qualification after the source wait without saving a selection`, async t => {
+  let entered!: () => void, release!: () => void;
+  const started = new Promise<void>(done => { entered = done; }), gate = new Promise<void>(done => { release = done; });
+  const source = { active: true, vip: true, vipUntil: new Date(Date.now() + 60_000).toISOString() };
+  const f = await fixture(t, async () => { entered(); await gate; return { ...source }; });
+  acceptCommunityConvention(f.store, [reader]);
+  const selected = Promise.resolve().then(() => f.authority.equip(reader.id, 'vipmoon'));
+  const assertion = assert.rejects(selected, { status: change === 'deleted' ? 404 : 403 });
+  await started;
+  if (change === 'expired') source.vipUntil = new Date(Date.now() - 1).toISOString();
+  else if (change === 'disabled') source.active = false;
+  else f.deleted.add(reader.id);
+  release(); await assertion;
+  assert.equal(f.store.members.storedDecorations(reader)?.frame, null);
+});
+
+test('VIP frame state cache and both shared and equip responses never remain qualified beyond expiry', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  const now = Date.now(), until = new Date(now + 1000).toISOString();
+  const vip = { ...emptyFrameState, frame: 'vipmoon', items: [{ id: 'frame-vipmoon', name: 'VIP 月相头像框', ref: 'vipmoon', image: null }], vipUntil: until };
+  let calls = 0, release!: () => void;
+  const held = new Promise<void>(done => { release = done; });
+  const client = createCommunityFrameClient({ origin: 'https://community.sansphase.com', secret, fetch: async (_input, init) => {
+    calls++; if (JSON.parse(String(init?.body)).operation === 'frame-state' && calls === 2) await held;
+    return jsonResponse(vip);
+  } });
+  assert.equal((await client.equip(reader.id, 'vipmoon')).frame, 'vipmoon');
+  assert.equal((await client.state(reader.id)).frame, 'vipmoon');
+  assert.equal(calls, 1);
+  t.mock.timers.tick(1001);
+  const first = client.state(reader.id), shared = client.state(reader.id);
+  release();
+  for (const state of await Promise.all([first, shared])) { assert.equal(state.frame, null); assert.equal(state.items.length, 0); }
+  assert.equal(calls, 2);
 });

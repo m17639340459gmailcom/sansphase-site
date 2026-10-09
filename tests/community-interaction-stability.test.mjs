@@ -218,6 +218,49 @@ test('owned frames load and equip without remounting decoded previews; remove pe
   assert.equal(fixture.main.querySelector('[data-frame-ref="gold"]').getAttribute('aria-pressed'), 'false');
 });
 
+test('manual VIP frame wearing preserves every decoded catalogue preview and its mounted animation', async t => {
+  let frame = null;
+  const viewer = () => ({ ...person, vip: true, frame });
+  const fixture = await setup(t, '#/community/u/u1/frames', (url, init) => {
+    if (url.endsWith('/me')) return response(viewer());
+    if (url.includes('/members/u1?')) return response({ ...iconMember(), person: viewer(), tab: 'frames' });
+    if (url.endsWith('/profile')) return response({ person: viewer(), canEditProfile: false, frames: [
+      { id: 'frame-vipmoon', name: 'VIP 月相头像框', ref: 'vipmoon', image: null },
+      { id: 'gold', name: '金色框', ref: 'gold', image: null },
+    ] });
+    if (url.endsWith('/shop/equip')) { frame = JSON.parse(init.body).ref; return response({ frame }); }
+  });
+  const panel = fixture.main.querySelector('[data-community-frames]');
+  const choice = panel.querySelector('[data-frame-ref="vipmoon"]');
+  const preview = choice.querySelector('.community-vip-frame');
+  const image = preview.querySelector('img');
+  const otherImage = panel.querySelector('[data-frame-ref="gold"] .community-av');
+  // Model the existing enhancement's shadow host: reconciliation must retain
+  // its DOM and timeline instead of recreating all artwork after a save.
+  const canvas = fixture.w.document.createElement('span');
+  canvas.className = 'community-level-motion-canvas';
+  const shadow = canvas.attachShadow({ mode: 'open' });
+  shadow.innerHTML = '<svg data-preserved-timeline="true"></svg>';
+  preview.append(canvas);
+  choice.focus();
+  for (const ref of ['vipmoon', null]) {
+    choice.click(); await turn(); await turn();
+    assert.equal(frame, ref);
+    assert.equal(fixture.main.querySelector('[data-community-frames]'), panel);
+    assert.equal(panel.querySelector('[data-frame-ref="vipmoon"]'), choice);
+    assert.equal(choice.querySelector('.community-vip-frame'), preview);
+    assert.equal(preview.querySelector('img'), image);
+    assert.equal(preview.querySelector('.community-level-motion-canvas'), canvas);
+    assert.equal(canvas.shadowRoot, shadow);
+    assert.equal(panel.querySelector('[data-frame-ref="gold"] .community-av'), otherImage);
+    assert.equal(fixture.w.document.activeElement, choice);
+    assert.equal(choice.getAttribute('aria-pressed'), String(ref !== null));
+    assert.equal(Boolean(fixture.main.querySelector('.community-m-id > .community-av .community-vip-frame')), ref !== null);
+  }
+  assert.deepEqual(fixture.requests.filter(call => call.url.endsWith('/shop/equip')).map(call => JSON.parse(call.init.body)),
+    [{ kind: 'frame', ref: 'vipmoon' }, { kind: 'frame', ref: null }]);
+});
+
 test('a foreign member frames URL does not load private owned frames or permit a forged equip', async t => {
   const fixture = await setup(t, '#/community/u/other/frames', url => url.includes('/members/other?') ? response({ ...iconMember(), self: false, tab: 'frames', person: { ...person, uid: 'other' } }) : null);
   assert.equal(fixture.requests.some(call => call.url.endsWith('/profile')), false);

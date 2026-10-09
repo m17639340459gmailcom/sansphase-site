@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/m17639340459gmailcom/sansphase-site",
+  "branch": "codex/vip-moon-frame-draft",
+  "commit": "c78bcdbb5df9f21d2c27819f7b53ac6ac99ab9c4",
+  "sourceDirectory": "outputs/vip-moon-frame-v1",
+  "generator": {
+    "file": "frame.js",
+    "bytes": 7805,
+    "sha256": "c75acd23e54c356d3838d4c77516be4cf2bc6af0938e0cebbe03b4d7c81cd0b0",
+    "port": "scripts/vip-moon-frame.ts"
+  },
+  "files": {
+    "base-640.webp": {
+      "bytes": 162946,
+      "sha256": "0d0e5899b72ef3364062263ebe2cf6485841541b700eb5395b3751ec7da6b096",
+      "mime": "image/webp",
+      "width": 640,
+      "height": 640
+    },
+    "still-640.webp": {
+      "bytes": 147256,
+      "sha256": "ccd1b9205024f7bb70942c782fe21bbdfabb42f5caae2939f530894750e43a0a",
+      "mime": "image/webp",
+      "width": 640,
+      "height": 640
+    },
+    "ribbon-640.webp": {
+      "bytes": 30122,
+      "sha256": "a7c9bbc2a89d9c3467046e89559ee9a590b108770d0cef029a98d83d5b4b6383",
+      "mime": "image/webp",
+      "width": 640,
+      "height": 640
+    },
+    "mask-gold.png": {
+      "bytes": 43313,
+      "sha256": "6fe7f435aa0cc41f5c261c5ba645b80e2a00d98d35bf0276d0a918458c668368",
+      "mime": "image/png",
+      "width": 640,
+      "height": 640
+    },
+    "mask-blue.png": {
+      "bytes": 28916,
+      "sha256": "60f72d555be82494b3c98689468924a52bce0c66efab303790e6e97975ab6488",
+      "mime": "image/png",
+      "width": 640,
+      "height": 640
+    },
+    "mask-pale.png": {
+      "bytes": 49934,
+      "sha256": "30227a8fb0482270ec5b8287c7c9882be2d3ffbd7ae24edad3914075714fc1fc",
+      "mime": "image/png",
+      "width": 640,
+      "height": 640
+    },
+    "wave.png": {
+      "bytes": 76573,
+      "sha256": "d3610569d1e8a2d9cce92683ae908abd239c73a46ed8dea781690f77b99cfaf7",
+      "mime": "image/png",
+      "width": 512,
+      "height": 256
+    },
+    "env.png": {
+      "bytes": 5567,
+      "sha256": "6c71931a4494bbc674bbcd360c26d601a2e7ffc45156c4501a2cc465242f4f1c",
+      "mime": "image/png",
+      "width": 320,
+      "height": 320
+    }
+  },
+  "delivery": {
+    "dynamic": {
+      "file": "frame-moon.svg",
+      "description": "Original SVG and CSS animation with the seven referenced source images embedded unchanged; stable IDs make release builds deterministic."
+    },
+    "compact": {
+      "file": "compact/frame-moon.webp",
+      "width": 256,
+      "height": 256,
+      "source": "base-640.webp",
+      "description": "Lossless WebP of the resized original base artwork with transparency retained."
+    },
+    "overlay": {
+      "canvas": 1265,
+      "avatarRadius": 380,
+      "scale": 1.6644736842105263
+    }
+  }
+}

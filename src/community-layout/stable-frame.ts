@@ -105,6 +105,21 @@ export function createStableCommunityFrame(document: Document, window: FrameWind
     if (readingFloor) readingFloor.slot.style.minHeight = readingFloor.minHeight;
     readingFloor = null;
   };
+  const memberReading = () => communityRoute(currentHash).view === 'member'
+    && Boolean(routeSlot?.querySelector('.community-member[data-community="member"]'));
+  const retainMemberViewport = (top: number) => {
+    if (!readingFloor || !routeSlot || !center || !memberReading()) return false;
+    const viewport = mobileLayout
+      ? document.documentElement.clientHeight || document.defaultView?.innerHeight || 0 : center.clientHeight;
+    if (viewport <= 0) return false;
+    const offset = routeSlot.getBoundingClientRect().top + readTop()
+      - (mobileLayout ? 0 : center.getBoundingClientRect().top);
+    // Empty owned-frame content still needs enough space below the visible
+    // tabs. Retain this viewport only, never the old full achievement list.
+    readingFloor.height = Math.max(0, Math.ceil(top + viewport - offset));
+    routeSlot.style.minHeight = `${readingFloor.height}px`;
+    return true;
+  };
   const preserveReadingHeight = () => {
     if (!routeSlot || (!readingFloor && readTop() <= 0)) return;
     const height = routeSlot.getBoundingClientRect().height;
@@ -115,7 +130,7 @@ export function createStableCommunityFrame(document: Document, window: FrameWind
   };
   const onScrollInput = () => {
     cancelScrollRestore();
-    if (!loading()) releaseReadingHeight();
+    if (!loading() && !memberReading()) releaseReadingHeight();
   };
   const restoreAfterLayout = (top: number) => {
     cancelScrollRestore();
@@ -128,7 +143,10 @@ export function createStableCommunityFrame(document: Document, window: FrameWind
       writeTop(top);
       // Keep enough space throughout loading, then allow final short content
       // to settle at its valid limit without leaving empty page padding.
-      if (!loading()) { releaseReadingHeight(); writeTop(top); restoreTop = null; }
+      if (!loading()) {
+        if (!retainMemberViewport(top)) releaseReadingHeight();
+        writeTop(top); restoreTop = null;
+      }
     };
     if (window.requestAnimationFrame) scrollFrame = window.requestAnimationFrame(finish);
     else finish();

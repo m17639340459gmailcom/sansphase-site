@@ -98,6 +98,19 @@ export function refreshMembership(
         ? "Reader"
         : "普通读者";
   }
+  if (!state.active) {
+    // Expiration updates the visible qualification only. Keep the stored
+    // personal frame choice so a verified renewal can restore it later.
+    for (const avatar of card?.querySelectorAll<HTMLElement>('.reader-avatar-frame-vipmoon') ?? []) {
+      avatar.classList.remove('reader-avatar-frame-vipmoon');
+      avatar.querySelector(':scope > .reader-profile-frame-image')?.remove();
+    }
+    const option = card?.querySelector<HTMLOptionElement>('[data-reader-frame-select] option[value="vipmoon"]');
+    if (option) option.disabled = true;
+    const select = card?.querySelector<HTMLSelectElement>('[data-reader-frame-select]');
+    const save = card?.querySelector<HTMLButtonElement>('[data-reader-frame-save]');
+    if (select?.value === 'vipmoon' && save) save.disabled = true;
+  }
   return state;
 }
 

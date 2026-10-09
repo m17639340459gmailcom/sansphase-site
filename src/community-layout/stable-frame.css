@@ -1,6 +1,16 @@
 /* A persistent three-column host. Existing center pages retain their behavior. */
-html.community-frame-document { scrollbar-width: none; scrollbar-gutter: auto; scroll-behavior: auto; overflow-anchor: none; }
+/* Keep the same outer gutter when the workspace takes over document scrolling. */
+html.community-frame-document,
+html:has(body.community-management-open) { scrollbar-width: auto; scrollbar-gutter: stable; scroll-behavior: auto; overflow-anchor: none; }
+html.community-frame-document { scrollbar-color: transparent transparent; }
+html:has(body.community-management-open) { scrollbar-color: #87909b transparent; }
 html.community-frame-document::-webkit-scrollbar,
+html:has(body.community-management-open)::-webkit-scrollbar { display: block; width: 10px; height: 10px; }
+html.community-frame-document::-webkit-scrollbar-track,
+html:has(body.community-management-open)::-webkit-scrollbar-track { background: transparent; }
+html.community-frame-document::-webkit-scrollbar-thumb,
+html:has(body.community-management-open)::-webkit-scrollbar-thumb { background: transparent; border: 2px solid transparent; border-radius: 10px; }
+html:has(body.community-management-open)::-webkit-scrollbar-thumb { background: #87909b; }
 .page.community-page[data-community-frame="stable"] :is(.community-feed-rail, .community-aside, .community-frame-boards)::-webkit-scrollbar { display: none; width: 0; height: 0; }
 .page.community-page[data-community-frame="stable"] :is(.community-feed-rail, .community-aside, .community-frame-boards) { scrollbar-width: none; }
 /* Celestial reading materials: bright text over indigo, with restrained gold trim. */
@@ -201,10 +211,6 @@ html[lang^="en"] [data-inline-editor] .community-inline-upload[data-cover="true"
 }
 @media (max-width: 700px) {
   body.community-open:is(.community-frame-open, .community-management-open) { --header-h: 64px; }
-  html.community-frame-document { scrollbar-width: auto; scrollbar-gutter: stable; scrollbar-color: transparent transparent; }
-  html.community-frame-document::-webkit-scrollbar { display: block; width: 10px; height: 10px; }
-  html.community-frame-document::-webkit-scrollbar-thumb { background: transparent; border: 2px solid transparent; border-radius: 10px; }
-  html.community-frame-document::-webkit-scrollbar-track { background: transparent; }
   html.community-frame-document[data-frame-scrolling] { scrollbar-color: #76869b #1b2635; }
   html.community-frame-document[data-frame-scrolling]::-webkit-scrollbar-thumb { background: #76869b; border-color: #1b2635; }
   html.community-frame-document[data-frame-scrolling]::-webkit-scrollbar-track { background: #1b2635; }

@@ -117,6 +117,7 @@ for (const file of [
   "community-passive-refresh.mjs",
   "community-staff.mjs",
   "community-staff-art.mjs",
+  "community-vip-frame.mjs",
   "community-write-request.mjs",
   "community-editor-size.mjs",
   "community-editor-preparation.mjs",

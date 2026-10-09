@@ -9,11 +9,13 @@ export const identityRequestBytes = 64 * 1024;
 // operations retain their original request cap.
 export const identityAvatarRequestBytes = 704 * 1024;
 export const identityResponseBytes = 2 * 1024 * 1024;
-export type IdentityOperation = 'exchange' | 'session' | 'people' | 'member' | 'names' | 'avatar'
+export type IdentityOperation = 'exchange' | 'session' | 'people' | 'member' | 'names' | 'avatar' | 'frame-eligibility'
   | 'profile' | 'profile-signature' | 'profile-nickname' | 'profile-avatar' | 'profile-avatar-remove' | 'profile-avatar-pending'
   | 'profile-reviews' | 'profile-review-image' | 'profile-review' | 'profile-advise';
 export type IdentityReader = { id: string; uid: string | null; nickname: string; signature: string; avatar: string | null; role: 'reader'; vip: boolean; vipStartedAt: string | null; vipUntil: string | null };
 export type IdentityDTO = { viewer: CommunityViewer; reader: IdentityReader | null; author: { name: string } | null; ownerReader?: IdentityReader };
+// Internal account projection only. Neither a browser assertion nor permanent inventory.
+export type IdentityFrameEligibility = { active: boolean; vip: boolean; vipUntil: string | null };
 // The source binds immutable approved bytes to their full upload UUID. An
 // unchanged result is only a current approval confirmation, never authority
 // to skip the caller's session checks or to read a caller-selected file.

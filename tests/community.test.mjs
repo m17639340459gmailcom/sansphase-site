@@ -294,7 +294,7 @@ test("topic rows follow the demo: avatars, level and VIP marks, decorations, fla
   // Approved avatars, frames, name colours, levels, VIP; odd decoration names are ignored.
   const fancy = communityTopicsHTML([topic("f", { author: person("星野", { avatar: "/api/community/avatar/u2.webp?v=ab", frame: "gold", color: "aurora", vip: true, level: 3 }), glow: true })], common);
   assert.match(fancy, /<article class="community-topic is-glow"/);
-  assert.match(fancy, /<a class="community-av community-av-md is-frame-gold" href="#\/community\/u\/u2" tabindex="-1" aria-hidden="true"><img src="\/api\/community\/avatar\/u2\.webp\?v=ab" alt=""/);
+  assert.match(fancy, /<a class="community-av community-av-md has-vip-frame-space is-frame-gold" href="#\/community\/u\/u2" tabindex="-1" aria-hidden="true"><img src="\/api\/community\/avatar\/u2\.webp\?v=ab" alt=""/);
   assert.match(fancy, /<a class="community-uname is-color-aurora" href="#\/community\/u\/u2">星野<\/a><span class="community-level-marks"><span class="community-level-badge is-vip" data-name-icon="vip:1"[^]*data-level-icon="vip-1"/);
   assert.doesNotMatch(fancy, /is-trust|is-growth/);
   assert.doesNotMatch(communityTopicsHTML([topic("x", { author: person("甲", { frame: "gold onload=x", color: "Red" }) })], common), /is-frame|is-color/);

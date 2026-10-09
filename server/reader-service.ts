@@ -13,7 +13,7 @@ import { readerImageBytes } from '../src/upload-policy.mjs';
 import { createReaderWorkflow } from './reader-workflow.ts';
 import { createReaderProfileCommands, normalizeReaderAvatar, readerSignature, readerNickname } from './reader-profile-commands.ts';
 import type { ReaderProfileCommands } from './reader-profile-commands.ts';
-import { validCommunityFrame } from './community-frame-authority.ts';
+import { validCommunityFrame, vipCommunityFrame } from './community-frame-authority.ts';
 import type { CommunityFrameAccess, CommunityFrameState } from './community-frame-authority.ts';
 import { validReaderNickname } from '../src/reader-policy.ts';
 import type { createReaderUidStore } from './reader-uids.ts';
@@ -107,12 +107,20 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
     pendingNickname: workflow.profileFor(user.id, 'nickname')?.proposed_value ?? null,
     role: 'reader', ...membershipState(user), ...(ownerBinding && user.id === ownerBinding ? { ownerReader: true as const } : {}) });
   const noFrames = (): CommunityFrameState => ({ frame: null, frameImage: null, items: [], available: false });
-  const frameState = async (user: ReaderUser) => { try { return frames ? await frames.state(user.id) : noFrames(); } catch { return noFrames(); } };
+  const frameState = async (user: ReaderUser): Promise<CommunityFrameState> => {
+    try {
+      const state = frames ? await frames.state(user.id) : noFrames();
+      if (user._verified === true && !user.disabled && membershipState(user).vip) return state;
+      // The current account can veto a short display cache without removing
+      // the saved choice or another frame from the permanent inventory.
+      return { ...state, frame: state.frame === vipCommunityFrame ? null : state.frame,
+        frameImage: state.frame === vipCommunityFrame ? null : state.frameImage, items: state.items.filter(item => item.ref !== vipCommunityFrame) };
+    } catch { return noFrames(); }
+  };
   const displayDTO = async (user: ReaderUser | null) => {
-    const base = dto(user);
-    if (!user || !base) return null;
+    if (!user) return null;
     const state = await frameState(user);
-    return { ...base, frame: state.frame, frameImage: state.frameImage };
+    return { ...dto(user), frame: state.frame, frameImage: state.frameImage };
   };
   async function authenticated(req: IncomingMessage, strict = false): Promise<ReaderUser | null> {
     const token = session(req);

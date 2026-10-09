@@ -752,6 +752,72 @@ test('a center repaint restores reading position after a temporary short DOM cla
   assert.ok(main.querySelector('[data-frame-right]'));
 });
 
+for (const width of [1600, 390]) for (const outcome of ['empty', 'owned', 'failed']) test(`member frames handoff keeps the verified header and visible tab stable (${width}px, ${outcome})`, async t => {
+  const pending = deferred();
+  const member = tab => ({ person, self: true, tab, bio: '', joinedAt: null, streak: 0, muted: null,
+    stats: { topics: 3, replies: 0, likes: 0, accepted: 0, featured: 0 }, follows: { followers: 0, following: 0 },
+    counts: { topics: 3, replies: 0, bookmarks: 0 }, topics: tab === 'topics' ? listing.items : [], replies: [], bookmarks: [], badges: [], quick: null });
+  const fixture = await setup(t, '#/community/u/u1', url => {
+    if (url.includes('/members/u1?')) return response(member(new URL(url, 'http://localhost').searchParams.get('tab')));
+    if (url.endsWith('/profile')) return pending.promise;
+    return null;
+  });
+  const { w, main, frame, render, resizeWidth } = fixture;
+  resizeWidth(width); await turn();
+  const slot = main.querySelector('[data-frame-route]'), center = frame.center();
+  const host = width === 390 ? w.document.documentElement : center;
+  const hero = slot.querySelector('.community-m-hero'); assert.ok(hero);
+  const callbacks = new Map(); let sequence = 0, top = 400;
+  w.requestAnimationFrame = callback => { callbacks.set(++sequence, callback); return sequence; };
+  w.cancelAnimationFrame = id => { callbacks.delete(id); };
+  const flush = () => { const pendingFrames = [...callbacks.values()]; callbacks.clear(); pendingFrames.forEach(callback => callback(0)); };
+  const naturalHeight = () => slot.querySelector('[data-community="member"][data-tab="topics"]') ? 1800 : 480;
+  const height = () => Math.max(naturalHeight(), parseFloat(slot.style.minHeight) || 0);
+  Object.defineProperty(host, 'clientHeight', { get: () => 600 });
+  Object.defineProperty(host, 'scrollTop', { get: () => top = Math.min(top, Math.max(0, height() - 600)), set: value => { top = Math.min(value, Math.max(0, height() - 600)); } });
+  center.getBoundingClientRect = () => ({ top: 0, height: 600, bottom: 600, left: 0, right: 1000, width: 1000, x: 0, y: 0 });
+  slot.getBoundingClientRect = () => ({ top: -host.scrollTop, height: height(), bottom: height() - host.scrollTop, left: 0, right: 1000, width: 1000, x: 0, y: -host.scrollTop });
+  host.dispatchEvent(new w.Event('wheel', { bubbles: true }));
+  render('#/community/u/u1/frames'); await turn(); flush();
+  assert.equal(slot.querySelector('.community-m-hero'), hero, 'the actual source header is retained while the private frame read waits');
+  assert.equal(host.scrollTop, 400);
+  try {
+    pending.resolve(outcome === 'failed' ? { ok: false, status: 500, json: async () => ({ error: '头像框暂时无法加载' }) }
+      : response({ person, canEditProfile: false, frames: outcome === 'owned' ? [{ id: 'gold', ref: 'gold', name: '金色框', image: null }] : [] }));
+    await turn(); flush();
+    assert.equal(slot.querySelector('.community-m-hero'), hero, 'fresh unchanged header artwork must not be remounted at tab commit');
+    assert.equal(host.scrollTop, 400, 'short content cannot change the tab viewport');
+    assert.ok(parseFloat(slot.style.minHeight) <= 1000, 'do not retain the height of the full topic list');
+    if (outcome === 'empty') assert.equal(slot.querySelector('[data-community-frames], .community-card'), null, 'no owned frame still has no card or explanatory panel');
+    if (outcome === 'owned') assert.ok(slot.querySelector('[data-frame-ref="gold"]'));
+    if (outcome === 'failed') {
+      assert.match(slot.textContent, /头像框暂时无法加载/);
+      assert.ok(slot.querySelector('[data-action="community-retry"]'));
+    }
+    render('#/community/home'); await turn(); flush();
+    assert.equal(host.scrollTop, 0); assert.equal(slot.style.minHeight, '');
+  } finally { pending.resolve(response({ person, frames: [] })); await turn(); flush(); }
+});
+
+for (const selector of ['[data-action="community-profile-edit"]', '.community-me-quick a']) test(`a refreshed frame collection preserves keyboard focus in retained member controls (${selector})`, async t => {
+  let profiles = 0;
+  const { w, main, frame } = await setup(t, '#/community/u/u1/frames', url => {
+    if (url.includes('/members/u1?')) return response({ person, self: true, tab: 'frames', bio: '', joinedAt: null, streak: 0, muted: null,
+      stats: { topics: 0, replies: 0, likes: 0, accepted: 0, featured: 0 }, follows: { followers: 0, following: 0 },
+      counts: { topics: 0, replies: 0, bookmarks: 0 }, topics: [], replies: [], bookmarks: [], badges: [],
+      quick: { balance: 30, checkedIn: false, unread: 0, orders: 0 } });
+    if (url.endsWith('/profile')) return response({ person, canEditProfile: false,
+      frames: profiles++ ? [{ id: 'gold', ref: 'gold', name: '金色框', image: null }] : [] });
+    return null;
+  });
+  const control = main.querySelector(selector); assert.ok(control); control.focus({ preventScroll: true });
+  const retry = w.document.createElement('button'); retry.dataset.action = 'community-retry'; frame.center().append(retry);
+  retry.click(); await turn();
+  assert.ok(main.querySelector('[data-frame-ref="gold"]'), 'refresh really changed the owned collection');
+  assert.equal(main.querySelector(selector), control, 'unchanged member controls remain the same nodes');
+  assert.equal(w.document.activeElement, control, 'moving a retained header must not lose keyboard focus');
+});
+
 test('reply sorting keeps its reading position without rebuilding the thread or losing the reply draft', async t => {
   const data = { ...thread, replies: [1, 2].map(i => ({ id: `r${i}`, body: `回复 ${i}`, author: person,
     createdAt: `2026-10-01T10:0${i}:00Z`, likes: i, canDelete: false, byTopicAuthor: false })) };
