@@ -37,11 +37,13 @@ async function until(check, reason) {
 // approximation which could pass while app.mjs still replaces the whole main.
 const app = readFileSync(new URL('../src/app.mjs', import.meta.url), 'utf8');
 const start = app.indexOf('  cleanCommunity();\n  const pageMarkup =');
-const end = app.indexOf('  communityReady();', start);
+// Include the complete readiness call, regardless of its internal arguments.
+const end = app.indexOf("  cleanReaderAdmin=page==='admin'", start);
 assert.ok(start > 0 && end > start, 'find the formal app cleanup/render/mount entry');
+assert.match(app.slice(start, end), /communityReady\(/, 'retain the formal readiness call after mounting');
 const applicationRender = new Function('main', 'views', 'communityFrame', 'communityUI', 'communityContext', 'setContentHTML',
   'cleanCommunity', 'communityReady', 'communityEnabled', 'preserveScroll', `"use strict"; const page='community', contentStatus=null, readerUI=null, id='';
-  ${app.slice(start, end + '  communityReady();'.length)}
+  ${app.slice(start, end)}
   return cleanCommunity;`);
 const hashStart = app.indexOf('window.addEventListener("hashchange", (event) =>');
 const updateStart = app.indexOf('  const update = () => {', hashStart), updateEnd = app.indexOf('  // Community routes swap', updateStart);
