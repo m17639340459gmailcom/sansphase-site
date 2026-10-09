@@ -65,23 +65,48 @@ async function threadDTO(ctx: Ctx, id: string) {
   const currentTopic = visibleTopicAccess(ctx, id);
   if (canModerate !== ctx.canModerateBoard(currentTopic.board)) throw fail('管理权限发生变化，请重新打开帖子。', 403);
   const mentions = Object.fromEntries([...mentioned].map(([name, member]) => [name, mentionMap.get(memberKey(member))?.uid || null]).filter(([, uid]) => uid));
-  const lowerTarget=(author:CommunityAuthor)=>{try{live.staff.protect(me,author);return true;}catch{return false;}};
-  const replies = topic.replies.map(reply => {
-    const replyTarget = { kind: 'reply' as const, id: reply.id };
-    const mine = !ctx.readOnly && same(me, reply.author), byTopicAuthor = same(reply.author, topic.author);
-    const hiddenFromViewer = reply.hidden && !mine && !canModerate;
-    const quote = reply.quoteId ? quoted.get(reply.quoteId) : null;
-    return {
-      id: reply.id, author: ctx.person(reply.author, map), body: hiddenFromViewer ? '' : reply.body, createdAt: reply.createdAt,
-      images: hiddenFromViewer ? [] : reply.images,
-      edited: reply.edited, likes: reply.likes, liked: live.liked(replyTarget, me), thanked: live.thanked(replyTarget, me), thanks: live.thanks(replyTarget),
-      byTopicAuthor, accepted: topic.acceptedReplyId === reply.id, mine, hidden: reply.hidden,
-      quote: quote && !(quote.hidden && !canModerate) ? { id: quote.id, author: ctx.person(quote.author, map).name, excerpt: [...quote.body].slice(0, 80).join('') } : null,
-      canDelete: !ctx.readOnly && (mine || ctx.canStaff('reply.delete',currentTopic.board)&&lowerTarget(reply.author)), deleteReasonRequired: ctx.canStaff('reply.delete',currentTopic.board), canEdit: canEdit(ctx, reply.author, reply.createdAt), canRestore: ctx.canStaff('reply.restore',currentTopic.board) && reply.hidden,
-      canPenalty: ctx.canStaff('reply.penalty',currentTopic.board)&&lowerTarget(reply.author),canMute:ctx.canStaff('member.mute')&&lowerTarget(reply.author),
-      canAccept: topic.board === 'qa' && isAuthor && !topic.acceptedReplyId && !byTopicAuthor && !reply.hidden,
+  // These checks remain in the final synchronous response phase, after every
+  // awaited profile/mention lookup and live topic authorization check.
+  const staffPermissions = new Map<string, boolean>(), protectedTargets = new Map<string, boolean>();
+  const canStaff: Ctx['canStaff'] = (permission, board) => {
+    const key = JSON.stringify([permission, board]);
+    if (!staffPermissions.has(key)) staffPermissions.set(key, ctx.canStaff(permission, board));
+    return staffPermissions.get(key)!;
+  };
+  const lowerTarget = (author: CommunityAuthor) => {
+    const key = memberKey(author);
+    if (protectedTargets.has(key)) return protectedTargets.get(key)!;
+    let lower = false;
+    try { live.staff.protect(me, author); lower = true; } catch { /* Retain protected targets. */ }
+    protectedTargets.set(key, lower);
+    return lower;
+  };
+  const replies = (() => {
+    // badgeState can issue honors later in the response. Keep presentation
+    // reuse inside this reply map so topic/author/related retain fresh reads.
+    const people = new Map<string, ReturnType<Ctx['person']>>();
+    const person = (author: CommunityAuthor) => {
+      const key = memberKey(author);
+      if (!people.has(key)) people.set(key, ctx.person(author, map));
+      return people.get(key)!;
     };
-  });
+    return topic.replies.map(reply => {
+      const replyTarget = { kind: 'reply' as const, id: reply.id };
+      const mine = !ctx.readOnly && same(me, reply.author), byTopicAuthor = same(reply.author, topic.author);
+      const hiddenFromViewer = reply.hidden && !mine && !canModerate;
+      const quote = reply.quoteId ? quoted.get(reply.quoteId) : null;
+      return {
+        id: reply.id, author: person(reply.author), body: hiddenFromViewer ? '' : reply.body, createdAt: reply.createdAt,
+        images: hiddenFromViewer ? [] : reply.images,
+        edited: reply.edited, likes: reply.likes, liked: live.liked(replyTarget, me), thanked: live.thanked(replyTarget, me), thanks: live.thanks(replyTarget),
+        byTopicAuthor, accepted: topic.acceptedReplyId === reply.id, mine, hidden: reply.hidden,
+        quote: quote && !(quote.hidden && !canModerate) ? { id: quote.id, author: person(quote.author).name, excerpt: [...quote.body].slice(0, 80).join('') } : null,
+        canDelete: !ctx.readOnly && (mine || canStaff('reply.delete',currentTopic.board)&&lowerTarget(reply.author)), deleteReasonRequired: canStaff('reply.delete',currentTopic.board), canEdit: canEdit(ctx, reply.author, reply.createdAt), canRestore: canStaff('reply.restore',currentTopic.board) && reply.hidden,
+        canPenalty: canStaff('reply.penalty',currentTopic.board)&&lowerTarget(reply.author),canMute:canStaff('member.mute')&&lowerTarget(reply.author),
+        canAccept: topic.board === 'qa' && isAuthor && !topic.acceptedReplyId && !byTopicAuthor && !reply.hidden,
+      };
+    });
+  })();
   const meta = topic.fullMeta;
   const unlocked = meta?.promptMode === 'paid' ? live.economy.unlocked(topic.id, me) : false;
   const promptVisible = Boolean(meta && meta.prompt && (meta.promptMode === 'public' || isAuthor || ctx.owner || unlocked));
@@ -93,10 +118,10 @@ async function threadDTO(ctx: Ctx, id: string) {
       ...(ctx.options.simplePosting ? { rawTitle: topic.rawTitle } : {}),
       liked: live.liked(target, me), bookmarked: live.bookmarked(topic.id, me), bookmarks: topic.bookmarks,
       thanked: live.thanked(target, me), thanks: topic.thanks, mine: isAuthor,
-      canDelete: !ctx.readOnly && (isAuthor || ctx.canStaff(topic.pending?'topic.reject':'topic.delete',currentTopic.board)&&lowerTarget(topic.author)), deleteReasonRequired: ctx.canStaff(topic.pending?'topic.reject':'topic.delete',currentTopic.board), canEdit: canEdit(ctx, topic.author, topic.createdAt), canModerate, canFeature: ctx.staff?.role!=='assistant'&&ctx.canStaff('feature.decide',currentTopic.board),
-      canRecommend:!currentTopic.pending&&!currentTopic.hidden&&ctx.canStaff('feature.recommend',currentTopic.board)&&me.kind==='reader',canPenalty:ctx.canStaff('topic.penalty',currentTopic.board)&&lowerTarget(topic.author),canMute:ctx.canStaff('member.mute')&&lowerTarget(topic.author),
-      canPin:ctx.canStaff('topic.pin',currentTopic.board),canLock:ctx.canStaff('topic.lock',currentTopic.board),canMove:ctx.canStaff('topic.move',currentTopic.board),canApprove:ctx.canStaff('topic.approve',currentTopic.board),canRestore:ctx.canStaff('topic.restore',currentTopic.board),
-      canRetag: !ctx.readOnly && (ctx.trustLevel >= 3 || ctx.canStaff('topic.retag',currentTopic.board)), canPaidPin: isAuthor && (topic.board === 'showcase' || topic.board === 'tools') && !topic.paidPin,
+      canDelete: !ctx.readOnly && (isAuthor || canStaff(topic.pending?'topic.reject':'topic.delete',currentTopic.board)&&lowerTarget(topic.author)), deleteReasonRequired: canStaff(topic.pending?'topic.reject':'topic.delete',currentTopic.board), canEdit: canEdit(ctx, topic.author, topic.createdAt), canModerate, canFeature: ctx.staff?.role!=='assistant'&&canStaff('feature.decide',currentTopic.board),
+      canRecommend:!currentTopic.pending&&!currentTopic.hidden&&canStaff('feature.recommend',currentTopic.board)&&me.kind==='reader',canPenalty:canStaff('topic.penalty',currentTopic.board)&&lowerTarget(topic.author),canMute:canStaff('member.mute')&&lowerTarget(topic.author),
+      canPin:canStaff('topic.pin',currentTopic.board),canLock:canStaff('topic.lock',currentTopic.board),canMove:canStaff('topic.move',currentTopic.board),canApprove:canStaff('topic.approve',currentTopic.board),canRestore:canStaff('topic.restore',currentTopic.board),
+      canRetag: !ctx.readOnly && (ctx.trustLevel >= 3 || canStaff('topic.retag',currentTopic.board)), canPaidPin: isAuthor && (topic.board === 'showcase' || topic.board === 'tools') && !topic.paidPin,
       canHighlight: isAuthor && !topic.glow, canReply: !ctx.readOnly && canParticipateBoard(ctx, topic.board) && !topic.locked && !muted && !topic.pending,
       meta: meta && {
         tools: meta.tools, model: meta.model, usage: meta.usage, promptMode: meta.promptMode, price: meta.price,
