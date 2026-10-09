@@ -225,6 +225,10 @@ export function mountCommunityComposeEditor(root: HTMLElement, { request, prepar
   picker.addEventListener('change', onFiles);
   root.addEventListener('mousedown', retainSelection);
   host.hidden = false; field.hidden = true;
+  field.disabled = false; picker.disabled = false;
+  root.dataset.editorState = 'ready'; root.removeAttribute('aria-busy');
+  root.querySelectorAll<HTMLButtonElement>('[data-action="community-md"], [data-action="community-md-preview"]').forEach(button => { button.disabled = false; });
+  if (status) status.textContent = '';
   host.dataset.placeholder = field.placeholder;
   host.dataset.empty = String(editor.isEmpty);
   markCover();

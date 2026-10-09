@@ -39,6 +39,7 @@ import type { CommunityStaffState, CommunityStaffPermission } from './community-
 import { communityFrameBannersHTML } from './community-frame-banners.mjs';
 import type { CommunityBannerConfig } from './community-banners.ts';
 import type { CommunityComposeEditor } from './community-compose-editor.ts';
+import { createCommunityEditorPreparation } from './community-editor-preparation.mjs';
 import { createCommunityPassiveRefresh } from './community-passive-refresh.mjs';
 import { communityPageCacheLimits, createCommunityPageCache } from './community-page-cache.mjs';
 import {
@@ -68,7 +69,7 @@ export type CommunityContext = {
   simpleCompose?: boolean;
   mountSelect?: (select: HTMLSelectElement, icons: Record<string, string>) => { update(): void; dispose(): void };
 };
-type Options = { request?: typeof fetch; navigate?: (hash: string) => void; createProfileCrop?: typeof import('./community-profile-crop.ts').createCommunityProfileCrop };
+type Options = { request?: typeof fetch; navigate?: (hash: string) => void; createProfileCrop?: typeof import('./community-profile-crop.ts').createCommunityProfileCrop; loadComposeEditor?: () => Promise<typeof import('./community-compose-editor.mjs')> };
 type ApiError = Error & { status: number };
 type Form = HTMLFormElement;
 type Field = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
@@ -114,7 +115,7 @@ function applyMarkdown(field: HTMLTextAreaElement, kind: string, tr: Translate) 
   field.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
-export function createCommunityUI({ request = (...args) => fetch(...args), navigate: go = (hash) => { location.hash = hash; }, createProfileCrop }: Options = {}) {
+export function createCommunityUI({ request = (...args) => fetch(...args), navigate: go = (hash) => { location.hash = hash; }, createProfileCrop, loadComposeEditor = () => import('./community-compose-editor.mjs') }: Options = {}) {
   let sort: CommunitySort = 'curated';
   let summary: CommunityLoad<CommunitySummary> | null = null;
   const frameHighlights = new Map<string, CommunityLoad<CommunityListing>>();
@@ -255,7 +256,16 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   const editors = new Map<HTMLElement, CommunityComposeEditor>();
   const selects = new Map<HTMLSelectElement, { update(): void; dispose(): void }>();
   const editorFor = (field: Element | null) => [...editors.values()].find(editor => editor.field === field);
-  let composeEditorModule: Promise<typeof import('./community-compose-editor.mjs')> | null = null;
+  const editorPreparation = createCommunityEditorPreparation({
+    load: loadComposeEditor,
+    current: () => mounted ? { main: mounted.main, frame: frameIdentity, hash: location.hash } : null,
+    mount: (module, root) => {
+      const editor = module.mountCommunityComposeEditor(root, { request, prepare: async file => file, t: tr, owner: () => Boolean(readyData(me)?.owner) });
+      editors.set(root, editor); return editor;
+    },
+    removed: root => { editors.delete(root); },
+    t: (zh, en) => tr(zh, en),
+  });
   let lastHash = '';
   let approvedNavigation = '';
   let restoringHistory = false;
@@ -1309,28 +1319,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
 
   // Structural panels still repaint, retaining fields, previews and focus.
   function mountComposeEditor() {
-    if (!mounted) return;
-    for (const [root, editor] of editors) if (!root.isConnected) { editor.destroy(); editors.delete(root); }
-    const roots = [...mounted.main.querySelectorAll<HTMLElement>('[data-inline-editor]')].filter(root => !editors.has(root));
-    if (!roots.length) return;
-    composeEditorModule ||= import('./community-compose-editor.mjs');
-    void composeEditorModule.then(module => {
-      for (const root of roots) {
-        if (!root.isConnected || !mounted || editors.has(root)) continue;
-        const hadFocus = root.contains(document.activeElement);
-        const editor = module.mountCommunityComposeEditor(root, { request, prepare: async file => file, t: mounted.ctx.t, owner: () => Boolean(readyData(me)?.owner) });
-        editors.set(root, editor);
-        const button = root.querySelector<HTMLButtonElement>('[data-action="community-md-preview"]');
-        if (button?.getAttribute('aria-pressed') === 'true') editor.preview(true);
-        else if (hadFocus) editor.focus();
-      }
-    }).catch(() => {
-      composeEditorModule = null;
-      for (const root of roots) {
-        const line = root.querySelector('.community-editor-upload-status');
-        if (root.isConnected && line) line.textContent = tr('图片编辑器未能加载，请刷新后重试。文字内容仍然保留。', 'The image editor could not load. Refresh to retry; your text is retained.');
-      }
-    });
+    editorPreparation.sync();
   }
 
   function releaseDocumentReading() {
@@ -1559,13 +1548,22 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       if (previous) { previous.alt = image.alt; image.replaceWith(previous); }
     }
     const fieldScroll = new Map((preserveControls ? [...section.querySelectorAll<HTMLElement>('textarea[id]')] : []).map(field => [field.id, field.scrollTop]));
-    for (const editor of editors.values()) {
+    for (const root of editorPreparation.roots()) {
       if (!preserveControls) continue;
-      if (!section.contains(editor.root)) continue;
-      const nextEditor = next.querySelector<HTMLTextAreaElement>(`[id=${quoted(editor.field.id)}]`)?.closest<HTMLElement>('[data-inline-editor]');
-      if (!nextEditor || nextEditor.closest('form')?.dataset.id !== editor.field.form?.dataset.id) continue;
-      editor.root.dataset.imageMax = nextEditor.dataset.imageMax;
-      nextEditor.replaceWith(editor.root);
+      if (!section.contains(root)) continue;
+      const field = root.querySelector<HTMLTextAreaElement>('textarea');
+      if (!field) continue;
+      const nextEditor = next.querySelector<HTMLTextAreaElement>(`[id=${quoted(field.id)}]`)?.closest<HTMLElement>('[data-inline-editor]');
+      if (!nextEditor || nextEditor.closest('form')?.dataset.id !== field.form?.dataset.id) continue;
+      root.dataset.imageMax = nextEditor.dataset.imageMax;
+      if (root.hasAttribute('data-community-busy')) {
+        // The retained editor also retains its pending submit operation.
+        const button = field.form?.querySelector<HTMLButtonElement>('button[type="submit"]');
+        const nextForm = nextEditor.closest('form');
+        if (button) nextForm?.querySelector('button[type="submit"]')?.replaceWith(button);
+        nextForm?.setAttribute('data-community-busy', '');
+      }
+      nextEditor.replaceWith(root);
     }
     mounted.main.classList.remove('community-entering');
     // An in-flight asset operation owns its form and lock until it completes;
@@ -1664,6 +1662,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     }
   }
   function togglePreview(button: HTMLButtonElement, on = button.getAttribute('aria-pressed') !== 'true') {
+    if (editorPreparation.pending(button)) { editorPreparation.focus(button); return; }
     const id = button.dataset.for || '';
     const root = button.closest('.community-editor');
     const field = root?.querySelector<HTMLTextAreaElement>(`[id=${quoted(id)}]`);
@@ -1690,6 +1689,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     field?.setAttribute('aria-invalid', 'true');
     const details = field?.closest('details');
     if (details) details.open = true;
+    if (editorPreparation.focus(field)) return false;
     const editor = editorFor(field);
     if (editor) editor.focus();
     else (field as HTMLElement | null)?.focus({ preventScroll: true });
@@ -1713,6 +1713,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     return true;
   }
   function imagesReady(form: Form) {
+    if (editorPreparation.pending(form)) { status(form, tr('正在准备编辑器，请稍候。', 'The editor is preparing; please wait.')); editorPreparation.focus(form); return false; }
     const editor = editorFor(form.querySelector('textarea[name="body"]'));
     if (editor?.state().pending) { status(form, tr('图片还在上传，请稍等。', 'Images are still uploading.')); return false; }
     if (editor?.state().failed) { status(form, tr('有图片上传失败，请移除后重新粘贴。', 'An image failed to upload. Remove it and paste it again.')); return false; }
@@ -1720,6 +1721,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   }
   function focusBody(id: string) {
     const field = mounted?.main.querySelector<HTMLTextAreaElement>(`[id=${quoted(id)}]`);
+    if (editorPreparation.focus(field || null)) return;
     const editor = editorFor(field || null);
     if (editor) editor.focus(); else field?.focus({ preventScroll: true });
   }
@@ -1728,15 +1730,29 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     interactionWorks.set(operation, frameIdentity); passiveRefresh?.invalidate();
     const button = form.querySelector<HTMLButtonElement>('button[type="submit"]');
     const label = button?.innerHTML || '';
+    const inlineRoots = [...form.querySelectorAll<HTMLElement>('[data-inline-editor]')];
+    const ownerMain = mounted?.main, ownerFrame = frameIdentity, ownerHash = location.hash;
+    const currentForm = () => {
+      if (!inlineRoots.length) return form;
+      if (!ownerMain || mounted?.main !== ownerMain || ownerFrame !== frameIdentity || ownerHash !== location.hash) return null;
+      return inlineRoots.find(root => root.isConnected && ownerMain.contains(root))?.closest<Form>('form') || null;
+    };
+    for (const root of inlineRoots) root.setAttribute('data-community-busy', '');
+    form.setAttribute('data-community-busy', '');
     form.querySelectorAll('[aria-invalid]').forEach(item => item.removeAttribute('aria-invalid'));
     if (button) { button.disabled = true; button.textContent = text; }
     status(form, '');
     try { await work(); }
     catch (error) {
-      status(form, message(error));
-      if ((error as ApiError).status === 428) void loadMe();
+      const target = currentForm();
+      if (target) status(target, message(error));
+      if (target && (error as ApiError).status === 428) void loadMe();
     }
-    finally { interactionWorks.delete(operation); if (button?.isConnected) { button.disabled = false; button.innerHTML = label; } }
+    finally {
+      interactionWorks.delete(operation); form.removeAttribute('data-community-busy');
+      for (const root of inlineRoots) { root.removeAttribute('data-community-busy'); root.closest('form')?.removeAttribute('data-community-busy'); }
+      if (button?.isConnected) { button.disabled = false; button.innerHTML = label; }
+    }
   }
   function otherProfileImageDraft(form: Form) {
     return [...(profileDialog.root()?.querySelectorAll<HTMLInputElement>('input[type="file"]') || [])].some(field => field.closest('form') !== form && Boolean(field.files?.length));
@@ -2680,6 +2696,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       }
       case 'community-md': {
         const field = mounted.main.querySelector<HTMLTextAreaElement>(`[id=${quoted(target.dataset.for || '')}]`);
+        if (editorPreparation.pending(field)) { editorPreparation.focus(field); return; }
         const editor = editorFor(field);
         if (editor) { editor.command(target.dataset.md || ''); return; }
         if (field) applyMarkdown(field, target.dataset.md || '', tr);
@@ -2934,6 +2951,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     }
     if (event.key === 'Escape' && postMenu) { event.preventDefault(); setPostMenu(false, true); return; }
     if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey)) return;
+    if (event.isComposing || composing) return;
     const form = (event.target as Element).closest?.<Form>('form[data-community-form="reply"], form[data-community-form="topic"], form[data-community-form="reply-edit"]');
     if (!form) return;
     event.preventDefault();
@@ -2980,6 +2998,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (routeHandoffPending()) return;
     if (switchingBrowseMode) { status(form, tr('正在切换浏览身份，请稍候。', 'Switching browsing perspective; please wait.')); return; }
     if (communityReaderReadOnly(readyData(me)) && form.dataset.communityForm !== 'search') { status(form, tr('请先返回管理身份。', 'Restore management first.')); return; }
+    if (editorPreparation.pending(form)) { status(form, tr('正在准备编辑器，请稍候。', 'The editor is preparing; please wait.')); editorPreparation.focus(form); return; }
     if (form.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled) return;
     if (boardEditor.submit(form)) return;
     if (bannerEditor.submit(form)) return;
@@ -3278,6 +3297,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   };
 
   function clearData(clearWrites = true) {
+    editorPreparation.clear();
     shopDialog.close();
     closeImageViewer();
     locatedReplyHash = '';
@@ -3435,8 +3455,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         profileDialog.close();
         releaseDocumentReading();
         restoreManagementBackground();
-        for (const editor of editors.values()) editor.destroy();
-        editors.clear();
+        editorPreparation.clear();
         for (const control of selects.values()) control.dispose();
         selects.clear();
         main.removeEventListener('click', onClick);

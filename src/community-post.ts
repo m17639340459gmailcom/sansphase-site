@@ -56,15 +56,16 @@ export const bodyLimits = (board: string, simple = false): readonly [number, num
 /* ---------- 编辑器：格式按钮、正文和预览 ---------- */
 type EditorOptions = { id: string; name?: string; rows: number; value?: string; placeholder: string; label: string; limits: readonly [number, number]; hideLabel?: boolean; inlineImages?: boolean; imageMax?: number; imageCover?: boolean; imageOwner?: boolean };
 export function editorHTML({ id, name = "body", value = "", placeholder, label, limits: [min, max], hideLabel = false, inlineImages = false, imageMax = 0, imageCover = true, imageOwner = false }: EditorOptions, { t, esc, icons = {} }: Common) {
-  const tool = (md: string, icon: string, title: string) => `<button type="button" data-action="community-md" data-md="${md}" data-for="${id}" title="${title}" aria-label="${title}">${icons[icon] || ""}</button>`;
+  const disabled = inlineImages ? ' disabled' : '';
+  const tool = (md: string, icon: string, title: string) => `<button type="button"${disabled} data-action="community-md" data-md="${md}" data-for="${id}" title="${title}" aria-label="${title}">${icons[icon] || ""}</button>`;
   return `<div class="community-field"><label id="${id}-label" class="${hideLabel ? "sr-only" : "community-field-l"}" for="${id}">${label}</label>`
-    + `<div class="community-editor"${inlineImages ? ` data-inline-editor data-image-max="${imageMax}" data-image-cover="${imageCover}"` : ''}><div class="community-ed-tools" role="toolbar" aria-label="${t("格式", "Formatting")}" aria-controls="${id}">`
+    + `<div class="community-editor"${inlineImages ? ` data-inline-editor data-editor-state="loading" aria-busy="true" data-image-max="${imageMax}" data-image-cover="${imageCover}"` : ''}><div class="community-ed-tools" role="toolbar" aria-label="${t("格式", "Formatting")}" aria-controls="${id}">`
     + tool("bold", "bold", t("加粗", "Bold")) + tool("code", "code", t("代码", "Code")) + tool("link", "link", t("链接", "Link"))
     + tool("quote", "quote", t("引用", "Quote")) + tool("list", "list", t("列表", "List"))
-    + (inlineImages ? `<label class="community-ed-image" title="${t('插入图片，也可以直接粘贴', 'Insert an image, or paste directly')}">${icons['image-plus'] || icons.image || '＋'}<span class="sr-only">${t('插入图片', 'Insert image')}</span><input class="sr-only" type="file" accept="image/jpeg,image/png,image/webp" multiple data-community-upload></label>` : '')
-    + `<span class="community-ed-sep"></span><button type="button" class="community-ed-prev" data-action="community-md-preview" data-for="${id}" aria-pressed="false">${t("预览", "Preview")}</button></div>`
-    + `<textarea id="${id}" name="${name}" rows="1" minlength="${min}" maxlength="${max}"${min ? " required" : ""} placeholder="${esc(placeholder)}">${esc(value)}</textarea>`
-    + (inlineImages ? `<div data-community-rich hidden></div><p class="community-editor-upload-status" role="status" aria-live="polite"></p>` : '')
+    + (inlineImages ? `<label class="community-ed-image" title="${t('插入图片，也可以直接粘贴', 'Insert an image, or paste directly')}">${icons['image-plus'] || icons.image || '＋'}<span class="sr-only">${t('插入图片', 'Insert image')}</span><input class="sr-only" type="file" accept="image/jpeg,image/png,image/webp" multiple data-community-upload disabled></label>` : '')
+    + `<span class="community-ed-sep"></span><button type="button"${disabled} class="community-ed-prev" data-action="community-md-preview" data-for="${id}" aria-pressed="false">${t("预览", "Preview")}</button></div>`
+    + `<textarea id="${id}" name="${name}" rows="1"${disabled} minlength="${min}" maxlength="${max}"${min ? " required" : ""} placeholder="${esc(placeholder)}">${esc(value)}</textarea>`
+    + (inlineImages ? `<div data-community-rich hidden></div><p id="${id}-status" class="community-editor-upload-status" role="status" aria-live="polite" tabindex="-1">${t('正在准备编辑器…', 'Preparing the editor…')}</p>` : '')
     + `<div class="community-ed-preview community-text is-small" data-preview-for="${id}" hidden></div></div>`
     + (inlineImages ? `<div class="community-editor-caption"><span>${imageCover ? t('至少 1 张图片，第一张自动作为封面 · ', 'At least 1 image; the first is the cover · ') : ''}${t(`最多 ${imageMax} 张${imageOwner ? '' : ` · 单张不超过 ${communityRules.imageBytes / 1024 ** 2}MB`} · 不支持视频`, `Up to ${imageMax} images${imageOwner ? '' : ` · ${communityRules.imageBytes / 1024 ** 2}MB per image`} · No videos`)}</span><small data-count-for="${name}">0 / ${max}</small></div>` : `<small data-count-for="${name}">0 / ${max}</small>`) + `</div>`;
 }

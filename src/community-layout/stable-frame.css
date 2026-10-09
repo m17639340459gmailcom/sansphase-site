@@ -151,9 +151,12 @@ body.community-frame-open #site-footer { display: none; }
 [data-inline-editor] .community-rich-body > :last-child { margin-bottom: 0; }
 [data-inline-editor] .community-ed-image { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 32px; min-height: 32px; color: var(--dim); cursor: pointer; border: 1px solid transparent; border-radius: 5px; }
 [data-inline-editor] .community-ed-image:focus-within { border-color: var(--focus-edge); color: var(--text); }
-[data-inline-editor] .community-ed-image:hover { color: var(--text); }
+[data-inline-editor] .community-ed-image:not(:has(input:disabled)):hover { color: var(--text); }
+[data-inline-editor] .community-ed-image:has(input:disabled) { cursor: default; opacity: .45; }
 [data-inline-editor] .community-editor-upload-status { margin: 0; padding: 0 14px 12px; color: var(--error); font-size: 12px; line-height: 1.6; }
 [data-inline-editor] .community-editor-upload-status:empty { display: none; }
+[data-inline-editor][data-editor-state="loading"] .community-editor-upload-status { color: var(--dim); }
+[data-inline-editor] .community-editor-upload-status .community-button { min-height: 28px; margin-left: 6px; padding: 2px 10px; font-size: inherit; }
 [data-inline-editor] .community-inline-upload { position: relative; display: grid; place-items: center; height: 240px; margin: 16px 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--surface-2); }
 [data-inline-editor] .community-inline-upload[data-cover="true"]::before { content: '封面'; position: absolute; top: 10px; left: 10px; z-index: 1; padding: 4px 9px; border-radius: 5px; background: #d9c49c; color: #201b14; font-size: 12px; pointer-events: none; }
 html[lang^="en"] [data-inline-editor] .community-inline-upload[data-cover="true"]::before { content: 'Cover'; }

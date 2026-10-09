@@ -15,6 +15,7 @@ export const typedBrowserModules = new Set([
   'community-staff-art.mjs',
   'community-write-request.mjs',
   'community-editor-size.mjs',
+  'community-editor-preparation.mjs',
   'community-post.mjs',
   'community-pages.mjs',
   'community-profile.mjs',

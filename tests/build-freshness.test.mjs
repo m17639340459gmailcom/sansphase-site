@@ -48,6 +48,7 @@ const canonicalFiles = [
   "community-ui.mjs",
   "community-news.mjs",
   "community-passive-refresh.mjs",
+  "community-editor-preparation.mjs",
   "community-staff.mjs",
   "community-profile.mjs",
   "reader-frames.mjs",
@@ -108,6 +109,19 @@ test('passive refresh ships as compiled JavaScript at its browser import path', 
   const { createCommunityPassiveRefresh } = await import('../dist/community-passive-refresh.mjs');
   assert.equal(typeof createCommunityPassiveRefresh, 'function');
   await verifySite('dist');
+});
+
+test('editor preparation ships at its typed browser import path with no eager rich dependency', async () => {
+  const file = 'community-editor-preparation.mjs';
+  assert.ok(typedBrowserModules.has(file));
+  assert.equal((await readFile(`src/${file}`, 'utf8')).trim(), "// Source adapter for Node tests while the browser receives compiled output.\nexport * from './community-editor-preparation.ts';");
+  const source = await readFile('src/community-editor-preparation.ts', 'utf8');
+  const output = await readFile(`dist/${file}`, 'utf8');
+  assert.equal(output, (await transform(source, { loader: 'ts', format: 'esm', target: 'es2022' })).code);
+  assert.doesNotMatch(output, /(?:from\s*|import\s*\()["'][^"']*\.ts["']/);
+  assert.doesNotMatch(output, /(?:from\s*|import\s*\()["'][^"']*community-compose-editor/);
+  assert.match(await readFile('dist/community-ui.mjs', 'utf8'), /from ["']\.\/community-editor-preparation\.mjs["']/);
+  assert.equal(typeof (await import('../dist/community-editor-preparation.mjs')).createCommunityEditorPreparation, 'function');
 });
 
 test('page DTO cache bundles its dependency at the stable browser module path', async () => {
