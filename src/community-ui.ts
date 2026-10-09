@@ -1053,7 +1053,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       for (const root of roots) {
         if (!root.isConnected || !mounted || editors.has(root)) continue;
         const hadFocus = root.contains(document.activeElement);
-        const editor = module.mountCommunityComposeEditor(root, { request, prepare: async file => file, t: mounted.ctx.t, owner: () => Boolean(readyData(me)?.owner) });
+        const editor = module.mountCommunityComposeEditor(root, { request, t: mounted.ctx.t, owner: () => Boolean(readyData(me)?.owner) });
         editors.set(root, editor);
         const button = root.querySelector<HTMLButtonElement>('[data-action="community-md-preview"]');
         if (button?.getAttribute('aria-pressed') === 'true') editor.preview(true);

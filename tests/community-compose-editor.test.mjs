@@ -8,7 +8,7 @@ import { bodyImageContent } from '../src/community-body-images.ts';
 const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const turn = () => new Promise(resolve => setTimeout(resolve, 25));
 const esc = value => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
-function setup(t, content = '前文\n\n后文', request = async () => ({ ok: true, json: async () => ({ id }) }), owner = false) {
+function setup(t, content = '前文\n\n后文', request = async () => ({ ok: true, json: async () => ({ id }) }), owner = false, prepare = async file => file) {
   const dom = new JSDOM(`<form>${editorHTML({ id: 'community-body', rows: 10, value: content, placeholder: '正文', label: '正文', limits: [1, 10000], inlineImages: true, imageMax: 4 }, { t: zh => zh, esc })}</form>`, { pretendToBeVisual: true, url: 'http://localhost:4212/' });
   const w = dom.window;
   const names = ['window', 'document', 'Node', 'HTMLElement', 'MutationObserver', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame'];
@@ -18,7 +18,7 @@ function setup(t, content = '前文\n\n后文', request = async () => ({ ok: tru
   w.Range.prototype.getBoundingClientRect = () => ({ top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 });
   const calls = [];
   const wrapper = w.document.querySelector('[data-inline-editor]');
-  const control = mountCommunityComposeEditor(wrapper, { t: zh => zh, owner, prepare: async file => file, request: async (...args) => { calls.push(args); return request(...args); } });
+  const control = mountCommunityComposeEditor(wrapper, { t: zh => zh, owner, prepare, request: async (...args) => { calls.push(args); return request(...args); } });
   t.after(() => { control.destroy(); for (const [name, value] of previous) { if (value === undefined) delete globalThis[name]; else globalThis[name] = value; } w.close(); });
   const paste = (files, text = '') => {
     const event = new w.Event('paste', { bubbles: true, cancelable: true });
@@ -30,15 +30,50 @@ function setup(t, content = '前文\n\n后文', request = async () => ({ ok: tru
   return { w, control, calls, wrapper, paste, file };
 }
 
-test('an oversized pasted image is rejected before preparation or upload; surrounding text is kept', async t => {
+test('a pasted image above the reader limit is compressed and the smaller file is what gets uploaded', async t => {
+  const prepared = [];
+  const small = new File([new Uint8Array(1024)], 'large.webp', { type: 'image/webp' });
+  const { wrapper, control, paste, calls } = setup(t, '原文', undefined, false, async (file, cap) => { prepared.push([file.name, cap]); return small; });
+  const large = Object.assign(new Blob([new Uint8Array(2 * 1024 ** 2 + 1)], { type: 'image/png' }), { name: 'large.png' });
+  paste([large], '粘贴文字');
+  await turn();
+  assert.deepEqual(prepared, [['large.png', 2 * 1024 ** 2]]);
+  assert.equal(calls.length, 1);
+  const sent = calls[0][1].body.get('file');
+  assert.deepEqual([sent.size, sent.type, sent.name], [1024, 'image/webp', 'large.webp']);
+  assert.match(wrapper.querySelector('[role=status]').textContent, /自动压缩/);
+  assert.match(control.field.value, /粘贴文字/);
+  assert.deepEqual(bodyImageContent(control.field.value).images, [id]);
+  assert.equal(control.state().failed, false);
+});
+
+test('an image still above the limit after compression is not uploaded and says why; surrounding text is kept', async t => {
   const { wrapper, control, paste, calls } = setup(t, '原文');
   const large = Object.assign(new Blob([new Uint8Array(2 * 1024 ** 2 + 1)], { type: 'image/png' }), { name: 'large.png' });
   paste([large], '粘贴文字');
   await turn();
   assert.equal(calls.length, 0);
-  assert.match(wrapper.querySelector('[role=status]').textContent, /2MB/);
+  assert.equal(control.state().failed, true);
+  assert.match(wrapper.querySelector('.community-inline-upload figcaption').textContent, /2MB/);
   assert.match(control.field.value, /粘贴文字/);
+  assert.deepEqual(bodyImageContent(control.field.value).images, []);
+});
+
+test('a compression failure is shown on the picture, and an original above the technical ceiling is refused before any work', async t => {
+  const { CommunityImageCompressError } = await import('../src/community-image-compress.ts');
+  let prepared = 0;
+  const { wrapper, control, paste, calls } = setup(t, '原文', undefined, false, async () => { prepared++; throw new CommunityImageCompressError('unreadable'); });
+  paste([Object.assign(new Blob([new Uint8Array(2 * 1024 ** 2 + 1)], { type: 'image/png' }), { name: 'broken.png' })]);
+  await turn();
+  assert.equal(calls.length, 0);
+  assert.match(wrapper.querySelector('.community-inline-upload figcaption').textContent, /无法读取/);
+  wrapper.querySelector('.community-inline-remove').click();
+  paste([Object.assign(new Blob([new Uint8Array(25 * 1024 ** 2 + 1)], { type: 'image/png' }), { name: 'huge.png' })]);
+  await turn();
+  assert.equal(prepared, 1);
   assert.equal(wrapper.querySelector('.community-inline-upload'), null);
+  assert.match(wrapper.querySelector('[role=status]').textContent, /25MB/);
+  assert.equal(control.state().failed, false);
 });
 
 test('the author can paste an image above the reader limit, and a reset clears the rich editor', async t => {

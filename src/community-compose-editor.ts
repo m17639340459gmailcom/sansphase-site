@@ -7,6 +7,8 @@ import { communityBodyHTML } from './community.mjs';
 import { bodyImageContent, bodyImageMarker, imageIdFromPath } from './community-body-images.mjs';
 import type { Translate } from './community.ts';
 import { communityImageBytes } from './community-rules.mjs';
+import { uploadLimits } from './upload-policy.mjs';
+import { CommunityImageCompressError, compressCommunityImage } from './community-image-compress.ts';
 
 const escape = (value: unknown) => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
 const imageTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -35,10 +37,11 @@ export function composeMarkdown(node: JSONContent): string {
   return children().join('\n\n');
 }
 
-type Options = { request: typeof fetch; prepare: (file: File) => Promise<Blob>; t: Translate; owner?: boolean | (() => boolean) };
+// prepare brings a picture under the uploader's limit before it is sent; tests replace the browser's encoder with it.
+type Options = { request: typeof fetch; prepare?: (file: File, cap: number) => Promise<Blob>; t: Translate; owner?: boolean | (() => boolean) };
 export type CommunityComposeEditor = ReturnType<typeof mountCommunityComposeEditor>;
 
-export function mountCommunityComposeEditor(root: HTMLElement, { request, prepare, t, owner = false }: Options) {
+export function mountCommunityComposeEditor(root: HTMLElement, { request, prepare = compressCommunityImage, t, owner = false }: Options) {
   const field = root.querySelector<HTMLTextAreaElement>('textarea[name="body"]')!;
   const host = root.querySelector<HTMLElement>('[data-community-rich]')!;
   const status = root.querySelector<HTMLElement>('.community-editor-upload-status')!;
@@ -166,8 +169,10 @@ export function mountCommunityComposeEditor(root: HTMLElement, { request, prepar
     const typed = files.filter(file => imageTypes.has(file.type));
     if (typed.length !== files.length) messages.push(t('只支持 JPG、PNG、WebP 图片，不支持视频。', 'Only JPG, PNG and WebP images are supported, not videos.'));
     const cap = communityImageBytes(typeof owner === 'function' ? owner() : owner), label = `${cap / 1024 ** 2}MB`;
-    const valid = typed.filter(file => file.size <= cap);
-    if (valid.length !== typed.length) messages.push(t(`单张图片不能超过 ${label}。`, `Each image must be ${label} or smaller.`));
+    // Pictures above the uploader's limit are compressed below; only the technical ceiling refuses an original outright.
+    const ceiling = `${uploadLimits.maxImageBytes / 1024 ** 2}MB`;
+    const valid = typed.filter(file => file.size <= uploadLimits.maxImageBytes);
+    if (valid.length !== typed.length) messages.push(t(`原图不能超过 ${ceiling}，请先缩小。`, `Originals must be ${ceiling} or smaller. Reduce the image first.`));
     const max = Number(root.dataset.imageMax || 0);
     const selected = valid.slice(0, Math.max(0, max - imageCount()));
     if (selected.length < valid.length) messages.push(t(`此处最多 ${max} 张图片。`, `Up to ${max} images here.`));
@@ -189,9 +194,11 @@ export function mountCommunityComposeEditor(root: HTMLElement, { request, prepar
     await Promise.all(batch.map(async id => {
       const job = jobs.get(id)!;
       try {
-        const blob = await prepare(job.file);
+        const blob = await prepare(job.file, cap);
         if (destroyed || findUpload(id) === undefined) return;
-        const form = new FormData(); form.append('file', blob, job.file.name);
+        if (blob.size > cap) throw new CommunityImageCompressError('too-large');
+        if (blob !== job.file) announce(t('较大的图片已自动压缩后上传。', 'Larger images were compressed automatically before upload.'));
+        const form = new FormData(); form.append('file', blob, (blob as Partial<File>).name || job.file.name);
         const response = await request('/api/community/images', { method: 'POST', credentials: 'same-origin', headers: { 'X-Reader-Request': '1' }, body: form, signal: abort.signal });
         const result = await response.json() as { id?: string; error?: string };
         if (!response.ok || !result.id || !imageIdFromPath(`/api/community/images/${result.id}.webp`)) throw new Error(result.error || t('图片上传失败，请移除后重试。', 'Upload failed. Remove the image and try again.'));
@@ -204,7 +211,9 @@ export function mountCommunityComposeEditor(root: HTMLElement, { request, prepar
         }
       } catch (error) {
         if (destroyed) return;
-        const message = error instanceof Error ? error.message : t('图片上传失败', 'Image upload failed');
+        const message = error instanceof CommunityImageCompressError
+          ? error.reason === 'too-large' ? t(`图片压缩后仍超过 ${label}，请换一张或先缩小。`, `Still above ${label} after compression. Choose another image or reduce it first.`) : t('图片无法读取，请换一张。', 'This image could not be read. Choose another.')
+          : error instanceof Error ? error.message : t('图片上传失败', 'Image upload failed');
         completed.set(id, { state: 'error', error: message });
         const pos = findUpload(id);
         if (pos !== undefined) editor.view.dispatch(editor.state.tr.setNodeMarkup(pos, undefined, { ...editor.state.doc.nodeAt(pos)!.attrs, state: 'error', error: message }).setMeta('addToHistory', false));
