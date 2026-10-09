@@ -10,6 +10,11 @@ import { transform } from 'esbuild';
 import { typedBrowserModules } from '../scripts/typed-browser-modules.mjs';
 
 const flush = async () => { for (let i = 0; i < 12; i++) await setImmediate(); };
+const waitFor = async (ready, message) => {
+  const started = performance.now();
+  while (!ready() && performance.now() - started < 2000) await setImmediate();
+  assert.ok(ready(), message);
+};
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 const response = value => ({ ok: true, json: async () => structuredClone(value) });
 const esc = value => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
@@ -257,7 +262,8 @@ test('module mount failure restores a stable native editor and does not discard 
 test('text fallback submits once and an explicit retry cannot unlock or restart its pending write', async t => {
   const write = deferred(); const f = await setup(t, deferred(), (url, init) => url.endsWith('/topics/p1/replies') && init.method === 'POST' ? write.promise : null);
   f.load.reject(Error('offline')); await flush(); const root = f.root(); f.type('文字回复可以提交');
-  f.send(); await flush(); const button = root.closest('form').querySelector('button[type=submit]');
+  f.send(); await waitFor(() => f.calls.some(call => call.init.method === 'POST'), 'the asynchronous write fingerprint must finish before checking its pending request');
+  const button = root.closest('form').querySelector('button[type=submit]');
   assert.equal(button.disabled, true); assert.equal(f.calls.filter(call => call.init.method === 'POST').length, 1);
   root.querySelector('[data-community-editor-retry]').click(); await f.tick(0);
   assert.equal(f.loads(), 1); assert.equal(root.querySelector('textarea').disabled, false);

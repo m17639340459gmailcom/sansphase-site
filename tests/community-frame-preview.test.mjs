@@ -1064,6 +1064,10 @@ for (const width of [1600, 390]) test(`at ${width}px repeated navigation clicks 
   assert.equal(right.scrollTop, 44);
   scroll.dispatchEvent(new w.Event('wheel', { bubbles: true })); scroll.scrollTop = 200;
   nav.querySelector('a[href="#/community/home"]').click(); await turn();
+  const homeStarted = performance.now();
+  while ((!center.querySelector('[data-community="home"]') || main.querySelector('[data-community-pending-route]')) && performance.now() - homeStarted < 2000) await turn();
+  assert.ok(center.querySelector('[data-community="home"]'), 'wait for the first home navigation to commit before checking a repeated click');
+  assert.equal(main.querySelector('[data-community-pending-route]'), null);
   const home = center.querySelector('[data-community]');
   scroll.dispatchEvent(new w.Event('wheel', { bubbles: true })); scroll.scrollTop = 220;
   nav.querySelector('a[href="#/community/home"]').click(); await turn();
