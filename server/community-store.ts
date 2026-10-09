@@ -119,6 +119,10 @@ export function createCommunityStore(directory: string, { previewCatalog = false
     JOIN community_topics t ON t.id = requested.value
     WHERE t.deleted_at IS NULL AND t.pending = 0 AND t.hidden_at IS NULL
     ORDER BY CAST(requested.key AS INTEGER)`);
+  const publicTopicAccessBatch = db.prepare(`SELECT t.id, t.board FROM json_each(?) requested
+    JOIN community_topics t ON t.id = requested.value
+    WHERE t.deleted_at IS NULL AND t.pending = 0 AND t.hidden_at IS NULL
+    ORDER BY CAST(requested.key AS INTEGER)`);
   const oneTopic = db.prepare(`SELECT ${topicColumns}, t.body FROM community_topics t WHERE t.id = ? AND t.deleted_at IS NULL`);
   const topicAccessQuery = db.prepare('SELECT id, board, author_kind, author_id, pending, hidden_at FROM community_topics WHERE id = ? AND deleted_at IS NULL');
   const queuedTopics = db.prepare(`SELECT ${topicColumns}, t.body FROM community_topics t WHERE t.deleted_at IS NULL AND (t.pending = 1 OR t.hidden_at IS NOT NULL) ORDER BY t.created_at`);
@@ -438,6 +442,13 @@ export function createCommunityStore(directory: string, { previewCatalog = false
     topics(ids: readonly string[]) {
       if (!ids.length) return [];
       return (topicSummaries.all(JSON.stringify(ids)) as TopicRow[]).map(row => listed(row));
+    },
+    // Listing authorization only needs the current public state and board;
+    // preserve caller order without computing discarded summary fields.
+    publicTopicAccesses(ids: readonly string[]): Array<Pick<TopicAccess, 'id' | 'board'>> {
+      if (!ids.length) return [];
+      return (publicTopicAccessBatch.all(JSON.stringify(ids)) as Array<Pick<TopicAccess, 'id' | 'board'>>)
+        .map(({ id, board }) => ({ id, board }));
     },
     topicAccess(id: string): TopicAccess | null {
       const row = topicAccessQuery.get(id) as Pick<TopicRow, 'id' | 'board' | 'author_kind' | 'author_id' | 'pending' | 'hidden_at'> | undefined;

@@ -14,6 +14,7 @@ function captureSQL(t) {
       const value = Reflect.apply(original, this, args);
       if (recording) queries.push({ method, sql: this.sourceSQL.replace(/\s+/g, ' ').trim(), args,
         rows: Array.isArray(value) ? value.length : method === 'get' && value ? 1 : 0,
+        fields: Array.isArray(value) && value.length ? Object.keys(value[0]) : [],
         fullBody: Array.isArray(value) ? value.some(row => Object.hasOwn(row, 'body')) : Boolean(value && Object.hasOwn(value, 'body')) });
       return value;
     });
@@ -26,7 +27,43 @@ function captureSQL(t) {
 }
 
 const summaryReads = queries => queries.filter(query => query.sql.includes('AS last_kind'));
+const publicAccessReads = queries => queries.filter(query => /^SELECT t\.id,\s*t\.board FROM json_each\(\?\)/i.test(query.sql));
 const boardReads = queries => queries.filter(query => /^SELECT id FROM community_boards WHERE id\s*=\s*\?/i.test(query.sql));
+
+test('public access batch preserves input order and duplicates while reading only live public id and board', async t => {
+  const f = await setup(t), first = f.topic('只需读取资格的公开主题', 1), moved = f.topic('移动后读取当前板块', 2);
+  const pending = f.topic('待审不进入公开访问核对', 0, { pending: 'fixture' });
+  const hidden = f.topic('隐藏不进入公开访问核对', 0), deleted = f.topic('删除不进入公开访问核对', 0);
+  f.store.hide({ kind: 'topic', id: hidden.id }, 'fixture');
+  f.store.deleteTopic(deleted.id);
+  f.store.move(moved.id, 'vip');
+  const input = [moved.id, first.id, moved.id, 'missing', pending.id, hidden.id, deleted.id, first.id];
+  const oracle = f.store.topics(input).map(({ id, board }) => ({ id, board }));
+  const capture = captureSQL(t);
+  const { value, queries } = await capture(() => f.store.publicTopicAccesses(input));
+  assert.deepEqual(value, oracle);
+  assert.deepEqual(value, [{ id: moved.id, board: 'vip' }, { id: first.id, board: 'qa' }, { id: moved.id, board: 'vip' }, { id: first.id, board: 'qa' }]);
+  assert.equal(queries.length, 1);
+  assert.deepEqual(queries[0].fields, ['id', 'board']);
+  assert.equal(publicAccessReads(queries).length, 1);
+  assert.equal(summaryReads(queries).length, 0);
+  assert.equal(/community_(?:replies|reactions|views|images|votes)/.test(queries[0].sql), false, 'an authorization projection performs no unused summary subqueries');
+});
+
+test('public access empty batch reads no SQL and a large ordered batch safely occupies one JSON parameter', async t => {
+  const f = await setup(t), first = f.topic('第一份访问投影', 1), second = f.topic('第二份访问投影', 2);
+  const capture = captureSQL(t), empty = await capture(() => f.store.publicTopicAccesses([]));
+  assert.deepEqual(empty.value, []);
+  assert.equal(empty.queries.length, 0);
+  const input = Array.from({ length: 2100 }, (_, index) => index % 2 ? second.id : first.id);
+  input.splice(17, 0, '', "' OR 1=1 -- 😀", '不存在的中文ID');
+  const { value, queries } = await capture(() => f.store.publicTopicAccesses(input));
+  assert.deepEqual(value.map(row => row.id), input.filter(id => id === first.id || id === second.id));
+  assert.equal(queries.length, 1);
+  assert.equal(queries[0].args.length, 1);
+  assert.deepEqual(JSON.parse(queries[0].args[0]), input);
+  assert.deepEqual(queries[0].fields, ['id', 'board']);
+});
 
 test('batch summaries retain input order, duplicate ids, visibility exclusions and every existing listed field', async t => {
   const f = await setup(t), images = Array.from({ length: 5 }, () => randomUUID());
@@ -90,7 +127,7 @@ test('an empty batch reads no SQL and a large batch uses one JSON parameter with
 });
 
 for (const sort of ['curated', 'published', 'newest', 'active']) {
-  test(`${sort} listing uses one summary recheck and one visibility decision per board in each synchronous stage`, async t => {
+  test(`${sort} listing keeps its summary candidates but rechecks only public access in each synchronous stage`, async t => {
     const f = await setup(t), publicIds = [];
     for (let index = 0; index < 100; index++) {
       const board = index % 5 === 0 ? 'vip' : 'qa';
@@ -99,12 +136,17 @@ for (const sort of ['curated', 'published', 'newest', 'active']) {
     }
     const capture = captureSQL(t);
     const { value: listing, queries } = await capture(() => f.list(`topics?sort=${sort}`));
-    const summaries = summaryReads(queries), boards = boardReads(queries);
+    const summaries = summaryReads(queries), access = publicAccessReads(queries), boards = boardReads(queries);
     t.diagnostic(JSON.stringify({ sort, topics: 100, visible: 80, sql: queries.length,
-      summaryQueries: summaries.length, boardQueries: boards.length, rows: queries.reduce((sum, query) => sum + query.rows, 0) }));
+      summaryQueries: summaries.length, accessQueries: access.length, recheckFields: access[0]?.fields,
+      boardQueries: boards.length, rows: queries.reduce((sum, query) => sum + query.rows, 0) }));
     assert.equal(listing.total, 80);
     assert.deepEqual(ids(listing), publicIds.slice(0, sort === 'curated' || sort === 'published' ? 6 : 20));
-    assert.equal(summaries.length, 2, 'initial candidate query plus one batch after the people await');
+    assert.equal(summaries.length, 1, 'only the initial candidates need latest reply, reactions, views, thumbs and vote summaries');
+    assert.equal(access.length, 1, 'one current public access batch follows the people await');
+    assert.equal(access[0].rows, 80);
+    assert.deepEqual(access[0].fields, ['id', 'board']);
+    assert.equal(/community_(?:replies|reactions|views|images|votes)/.test(access[0].sql), false);
     assert.equal(summaries.every(query => !query.fullBody), true);
     assert.equal(boards.length, 3, 'initial QA/VIP decisions and a fresh final QA decision are independent of candidate count');
     assert.equal(JSON.stringify(listing).includes('"board":"vip"'), false);
@@ -121,6 +163,34 @@ test('an empty following board page still retains its existing board-wide poster
   assert.equal(listing.total, 0);
   assert.equal(listing.followingCount, 1);
   assert.deepEqual(listing.posters.map(poster => [poster.author.name, poster.topics]), [['测试站长', 2]]);
+});
+
+test('real listing DTOs remain equal to the complete-summary guard across sorting, page boundaries and public fields', async t => {
+  const f = await setup(t), image = randomUUID();
+  f.store.addImage({ id: image, uploader: owner, width: 800, height: 600 });
+  const featured = f.topic('保留全部资源与交互字段的精华', 30, { board: 'tools', images: [image], tags: ['提示词'],
+    meta: { tools: '合成工具', model: '合成模型', usage: '仅用于接口对照', prompt: 'PRIVATE-PAID-PROMPT', promptMode: 'paid', price: 8 },
+    resource: { url: 'https://example.com/resource', kind: '工具', price: '免费', platform: 'Web' } });
+  f.store.setFeatured(featured.id, true);
+  f.store.like({ kind: 'topic', id: featured.id }, reader('author'), true);
+  f.store.view(featured.id, reader('author'));
+  f.store.vote(featured.id, reader('author'), 'alive');
+  f.store.addReply({ topicId: featured.id, author: reader('vip'), body: '保留最后回复作者与时间', now: f.ago(1) });
+  for (let index = 0; index < 16; index++) f.topic(`分页对照主题 ${index}`, index / 100, { pin: index === 15 });
+  f.topic('普通读者不能看到的精华', 0, { board: 'vip' });
+  for (const sort of ['curated', 'published', 'newest', 'active', 'hot', 'featured']) for (const page of [1, 2]) {
+    const path = `topics?sort=${sort}&page=${page}`;
+    const lightweight = await f.list(path);
+    const original = f.store.publicTopicAccesses;
+    let legacy;
+    try {
+      f.store.publicTopicAccesses = input => f.store.topics(input);
+      legacy = await f.list(path);
+    } finally { f.store.publicTopicAccesses = original; }
+    assert.deepEqual(lightweight, legacy, `${sort}/${page} keeps all existing response fields, ranking and totals`);
+    assert.equal(JSON.stringify(lightweight).includes('PRIVATE-PAID-PROMPT'), false);
+    assert.ok(lightweight.items.every(topic => topic.board !== 'vip'));
+  }
 });
 
 test('a requested private board is denied if its moderator scope is revoked during the people await', async t => {
@@ -231,7 +301,7 @@ for (const sort of ['curated', 'published']) {
   });
 }
 
-test('a replacement moved into the private board during its identity lookup is removed again before sending', async t => {
+for (const change of ['move', 'hide', 'delete']) test(`a replacement affected by ${change} during its identity lookup is removed again before sending`, async t => {
   const f = await setup(t), firstSix = [], requests = [];
   for (let i = 0; i < 6; i++) firstSix.push(f.topic(`待复核公开主题 ${i}`, i / 100).id);
   const replacement = f.topic('REPLACEMENT-MOVED-PRIVATE', 1, { author: reader('author') });
@@ -243,7 +313,9 @@ test('a replacement moved into the private board during its identity lookup is r
       f.store.deleteTopic(firstSix[0]);
     } else if (removed && !moved && authors.some(author => author.id === 'author')) {
       moved = true;
-      f.store.move(replacement.id, 'vip');
+      if (change === 'move') f.store.move(replacement.id, 'vip');
+      else if (change === 'hide') f.store.hide({ kind: 'topic', id: replacement.id }, 'fixture');
+      else f.store.deleteTopic(replacement.id);
     }
   });
   const listing = await f.list('topics?sort=published');
