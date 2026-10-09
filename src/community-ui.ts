@@ -639,7 +639,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         memberPages.set(key, value);
         const state = readyData(value)?.iconState;
         if (tab === 'icons' && state && !iconSelection) {
-          const { kind, page } = communityIconBrowse(state); iconSelection = { kind, page };
+          const { kind } = communityIconBrowse(state); iconSelection = { kind };
         }
       }
     });
@@ -2476,7 +2476,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       'community-lightbox', 'community-post-menu', 'community-copy-link', 'community-copy-prompt', 'community-copy-delivery',
       'community-delivery', 'community-delivery-close', 'community-month', 'community-flow', 'community-notice',
       'community-shop-detail',
-      'community-level-mode', 'community-level-select', 'community-badge-family', 'community-badge-tier', 'community-icon-category', 'community-icon-page',
+      'community-level-mode', 'community-level-select', 'community-badge-family', 'community-badge-tier', 'community-icon-category',
     ].includes(action || '')) {
       notify(tr('当前预览仅供查看，请先返回管理身份。', 'This preview is read-only. Restore management first.')); return;
     }
@@ -2658,29 +2658,26 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       case 'community-shop-detail': shopDialog.open(mounted.main.ownerDocument, id, target); return;
       case 'community-redeem': shopDialog.close(); redeeming = id; delivery = null; openPanel('form[data-community-form="redeem"]'); return;
       case 'community-redeem-cancel': redeeming = null; paint(); return;
-      case 'community-icon-category': case 'community-icon-page': {
+      case 'community-icon-category': {
         const current = route(), viewer = readyData(me);
         const member = current.view === 'member' ? readyData(memberPages.get(memberKey(current.id, current.tab))) : null;
         const panel = target.closest<HTMLElement>('[data-community-icons]');
         if (!panel || current.tab !== 'icons' || !member?.self || !member.iconState || member.person.uid !== viewer?.uid) return;
         const kind = communityIconCategory(target.dataset.iconCategory);
-        if (action === 'community-icon-category' && !kind) return;
+        if (!kind) return;
         const browse = communityIconBrowse(member.iconState, iconSelection);
-        iconSelection = action === 'community-icon-category' && kind ? { kind, page: 1 }
-          : action === 'community-icon-page' && ['previous', 'next'].includes(target.dataset.iconPage || '')
-            ? { kind: browse.kind, page: browse.page + (target.dataset.iconPage === 'next' ? 1 : -1) } : iconSelection;
+        if (kind === browse.kind) return;
+        iconSelection = { kind };
         const nextBrowse = communityIconBrowse(member.iconState, iconSelection);
-        iconSelection = { kind: nextBrowse.kind, page: nextBrowse.page };
         const template = document.createElement('template');
         template.innerHTML = communityIconPanelHTML(member.person, member.iconState, !communityReaderReadOnly(viewer), mounted.ctx, iconSelection);
         const next = template.content.firstElementChild;
         const collection = panel.querySelector('[data-icon-collection]'), nextCollection = next?.querySelector('[data-icon-collection]');
         if (!next || !collection || !nextCollection) return;
         collection.replaceChildren(...nextCollection.childNodes);
-        panel.dataset.iconKind = nextBrowse.kind; panel.dataset.iconCurrentPage = String(nextBrowse.page);
+        panel.dataset.iconKind = nextBrowse.kind;
         for (const button of panel.querySelectorAll('[data-icon-category]')) button.setAttribute('aria-pressed', String(button.getAttribute('data-icon-category') === nextBrowse.kind));
-        const focus = action === 'community-icon-category' ? target : collection.querySelector<HTMLElement>('[data-icon-ref]:not(:disabled)') || collection.querySelector<HTMLElement>('[data-icon-page]:not(:disabled)');
-        focus?.focus({ preventScroll: true });
+        target.focus({ preventScroll: true });
         mounted.ctx.painted?.();
         return;
       }
@@ -2719,9 +2716,10 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       case 'community-frame-equip': {
         const current = route(), viewer = readyData(me), identity = frameIdentity;
         const member = current.view === 'member' && current.tab === 'frames' ? readyData(memberPages.get(memberKey(current.id, current.tab))) : null;
-        const owned = readyData(profile), ref = target.dataset.frameRef;
+        const owned = readyData(profile), selectedRef = target.dataset.frameRef;
         if (frameWrite?.identity === identity || !viewer?.uid || !member?.self || member.person.uid !== viewer.uid || owned?.person.uid !== viewer.uid || communityReaderReadOnly(viewer)) return;
-        if (ref === undefined || ref && !owned.frames.some(frame => frame.ref === ref)) return;
+        if (!selectedRef || !owned.frames.some(frame => frame.ref === selectedRef)) return;
+        const ref = viewer.frame === selectedRef ? null : selectedRef;
         const write = { identity }; frameWrite = write;
         const panel = target.closest<HTMLElement>('[data-community-frames]');
         const controls = [...panel?.querySelectorAll<HTMLButtonElement>('button[data-action="community-frame-equip"]') || []];

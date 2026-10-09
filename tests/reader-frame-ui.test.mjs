@@ -296,7 +296,14 @@ test('the frame focus uses a single border and shared community orbit animation 
     const forum = community.nodes.find(node => node.type === 'rule' && node.selector === `.community-av.is-frame-${frame}`);
     const lookup = rule => new Map(rule.nodes.filter(node => node.type === 'decl').map(node => [node.prop, node.value]));
     assert.equal(lookup(main).get('padding'), lookup(forum).get('padding'));
-    assert.equal(lookup(main).get('background'), lookup(forum).get('background'));
+    const background = rule => {
+      const declarations = lookup(rule), value = declarations.get('background');
+      const variable = /^var\((--[a-z-]+)\)$/.exec(value);
+      if (!variable) return value;
+      assert.ok(declarations.has(variable[1]), 'the frame fill must resolve in the same rule');
+      return declarations.get(variable[1]);
+    };
+    assert.equal(background(main), background(forum), 'main-site and community frames retain identical fills after variable reuse');
   }
 });
 

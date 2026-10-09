@@ -305,7 +305,7 @@ function currentAppearance(person: CommunityPerson, common: Common): CommunityPe
       icon: viewer.icon === undefined ? person.icon : viewer.icon }
     : person;
 }
-export function avatarHTML(person: CommunityPerson | null | undefined, common: Common, size: AvatarSize = "md", link = true) {
+export function avatarHTML(person: CommunityPerson | null | undefined, common: Common, size: AvatarSize = "md", link = true, frameOnly = false) {
   const { esc } = common;
   if (!person) return `<span class="community-av community-av-${size} is-guest" aria-hidden="true"></span>`;
   person = currentAppearance(person, common);
@@ -314,11 +314,11 @@ export function avatarHTML(person: CommunityPerson | null | undefined, common: C
   // The role frame takes visual priority; equipped shop frames stay stored for after revocation.
   const customFrame = staffRole ? '' : /^image:([0-9a-f-]{36})$/.exec(person.frame || '')?.[1] || '';
   const frame = staffRole ? '' : decoration(person.frame);
-  const cls = `community-av community-av-${size}${person.role === "owner" ? " is-owner" : ""}${staffRole ? ' is-staff-frame' : customFrame ? ' is-frame-image' : frame ? ` is-frame-${frame}` : ""}`;
-  const inner = (src
+  const cls = `community-av community-av-${size}${person.role === "owner" ? " is-owner" : ""}${staffRole ? ' is-staff-frame' : customFrame ? ' is-frame-image' : frame ? ` is-frame-${frame}` : ""}${frameOnly ? ' is-frame-preview' : ''}`;
+  const inner = (frameOnly ? '' : src
     ? `<img src="${esc(src)}" alt="" loading="lazy" decoding="async">`
     : `<span style="--h:${hue(person.name)}">${esc(initial(person.name))}</span>`)
-    + (staffRole ? communityStaffArtHTML(staffRole, 'frame') : customFrame ? `<img class="community-frame-image" src="${imageSrc(customFrame)}" alt="" decoding="async">` : '');
+    + (staffRole ? communityStaffArtHTML(staffRole, 'frame') : customFrame ? `<img class="community-frame-image" src="${imageSrc(customFrame)}" alt=""${frameOnly ? ' loading="lazy"' : ''} decoding="async">` : '');
   // The name next to it is the link people use; the avatar link is a larger target for pointers only.
   const uid = person.uid;
   return link && uid

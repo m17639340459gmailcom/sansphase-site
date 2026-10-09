@@ -35,15 +35,12 @@ export function communityProfileFramesHTML(profile: CommunityLoad<CommunityProfi
   if (profile.state !== 'ready') return `<section class="community-card">${communityStatusHTML(profile, common)}</section>`;
   const data = profile.data;
   if (!me?.uid || data.person.uid !== me.uid) return `<section class="community-card"><p class="community-muted">${t('请重新加载本人的头像框。', 'Reload your own avatar frames.')}</p></section>`;
+  if (!data.frames.length) return '';
   const editable = !communityReaderReadOnly(me), staff = me.role !== 'owner' && Boolean(me.staffRole);
-  return `<section class="community-card community-icon-panel" data-community-frames><header class="community-icon-panel-head"><div><h2>${t('头像框佩戴', 'Avatar frames')}</h2><p class="community-muted">${t('只展示你已拥有的头像框，佩戴不会重复兑换或扣除星尘。', 'Only your owned frames are shown. Equipping does not redeem again or cost stardust.')}</p></div><button type="button" class="community-button is-small" data-action="community-frame-equip" data-frame-ref="" aria-pressed="${!me.frame}"${editable ? '' : ' disabled'}>${t('取下商城头像框', 'Remove shop frame')}</button></header>`
-    + (staff ? `<p class="community-muted" data-frame-staff-hint>${t('当前职务头像框会优先自动显示；这里选择的商城头像框会保留，在职务结束后使用。', 'Your current staff frame takes priority. Your shop-frame selection stays saved and is used when the appointment ends.')}</p>` : '')
-    + `<p class="community-icon-current"><span>${esc(me.name)}</span><span>${t(me.frame ? staff ? '商城头像框已设置' : '当前已佩戴' : '当前未设置商城头像框', me.frame ? 'Shop frame selected' : 'No shop frame selected')}</span></p>`
-    + (data.frames.length ? `<div class="community-icon-grid community-frame-grid">${data.frames.map(frame => {
+  return `<div class="community-icon-grid community-frame-grid" data-community-frames role="group" aria-label="${t('已拥有的头像框', 'Owned avatar frames')}">${data.frames.map(frame => {
       const selected = me.frame === frame.ref;
-      return `<button type="button" class="community-icon-choice community-frame-choice${selected ? ' is-selected' : ''}" data-action="community-frame-equip" data-frame-ref="${esc(frame.ref)}" aria-pressed="${selected}" aria-label="${esc(`${frame.name}，${selected ? t('已设置', 'Selected') : t('可佩戴', 'Available')}`)}"${editable ? '' : ' disabled'}><span class="community-frame-choice-preview">${avatarHTML({ name: me.name, uid: null, role: 'reader', staffRole: null, frame: frame.ref }, common, 'xl', false)}</span><b>${esc(frame.name)}</b><span class="community-icon-choice-status">${selected ? staff ? t('已设置', 'Selected') : t('已佩戴', 'Equipped') : t('可佩戴', 'Available')}</span></button>`;
-    }).join('')}</div>` : `<p class="community-muted">${t('你还没有拥有商城头像框。', 'You do not own any shop frames yet.')}</p>`)
-    + `<a class="community-more" href="#/community/shop/look">${t('前往兑换商城', 'Visit the exchange')}</a></section>`;
+      return `<button type="button" class="community-icon-choice community-frame-choice${selected ? ' is-selected' : ''}" data-action="community-frame-equip" data-frame-ref="${esc(frame.ref)}" aria-pressed="${selected}" aria-label="${esc(`${frame.name}，${selected ? t('再次点击取下', 'Click again to remove') : t('点击佩戴', 'Click to equip')}`)}"${editable ? '' : ' disabled'}><span class="community-frame-choice-preview">${avatarHTML({ name: me.name, uid: null, role: 'reader', staffRole: null, frame: frame.ref }, common, 'xl', false, true)}</span><b>${esc(frame.name)}</b><span class="community-icon-choice-status">${selected ? staff ? t('已设置', 'Selected') : t('已佩戴', 'Equipped') : t('可佩戴', 'Available')}</span></button>`;
+    }).join('')}</div>`;
 }
 
 export function communityProfileHTML({ profile, ...common }: Common & { profile: CommunityLoad<CommunityProfile> }) {

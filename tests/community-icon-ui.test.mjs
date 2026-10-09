@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
+import { readFile } from 'node:fs/promises';
+import postcss from 'postcss';
 import { communityAccountHTML, nameHTML, levelMarksHTML, whoHTML } from '../src/community.ts';
 import { communityMemberHTML, communityRankHTML } from '../src/community-pages.ts';
 import { communityPostHTML } from '../src/community-post.ts';
@@ -69,22 +71,53 @@ test('icon panel keeps unavailable and expired choices grey, has one selected it
   });
 });
 
-test('icon categories and six-item pages keep the collection compact and every approved icon reachable', () => {
+test('icon categories show the full selected category without pagination', () => {
   const state = { selected: '', equipped: null, available: ['growth:1'] };
-  for (const [kind, count] of [['staff', 3], ['vip', 8], ['growth', 10], ['trust', 4], ['badge', 18]]) {
-    const seen = new Set();
-    for (let page = 1; page <= Math.ceil(count / 6); page++) inspect(communityIconPanelHTML(person, state, true, common, { kind, page }), doc => {
+  for (const [kind, count] of [['staff', 3], ['vip', 8], ['growth', 10], ['trust', 4]]) {
+    inspect(communityIconPanelHTML(person, state, true, common, { kind }), doc => {
       const choices = [...doc.querySelectorAll('[data-icon-ref]')];
       assert.equal(doc.querySelectorAll('[data-icon-category]').length, 5);
       assert.equal(doc.querySelectorAll('.community-icon-group').length, 1);
-      assert.ok(choices.length > 0 && choices.length <= 6);
+      assert.equal(choices.length, count);
       assert.ok(choices.every(button => button.dataset.iconRef.startsWith(`${kind}:`)));
-      choices.forEach(button => { assert.equal(seen.has(button.dataset.iconRef), false); seen.add(button.dataset.iconRef); });
-      assert.equal(doc.querySelector('[data-icon-page="previous"]').disabled, page === 1);
-      assert.equal(doc.querySelector('[data-icon-page="next"]').disabled, page === Math.ceil(count / 6));
+      assert.equal(new Set(choices.map(button => button.dataset.iconRef)).size, count);
+      assert.equal(doc.querySelector('.community-icon-pagination, [data-icon-page]'), null);
     });
-    assert.equal(seen.size, count);
   }
+});
+
+test('achievement choices show only the highest actually earned material in each family', () => {
+  const state = { selected: '', equipped: null, available: ['badge:attendance:gold', 'badge:attendance:diamond', 'badge:writing:gold', 'badge:featured:aurora'] };
+  inspect(communityIconPanelHTML(person, state, true, common, { kind: 'badge' }), doc => {
+    assert.deepEqual([...doc.querySelectorAll('[data-icon-ref]')].map(button => button.dataset.iconRef),
+      ['badge:attendance:diamond', 'badge:writing:gold', 'badge:featured:aurora']);
+    assert.ok([...doc.querySelectorAll('[data-icon-ref]')].every(button => !button.disabled));
+    assert.equal(doc.querySelector('[data-icon-ref="badge:early:gold"]'), null, 'unearned families are omitted');
+  });
+  inspect(communityIconPanelHTML(person, { selected: '', equipped: null, available: [] }, true, common, { kind: 'badge' }), doc => {
+    assert.equal(doc.querySelector('[data-icon-ref]'), null, 'no earned honors means no unearned achievement artwork');
+  });
+  inspect(communityIconPanelHTML(person, { selected: 'badge:answers:diamond', equipped: null, available: ['badge:writing:gold'] }, true, common, { kind: 'badge' }), doc => {
+    const revoked = doc.querySelector('[data-icon-ref="badge:answers:diamond"]');
+    assert.equal(revoked.disabled, true);
+    assert.equal(revoked.dataset.iconLocked, 'true');
+    assert.equal(revoked.querySelector('.community-icon-choice-status').textContent, '资格已失效');
+    assert.equal(doc.querySelectorAll('[data-icon-ref]').length, 2, 'a lost saved selection stays grey without exposing the whole locked catalogue');
+  });
+});
+
+test('icon rows fit five wide, three narrow and two on a phone without changing the owned-frame layout', async () => {
+  const css = postcss.parse(await readFile(new URL('../src/community.css', import.meta.url), 'utf8'));
+  const columns = [];
+  css.walkRules(rule => {
+    if (!['.community-icon-grid', '.community-icon-group .community-icon-grid', '.community-frame-grid'].includes(rule.selector)) return;
+    const value = rule.nodes.find(node => node.type === 'decl' && node.prop === 'grid-template-columns')?.value;
+    columns.push([rule.selector, rule.parent.type === 'atrule' ? rule.parent.params : '', value]);
+  });
+  assert.ok(columns.some(([selector, media, value]) => selector === '.community-icon-grid' && !media && value === 'repeat(5, minmax(0, 1fr))'));
+  assert.ok(columns.some(([selector, media, value]) => selector === '.community-icon-group .community-icon-grid' && media === '(max-width: 960px)' && value === 'repeat(3, minmax(0, 1fr))'));
+  assert.ok(columns.some(([selector, media, value]) => selector === '.community-icon-group .community-icon-grid' && media === '(max-width: 640px)' && value === 'repeat(2, minmax(0, 1fr))'));
+  assert.ok(columns.some(([selector, , value]) => selector === '.community-frame-grid' && value === 'repeat(auto-fill, minmax(148px, 1fr))'));
 });
 
 test('the icon tab belongs to the current member and does not expose another account’s choices', () => {
@@ -103,20 +136,49 @@ test('owned avatar frames follow the icon tab and remain usable without reader p
   inspect(communityMemberHTML({ ...common, me, member: ready({ ...member, tab: 'frames' }), frames: ready(profile) }), doc => {
     const links = [...doc.querySelectorAll('.community-tabs a')].map(a => a.getAttribute('href'));
     assert.equal(links.indexOf('#/community/u/10001/frames'), links.indexOf('#/community/u/10001/icons') + 1);
-    assert.deepEqual([...doc.querySelectorAll('[data-frame-ref]')].map(b => b.dataset.frameRef), ['', 'gold']);
+    assert.deepEqual([...doc.querySelectorAll('[data-frame-ref]')].map(b => b.dataset.frameRef), ['gold']);
     const candidate = doc.querySelector('[data-frame-ref="gold"]');
     assert.equal(candidate.disabled, false);
     assert.equal(candidate.querySelector('[data-staff-frame]'), null, 'owned-frame previews cannot be replaced by an automatic staff frame');
-    assert.ok(doc.body.textContent.includes('当前职务头像框会优先自动显示'));
+    const panel = doc.querySelector('[data-community-frames]');
+    assert.equal(panel.querySelector('header, h2, p, a'), null, 'the owned frame collection contains no explanatory panel or shop links');
+    assert.equal(candidate.querySelector('.community-av > span, .community-av > img:not(.community-frame-image)'), null, 'only the frame is previewed');
   });
-  inspect(communityProfileFramesHTML(ready({ ...profile, frames: [] }), me, common), doc => {
-    assert.equal(doc.querySelectorAll('[data-frame-ref]').length, 1);
-    assert.ok(doc.body.textContent.includes('还没有拥有商城头像框'));
-  });
+  assert.equal(communityProfileFramesHTML(ready({ ...profile, frames: [] }), me, common), '', 'no owned frames means no empty card, text or controls');
   inspect(communityProfileFramesHTML(ready(profile), { ...me, management: { role: 'general', browsingAsReader: true } }, common), doc => {
     assert.ok([...doc.querySelectorAll('[data-frame-ref]')].every(button => button.disabled));
   });
   inspect(communityMemberHTML({ ...common, me, member: ready({ ...member, self: false, tab: 'frames', person: { ...person, uid: 'other' } }), frames: ready(profile) }), doc => {
     assert.equal(doc.querySelector('a[href$="/frames"], [data-community-frames]'), null);
   });
+});
+
+test('the icon collection omits duplicate titles, instructions and the member name', () => {
+  inspect(communityIconPanelHTML(person, { selected: '', equipped: null, available: ['trust:0'] }, true, common, { kind: 'trust' }), doc => {
+    const panel = doc.querySelector('[data-community-icons]');
+    assert.equal(panel.querySelector('h2, h3, p, .community-icon-current'), null);
+    assert.equal(panel.textContent.includes(person.name), false);
+    assert.equal(panel.querySelectorAll('[data-icon-category]').length, 5);
+    assert.equal(panel.querySelectorAll('[data-icon-ref]').length, 4);
+  });
+});
+
+test('owned frame previews contain only the ring or full custom frame while public avatars remain intact', async () => {
+  const image = '11111111-1111-4111-8111-111111111111';
+  const frames = ['gold', 'nebula', 'orbit', `image:${image}`].map((ref, i) => ({ id: String(i), name: `框 ${i}`, ref, image: ref.startsWith('image:') ? image : null }));
+  inspect(communityProfileFramesHTML(ready({ person, frames }), me, common), doc => {
+    assert.equal(doc.querySelectorAll('.is-frame-preview').length, 4);
+    assert.equal(doc.querySelector('.community-av > span, .community-av > img:not(.community-frame-image), [data-staff-frame]'), null);
+    const custom = doc.querySelector('.community-frame-image');
+    assert.equal(custom.getAttribute('src'), `/api/community/images/${image}.webp`);
+    assert.equal(custom.getAttribute('loading'), 'lazy');
+  });
+  inspect(communityAccountHTML({ ...common, me }), doc => {
+    assert.equal(doc.querySelector('.is-frame-preview'), null, 'normal account avatars keep their existing rendering');
+    assert.ok(doc.querySelector('.community-av > span, .community-av > img:not(.community-frame-image)'));
+  });
+  const css = await readFile(new URL('../src/community.css', import.meta.url), 'utf8');
+  assert.match(css, /\.community-av\.is-frame-preview\s*\{[^}]*background:\s*transparent/);
+  assert.match(css, /\.community-av\.is-frame-preview::before\s*\{[^}]*mask-image:\s*radial-gradient/);
+  assert.match(css, /\.community-frame-grid \.community-av\.is-frame-orbit::after\s*\{[^}]*animation:\s*none/);
 });

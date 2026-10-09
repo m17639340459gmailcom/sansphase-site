@@ -106,11 +106,11 @@ test('owned frames load and equip without remounting decoded previews; remove pe
   assert.equal(gold.querySelector('.community-av'), preview);
   assert.equal(fixture.w.document.activeElement, gold);
   assert.equal(gold.getAttribute('aria-pressed'), 'true');
-  panel.querySelector('[data-frame-ref=""]').click(); await turn(); await turn();
+  gold.click(); await turn(); await turn();
   assert.equal(frame, null);
   assert.deepEqual(fixture.requests.filter(call => call.url.endsWith('/shop/equip')).map(call => JSON.parse(call.init.body)), [{ kind: 'frame', ref: 'gold' }, { kind: 'frame', ref: null }]);
   await fixture.remount('#/community/u/u1/frames');
-  assert.equal(fixture.main.querySelector('[data-frame-ref=""]').getAttribute('aria-pressed'), 'true');
+  assert.equal(fixture.main.querySelector('[data-frame-ref="gold"]').getAttribute('aria-pressed'), 'false');
 });
 
 test('a foreign member frames URL does not load private owned frames or permit a forged equip', async t => {
@@ -195,7 +195,7 @@ test('locked icon controls cannot submit a forged wearable, and failed saves res
   assert.ok(notices.includes('资格已失效'));
 });
 
-test('category and page browsing stays local; equipping on a later page retains its cards and focus', async t => {
+test('category browsing stays local; equipping in a lower row retains every card and focus', async t => {
   let selection = '', effective = null;
   const fixture = await setup(t, '#/community/u/u1/icons', (url, init) => {
     if (url.endsWith('/me')) return response({ ...person, icon: effective });
@@ -203,10 +203,14 @@ test('category and page browsing stays local; equipping on a later page retains 
     if (url.endsWith('/shop/equip')) { selection = JSON.parse(init.body).ref; effective = selection; return response({ icon: effective }); }
   });
   const panel = fixture.main.querySelector('[data-community-icons]'), reads = fixture.requests.length;
-  fixture.main.querySelector('[data-icon-page="next"]').click();
-  assert.equal(panel.dataset.iconCurrentPage, '2');
-  assert.equal(fixture.main.querySelector('[data-icon-ref="growth:1"]'), null);
+  assert.equal(panel.querySelectorAll('[data-icon-ref]').length, 10);
+  assert.equal(panel.querySelector('[data-icon-page]'), null);
+  fixture.main.querySelector('[data-icon-category="vip"]').click();
+  assert.equal(panel.querySelectorAll('[data-icon-ref]').length, 8);
+  fixture.main.querySelector('[data-icon-category="growth"]').click();
   const target = fixture.main.querySelector('[data-icon-ref="growth:8"]'), art = target.querySelector('.community-icon-choice-art');
+  fixture.main.querySelector('[data-icon-category="growth"]').click();
+  assert.equal(fixture.main.querySelector('[data-icon-ref="growth:8"]'), target, 'clicking the current category does not rebuild the artwork');
   assert.equal(fixture.requests.length, reads, 'browsing does not request the account or catalogue again');
   target.focus(); target.click(); await turn(); await turn();
   assert.equal(fixture.main.querySelector('[data-community-icons]'), panel);
@@ -227,7 +231,7 @@ test('a qualification lost during saving stays grey and disabled after the reque
   card.click(); await turn(); await turn();
   assert.equal(fixture.main.querySelector('[data-icon-ref="growth:1"]'), card);
   assert.equal(card.dataset.iconLocked, 'true'); assert.equal(card.disabled, true);
-  assert.ok(fixture.main.querySelector('.community-icon-expired'));
+  assert.equal(card.querySelector('.community-icon-choice-status').textContent, '资格已失效');
 });
 
 test('an existing general sees the shared product editor and submits edits and categories without owner-only sections', async t => {
