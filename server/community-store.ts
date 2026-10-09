@@ -106,12 +106,12 @@ export function createCommunityStore(directory: string, { previewCatalog = false
     (SELECT COUNT(*) FROM community_votes v WHERE v.topic_id = t.id AND v.value = 'alive') AS alive,
     (SELECT COUNT(*) FROM community_votes v WHERE v.topic_id = t.id AND v.value = 'dead') AS dead`;
   // Listed topics: published and not hidden, with optional board, tag, author and search filters.
-  const liveTopics = db.prepare(`SELECT ${topicColumns}
-    FROM community_topics t WHERE t.deleted_at IS NULL AND t.pending = 0 AND t.hidden_at IS NULL
+  const listedTopicScope = `FROM community_topics t WHERE t.deleted_at IS NULL AND t.pending = 0 AND t.hidden_at IS NULL
     AND ($board IS NULL OR t.board = $board)
     AND ($tag IS NULL OR EXISTS (SELECT 1 FROM json_each(t.tags) WHERE json_each.value = $tag))
     AND ($authorKind IS NULL OR (t.author_kind = $authorKind AND t.author_id = $authorId))
-    AND ($pattern IS NULL OR t.title LIKE $pattern ESCAPE '\\' OR t.body LIKE $pattern ESCAPE '\\')`);
+    AND ($pattern IS NULL OR t.title LIKE $pattern ESCAPE '\\' OR t.body LIKE $pattern ESCAPE '\\')`;
+  const liveTopics = db.prepare(`SELECT ${topicColumns} ${listedTopicScope}`);
   const oneTopic = db.prepare(`SELECT ${topicColumns}, t.body FROM community_topics t WHERE t.id = ? AND t.deleted_at IS NULL`);
   const queuedTopics = db.prepare(`SELECT ${topicColumns}, t.body FROM community_topics t WHERE t.deleted_at IS NULL AND (t.pending = 1 OR t.hidden_at IS NOT NULL) ORDER BY t.created_at`);
   const topicReplies = db.prepare(`SELECT r.id, r.topic_id, r.author_kind, r.author_id, r.body, r.created_at, r.edited_at, r.quote_id, r.hidden_at,
@@ -124,6 +124,12 @@ export function createCommunityStore(directory: string, { previewCatalog = false
     FROM community_replies r JOIN community_topics t ON t.id = r.topic_id
     WHERE r.author_kind = ? AND r.author_id = ? AND r.deleted_at IS NULL AND r.hidden_at IS NULL AND t.deleted_at IS NULL AND t.pending = 0 AND t.hidden_at IS NULL
     ORDER BY r.created_at DESC LIMIT 50`);
+  const memberTopicScopes = db.prepare(`SELECT t.board, t.created_at, t.pinned, t.paid_pin_until ${listedTopicScope}`);
+  const memberReplyScopes = db.prepare(`SELECT t.board FROM community_replies r JOIN community_topics t ON t.id = r.topic_id
+    WHERE r.author_kind = ? AND r.author_id = ? AND r.deleted_at IS NULL AND r.hidden_at IS NULL AND t.deleted_at IS NULL AND t.pending = 0 AND t.hidden_at IS NULL
+    ORDER BY r.created_at DESC LIMIT 50`);
+  const memberBookmarkScopes = db.prepare(`SELECT t.board FROM community_bookmarks b JOIN community_topics t ON t.id = b.topic_id
+    WHERE b.member_kind = ? AND b.member_id = ? AND t.deleted_at IS NULL AND t.pending = 0 AND t.hidden_at IS NULL`);
   const hiddenReplies = db.prepare(`SELECT r.id, r.topic_id, r.author_kind, r.author_id, r.body, r.created_at, r.hidden_at, t.title, t.body AS topic_body
     FROM community_replies r JOIN community_topics t ON t.id = r.topic_id WHERE r.deleted_at IS NULL AND r.hidden_at IS NOT NULL AND t.deleted_at IS NULL ORDER BY r.hidden_at`);
   const recentReplies = db.prepare(`SELECT t.board AS board, COUNT(*) AS count FROM community_replies r
@@ -450,6 +456,22 @@ export function createCommunityStore(directory: string, { previewCatalog = false
     memberReplies(member: CommunityAuthor) {
       return (memberReplies.all(member.kind, member.id) as Array<{ id: string; topic_id: string; body: string; created_at: string; title: string; topic_body: string; board: string; likes: number }>)
         .map(row => ({ id: row.id, topicId: row.topic_id, topicTitle: displayTitle(row.title, row.topic_body), board: row.board, body: row.body, createdAt: row.created_at, likes: Number(row.likes), images: replyImages.all(row.topic_id, row.id) as Array<{ id: string; width: number; height: number }> }));
+    },
+    memberContentCounts(member: CommunityAuthor, { visibleBoards, bookmarks = false }: { visibleBoards: readonly string[]; bookmarks?: boolean }) {
+      const visible = new Set(visibleBoards), now = Date.now();
+      // Keep the content tabs' exact newest/pin ordering and caps before scope
+      // filtering. Other sort fields are unused for newest; no payload, image
+      // or reaction queries are needed merely to count these rows.
+      const topics = sortTopics((memberTopicScopes.all({ board: null, tag: null, authorKind: member.kind, authorId: member.id, pattern: null }) as Array<{ board: string; created_at: string; pinned: number; paid_pin_until: string | null }>).map(row => ({
+        board: row.board, createdAt: row.created_at, lastActivityAt: row.created_at, likes: 0, replies: 0, featured: false,
+        pinned: Boolean(row.pinned), paidPin: Boolean(row.paid_pin_until && Date.parse(row.paid_pin_until) > now),
+      })), 'newest', now).slice(0, 100);
+      const countVisible = (rows: Array<{ board: string }>) => rows.filter(row => visible.has(row.board)).length;
+      return {
+        topics: countVisible(topics),
+        replies: countVisible(memberReplyScopes.all(member.kind, member.id) as Array<{ board: string }>),
+        bookmarks: bookmarks ? countVisible(memberBookmarkScopes.all(member.kind, member.id) as Array<{ board: string }>) : 0,
+      };
     },
     // Per-board totals, replies in the last 24 hours, the latest topic, tags, and today's check-ins.
     summary({ limit = 5, now = Date.now(), hiddenBoard = '' }: { limit?: number; now?: number; hiddenBoard?: string } = {}) {

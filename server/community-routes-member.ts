@@ -140,9 +140,10 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
       const member = await memberByUid(ctx, memberMatch[1]);
       const self = same(member, me);
       const tab = url.searchParams.get('tab') || 'topics';
-      const topics = live.listTopics({ author: member, sort: 'newest', page: 1, pageSize: 100 }).items.filter(topic => ctx.canSeeBoard(topic.board));
-      const replies = live.memberReplies(member).filter(reply => ctx.canSeeBoard(reply.board));
-      const bookmarks = self ? live.topics(live.bookmarks(me)).filter(topic => ctx.canSeeBoard(topic.board)) : [];
+      const contentTab = tab === 'topics' || tab === 'replies' || tab === 'bookmarks';
+      const topics = contentTab ? live.listTopics({ author: member, sort: 'newest', page: 1, pageSize: 100 }).items.filter(topic => ctx.canSeeBoard(topic.board)) : [];
+      const replies = contentTab ? live.memberReplies(member).filter(reply => ctx.canSeeBoard(reply.board)) : [];
+      const bookmarks = contentTab && self ? live.topics(live.bookmarks(me)).filter(topic => ctx.canSeeBoard(topic.board)) : [];
       const topicDTOs = tab === 'topics' ? await ctx.topicsDTO(topics) : [];
       const bookmarkDTOs = tab === 'bookmarks' && self ? await ctx.topicsDTO(bookmarks) : [];
       // Resolve the final profile after list rendering yields; its icon must not retain an old appointment.
@@ -152,10 +153,12 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
       const person = ctx.person(member, map);
       const stats = live.authorStats(member);
       const muted = members.muted(member);
+      const counts = contentTab ? { topics: topics.length, replies: replies.length, bookmarks: bookmarks.length }
+        : live.memberContentCounts(member, { bookmarks: self, visibleBoards: live.boards.ids().filter(board => ctx.canSeeBoard(board)) });
       ctx.send({
         person, bio: info.bio, joinedAt: member.kind === 'owner' ? null : info.joinedAt || members.joinedAt(member),
         ...economy.coverDecoration(member), background: live.profileBackgrounds.state(member).approved,
-        streak: economy.currentStreak(member), stats: { ...stats, topics: topics.length, replies: replies.length },
+        streak: economy.currentStreak(member), stats: { ...stats, topics: counts.topics, replies: counts.replies },
         follows: members.followCounts(member), following: !self && members.following(me, member), self, badges: members.badges(member),
         badgeState: ctx.appearancePreview(member, map)?.badgeState ?? members.badgeState(member, { joinedAt: info.joinedAt }),
         ...(self ? { iconState: ctx.iconState(member, map) } : {}),
@@ -164,7 +167,7 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
         staff: self ? ctx.staff : ctx.canStaff('staff.appoint') && live.staff.canAppoint(me, member) ? live.staff.state(member) : null,
         reasons: ctx.mod ? communityReportReasons : undefined,
         tab, topics: topicDTOs.map(topic => ({ ...topic, author: person })), replies: tab === 'replies' ? replies : [],
-        bookmarks: bookmarkDTOs, counts: { topics: topics.length, replies: replies.length, bookmarks: bookmarks.length },
+        bookmarks: bookmarkDTOs, counts,
         quick: self ? { balance: ledger.balance(me), checkedIn: economy.checked(me), unread: members.unread(me).all, orders: economy.orders(me).length } : null,
       });
       return true;
