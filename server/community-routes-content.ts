@@ -24,11 +24,16 @@ function assertNotMuted(ctx: Ctx) {
 }
 const canParticipateBoard = (ctx: Ctx, board: string) => board !== 'vip' || ctx.viewer.vip || ctx.owner;
 // A topic the viewer may see: pending and hidden ones only for their author and moderators.
-function visibleTopic(ctx: Ctx, id: string) {
-  const topic = ctx.live.topic(id);
+function requireVisibleTopic<T extends Pick<StoredTopic, 'board' | 'author' | 'pending' | 'hidden'>>(ctx: Ctx, topic: T | null): T {
   if (!topic || !ctx.canSeeBoard(topic.board) || ((topic.pending || topic.hidden) && !ctx.canModerateBoard(topic.board) && (ctx.readOnly || !same(topic.author, ctx.me))))
     throw fail('帖子不存在，或已被删除。', 404);
   return topic;
+}
+function visibleTopic(ctx: Ctx, id: string) {
+  return requireVisibleTopic(ctx, ctx.live.topic(id));
+}
+function visibleTopicAccess(ctx: Ctx, id: string) {
+  return requireVisibleTopic(ctx, ctx.live.topicAccess(id));
 }
 function visibleReply(ctx: Ctx, id: string) {
   const reply = ctx.live.reply(id);
@@ -57,7 +62,7 @@ async function threadDTO(ctx: Ctx, id: string) {
   const names = [...new Set([topic.body, ...visibleReplyText].flatMap(text => [...text.matchAll(/@([\p{Script=Han}A-Za-z0-9_\-·]{1,30})/gu)].map(match => match[1])))];
   const mentioned = names.length && ctx.options.findByNames ? await ctx.options.findByNames(names.slice(0, 30)) : new Map<string, CommunityAuthor>();
   const mentionMap = await ctx.people([...mentioned.values()]);
-  const currentTopic = visibleTopic(ctx, id);
+  const currentTopic = visibleTopicAccess(ctx, id);
   if (canModerate !== ctx.canModerateBoard(currentTopic.board)) throw fail('管理权限发生变化，请重新打开帖子。', 403);
   const mentions = Object.fromEntries([...mentioned].map(([name, member]) => [name, mentionMap.get(memberKey(member))?.uid || null]).filter(([, uid]) => uid));
   const lowerTarget=(author:CommunityAuthor)=>{try{live.staff.protect(me,author);return true;}catch{return false;}};

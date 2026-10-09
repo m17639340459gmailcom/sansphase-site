@@ -36,13 +36,13 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
       const muted = members.muted(me);
       const allQueue = ctx.mod ? live.queue() : { topics: [], replies: [] };
       const queue = { topics: allQueue.topics.filter(topic => ctx.canModerateBoard(topic.board)), replies: allQueue.replies.filter(reply => {
-        const board = live.topic(reply.topicId)?.board;
+        const board = live.topicAccess(reply.topicId)?.board;
         return Boolean(board && ctx.canModerateBoard(board));
       }) };
       const reports = ctx.mod ? live.openReports().filter(report => {
         if (ctx.owner) return true;
         const reply = report.target.kind === 'reply' ? live.reply(report.target.id) : null;
-        const topic = live.topic(reply ? reply.topicId : report.target.id);
+        const topic = live.topicAccess(reply ? reply.topicId : report.target.id);
         return Boolean(topic && ctx.canStaff('report.review',topic.board));
       }).length : 0;
       const orders = ctx.owner ? economy.goodsOrders().filter(order => order.status === 'pending').length : 0;

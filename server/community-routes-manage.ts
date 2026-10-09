@@ -112,7 +112,7 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
     const queue = {
       topics: allQueue.topics.filter(topic => ctx.canModerateBoard(topic.board)),
       replies: allQueue.replies.filter(reply => {
-        const parent = live.topic(reply.topicId);
+        const parent = live.topicAccess(reply.topicId);
         return Boolean(parent && ctx.canModerateBoard(parent.board));
       }),
     };
@@ -138,7 +138,7 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
     for (const { reply, topic } of reportTargets) if (reply) people.push(reply.author); else if (topic) people.push(topic.author);
     const map = await ctx.people(people);
     const stillModeratesTopic = (id: string) => {
-      const topic = live.topic(id);
+      const topic = live.topicAccess(id);
       return Boolean(topic && ctx.canModerateBoard(topic.board));
     };
     const stillModeratesReply = (id: string) => {
@@ -152,7 +152,7 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
       if (!ctx.owner && (queue.topics.some(topic => !stillModeratesTopic(topic.id))
         || queue.replies.some(reply => !stillModeratesReply(reply.id))
         || content.some(topic => !stillModeratesTopic(topic.id))
-        || reports.some(report => {const reply=report.target.kind==='reply'?live.reply(report.target.id):null;const topic=live.topic(reply?reply.topicId:report.target.id);return !topic||!ctx.canStaff('report.review',topic.board);})))
+        || reports.some(report => {const reply=report.target.kind==='reply'?live.reply(report.target.id):null;const topic=live.topicAccess(reply?reply.topicId:report.target.id);return !topic||!ctx.canStaff('report.review',topic.board);})))
         throw fail('内容所属板块发生变化，请重新打开管理页面。', 403);
     };
     assertReadable();
@@ -180,7 +180,7 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
       kpis: { topics24h: activity.topics24h, replies24h: activity.replies24h },
       queue: {
         topics: queue.topics.map(topic => ({ ...ctx.topicDTO(topic, map),...topicProof(topic), body: [...topic.body].slice(0, 200).join(''), pendingReason: topic.pendingReason, hiddenReason: topic.hiddenReason })),
-        replies: queue.replies.map(reply => {const board=live.topic(reply.topicId)?.board;return { ...reply, board:board ?? null,
+        replies: queue.replies.map(reply => {const board=live.topicAccess(reply.topicId)?.board;return { ...reply, board:board ?? null,
           canDelete:ctx.canStaff('reply.delete',board)&&protectedTarget(reply.author),canRestore:ctx.canStaff('reply.restore',board),
           canPenalty:ctx.canStaff('reply.penalty',board)&&protectedTarget(reply.author),canMute:ctx.canStaff('member.mute')&&protectedTarget(reply.author),
           author: ctx.person(reply.author, map), body: [...reply.body].slice(0, 200).join('') };}),

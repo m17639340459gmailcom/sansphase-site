@@ -227,7 +227,7 @@ export function createCommunityService(options: ServiceOptions) {
       topicsDTO: async topics => {
         const map = await presentationPeople(peopleIn(topics)); await refreshStaff(); options.assertActive?.(req);
         return topics.filter(topic => {
-          const current = live.topic(topic.id);
+          const current = live.topicAccess(topic.id);
           return current && current.board === topic.board && canSeeBoard(current.board)
             && (!(current.pending || current.hidden) || same(current.author, me) || canModerateBoard(current.board));
         }).map(topic => topicDTO(topic, map));

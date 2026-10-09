@@ -46,6 +46,7 @@ export type StoredTopic = Omit<CommunityTopic, 'author' | 'authorRole' | 'lastRe
   meta: Omit<ShowcaseMeta, 'prompt'> | null;
   resource: (ResourceMeta & { alive: number; dead: number }) | null;
 };
+export type TopicAccess = { id: string; board: string; author: CommunityAuthor; pending: boolean; hidden: boolean };
 export type BoardStats = { topics: number; repliesToday: number; latest: { id: string; title: string; lastActivityAt: string } | null };
 export type NewTopic = {
   board: string; author: CommunityAuthor; title: string; body: string; tags?: readonly string[]; images?: readonly string[];
@@ -119,6 +120,7 @@ export function createCommunityStore(directory: string, { previewCatalog = false
     WHERE t.deleted_at IS NULL AND t.pending = 0 AND t.hidden_at IS NULL
     ORDER BY CAST(requested.key AS INTEGER)`);
   const oneTopic = db.prepare(`SELECT ${topicColumns}, t.body FROM community_topics t WHERE t.id = ? AND t.deleted_at IS NULL`);
+  const topicAccessQuery = db.prepare('SELECT id, board, author_kind, author_id, pending, hidden_at FROM community_topics WHERE id = ? AND deleted_at IS NULL');
   const queuedTopics = db.prepare(`SELECT ${topicColumns}, t.body FROM community_topics t WHERE t.deleted_at IS NULL AND (t.pending = 1 OR t.hidden_at IS NOT NULL) ORDER BY t.created_at`);
   const topicReplies = db.prepare(`SELECT r.id, r.topic_id, r.author_kind, r.author_id, r.body, r.created_at, r.edited_at, r.quote_id, r.hidden_at,
     (SELECT COUNT(*) FROM community_reactions x WHERE x.target_kind = 'reply' AND x.target_id = r.id) AS likes
@@ -426,6 +428,10 @@ export function createCommunityStore(directory: string, { previewCatalog = false
     topics(ids: readonly string[]) {
       if (!ids.length) return [];
       return (topicSummaries.all(JSON.stringify(ids)) as TopicRow[]).map(row => listed(row));
+    },
+    topicAccess(id: string): TopicAccess | null {
+      const row = topicAccessQuery.get(id) as Pick<TopicRow, 'id' | 'board' | 'author_kind' | 'author_id' | 'pending' | 'hidden_at'> | undefined;
+      return row ? { id: row.id, board: row.board, author: authorOf(row), pending: Boolean(row.pending), hidden: Boolean(row.hidden_at) } : null;
     },
     topic(id: string) {
       const row = topicRow(id);
