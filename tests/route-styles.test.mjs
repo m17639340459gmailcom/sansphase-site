@@ -49,3 +49,43 @@ test("route style URLs honor the existing static asset base", async () => {
   await pending;
   dom.window.close();
 });
+
+test("a stalled route stylesheet exits waiting, removes its link, and allows one shared retry", async t => {
+  const dom = page();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const { document } = dom.window;
+    const first = ensureRouteStyle(document, "community");
+    const oldLink = document.querySelector('[data-route-style="community"]');
+    const rejection = assert.rejects(first, /Could not load community\.css/);
+    t.mock.timers.tick(10_000);
+    await rejection;
+    assert.equal(oldLink.isConnected, false);
+    const retry = ensureRouteStyle(document, "community");
+    assert.notEqual(retry, first);
+    assert.equal(ensureRouteStyle(document, "community"), retry);
+    oldLink.dispatchEvent(new dom.window.Event("load"));
+    oldLink.dispatchEvent(new dom.window.Event("error"));
+    assert.equal(ensureRouteStyle(document, "community"), retry, "late events cannot delete the new attempt");
+    document.querySelector('[data-route-style="community"]').dispatchEvent(new dom.window.Event("load"));
+    await retry;
+    t.mock.timers.tick(20_000);
+    assert.equal(ensureRouteStyle(document, "community"), retry, "a successful style stays cached after its old deadline");
+  } finally { t.mock.timers.reset(); dom.window.close(); }
+});
+
+test("a settled stylesheet ignores later load/error events and cleans its deadline", async t => {
+  const dom = page();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  try {
+    const { document } = dom.window;
+    const ready = ensureRouteStyle(document, "author");
+    const link = document.querySelector('[data-route-style="author"]');
+    link.dispatchEvent(new dom.window.Event("load"));
+    await ready;
+    link.dispatchEvent(new dom.window.Event("error"));
+    t.mock.timers.tick(20_000);
+    assert.equal(link.isConnected, true);
+    assert.equal(ensureRouteStyle(document, "author"), ready);
+  } finally { t.mock.timers.reset(); dom.window.close(); }
+});

@@ -57,6 +57,21 @@ function setup(t) {
   return { context, contentReader, siteContent, main, dom, calls, rendered, navigate, respond, seed, promptOpened: () => promptOpened };
 }
 
+test('a failed first forum stylesheet exposes the existing retry state without painting unstyled forum controls', async t => {
+  const s = setup(t);
+  s.context.communityEnabled = () => true;
+  s.context.communityView = () => 'home';
+  let attempts = 0;
+  s.context.ensureRouteStyle = async () => { if (++attempts === 1) throw new Error('CSS read expired'); };
+  await s.navigate('#/community/home');
+  assert.equal(s.context.communityStyleReady, false);
+  assert.equal(s.rendered.at(-1).contentStatus, 'error');
+  await s.context.render();
+  assert.equal(attempts, 2);
+  assert.equal(s.context.communityStyleReady, true);
+  assert.equal(s.rendered.at(-1).contentStatus, undefined);
+});
+
 test('a fast validated public navigation commits its target once without a loading flash', async t => {
   const s = setup(t); await s.seed();
   const before = s.rendered.length, rendering = s.navigate('#/works');

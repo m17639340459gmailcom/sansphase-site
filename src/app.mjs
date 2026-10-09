@@ -590,7 +590,7 @@ async function render(options={}) {
  }
  const bookStyle = route.page==='resource-center' && route.id ? ensureRouteStyle(document,'book').then(()=>true,()=>false) : null;
  // Wait for the community stylesheet only on the first visit; later renders
- // (language switch, sorting) stay synchronous. A failed load still renders.
+ // (language switch, sorting) stay synchronous. A failed load exposes retry.
   const communityStyle = communityEnabled() && !communityStyleReady && communityView(route.page, route.id) !== 'unknown'
   ? ensureRouteStyle(document,'community').then(()=>{communityStyleReady=true;return true;},()=>false) : null;
  const landingReady = communityEnabled() && communityView(route.page, route.id) === 'landing'
@@ -634,7 +634,7 @@ async function render(options={}) {
  if(communityStyle) {
   const ready = await communityStyle;
   if(generation!==renderGeneration) return;
-  if (landingReady && !ready) { renderView({ ...options, contentStatus: 'error' }); return; }
+  if (!ready) { renderView({ ...options, contentStatus: 'error' }); return; }
  }
  if (landingReady) {
   const ready = await landingReady;
