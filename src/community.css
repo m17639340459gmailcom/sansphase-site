@@ -1257,8 +1257,8 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-sitem.is-off { opacity: 0.6; }
 .community-sitem.is-owned { border-color: rgb(159 211 180 / 24%); }
 .community-sitem-art { position: relative; box-sizing: border-box; width: 100%; min-width: 0; min-height: 0; height: 112px; padding: 0; overflow: hidden; display: grid; grid-template-rows: minmax(0, 1fr); place-items: center; border: 0; border-bottom: 1px solid var(--line); background: radial-gradient(70% 90% at 50% 40%, rgb(96 118 170 / 18%), transparent 70%), rgb(5 7 11 / 55%); cursor: pointer; }
-.community-sitem-art.is-tool-card { height: 176px; }
-.community-sitem-art.is-tool-card .community-holo:not(.is-uploaded) { width: 100px; height: 142px; transform: perspective(700px) rotateX(var(--holo-rx, 0deg)) rotateY(var(--holo-ry, 0deg)) rotate(5deg); }
+.community-sitem-art.is-tool-card { height: 208px; }
+.community-sitem-art.is-tool-card .community-holo:not(.is-uploaded) { width: 118px; height: 168px; transform: perspective(700px) rotateX(var(--holo-rx, 0deg)) rotateY(var(--holo-ry, 0deg)) rotate(5deg); }
 .community-sitem-art > .community-product-image { display: block; box-sizing: border-box; min-width: 0; min-height: 0; width: 100%; height: 100%; max-width: 100%; max-height: 100%; padding: 8px; object-fit: contain; }
 .community-sitem-art:focus-visible { outline: 1px solid var(--focus-edge); outline-offset: -4px; }
 .community-owned-tag { position: absolute; top: 6px; right: 6px; display: inline-flex; align-items: center; gap: 4px; padding: 2px 7px; border: 1px solid rgb(159 211 180 / 35%); border-radius: var(--pill); background: var(--cm-good-soft); font-size: 12px; color: var(--cm-good); }
@@ -1606,6 +1606,7 @@ a.community-queue-title:hover { text-decoration: underline; text-underline-offse
   .community-kpis dt { overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
   .community-kpis dd { font-size: 17px; }
   .community-shop-grid { grid-template-columns: repeat(2, minmax(0, 208px)); gap: 8px; }
+  .community-sitem-art.is-tool-card .community-holo:not(.is-uploaded) { width: min(118px, 70%); height: auto; aspect-ratio: 7 / 10; }
   .community-shop-cats { max-width: 100%; flex-wrap: nowrap; overflow-x: auto; border-radius: 0; }
   .community-sitem-body { gap: 5px; padding: 9px 10px 11px; }
   .community-shop-dialog { padding: 12px; }

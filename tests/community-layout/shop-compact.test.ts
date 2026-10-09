@@ -52,7 +52,9 @@ for (const theme of ['light', 'dark'] as const) {
       const radians = angle * Math.PI / 180;
       const projectedWidth = (width * Math.cos(radians) + height * Math.sin(radians)) * 1.035;
       const projectedHeight = (height * Math.cos(radians) + width * Math.sin(radians)) * 1.035;
-      assert.ok(projectedWidth < 160 && projectedHeight < 160, 'the full silhouette and hover enlargement fit inside the unchanged 176px stage');
+      const stageHeight = parseFloat(style(window.document.querySelector('.community-sitem-art.is-tool-card')!).height);
+      assert.ok(width >= 115 && height >= 160, 'the drawing must grow with the widened merchandise card');
+      assert.ok(projectedWidth < 190 && projectedHeight < stageHeight - 16, 'the full silhouette and hover enlargement leave breathing room inside the larger stage');
       const uploadedStyle = style(window.document.querySelector('.community-sitem-art.is-tool-card .community-holo.is-uploaded')!);
       assert.doesNotMatch(uploadedStyle.transform, /\brotate\(/, 'an image that already contains a tilt receives no additional planar rotation');
       const detailBuiltIn = style(window.document.querySelector('.community-shop-detail-art .community-holo:not(.is-uploaded)')!);
@@ -78,7 +80,7 @@ for (const theme of ['light', 'dark'] as const) {
       }
       for (const art of window.document.querySelectorAll('.community-sitem-art, .community-inv .community-sart')) {
         const item = shop.items.find(candidate => candidate.id === (art as HTMLElement).dataset.id);
-        assert.equal(style(art).height, item?.kind === 'card' ? '176px' : '112px', 'tool cards are legible without enlarging other merchandise or owned inventory');
+        assert.equal(style(art).height, item?.kind === 'card' ? '208px' : '112px', 'tool cards are legible without enlarging other merchandise or owned inventory');
       }
       assert.equal(style(window.document.querySelector('.community-sitem')!).borderRadius, '12px');
       for (const button of window.document.querySelectorAll('.community-sitem-foot .community-button')) assert.ok(parseFloat(style(button).minHeight) >= 36, 'compacting the card must preserve a usable action');
@@ -107,19 +109,47 @@ for (const theme of ['light', 'dark'] as const) {
     } finally { window.close(); }
   });
 
-  test(`${theme}: item artwork fits the smaller stage without clipping on hover`, async () => {
+  test(`${theme}: item artwork fits its merchandise stage without clipping on hover`, async () => {
     const { window, style } = await fixture(theme, communityShopHTML({ shop: { state: 'ready', data: shop }, tab: 'all', ...common }));
     try {
       for (const selector of ['.community-sart .community-av-xl', '.community-cover-sample', '.community-holo', '.community-file', '.community-goods']) {
         const artwork = style(window.document.querySelector(selector)!);
-        const limit = selector === '.community-holo' ? 152 : 96;
+        const limit = selector === '.community-holo' ? 176 : 96;
         assert.ok(parseFloat(artwork.height) <= limit, `${selector} leaves room for rotation and hover inside its own stage`);
-        if (selector === '.community-holo') assert.ok(parseFloat(artwork.height) >= 130, 'the built-in tool card also fills the larger display instead of leaving its old tiny drawing');
+        if (selector === '.community-holo') assert.ok(parseFloat(artwork.height) >= 160, 'the built-in tool card also fills the larger display instead of leaving its old tiny drawing');
         assert.ok(parseFloat(artwork.width) <= 140, `${selector} leaves horizontal breathing room`);
       }
     } finally { window.close(); }
   });
 }
+
+test('a listed portrait grows inside the wider card while its complete image and sheen stay aligned', async () => {
+  const uploaded: CommunityShopItem = { ...shop.items.find(item => item.id === 'portrait-card')!, cat: 'card', kind: 'card', ref: 'makeup' };
+  const { window, style } = await fixture('light', communityShopHTML({ shop: { state: 'ready', data: { ...shop, items: [uploaded] } }, tab: 'card', ...common }));
+  try {
+    const stage = style(window.document.querySelector('.community-sitem-art')!);
+    const drawing = style(window.document.querySelector('.community-sart.is-uploaded-card')!);
+    const grid = style(window.document.querySelector('.community-shop-grid')!);
+    const track = Number(grid.gridTemplateColumns.match(/(\d+)px\)\)$/)?.[1]);
+    assert.equal(track, 208, 'use the same category track for existing uploaded merchandise');
+    // JSDOM misreports border widths when a shorthand contains CSS variables.
+    // Read the literal thickness from the accepted cascade for this fit budget.
+    const css = postcss.parse(await composeCommunityStyles());
+    let itemBorder = '', stageBorder = '';
+    css.walkRules('.community-sitem', rule => rule.walkDecls('border', declaration => { itemBorder = declaration.value; }));
+    css.walkRules('.community-sitem-art', rule => rule.walkDecls('border-bottom', declaration => { stageBorder = declaration.value; }));
+    const border = parseFloat(itemBorder), stageBorderWidth = parseFloat(stageBorder);
+    assert.ok(Number.isFinite(border) && Number.isFinite(stageBorderWidth));
+    const availableWidth = track - border * 2 - parseFloat(drawing.paddingLeft) - parseFloat(drawing.paddingRight);
+    const availableHeight = parseFloat(stage.height) - stageBorderWidth - parseFloat(drawing.paddingTop) - parseFloat(drawing.paddingBottom);
+    const aspect = .7;
+    const fittedWidth = Math.min(availableWidth, availableHeight * aspect);
+    const fittedHeight = fittedWidth / aspect;
+    assert.ok(fittedWidth >= 130 && fittedHeight >= 185, 'widening only the outside must not leave the reported 111 by 159 portrait unchanged');
+    assert.ok(fittedWidth * 1.035 < track - border * 2 && fittedHeight * 1.035 < parseFloat(stage.height) - stageBorderWidth, 'hover enlargement stays within the stage');
+    assert.equal(style(window.document.querySelector('.community-holo.is-uploaded > img')!).objectFit, 'contain', 'the improvement must not crop the original image');
+  } finally { window.close(); }
+});
 
 test('item descriptions live in a separate dialog while prices, limits, stock and actions stay visible in the collection', async () => {
   const { window } = await fixture('dark', communityShopHTML({ shop: { state: 'ready', data: shop }, tab: 'all', ...common }));
@@ -188,6 +218,18 @@ test('narrow screens retain compact artwork and stack complete product details w
     });
   });
   assert.match(narrow.get('.community-shop-grid')?.get('grid-template-columns') || '', /repeat\(2, minmax\(0, 208px\)\)/);
+  const toolCard = narrow.get('.community-sitem-art.is-tool-card .community-holo:not(.is-uploaded)');
+  const widthBudget = toolCard?.get('width')?.match(/^min\(([\d.]+)px, ([\d.]+)%\)$/);
+  assert.ok(widthBudget, 'a narrow track must scale the built-in drawing instead of clipping its fixed width');
+  assert.equal(toolCard?.get('height'), 'auto', 'the portrait height follows the constrained width');
+  assert.equal(toolCard?.get('aspect-ratio'), '7 / 10');
+  const angle = 5 * Math.PI / 180;
+  for (const trackWidth of [100, 132, 156, 208]) {
+    const width = Math.min(Number(widthBudget[1]), trackWidth * Number(widthBudget[2]) / 100);
+    const height = width * 10 / 7;
+    const projectedWidth = (width * Math.cos(angle) + height * Math.sin(angle)) * 1.035;
+    assert.ok(projectedWidth < trackWidth - 8, `the complete tilted drawing fits the ${trackWidth}px mobile track on hover`);
+  }
   assert.equal(narrow.get('.community-sitem-art')?.get('height'), undefined, 'mobile must not restore the old 156px stage');
   assert.equal(narrow.get('.community-sitem-art .community-sart')?.get('transform'), undefined, 'individual objects now have the correct dimensions without shrinking their text again');
   assert.equal(narrow.get('.community-sitem-body p')?.get('-webkit-line-clamp'), undefined, 'opening a description must reveal all of it');
@@ -224,7 +266,7 @@ test('only genuine uploaded tool cards keep the holo material around their compl
   const { window, style } = await fixture('light', communityShopHTML({ shop: { state: 'ready', data }, tab: 'all', ...common }));
   try {
     const artwork = window.document.querySelector('[data-id="actual-card"].community-sitem-art')!;
-    assert.equal(style(artwork).height, '176px', 'the full portrait gets a larger stage instead of being cropped to simulate enlargement');
+    assert.equal(style(artwork).height, '208px', 'the full portrait gets a larger stage instead of being cropped to simulate enlargement');
     const holo = artwork.querySelector<HTMLElement>('.community-holo.is-uploaded')!;
     assert.ok(holo, 'an uploaded PNG must not bypass the original holographic card renderer');
     assert.ok(holo.hasAttribute('data-community-card-art'));
