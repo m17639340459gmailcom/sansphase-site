@@ -47,6 +47,12 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
     JOIN community_checkins c ON c.day=e.source_id AND e.actor_key=c.member_kind || ':' || c.member_id
     WHERE e.kind='early' AND c.day=? AND c.reward>0 AND c.member_kind='reader' ORDER BY c.created_at,c.rowid LIMIT ?`);
   const recentCheckers = db.prepare(`SELECT DISTINCT member_kind, member_id FROM community_checkins WHERE day >= ? AND member_kind = 'reader'`);
+  // Keep candidate IDs first so SQLite seeks the member/day index instead of
+  // scanning every reader's attendance before matching the JSON candidates.
+  const rankingDays = db.prepare(`SELECT c.member_id, c.day FROM json_each(?) requested
+    CROSS JOIN community_checkins c
+    WHERE c.member_kind = 'reader' AND c.member_id = requested.value AND c.day >= ? AND c.day <= ?
+    ORDER BY c.member_id, c.day DESC`);
   const insertMakeup = db.prepare('INSERT INTO community_makeups (member_kind, member_id, day, month, cost, created_at) VALUES (?, ?, ?, ?, ?, ?)');
   const makeupsIn = db.prepare('SELECT COUNT(*) AS count FROM community_makeups WHERE member_kind = ? AND member_id = ? AND month = ?');
   // Shop.
@@ -104,14 +110,17 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
   const topic = (id: string) => topicRow.get(id) as TopicRow | undefined;
 
   /* ---------- 签到 ---------- */
-  function streakEnding(member: CommunityAuthor, key: string) {
+  function countStreak(days: readonly string[], key: string) {
     let streak = 0, expected = key;
-    for (const row of daysUpTo.all(member.kind, member.id, key) as Array<{ day: string }>) {
-      if (row.day !== expected) break;
+    for (const checkedDay of days) {
+      if (streak === 800 || checkedDay !== expected) break;
       streak++;
       expected = previousDay(expected);
     }
     return streak;
+  }
+  function streakEnding(member: CommunityAuthor, key: string) {
+    return countStreak((daysUpTo.all(member.kind, member.id, key) as Array<{ day: string }>).map(row => row.day), key);
   }
   const checked = (member: CommunityAuthor, key: string) => countOf(checkedOn, member.kind, member.id, key) > 0;
   function currentStreak(member: CommunityAuthor, now = Date.now()) {
@@ -177,6 +186,7 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
   // decorations. Only an explicitly constructed local preview sells them;
   // formal publication comes from the author's persisted active products.
   const builtinItem = (item: ShopItem) => ({ ...item, active: previewCatalog, delivery: '' });
+  const allItems = () => [...communityBuiltinItems.map(builtinItem), ...allCustom()];
   function findItem(id: string) {
     const builtin = communityBuiltinItems.find(item => item.id === id);
     if (builtin) return builtinItem(builtin);
@@ -190,9 +200,9 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
     return countOf(ordersSince, member.kind, member.id, item.id, since);
   }
   type RedeemContext = { level: number; owner: boolean; joinedAt: string | null; now?: number };
-  // Whether the member may redeem the item now, and why not.
-  function redeemState(member: CommunityAuthor, item: ShopItem & { active?: boolean }, { level, owner, joinedAt, now = Date.now() }: RedeemContext) {
-    const isOwned = (item.kind === 'frame' || item.kind === 'color' || item.kind === 'cover' || item.kind === 'digital') && owned(member).has(item.id);
+  const canOwn = (item: ShopItem) => item.kind === 'frame' || item.kind === 'color' || item.kind === 'cover' || item.kind === 'digital';
+  function redemptionState(member: CommunityAuthor, item: ShopItem & { active?: boolean }, { level, owner, joinedAt, now = Date.now() }: RedeemContext,
+    isOwned: boolean, balanceOf: () => number) {
     const base = { owned: isOwned, left: item.stock == null ? null : item.left ?? 0 };
     if (item.active === false) return { ...base, ok: false, code: 'closed', why: '已下架' };
     if (isOwned) return { ...base, ok: false, code: 'owned', why: '已拥有' };
@@ -202,9 +212,13 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
     if (item.minDays && !owner && days < item.minDays) return { ...base, ok: false, code: 'days', why: `注册满 ${item.minDays} 天后可兑` };
     if (item.limit && redeemedCount(member, item, now) >= item.limit.n)
       return { ...base, ok: false, code: 'limit', why: item.limit.per === 'once' ? '已经兑换过' : `${item.limit.per === 'year' ? '今年' : '这个月'}的次数用完了` };
-    const balance = ledger.balance(member);
+    const balance = balanceOf();
     if (balance < item.price) return { ...base, ok: false, code: 'short', why: `还差 ${item.price - balance} 星尘` };
     return { ...base, ok: true, code: 'ok', why: '' };
+  }
+  // Single-item checks, including transactional redemption, always read live facts.
+  function redeemState(member: CommunityAuthor, item: ShopItem & { active?: boolean }, context: RedeemContext) {
+    return redemptionState(member, item, context, canOwn(item) && owned(member).has(item.id), () => ledger.balance(member));
   }
   const orderDTO = (row: OrderRow, withShipping = false) => ({
     id: row.id, member: { kind: row.member_kind, id: row.member_id }, item: row.item, itemName: row.item_name, price: row.price, status: row.status,
@@ -266,17 +280,39 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
     },
     // Current streaks of readers who checked in today or yesterday, longest first.
     streakRanking(now = Date.now(), limit = 10) {
-      return (recentCheckers.all(previousDay(beijingDay(now))) as Array<{ member_kind: CommunityAuthor['kind']; member_id: string }>)
-        .map(row => { const member = { kind: row.member_kind, id: row.member_id }; return { member, streak: currentStreak(member, now) }; })
+      const today = beijingDay(now), yesterday = previousDay(today);
+      const candidates = recentCheckers.all(yesterday) as Array<{ member_kind: CommunityAuthor['kind']; member_id: string }>;
+      if (!candidates.length) return [];
+      // Include yesterday plus its preceding 799 dates, and today. The shared
+      // counter retains the original 800-row cap for either starting date.
+      const firstDay = new Date(Date.parse(`${today}T00:00:00Z`) - 800 * day).toISOString().slice(0, 10);
+      const histories = new Map<string, string[]>();
+      for (const row of rankingDays.all(JSON.stringify(candidates.map(candidate => candidate.member_id)), firstDay, today) as Array<{ member_id: string; day: string }>) {
+        const history = histories.get(row.member_id);
+        if (history) history.push(row.day); else histories.set(row.member_id, [row.day]);
+      }
+      // Candidate order remains unchanged so the stable sort preserves ties.
+      return candidates.map(row => {
+        const member = { kind: row.member_kind, id: row.member_id }, dates = histories.get(row.member_id) || [];
+        return { member, streak: countStreak(dates, dates[0] === today ? today : yesterday) };
+      })
         .filter(entry => entry.streak > 0).sort((a, b) => b.streak - a.streak).slice(0, limit);
     },
 
     /* ---------- 兑换所 ---------- */
     inventory,
     owned,
-    items: () => [...communityBuiltinItems.map(builtinItem), ...allCustom()],
+    items: allItems,
     item: findItem,
     redeemState,
+    catalogue(member: CommunityAuthor, context: RedeemContext) {
+      const items = allItems().filter(item => item.active);
+      // A GET snapshot is local to this synchronous catalogue construction.
+      // It is never passed into redeem(), which keeps its transaction checks.
+      const ownedItems = owned(member), balance = ledger.balance(member), now = context.now ?? Date.now();
+      return { balance, items: items.map(item => ({ ...item, delivery: undefined,
+        state: redemptionState(member, item, { ...context, now }, canOwn(item) && ownedItems.has(item.id), () => balance) })) };
+    },
     redeem(member: CommunityAuthor, id: string, context: RedeemContext & { shipping?: Shipping | null }) {
       return tx(() => {
         const item = findItem(id);

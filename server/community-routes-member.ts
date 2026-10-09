@@ -104,10 +104,8 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
     }
     if (path === 'shop') {
       const joined = await joinedAt(ctx, me);
-      const items = economy.items().filter(item => item.active).map(item => ({
-        ...item, delivery: undefined, state: economy.redeemState(me, item, { level: ctx.level, owner: ctx.owner, joinedAt: joined }),
-      }));
-      ctx.send({ balance: ledger.balance(me), level: ctx.level, owner: ctx.owner, cats: communityShopCats, categories: economy.categories(), items, inventory: economy.inventory(me), decorations: members.decorations(me) });
+      const level = ctx.level, catalogue = economy.catalogue(me, { level, owner: ctx.owner, joinedAt: joined });
+      ctx.send({ ...catalogue, level, owner: ctx.owner, cats: communityShopCats, categories: economy.categories(), inventory: economy.inventory(me), decorations: members.decorations(me) });
       return true;
     }
     if (path === 'shop/mine') {
