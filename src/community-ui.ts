@@ -2247,11 +2247,12 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   }
   // Runs a button's request; problems go to the toast (or the reply form when there is no toast).
   async function act(button: HTMLButtonElement, work: () => Promise<void>) {
-    const operation = {};
-    interactionWorks.set(operation, frameIdentity); passiveRefresh?.invalidate();
+    const operation = {}, identity = frameIdentity;
+    interactionWorks.set(operation, identity); passiveRefresh?.invalidate();
     button.disabled = true;
     try { await work(); }
     catch (error) {
+      if (identity !== frameIdentity) return;
       if (button.isConnected) button.disabled = false;
       if ((error as ApiError).status === 428) { await loadMe(); return; }
       if (mounted?.ctx.notify) notify(message(error));

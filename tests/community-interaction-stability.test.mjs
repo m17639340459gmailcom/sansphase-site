@@ -136,6 +136,34 @@ test('failed frame saves retain owned previews and reject a ref outside the owne
   assert.equal(choice.getAttribute('aria-pressed'), 'false');
 });
 
+for (const kind of ['icon', 'frame']) for (const code of [403, 428]) {
+  test(`a delayed ${kind} save failure (${code}) cannot notify or reload a different account`, async t => {
+    const pending = deferred(), notices = [];
+    let viewer = person;
+    const tab = kind === 'icon' ? 'icons' : 'frames';
+    const fixture = await setup(t, `#/community/u/u1/${tab}`, url => {
+      if (url.endsWith('/me')) return response({ ...viewer, frame: null, icon: null });
+      if (url.includes('/members/')) return response({ ...iconMember(), person: viewer, tab });
+      if (url.endsWith('/profile')) return response({ person: viewer, frames: [{ id: 'gold', name: '金色框', ref: 'gold', image: null }] });
+      if (url.endsWith('/shop/equip')) return pending.promise;
+    }, { notify: value => notices.push(value) });
+    fixture.main.querySelector(kind === 'icon' ? '[data-icon-ref="growth:1"]' : '[data-frame-ref="gold"]').click();
+    await turn();
+    viewer = { ...person, name: '另一成员', uid: 'u2' };
+    fixture.ui.clear();
+    await fixture.remount(`#/community/u/u2/${tab}`);
+    const reads = fixture.requests.filter(call => call.url.endsWith('/me')).length;
+    const collection = fixture.main.querySelector(kind === 'icon' ? '[data-community-icons]' : '[data-community-frames]');
+    pending.resolve(new Response(JSON.stringify({ error: '旧账号佩戴失败' }), { status: code, headers: { 'Content-Type': 'application/json' } }));
+    await turn(); await turn();
+    assert.deepEqual(notices, []);
+    assert.equal(fixture.requests.filter(call => call.url.endsWith('/me')).length, reads, 'an old convention error cannot reload the new identity');
+    assert.equal(fixture.ui.me().uid, 'u2');
+    assert.equal(fixture.main.querySelector(kind === 'icon' ? '[data-community-icons]' : '[data-community-frames]'), collection);
+    assert.equal(collection.querySelector('[data-icon-ref][aria-pressed="true"], [data-frame-ref][aria-pressed="true"]'), null);
+  });
+}
+
 test('choosing an icon is serialized, survives a refresh, and keeps take-off distinct from default', async t => {
   const pending = deferred();
   let selection = '', effective = null, writes = 0;
