@@ -86,7 +86,12 @@ test('check-in shows two family awards and earned legacy records, with no fabric
 test('aurora is masked inside the approved emblem and has theme-specific four-second reduced-motion styles', () => {
   const css = readFileSync(new URL('../src/community.css', import.meta.url), 'utf8');
   const light = readFileSync(new URL('../src/community-layout/appearance.css', import.meta.url), 'utf8');
-  assert.match(css, /mask-image: url\('\.\/assets\/community\/badges\/badge-atlas\.png'\)/);
+  assert.match(css, /background-image: url\('\.\/assets\/community\/badges\/badge-atlas\.webp'\)/);
+  assert.match(css, /mask-image: url\('\.\/assets\/community\/badges\/badge-atlas\.webp'\)/);
+  assert.doesNotMatch(css, /url\(['"]?\.\/assets\/community\/badges\/badge-atlas\.png/);
+  assert.match(css, /aspect-ratio: 248 \/ 300/);
+  assert.match(css, /background-size: 619\.354839% 341\.333333%/);
+  assert.match(css, /mask-size: 619\.354839% 341\.333333%/);
   assert.match(css, /animation: community-sheen 4s linear infinite/);
   assert.match(css, /\.community-badge-art\[data-finish="aurora"\]/);
   assert.match(css, /prefers-reduced-motion: reduce[\s\S]*community-badge-art[\s\S]*animation: none/);
