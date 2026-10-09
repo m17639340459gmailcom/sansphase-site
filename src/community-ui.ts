@@ -583,18 +583,18 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   function identityChange(next: CommunityMe) {
     const previous = readyData(me);
     const changedAccount = Boolean(previous && (previous.uid !== next.uid || previous.role !== next.role));
-    const lostPermission = Boolean(previous && !changedAccount && (previous.vip === true && next.vip !== true
+    const permissionChanged = Boolean(previous && !changedAccount && ((previous.vip === true) !== (next.vip === true)
       || previous.owner && !next.owner || previous.mod && !next.mod
       || Boolean(previous.management && !next.management)
       || (previous.moderationBoards || []).some(board => !(next.moderationBoards || []).includes(board))
       || permissionFingerprint(previous) !== permissionFingerprint(next)));
-    return { changedAccount, lostPermission };
+    return { changedAccount, permissionChanged };
   }
   function commitMe(next: CommunityMe, hash: string) {
     if (JSON.stringify(readyData(me)?.iconState) !== JSON.stringify(next.iconState)) iconQualificationRevision++;
-    const { changedAccount, lostPermission } = identityChange(next);
+    const { changedAccount, permissionChanged } = identityChange(next);
     if (changedAccount) clearData(false);
-    else if (lostPermission) {
+    else if (permissionChanged) {
       shopDialog.close();
       closeImageViewer();
       permissionRevision++; confirmedPage = null; pendingRoute = null; coreRoute = null;
@@ -614,7 +614,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const key = [next.name, next.uid, next.role, next.owner, next.vip, next.avatar, next.frame, next.color, next.icon, JSON.stringify(next.nameEffect), next.level, JSON.stringify(next.growth), JSON.stringify(next.vipGrowth), next.steward, next.mod, JSON.stringify(next.management), permissionFingerprint(next), JSON.stringify(next.moderationBoards), next.balance, next.checkedIn, next.unread.all].join('|');
     if (key !== headerKey) { headerKey = key; mounted?.ctx.headerChanged?.(); }
     syncConvention();
-    return { changedAccount, lostPermission };
+    return { changedAccount, permissionChanged };
   }
   function rejectViewer(error: ReturnType<typeof failure>) {
     clearData(false);
@@ -643,14 +643,14 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       return;
     }
     if (identity !== frameIdentity || requestId !== meRequest) return;
-    const { changedAccount, lostPermission } = commitMe(next, hash);
+    const { changedAccount, permissionChanged } = commitMe(next, hash);
     const verifiedFrame = frameIdentity, verifiedRequest = meRequest;
     // A real entrance is recorded as soon as identity is confirmed, even if
     // supporting cards are slow or the reader leaves before they finish.
     void recordActiveVisit().then(changed => {
       if (changed && verifiedFrame === frameIdentity && verifiedRequest === meRequest && hash === location.hash) paint(true);
     });
-    if (changedAccount || lostPermission) { paint(); void refresh(); }
+    if (changedAccount || permissionChanged) { paint(); void refresh(); }
   }
   async function loadProfile() {
     const requestId = ++profileRequest;
@@ -988,8 +988,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     try {
       const next = await requestAPI<CommunityMe>('me', init);
       if (!valid() || !passiveAllowed()) return false;
-      const { changedAccount, lostPermission } = identityChange(next);
-      const changed = changedAccount || lostPermission;
+      const { changedAccount, permissionChanged } = identityChange(next);
+      const changed = changedAccount || permissionChanged;
       if (changed) {
         // Permission-bearing pixels retire immediately. The following reads
         // still use the passive contract and the newly confirmed authority.

@@ -255,6 +255,100 @@ test('permission shrink retires the old VIP pixels immediately and retries scope
   assert.equal(calls.some(x => x.url.endsWith('/active/visit')), false);
 });
 
+test('passive VIP gain reads newly accessible VIP topics in the same batch without active reads', async t => {
+  const vipTopic = { ...topic, board: 'vip', title: '续费后可见的 VIP 讨论' };
+  const { main, ui, calls, tick } = await setup(t, (url, init) => {
+    if (url.endsWith('/me')) return response({ ...person, vip: passive(init) });
+    if (url.includes('/topics?') && url.includes('board=vip')) return response({ ...listing, items: [vipTopic] });
+    return null;
+  }, '#/community/boards/vip');
+  assert.equal(ui.me().vip, false);
+  assert.match(main.textContent, /会员茶室只对 VIP 开放/);
+  await tick(15000);
+  assert.equal(ui.me().vip, true);
+  assert.equal(ui.me().uid, person.uid);
+  assert.equal(ui.me().role, person.role);
+  assert.equal(calls.filter(x => passive(x.init) && x.url.includes('board=vip')).length, 1,
+    'the newly confirmed VIP authority must be used to stage topics in this batch');
+  assert.match(main.textContent, /续费后可见的 VIP 讨论/);
+  assert.doesNotMatch(main.textContent, /正在读取/);
+  await tick(15000);
+  assert.equal(calls.filter(x => passive(x.init) && x.url.endsWith('/me')).length, 2);
+  assert.equal(calls.filter(x => passive(x.init) && x.url.includes('board=vip')).length, 2,
+    'unchanged VIP authority adds only the normal one list read per passive interval');
+  assert.equal(calls.filter(x => !passive(x.init) && x.url.endsWith('/me')).length, 1);
+  assert.equal(calls.some(x => x.url.endsWith('/active/visit') || x.init.method === 'POST'), false);
+});
+
+test('passive VIP gain replaces the old accumulated visibility scope only once and keeps later pages', async t => {
+  let renewed = false;
+  const { main, ui, calls, tick, w } = await setup(t, url => {
+    if (url.endsWith('/me')) return response({ ...person, vip: renewed });
+    if (url.includes('/topics?')) {
+      const page = Number(new URL(url, 'http://localhost').searchParams.get('page') || 1);
+      const item = renewed && page === 1
+        ? { ...topic, id: 'pvip', board: 'vip', title: '新增可见的 VIP 主题' }
+        : { ...topic, id: `p${page}`, title: `原普通主题${page}` };
+      return response({ items: [item], total: 3, page, pageSize: 1 });
+    }
+    return null;
+  });
+  const titles = () => [...main.querySelectorAll('.community-curated-title')].map(link => link.textContent);
+  const more = async () => {
+    main.querySelector('[data-action="community-more"]').click(); await flush();
+    w.document.activeElement?.blur(); await flush();
+    // Drain the focus/blur selectionchange before starting this idle interval.
+    await tick(0);
+  };
+  await more();
+  assert.deepEqual(titles(), ['原普通主题1', '原普通主题2']);
+  renewed = true;
+  await tick(15000);
+  assert.equal(ui.me().vip, true);
+  assert.equal(calls.filter(x => passive(x.init) && x.url.includes('/topics?')).length, 1,
+    'a visibility gain invalidates the accumulated list from the old qualification');
+  assert.deepEqual(titles(), ['新增可见的 VIP 主题']);
+  const renewedRow = main.querySelector('.community-curated-row[data-topic-id="pvip"]');
+  await more();
+  assert.deepEqual(titles(), ['新增可见的 VIP 主题', '原普通主题2']);
+  await tick(15000); await tick(15000);
+  assert.equal(calls.filter(x => passive(x.init) && x.url.endsWith('/me')).length, 3);
+  assert.equal(calls.filter(x => passive(x.init) && x.url.includes('/topics?')).length, 1,
+    'stable qualifications preserve newly accumulated pages instead of repeatedly resetting them');
+  assert.equal(main.querySelector('.community-curated-row[data-topic-id="pvip"]'), renewedRow);
+  assert.deepEqual(titles(), ['新增可见的 VIP 主题', '原普通主题2']);
+  assert.equal(calls.filter(x => !passive(x.init) && x.url.endsWith('/me')).length, 1);
+  assert.equal(calls.some(x => x.url.endsWith('/active/visit') || x.init.method === 'POST'), false);
+});
+
+for (const blocker of ['editing', 'navigation', 'write']) test(`pending passive VIP gain cannot supersede newer ${blocker}`, async t => {
+  const slow = wait();
+  const { main, ui, calls, tick, w, remount } = await setup(t, (url, init) => {
+    if (url.endsWith('/me')) return passive(init) ? slow.promise : response({ ...person, vip: false });
+    if (url.endsWith('/topics/p1/like')) return response({ likes: 1 });
+    return null;
+  }, '#/post/p1');
+  await tick(15000);
+  const signal = calls.find(x => passive(x.init) && x.url.endsWith('/me')).init.signal;
+  let field;
+  if (blocker === 'editing') {
+    field = main.querySelector('textarea[name="body"]');
+    field.value = '刚输入的原生回复草稿';
+    field.dispatchEvent(new w.Event('input', { bubbles: true }));
+  } else if (blocker === 'navigation') await remount('#/community/home');
+  else { main.querySelector('[data-action="community-like"]').click(); await flush(); }
+  assert.equal(signal.aborted, true);
+  slow.resolve(response({ ...person, vip: true })); await flush();
+  assert.equal(ui.me().vip, false, 'the retired qualification result must not commit');
+  assert.equal(ui.me().uid, person.uid);
+  assert.equal(calls.filter(x => passive(x.init)).length, 1,
+    'the cancelled me result must not stage resources from its old operation');
+  if (field) { assert.equal(field.isConnected, true); assert.equal(field.value, '刚输入的原生回复草稿'); }
+  if (blocker === 'navigation') assert.equal(w.location.hash, '#/community/home');
+  assert.equal(calls.filter(x => x.init.method === 'POST').length, blocker === 'write' ? 1 : 0);
+  assert.equal(calls.some(x => x.url.endsWith('/active/visit')), false);
+});
+
 test('a newly detected account drops old pixels then reads only passive resources for its own account', async t => {
   const { main, ui, tick, calls } = await setup(t, (url, init) => {
     if (!passive(init)) return null;
