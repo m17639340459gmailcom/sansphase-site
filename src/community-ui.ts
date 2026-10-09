@@ -576,7 +576,9 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       reviewSelection.clear(); managementBoard = ''; stewardCandidate = null; stewardLookupRequest++;
     }
     me = { state: 'ready', data: next }; viewerFailure = null; viewerVerified = true; viewerHash = hash;
-    if (next.uid && next.iconState) for (const [key, value] of memberPages) {
+    // Updating an LRU entry changes its traversal order. Snapshot first so
+    // confirming identity across cached member tabs cannot revisit them forever.
+    if (next.uid && next.iconState) for (const [key, value] of [...memberPages]) {
       if (value.state === 'ready' && value.data.self && value.data.person.uid === next.uid) {
         memberPages.set(key, { ...value, data: { ...value.data, iconState: next.iconState } });
       }
