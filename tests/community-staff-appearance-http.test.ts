@@ -136,9 +136,10 @@ test('public author account validation stays batched and revocation during profi
   f.calls.length = 0;
   const list = await f.get('topics');
   assert.equal(list.items.length, 4);
-  assert.equal(f.calls.length, 1, 'one bulk people read for the public author list');
+  assert.equal(f.calls.length, 2, 'one author batch followed by one final viewer qualification batch');
   assert.deepEqual(new Set(f.calls[0].map(member => `${member.kind}:${member.id}`)), new Set(['reader:assistant', 'reader:moderator', 'reader:general']));
   assert.equal(f.calls[0].length, 3, 'duplicate authors and shared ancestors are requested once');
+  assert.deepEqual(f.calls[1], [reader('reader')], 'the final batch checks the viewer rather than fetching every author again');
   f.onPeople(() => { f.store().staff.revoke(owner, reader('general')); });
   assert.ok((await f.get('topics')).items.every((item: { author: CommunityPerson }) => item.author.staffRole === null));
 });

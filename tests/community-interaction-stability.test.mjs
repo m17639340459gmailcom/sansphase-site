@@ -26,7 +26,7 @@ function clipboardFixture(t) {
   return copied;
 }
 
-async function setup(t, hash, handle = () => null, ctxOptions = {}) {
+async function setup(t, hash, handle = () => null, ctxOptions = {}, options = {}) {
   const dom = new JSDOM('<main></main>', { url: `http://localhost/${hash}`, pretendToBeVisual: true });
   const w = dom.window;
   const names = ['window', 'document', 'location', 'HTMLElement', 'Element', 'Node', 'HTMLInputElement', 'HTMLTextAreaElement', 'HTMLSelectElement', 'HTMLButtonElement', 'HTMLFormElement', 'HTMLAnchorElement', 'Event', 'CustomEvent', 'getComputedStyle'];
@@ -47,7 +47,7 @@ async function setup(t, hash, handle = () => null, ctxOptions = {}) {
   };
   const main = w.document.querySelector('main');
   const ctx = { t: zh => zh, esc: value => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;'), icons: {}, members: true, ...ctxOptions };
-  const ui = createCommunityUI({ request });
+  const ui = createCommunityUI({ request, ...options });
   main.innerHTML = ui.html(ctx);
   let cleanup = ui.mount(main, ctx);
   t.after(() => {
@@ -1826,18 +1826,50 @@ test('switching perspective on a public thread preserves the unsent reply and it
     if (url.endsWith('/me')) return response({ ...managementViewer, owner: !reader, mod: !reader, management: { role: 'owner', browsingAsReader: reader } });
     if (url.endsWith('/browse-mode')) { reader = JSON.parse(init.body).reader; return response({ ok: true }); }
     return null;
-  });
+  }, {}, { loadComposeEditor: async () => { throw Error('native text fixture'); } });
   const field = main.querySelector('#community-reply');
+  assert.equal(field.disabled, false, 'input begins after preparation has reached native text recovery');
+  assert.equal(field.closest('[data-inline-editor]').dataset.editorState, 'text');
   field.value = '切换身份前还没有发送的回复';
   field.dispatchEvent(new w.Event('input', { bubbles: true }));
   field.focus(); field.setSelectionRange(2, 7); field.scrollTop = 45;
+  for (const perspective of [true, false]) {
+    await ui.setBrowsing(perspective); await turn();
+    const restored = main.querySelector('#community-reply');
+    assert.equal(restored.disabled, false);
+    assert.equal(w.location.hash, '#/post/p1');
+    assert.equal(restored.value, '切换身份前还没有发送的回复');
+    assert.deepEqual([restored.selectionStart, restored.selectionEnd], [2, 7]);
+    assert.equal(restored.scrollTop, 45);
+    assert.equal(w.document.activeElement, restored, 'the preparation status hands focus back to native text');
+  }
+});
+
+test('perspective repaint hands focus to loading status without stealing later external focus', async t => {
+  let reader = false, attempts = 0, rejectPreparation;
+  const { ui, w, main } = await setup(t, '#/post/p1', (url, init) => {
+    if (url.endsWith('/me')) return response({ ...managementViewer, owner: !reader, mod: !reader, management: { role: 'owner', browsingAsReader: reader } });
+    if (url.endsWith('/browse-mode')) { reader = JSON.parse(init.body).reader; return response({ ok: true }); }
+    return null;
+  }, {}, { loadComposeEditor: () => {
+    if (++attempts === 1) return Promise.reject(Error('native text fixture'));
+    return new Promise((_, reject) => { rejectPreparation = reject; });
+  } });
+  const field = main.querySelector('#community-reply');
+  assert.equal(field.disabled, false);
+  field.value = '恢复过程中仍保留草稿'; field.dispatchEvent(new w.Event('input', { bubbles: true }));
+  field.focus(); field.setSelectionRange(2, 7); field.scrollTop = 45;
   await ui.setBrowsing(true);
-  await ui.setBrowsing(false);
   const restored = main.querySelector('#community-reply');
-  assert.equal(w.location.hash, '#/post/p1');
-  assert.equal(restored.value, '切换身份前还没有发送的回复');
+  assert.equal(restored.disabled, true, 'the loading gate stays closed');
+  assert.equal(w.document.activeElement, restored.closest('[data-inline-editor]').querySelector('[role="status"]'));
+  const outside = w.document.createElement('button'); w.document.body.append(outside); outside.focus();
+  rejectPreparation(Error('retry unavailable')); await turn();
+  assert.equal(restored.disabled, false);
+  assert.equal(restored.value, '恢复过程中仍保留草稿');
   assert.deepEqual([restored.selectionStart, restored.selectionEnd], [2, 7]);
   assert.equal(restored.scrollTop, 45);
+  assert.equal(w.document.activeElement, outside, 'recovery respects focus moved outside the editor');
 });
 
 test('an existing content edit must finish before switching perspective, keeping its unsaved changes intact', async t => {

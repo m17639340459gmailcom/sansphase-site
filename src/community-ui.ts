@@ -1602,7 +1602,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     profileDialog.render(profile || loading);
     for (const field of next.querySelectorAll<HTMLTextAreaElement>('textarea')) autosize(field);
     const focused = focusSelector ? next.querySelector<HTMLInputElement>(focusSelector) : null;
-    focused?.focus({ preventScroll: true });
+    if (!editorPreparation.focus(focused)) focused?.focus({ preventScroll: true });
     if (focused && caret) try { focused.setSelectionRange(...caret); } catch { /* not a text field */ }
     for (const field of next.querySelectorAll<HTMLElement>('textarea[id]')) field.scrollTop = fieldScroll.get(field.id) || 0;
     mounted?.ctx.painted?.();

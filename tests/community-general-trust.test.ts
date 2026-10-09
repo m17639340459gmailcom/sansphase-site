@@ -157,7 +157,7 @@ for (const change of ['revocation', 'demotion', 'inactive account'] as const) {
       });
       const input = f.body(f.images(2), 'qa', '解析提及期间更新权限 @读者');
       const response = await f.post(operation === 'topic' ? 'topics' : `topics/${parent.id}/replies`, operation === 'topic' ? input : { body: input.body });
-      assert.equal(response.status, 400, await response.clone().text());
+      assert.equal(response.status, change === 'inactive account' ? 401 : 400, await response.clone().text());
       assert.equal(f.store.authorStats(reader('general')).topics, 0);
       assert.equal(f.store.authorStats(reader('general')).replies, 0);
     });
@@ -180,11 +180,15 @@ test('an account invalidated during the final staff refresh cannot keep an earli
   const f = await fixture(t);
   let calls = 0;
   f.onPeople(() => { if (++calls === 3) f.accounts.get('general')!.active = false; });
-  const me = await f.json<CommunityMe>('me'); assert.equal(me.trustLevel, 0); assert.equal(me.level, 0); assert.equal(me.staffRole, null);
+  const me = await f.get('me'); assert.equal(me.status, 401);
+  assert.deepEqual(Object.keys(await me.json()), ['error'], 'an inactive execution account cannot receive an old person projection');
   f.accounts.get('general')!.active = true; f.onPeople(() => {});
   const ids = f.images(2), target = f.store.createTopic({ board: 'qa', author: reader('general'), title: '保留旧图片权限测试', body: f.body(ids).body, images: ids });
   calls = 0; f.onPeople(() => { if (++calls === 4) f.accounts.get('general')!.active = false; });
-  const edit = await f.post(`topics/${target.id}/edit`, f.body(ids)); assert.equal(edit.status, 400, await edit.clone().text());
+  const original = f.store.topic(target.id)!;
+  const edit = await f.post(`topics/${target.id}/edit`, f.body(ids)); assert.equal(edit.status, 401, await edit.clone().text());
+  assert.equal(f.store.topic(target.id)!.body, original.body);
+  assert.deepEqual(f.store.topic(target.id)!.images, original.images, 'identity rejection preserves the existing images');
 });
 
 test('daily throttling receives projected trust without changing the existing daily event history', async t => {

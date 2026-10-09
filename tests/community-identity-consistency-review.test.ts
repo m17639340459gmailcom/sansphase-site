@@ -29,7 +29,9 @@ async function fixture(t: TestContext, profileVip: boolean, finalVip: boolean, o
   const store = createCommunityStore(directory);
   acceptCommunityConvention(store, [reader]);
   let confirmations = 0;
-  let profileResolved = false;
+  let profileReads = 0;
+  let membershipVip = profileVip;
+  const qualificationReads: { kind: 'identity' | 'profile' | 'change'; vip: boolean }[] = [];
   let service: ReturnType<typeof createCommunityService>;
   const server = createServer((req, res) => { void service.handle(req, res); });
   await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
@@ -39,17 +41,25 @@ async function fixture(t: TestContext, profileVip: boolean, finalVip: boolean, o
   service = createCommunityService({ store, directory, siteOrigin: origin,
     identify: async () => {
       confirmations++;
-      if (confirmations > 1) assert.equal(profileResolved, true, 'final confirmation follows profile lookup');
+      qualificationReads.push({ kind: 'identity', vip: membershipVip });
       return ownerPersonal ? { kind: 'owner', id: 'owner', name: 'Review owner', vip: true }
-        : { ...reader, name: 'Review reader', vip: confirmations === 1 ? profileVip : finalVip };
+        : { ...reader, name: 'Review reader', vip: membershipVip };
     },
     ownerReaderIdentity: async () => ownerPersonal
-      ? { ...reader, name: 'Review personal reader', vip: confirmations === 1 ? profileVip : finalVip } : null,
+      ? { ...reader, name: 'Review personal reader', vip: membershipVip } : null,
     people: async authors => {
-      profileResolved = true;
-      return new Map(authors.filter(author => author.kind === reader.kind && author.id === reader.id).map(author => [
-        `${author.kind}:${author.id}`, { name: 'Review reader', uid: '10001', active: true, vip: profileVip, avatar: null, bio: '', joinedAt: null },
+      const capturedVip = membershipVip;
+      qualificationReads.push({ kind: 'profile', vip: capturedVip });
+      const result = new Map(authors.filter(author => author.kind === reader.kind && author.id === reader.id).map(author => [
+        `${author.kind}:${author.id}`, { name: 'Review reader', uid: '10001', active: true, vip: capturedVip, ownerReader: ownerPersonal, avatar: null, bio: '', joinedAt: null },
       ]));
+      // The first profile read confirms the awaited JSON body. During the
+      // presentation read, return its old snapshot but change the real account.
+      if (++profileReads === 2) {
+        membershipVip = finalVip;
+        qualificationReads.push({ kind: 'change', vip: membershipVip });
+      }
+      return result;
     },
   });
   t.after(async () => {
@@ -60,7 +70,7 @@ async function fixture(t: TestContext, profileVip: boolean, finalVip: boolean, o
   const post = (path: string, body: Record<string, unknown> = {}) => fetch(`${origin}/api/community/${path}`, { method: 'POST',
     headers: { cookie, Origin: origin, 'X-Reader-Request': '1', 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   });
-  return { store, confirmations: () => confirmations, checkin: () => post('checkin'), post,
+  return { store, confirmations: () => confirmations, qualificationReads, checkin: () => post('checkin'), post,
     get: (path: string) => fetch(`${origin}/api/community/${path}`, { headers: { cookie } }),
   };
 }
@@ -69,7 +79,12 @@ for (const finalVip of [false, true]) test(`check-in uses final confirmed ${fina
   const env = await fixture(t, !finalVip, finalVip);
   const response = await env.checkin();
   assert.equal(response.status, 200, await response.clone().text());
-  assert.equal(env.confirmations(), 2, 'the authority is read initially and immediately before the write');
+  assert.equal(env.confirmations(), 3, 'initial, post-body and post-profile identity checks are bounded');
+  assert.deepEqual(env.qualificationReads, [
+    { kind: 'identity', vip: !finalVip }, { kind: 'identity', vip: !finalVip },
+    { kind: 'profile', vip: !finalVip }, { kind: 'profile', vip: !finalVip },
+    { kind: 'change', vip: finalVip }, { kind: 'identity', vip: finalVip }, { kind: 'profile', vip: finalVip },
+  ], 'the stale presentation snapshot is followed by fresh identity and profile reads before settlement');
   const result = await response.json() as { reward: number; bonus: number; balance: number };
   const expected = checkinReward(false, finalVip).total;
   assert.equal(result.bonus, 0);

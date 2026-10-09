@@ -59,7 +59,7 @@ async function fixture(t:test.TestContext,options:{ownerReader?:boolean}={}){
     ownerIdentity:async req=>ownerActive&&req.headers.cookie==='sansphase_author_session=owner.token'?{name:'站长'}:null,
     ownerReaderIdentity:async req=>options.ownerReader&&ownerActive&&!personal.disabled&&personal._verified&&req.headers.cookie==='sansphase_author_session=owner.token'?{...personal}:null,
     people:async authors=>new Map(authors.flatMap(author=>{
-      const row=rows.get(author.id);if(row)return[[`reader:${row.id}`,{name:row.nickname,uid:row.uid,avatar:row.avatar,bio:row.signature,vip:false,joinedAt:'2026-01-01T00:00:00Z',active:row._verified&&!row.disabled}]as const];
+      const row=rows.get(author.id);if(row)return[[`reader:${row.id}`,{name:row.nickname,uid:row.uid,avatar:row.avatar,bio:row.signature,vip:false,ownerReader:options.ownerReader===true&&row.id===personalId&&!row.disabled,joinedAt:'2026-01-01T00:00:00Z',active:row._verified&&!row.disabled}]as const];
       return author.kind==='owner'&&author.id===ownerId?[[`owner:${ownerId}`,{name:'站长',uid:'owner',avatar:null,bio:'',vip:true,joinedAt:null,active:true}]as const]:[];
     })),findMember:async uid=>{const row=[...rows.values()].find(row=>row.uid===uid);return row?{kind:'reader',id:row.id}:uid==='owner'?{kind:'owner',id:ownerId}:null;},findByNames:async()=>new Map(),avatar:async uid=>{const row=[...rows.values()].find(row=>row.uid===uid);return row?.avatar?readFile(resolve(directory,'uploads',`reader-avatar-${row.avatar}.webp`)):null;},
   });

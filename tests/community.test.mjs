@@ -547,7 +547,16 @@ test("a post follows the demo: crumb, author line, text, bounty, actions, replie
   assert.match(html, /<blockquote class="community-quote"><b>無相：<\/b>回复一 @远山<\/blockquote>/);
   assert.match(html, /3 条回复/);
   assert.equal(textAt(html, '.community-rf-head > span:last-child'), '以 林间 的身份回复');
-  assert.match(html, /data-community-form="reply" data-topic="t1"[\s\S]*<textarea id="community-reply" name="body" rows="1" minlength="2" maxlength="2000" required/);
+  const replyDom = new JSDOM(html);
+  try {
+    const form = replyDom.window.document.querySelector('form[data-community-form="reply"][data-topic="t1"]');
+    const field = form.querySelector('#community-reply');
+    assert.equal(field.name, 'body'); assert.equal(field.rows, 1);
+    assert.equal(field.minLength, 2); assert.equal(field.maxLength, 2000); assert.equal(field.required, true);
+    assert.equal(field.disabled, true, 'inline reply text starts behind the preparation gate');
+    assert.equal(field.closest('[data-inline-editor]').dataset.editorState, 'loading');
+    assert.equal(field.closest('[data-inline-editor]').getAttribute('aria-busy'), 'true');
+  } finally { replyDom.window.close(); }
   assert.match(html, /data-action="community-md" data-md="bold" data-for="community-reply"[\s\S]*data-action="community-md-preview" data-for="community-reply" aria-pressed="false">预览/);
   assert.match(html, /<p class="community-muted">&lt;喜欢画画&gt;<\/p>/);
   assert.match(html, /<dt>主题<\/dt><dd>4<\/dd><\/div><div><dt>获赞<\/dt><dd>7<\/dd><\/div><div><dt>被采纳<\/dt><dd>2<\/dd>/, "the author card");

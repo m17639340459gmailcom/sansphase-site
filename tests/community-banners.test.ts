@@ -30,7 +30,7 @@ async function setup(t: TestContext) {
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   service = createCommunityService({ store, directory, siteOrigin: origin,
     identify: async req => { const id = String(req.headers.cookie || 'reader').split(';')[0]; return { kind: id === 'owner' ? 'owner' : 'reader', id, name: id, vip: id === 'owner' || id === 'vip' }; },
-    people: async authors => {await beforePeople?.();return new Map(authors.map(author => [`${author.kind}:${author.id}`, { name: author.id, uid: author.id, avatar: null, vip: false, joinedAt: null, bio: '', active:!inactive.has(author.id) }]));}, audit: async () => {},
+    people: async authors => {await beforePeople?.();return new Map(authors.map(author => [`${author.kind}:${author.id}`, { name: author.id, uid: author.id, avatar: null, vip: author.id === 'owner' || author.id === 'vip', joinedAt: null, bio: '', active:!inactive.has(author.id) }]));}, audit: async () => {},
   });
   t.after(async () => { await new Promise<void>(done => server.close(() => done())); store.close(); await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
   const get = (path: string, as = 'reader') => fetch(`${origin}/api/community/${path}`, { headers: { cookie: as } });

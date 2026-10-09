@@ -173,7 +173,7 @@ test('a parent lost while person projection waits removes private topics and man
 });
 test('a general disabled after request identification cannot appoint a moderator',async t=>{
   const f=await setup(t);let calls=0;f.onPeople(()=>{if(++calls===2)f.accounts.get('g')!.active=false;});
-  assert.equal((await f.post('members/10005/steward',{on:true,role:'moderator',boards:['qa'],permissions:['content.inspect'],delegable:[]},'g')).status,403);
+  assert.equal((await f.post('members/10005/steward',{on:true,role:'moderator',boards:['qa'],permissions:['content.inspect'],delegable:[]},'g')).status,401);
   assert.equal(f.store.staff.state(reader('other')),null);
 });
 test('unpublished banner media cannot retain its uploader staff authority after an upstream account becomes inactive',async t=>{
