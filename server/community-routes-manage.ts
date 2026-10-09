@@ -108,6 +108,31 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
     }
     const moderationBoards = ctx.moderationBoards;
     const staffSnapshot=JSON.stringify(ctx.staff);
+    const assertAuthority = () => {
+      const currentBoards = ctx.moderationBoards;
+      if (!ctx.mod || !canTab(ctx,tab) || JSON.stringify(ctx.staff)!==staffSnapshot || currentBoards.length !== moderationBoards.length || currentBoards.some(board => !moderationBoards.includes(board)))
+        throw fail('管理权限发生变化，请重新打开管理页面。', 403);
+    };
+    if (tab === 'items') {
+      // Refresh the execution identity before building the final synchronous
+      // product response. Other channels keep their full review payloads.
+      await ctx.people([]);
+      assertAuthority();
+      const queue = live.queueCounts().reduce((total, row) => total + (ctx.canModerateBoard(row.board) ? row.count : 0), 0);
+      const reports = live.openReportCounts().reduce((total, row) => total + (ctx.owner || row.board !== null && ctx.canStaff('report.review',row.board) ? row.count : 0), 0);
+      const orders = ctx.owner ? live.economy.goodsOrders() : [];
+      const sanctions = ctx.canStaff('member.mute') || ctx.canStaff('member.unmute') ? live.members.sanctions() : [];
+      const activity = live.activity(Date.now(), ctx.owner ? undefined : ctx.moderationBoards);
+      ctx.send({
+        tab, owner: ctx.owner, moderationBoards: ctx.moderationBoards, actorStaff: ctx.staff,
+        allowedTabs: tabs.filter(item => canTab(ctx,item) && (!ownerTabs.has(item) || ctx.owner)), boardCatalog: live.boards.catalog(),
+        counts: { queue, reports, orders: orders.filter(order => order.status === 'pending').length, sanctions: sanctions.filter(sanction => sanction.active).length },
+        kpis: { topics24h: activity.topics24h, replies24h: activity.replies24h },
+        items: live.economy.customItems(), categories: live.economy.categories(),
+        queue: { topics: [], replies: [] }, reports: [], orders: [], sanctions: [], content: [], data: null,
+      });
+      return true;
+    }
     const allQueue = live.queue();
     const queue = {
       topics: allQueue.topics.filter(topic => ctx.canModerateBoard(topic.board)),
@@ -146,9 +171,7 @@ export async function manageRoutes(ctx: Ctx): Promise<boolean> {
       return Boolean(reply && stillModeratesTopic(reply.topicId));
     };
     const assertReadable = () => {
-      const currentBoards = ctx.moderationBoards;
-      if (!ctx.mod || !canTab(ctx,tab) || JSON.stringify(ctx.staff)!==staffSnapshot || currentBoards.length !== moderationBoards.length || currentBoards.some(board => !moderationBoards.includes(board)))
-        throw fail('管理权限发生变化，请重新打开管理页面。', 403);
+      assertAuthority();
       if (!ctx.owner && (queue.topics.some(topic => !stillModeratesTopic(topic.id))
         || queue.replies.some(reply => !stillModeratesReply(reply.id))
         || content.some(topic => !stillModeratesTopic(topic.id))

@@ -140,6 +140,12 @@ export function createCommunityStore(directory: string, { previewCatalog = false
     WHERE b.member_kind = ? AND b.member_id = ? AND t.deleted_at IS NULL AND t.pending = 0 AND t.hidden_at IS NULL`);
   const hiddenReplies = db.prepare(`SELECT r.id, r.topic_id, r.author_kind, r.author_id, r.body, r.created_at, r.hidden_at, t.title, t.body AS topic_body
     FROM community_replies r JOIN community_topics t ON t.id = r.topic_id WHERE r.deleted_at IS NULL AND r.hidden_at IS NOT NULL AND t.deleted_at IS NULL ORDER BY r.hidden_at`);
+  const queuedBoardCounts = db.prepare(`SELECT board, COUNT(*) AS count FROM (
+    SELECT t.board FROM community_topics t WHERE t.deleted_at IS NULL AND (t.pending = 1 OR t.hidden_at IS NOT NULL)
+    UNION ALL
+    SELECT t.board FROM community_replies r JOIN community_topics t ON t.id = r.topic_id
+      WHERE r.deleted_at IS NULL AND r.hidden_at IS NOT NULL AND t.deleted_at IS NULL
+    ) GROUP BY board`);
   const recentReplies = db.prepare(`SELECT t.board AS board, COUNT(*) AS count FROM community_replies r
     JOIN community_topics t ON t.id = r.topic_id
     WHERE r.deleted_at IS NULL AND r.hidden_at IS NULL AND t.deleted_at IS NULL AND t.pending = 0 AND t.hidden_at IS NULL AND r.created_at >= ? GROUP BY t.board`);
@@ -219,6 +225,10 @@ export function createCommunityStore(directory: string, { previewCatalog = false
   const openReportBy = db.prepare(`SELECT COUNT(*) AS count FROM community_reports WHERE target_kind = ? AND target_id = ? AND reporter_kind = ? AND reporter_id = ? AND status = 'open'`);
   const openReportsFrom = db.prepare(`SELECT COUNT(*) AS count FROM community_reports WHERE target_kind = ? AND target_id = ? AND status = 'open' AND reporter_level >= ?`);
   const openReports = db.prepare(`SELECT id, target_kind, target_id, reporter_kind, reporter_id, reason, note, created_at FROM community_reports WHERE status = 'open' ORDER BY created_at`);
+  const openReportBoardCounts = db.prepare(`SELECT t.board, COUNT(*) AS count FROM community_reports q
+    LEFT JOIN community_replies r ON q.target_kind = 'reply' AND r.id = q.target_id AND r.deleted_at IS NULL
+    LEFT JOIN community_topics t ON t.id = CASE q.target_kind WHEN 'reply' THEN r.topic_id WHEN 'topic' THEN q.target_id END AND t.deleted_at IS NULL
+    WHERE q.status = 'open' GROUP BY t.board`);
   const oneReport = db.prepare(`SELECT id, target_kind, target_id, reporter_kind, reporter_id, status FROM community_reports WHERE id = ?`);
   const reportsOn = db.prepare(`SELECT id, reporter_kind, reporter_id FROM community_reports WHERE target_kind = ? AND target_id = ? AND status = 'open'`);
   const closeReport = db.prepare(`UPDATE community_reports SET status = ?, resolved_at = ? WHERE id = ?`);
@@ -670,6 +680,9 @@ export function createCommunityStore(directory: string, { previewCatalog = false
         .map(row => ({ id: row.id, topicId: row.topic_id, topicTitle: displayTitle(row.title, row.topic_body), author: authorOf(row), body: row.body, createdAt: row.created_at, hiddenAt: row.hidden_at }));
       return { topics, replies };
     },
+    // Counts retain the queue's exact visibility conditions without its content projections.
+    queueCounts: () => (queuedBoardCounts.all() as Array<{ board: string; count: number }>)
+      .map(row => ({ board: row.board, count: Number(row.count) })),
 
     /* ---------- 感谢 ---------- */
     thank(target: Target, from: CommunityAuthor, to: CommunityAuthor, now = new Date().toISOString()) {
@@ -717,6 +730,9 @@ export function createCommunityStore(directory: string, { previewCatalog = false
       return (openReports.all() as Array<{ id: string; target_kind: 'topic' | 'reply'; target_id: string; reporter_kind: Kind; reporter_id: string; reason: string; note: string; created_at: string }>)
         .map(row => ({ id: row.id, target: { kind: row.target_kind, id: row.target_id }, reporter: { kind: row.reporter_kind, id: row.reporter_id } as CommunityAuthor, reason: row.reason, note: row.note, createdAt: row.created_at }));
     },
+    // A null board preserves dangling reports for the author's all-report count.
+    openReportCounts: () => (openReportBoardCounts.all() as Array<{ board: string | null; count: number }>)
+      .map(row => ({ board: row.board, count: Number(row.count) })),
     // Upholding removes the content (with the penalty) and notifies every open reporter;
     // dismissing closes this report and shows the content again if nothing else holds it.
     resolveReport(id: string, uphold: boolean, now = new Date().toISOString(), decisionReason = '', penalty = true) {
