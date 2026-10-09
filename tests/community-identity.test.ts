@@ -219,7 +219,7 @@ test('entry rate limits persist and bridge rejects unknown operations, malformed
 test('approved profiles, UID lookup, mentions and avatars require a session and owner ID stays server-controlled', async t => {
   const f = await fixture(t), { sessionRef } = await f.exchange();
   const response = await f.bridge('people', { sessionRef, authors: [{ kind: 'reader', id: reader.id }] });
-  assert.deepEqual(await response.json(), [[`reader:${reader.id}`, {...person,active:false}]], 'missing private account proof cannot authorize management');
+  assert.deepEqual(await response.json(), [[`reader:${reader.id}`, {...person,active:false,ownerReader:false}]], 'missing private account proof cannot authorize management or impersonate an owner reader');
   assert.deepEqual(await (await f.bridge('member', { sessionRef, uid: reader.uid })).json(), { kind: 'reader', id: reader.id });
   assert.deepEqual(await (await f.bridge('names', { sessionRef, names: [reader.nickname] })).json(), [[reader.nickname, { kind: 'reader', id: reader.id }]]);
   assert.deepEqual(await (await f.bridge('avatar', { sessionRef, uid: reader.uid })).json(), { base64: Buffer.from('approved avatar').toString('base64') });

@@ -46,7 +46,7 @@ export function createCommunityListingFixture(test) {
     ]);
     for (const id of accounts.keys()) store.members.visit(reader(id));
     acceptCommunityConvention(store, [owner, ...[...accounts.keys()].map(reader)]);
-    let beforePeople;
+    let beforePeople, beforeIdentify, beforeNames;
     let service;
     const server = createServer((req, res) => { void service.handle(req, res); });
     await new Promise(done => server.listen(0, '127.0.0.1', done));
@@ -56,7 +56,9 @@ export function createCommunityListingFixture(test) {
       identify: async req => {
         const id = String(req.headers.cookie || '').split(';')[0];
         const account = accounts.get(id);
-        return account?.active ? { ...reader(id), name: account.name, vip: account.vip } : null;
+        const value=account?.active ? { ...reader(id), name: account.name, vip: account.vip } : null;
+        await beforeIdentify?.(value);
+        return value;
       },
       people: async authors => {
         await beforePeople?.(authors);
@@ -66,6 +68,7 @@ export function createCommunityListingFixture(test) {
         }));
       },
       findMember: async uid => uid === 'owner' ? owner : [...accounts].filter(([, account]) => account.uid === uid).map(([id]) => reader(id))[0] || null,
+      findByNames: async names => { await beforeNames?.(names); return new Map([...accounts].filter(([,info])=>names.includes(info.name)).map(([id,info])=>[info.name,reader(id)])); },
     });
     t.after(async () => {
       await new Promise(done => server.close(done));
@@ -84,6 +87,7 @@ export function createCommunityListingFixture(test) {
     const topic = (title, days = 0, options = {}) => store.createTopic({
       board: 'qa', author: owner, title, body: '用于真实列表接口回归的完整正文内容。', now: ago(days), ...options,
     });
-    return { store, accounts, get, list, topic, ago, onPeople: hook => { beforePeople = hook; } };
+    return { directory, origin, store, accounts, get, list, topic, ago,
+      onPeople: hook => { beforePeople = hook; }, onIdentify: hook => { beforeIdentify=hook; }, onNames: hook => { beforeNames=hook; } };
   };
 }

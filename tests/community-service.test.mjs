@@ -145,13 +145,13 @@ test('check-in rechecks membership and authentication after asynchronous request
   let calls = 0;
   const expired = await setup(t, { vipOverride: { v1: false }, identifyOverride: async () => { calls++; return { kind: 'reader', id: 'v1', name: '墨白', vip: calls === 1 }; } });
   assert.equal((await json(expired.post('checkin', { vip: true }, 'reader=v1'))).reward, 1, 'the original VIP snapshot cannot override expiry at commit');
-  assert.equal(calls, 2);
+  assert.equal(calls, 3, 'initial identity, completed body, and final account profile each have their authority boundary');
   calls = 0;
   const upgraded = await setup(t, { identifyOverride: async () => ({ kind: 'reader', id: 'v1', name: '墨白', vip: ++calls > 1 }) });
   assert.equal((await json(upgraded.get('me', 'reader=v1'))).nextReward.base, 2);
   calls = 0;
   assert.equal((await json(upgraded.post('checkin', { vip: false }, 'reader=v1'))).reward, 2, 'fresh account VIP qualification supersedes an older non-VIP request snapshot');
-  assert.equal(calls, 2);
+  assert.equal(calls, 3);
   calls = 0;
   const revoked = await setup(t, { identifyOverride: async () => ++calls === 1 ? { kind: 'reader', id: 'v1', name: '墨白', vip: true } : null });
   assert.equal((await revoked.post('checkin', {}, 'reader=v1')).status, 401);
@@ -1243,7 +1243,7 @@ test("the runtime maps site identities to community members and looks up their p
   const finds = [];
   const options = {
     directory, siteOrigin: "http://127.0.0.1:1", authorId: "author-1",
-    payload: { find: async (query) => { finds.push(query); return { docs: [{ id: "r1", nickname: "林间", signature: "你好", createdAt: "2026-01-01T00:00:00.000Z" }] }; } },
+    payload: { find: async (query) => { finds.push(query); return { docs: [{ id: "r1", nickname: "林间", signature: "你好", _verified: true, createdAt: "2026-01-01T00:00:00.000Z" }] }; } },
     readerIdentity: async (req) => req.reader ? { id: "r1", nickname: "林间", vip: true } : null,
     ownerIdentity: async (req) => req.owner ? { name: "作者" } : null,
     ownerName: async () => "無相",
@@ -1263,9 +1263,9 @@ test("the runtime maps site identities to community members and looks up their p
     };
     assert.equal((await call({})).status, 401);
     const asReader = await call({ reader: true });
-    assert.equal(asReader.status, 200);
+    assert.equal(asReader.status, 200, JSON.stringify(asReader.value));
     assert.deepEqual(asReader.value.items.map((x) => [x.author.name, x.author.uid]).sort(), [["已注销用户", null], ["林间", "ur1"], ["無相", "owner"]].sort());
-    assert.deepEqual([...finds.at(-1).where.id.in].sort(), ["gone", "r1"], "one lookup for all reader profiles");
+    assert.deepEqual(finds.filter(query=>query.where?.id?.in).map(query=>[...query.where.id.in].sort()), [["gone","r1"],["r1"]], "one lookup for all author profiles and one bounded final actor confirmation");
     assert.equal((await call({ owner: true })).status, 200, "the owner can read too");
     const page = await call({ reader: true }, "/api/community/members/ur1");
     assert.deepEqual([page.status, page.value.person.name, page.value.bio, page.value.self], [200, "林间", "你好", true]);

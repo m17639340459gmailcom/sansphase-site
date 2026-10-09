@@ -16,7 +16,7 @@ import type { CommunityStaffPermission, CommunityStaffState } from '../src/commu
 export type CommunityViewer = { kind: 'reader' | 'owner'; id: string; name: string; vip: boolean; ownerAccountId?: string };
 // What the site knows about a member outside the community: nickname, public UID,
 // approved avatar, VIP, registration time and approved signature.
-export type PersonInfo = { name: string; uid: string | null; avatar: string | null; vip: boolean; joinedAt: string | null; bio: string; ownerReader?: true; active?: boolean };
+export type PersonInfo = { name: string; uid: string | null; avatar: string | null; vip: boolean; joinedAt: string | null; bio: string; ownerReader?: boolean; active?: boolean };
 export type ServiceOptions = {
   store: CommunityStore | null;
   siteOrigin: string;
@@ -60,6 +60,10 @@ export type Ctx = {
   canStaff: (permission: CommunityStaffPermission, board?: string) => boolean;
   requireStaff: (permission: CommunityStaffPermission, board?: string) => void;
   refreshStaff: (related?: readonly CommunityAuthor[]) => Promise<void>;
+  // Confirm the original execution identity and its real membership after a
+  // remote/file wait, then validate current staff accounts in the last phase.
+  refreshViewer: () => Promise<void>;
+  readonly membershipVip: boolean;
   canModerateBoard: (board: string) => boolean;
   actualOwner: boolean; actualMod: boolean; browsingAsReader: boolean; readOnly: boolean;
   ownerReaderPreview: OwnerReaderPreview | null;

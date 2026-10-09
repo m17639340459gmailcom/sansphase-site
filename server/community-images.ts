@@ -67,9 +67,9 @@ export async function saveCommunityImage(ctx: Ctx, shop = false, bannerScope?: s
     try {
       await writeFile(imagePath, full, { flag: 'wx', mode: 0o600 });
       await writeFile(thumbPath, thumb, { flag: 'wx', mode: 0o600 });
-      // Re-encoding and disk writes yield; recheck the real appointment before
+      // Re-encoding and disk writes yield; recheck the execution identity before
       // recording a completed upload, and remove the files when access changed.
-      await ctx.refreshStaff();
+      await ctx.refreshViewer();
       requireShop();
       requireBanner();
       if (bannerScope !== undefined) ctx.live.banners.authorize(bannerScope, bannerAccess);

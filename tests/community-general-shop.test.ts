@@ -193,7 +193,7 @@ for (const change of ['revocation', 'demotion', 'inactive', 'scope', 'capabiliti
       else if (change === 'capabilities') f.appoint('general', 'general', true);
       else f.invalidate(change);
     });
-    const response = await f.get('manage?tab=items'); assert.equal(changed, true); assert.equal(response.status, 403);
+    const response = await f.get('manage?tab=items'); assert.equal(changed, true); assert.equal(response.status, change === 'inactive' ? 401 : 403);
     assert.equal((await response.text()).includes(input.delivery), false);
   });
 }
@@ -336,14 +336,14 @@ for (const change of ['revocation', 'demotion', 'inactive'] as const) {
       f.onPeople(() => { if (++calls === 3) f.invalidate(change); });
       const path = operation === 'create' ? 'manage/items' : operation === 'category' ? 'manage/categories' : `manage/items/${id}`;
       const body = operation === 'toggle' ? { active: false } : operation === 'category' ? { name: '等待期间的分类' } : { ...input, price: 70 };
-      const response = await f.post(path, body); assert.equal(response.status, 403, await response.clone().text());
+      const response = await f.post(path, body); assert.equal(response.status, change === 'inactive' ? 401 : 403, await response.clone().text());
       assert.equal(f.store.economy.customItems().length, 1); assert.equal(f.store.economy.item(id)!.price, 20); assert.equal(f.store.economy.item(id)!.active, true);
       assert.deepEqual(f.store.economy.categories(), []); assert.deepEqual(f.audit(), []);
     });
   }
   test(`the managed item read rechecks ${change} after loading profile data`, async t => {
     const f = await fixture(t); let calls = 0; f.onPeople(() => { if (++calls === 3) f.invalidate(change); });
-    assert.equal((await f.get('manage?tab=items')).status, 403);
+    assert.equal((await f.get('manage?tab=items')).status, change === 'inactive' ? 401 : 403);
   });
 }
 
@@ -389,7 +389,7 @@ for (const change of ['revocation', 'demotion', 'inactive'] as const) {
     await writeFile(resolve(f.directory, 'uploads', `community-image-${image}.webp`), 'private fixture bytes');
     const first = await f.get(`images/${image}.webp`); assert.equal(first.status, 200); const etag = first.headers.get('etag')!;
     let calls = 0; f.onPeople(() => { if (++calls === 2) f.invalidate(change); });
-    assert.equal((await f.get(`images/${image}.webp`, 'general', { 'If-None-Match': etag })).status, 404);
+    assert.equal((await f.get(`images/${image}.webp`, 'general', { 'If-None-Match': etag })).status, change === 'inactive' ? 401 : 404);
   });
 }
 
@@ -417,7 +417,7 @@ for (const change of ['revocation', 'demotion', 'inactive'] as const) {
       if (!invalidated && files.some(name => name.startsWith('community-image-'))) { invalidated = true; f.invalidate(change); }
     });
     const png = await sharp({ create: { width: 16, height: 16, channels: 3, background: '#976223' } }).png().toBuffer();
-    const response = await f.upload(png); assert.equal(response.status, 403, await response.clone().text()); assert.equal(invalidated, true);
+    const response = await f.upload(png); assert.equal(response.status, change === 'inactive' ? 401 : 403, await response.clone().text()); assert.equal(invalidated, true);
     assert.deepEqual(await readdir(resolve(f.directory, 'uploads')), []);
     f.sql(db => assert.equal(db.prepare('SELECT COUNT(*) AS total FROM community_images').get()!.total, 0));
   });

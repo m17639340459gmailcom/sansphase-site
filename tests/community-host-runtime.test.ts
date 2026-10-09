@@ -35,14 +35,16 @@ async function fixture(t: test.TestContext, withOwner = false) {
   await copyFile(resolve(template, 'community-host.db'), resolve(directory, 'community-host.db'));
   await writeFile(resolve(root, 'index.html'), '<!doctype html><html><head></head><body><main id="app"></main></body></html>');
   prepareIdentityStore(mainDirectory);
-  const state = { enabled: true, vip: true, unavailable: false, subject: readerId, ownerPersonal: readerId };
+  const state = { enabled: true, vip: true, unavailable: false, subject: readerId, ownerPersonal: readerId, inactiveReaders: new Set<string>() };
   const calls: string[] = [];
+  const ownerReaderFlags: boolean[] = [];
   let paused: { operation: string; remaining: number; started: () => void; release: Promise<void> } | null = null;
   const authority = createIdentityAuthority({ directory: mainDirectory, siteOrigin: main, communityOrigin: community, ownerId: authorId, secret, stateEncryptionKey: 'separate-test-encryption-key-at-least-32-chars',
     readerIdentity: async req => { if (state.unavailable) throw Error('private source failure'); const account = req.headers.cookie === 'sansphase_reader_session=main.token' ? state.subject === readerId ? reader : observer : req.headers.cookie === 'sansphase_reader_session=main.observer' ? observer : null; return state.enabled && account ? { ...account, vip: state.vip } : null; },
     ownerIdentity: async req => withOwner && req.headers.cookie === 'sansphase_author_session=main.owner' ? { name: '测试作者' } : null,
     ownerReaderIdentity: async () => withOwner ? { ...(state.ownerPersonal === readerId ? reader : observer), vip: state.vip } : null,
     people: async authors => new Map(authors.flatMap(author => { const account = [reader, observer].find(item => item.id === author.id); return account ? [[`${author.kind}:${author.id}`, { name: account.nickname, uid: account.uid, avatar: avatarId, bio: account.signature, vip: state.vip, active: state.enabled, joinedAt: '2026-01-01T00:00:00Z',
+      ...(state.inactiveReaders.has(account.id) ? { active: false } : {}),
       ...(withOwner && account.id === state.ownerPersonal ? { ownerReader: true as const } : {}) }] as const] : []; })),
     findMember: async uid => { const account = [reader, observer].find(item => item.uid === uid); return account ? { kind: 'reader', id: account.id } : null; },
     findByNames: async names => new Map(names.filter(name => name === reader.nickname).map(name => [name, { kind: 'reader' as const, id: readerId }])),
@@ -57,6 +59,10 @@ async function fixture(t: test.TestContext, withOwner = false) {
     const response = await fetch(localMain + url.pathname, options);
     const operation = String(JSON.parse(String(options?.body || '{}')).operation);
     calls.push(operation);
+    if(operation==='people'&&response.ok) {
+      const profiles: Array<[string,{ownerReader:boolean}]> = await response.clone().json();
+      for(const [,info] of profiles) { assert.equal(typeof info.ownerReader,'boolean'); ownerReaderFlags.push(info.ownerReader); }
+    }
     if (paused?.operation === operation && --paused.remaining === 0) { const gate = paused; paused = null; gate.started(); await gate.release; }
     return response;
   } });
@@ -89,7 +95,7 @@ async function fixture(t: test.TestContext, withOwner = false) {
     const response = await fetch(local + path, { method: 'POST', headers: signIdentityRequest({ secret, method: 'POST', path, body }), body });
     assert.equal(response.status, 200); return response;
   };
-  return { directory, runtime, local, state, entry, pause, purge, calls };
+  return { directory, runtime, local, state, entry, pause, purge, calls, ownerReaderFlags };
 }
 
 function seedIconConsent(directory: string) {
@@ -102,9 +108,61 @@ function storedIcon(directory: string, id = readerId) {
   try { return db.prepare("SELECT name_icon FROM community_members WHERE member_kind='reader' AND member_id=?").get(id)?.name_icon ?? null; }
   finally { db.close(); }
 }
+function seedAwaitTopic(directory: string, staff = false) {
+  const seed = createCommunityStore(directory);
+  const me = { kind: 'reader' as const, id: readerId }, superior = { kind: 'reader' as const, id: observer.id };
+  try {
+    seed.staff.bindOwner(authorId);
+    acceptCommunityConvention(seed, [me, superior]);
+    seed.members.visit(me); seed.members.visit(superior);
+    if (staff) {
+      seed.staff.appoint({ kind: 'owner', id: authorId }, superior, { role: 'general', boards: ['vip'], permissions: ['content.inspect', 'staff.appoint'], delegable: ['content.inspect'] });
+      seed.staff.appoint(superior, me, { role: 'moderator', boards: ['vip'], permissions: ['content.inspect'], delegable: [] });
+    }
+    return seed.createTopic({ board: 'vip', author: me, title: 'PRIVATE FINAL AUTHORITY CONTENT', body: 'synthetic private body for the final authority race' }).id;
+  } finally { seed.close(); }
+}
+
+for (const change of ['disabled self', 'changed principal', 'changed personal binding', 'inactive superior', 'revoked appointment'] as const) {
+  test(`hosted private reads recheck ${change} after their added final identity wait`, async t => {
+    const ownerPersonal = change === 'changed personal binding';
+    const staff = change === 'inactive superior' || change === 'revoked appointment';
+    const env = await fixture(t, ownerPersonal); seedAwaitTopic(env.directory, staff);
+    if (staff) env.state.vip = false;
+    const { cookie } = await env.entry(200, ownerPersonal ? 'main.owner' : 'main.token'); env.calls.length = 0;
+    const gate = env.pause('session', 2);
+    const reading = fetch(env.local + '/api/community/topics?board=vip&sort=curated', { headers: { cookie: cookie + (ownerPersonal ? '; community_browse=reader' : '') } });
+    const reached = await Promise.race([gate.waiting.then(() => true), reading.then(() => false)]);
+    assert.equal(reached, true, 'the final source identity must be checked after the profile wait');
+    try {
+      if (change === 'disabled self') env.state.enabled = false;
+      if (change === 'changed principal') env.state.subject = observer.id;
+      if (change === 'changed personal binding') env.state.ownerPersonal = observer.id;
+      if (change === 'inactive superior') env.state.inactiveReaders.add(observer.id);
+      if (change === 'revoked appointment') {
+        const seed = createCommunityStore(env.directory);
+        try { seed.staff.bindOwner(authorId); seed.staff.revoke({ kind: 'owner', id: authorId }, { kind: 'reader', id: readerId }); }
+        finally { seed.close(); }
+      }
+    } finally { gate.release(); }
+    const response = await reading, body = await response.text();
+    assert.equal(response.status, staff ? 404 : 401, body);
+    assert.equal(body.includes('PRIVATE FINAL AUTHORITY CONTENT'), false);
+  });
+}
 const equipIcon = (local: string, cookie: string, ref = 'vip:1') => fetch(local + '/api/community/shop/equip', {
   method: 'POST', headers: { cookie, Origin: community, 'X-Reader-Request': '1', 'Content-Type': 'application/json' },
   body: JSON.stringify({ kind: 'icon', ref }),
+});
+
+test('hosted people projection explicitly distinguishes linked owner readers from ordinary readers', async t => {
+  const env=await fixture(t,true), {cookie}=await env.entry();
+  assert.equal((await fetch(env.local+'/api/community/me',{headers:{cookie}})).status,200);
+  assert.ok(env.ownerReaderFlags.includes(true));
+  env.ownerReaderFlags.length=0; env.state.ownerPersonal=observer.id;
+  assert.equal((await fetch(env.local+'/api/community/me',{headers:{cookie}})).status,200);
+  assert.ok(env.ownerReaderFlags.length>0);
+  assert.equal(env.ownerReaderFlags.every(flag=>flag===false),true);
 });
 
 test('hosted icon final confirmation rejects VIP expiry after the initial session read', async t => {
@@ -116,7 +174,7 @@ test('hosted icon final confirmation rejects VIP expiry after the initial sessio
   const response = await writing;
   assert.equal(response.status, 403, await response.clone().text());
   assert.equal(storedIcon(env.directory), null);
-  assert.equal(env.calls.filter(operation => operation === 'session').length, 2, 'initial session lookup and one final authority check');
+  assert.equal(env.calls.filter(operation => operation === 'session').length, 3, 'initial session, body confirmation and final icon confirmation');
 });
 
 test('hosted icon final confirmation accepts renewed VIP after the initial session read', async t => {
@@ -129,13 +187,13 @@ test('hosted icon final confirmation accepts renewed VIP after the initial sessi
   assert.equal(response.status, 200, await response.clone().text());
   assert.equal((await response.json()).icon, 'vip:1');
   assert.equal(storedIcon(env.directory), 'vip:1');
-  assert.equal(env.calls.filter(operation => operation === 'session').length, 2);
+  assert.equal(env.calls.filter(operation => operation === 'session').length, 3);
 });
 
 for (const change of ['revoked', 'different principal'] as const) test(`hosted icon final confirmation refuses a ${change} source after profile lookup`, async t => {
   const env = await fixture(t); seedIconConsent(env.directory);
   const { cookie } = await env.entry(); env.calls.length = 0;
-  const gate = env.pause('people');
+  const gate = env.pause('people', 2);
   const writing = equipIcon(env.local, cookie);
   await gate.waiting;
   if (change === 'revoked') env.state.enabled = false;
@@ -145,7 +203,7 @@ for (const change of ['revoked', 'different principal'] as const) test(`hosted i
   assert.equal(response.status, 401, await response.clone().text());
   assert.equal(storedIcon(env.directory), null);
   assert.equal(storedIcon(env.directory, observer.id), null, 'a changed source cannot write to either account');
-  assert.equal(env.calls.filter(operation => operation === 'session').length, 2);
+  assert.equal(env.calls.filter(operation => operation === 'session').length, 3);
 });
 
 test('hosted icon final confirmation remains guarded by local logout during remote profile lookup', async t => {
@@ -163,7 +221,7 @@ test('hosted icon final confirmation remains guarded by local logout during remo
 test('hosted icon final confirmation cannot commit a delayed authority response after local logout', async t => {
   const env = await fixture(t); seedIconConsent(env.directory);
   const { cookie } = await env.entry(); env.calls.length = 0;
-  const gate = env.pause('session', 2);
+  const gate = env.pause('session', 3);
   const writing = equipIcon(env.local, cookie);
   // Racing against completion gives a missing final read a deterministic
   // failure instead of leaving the test waiting for a request that never runs.
@@ -179,28 +237,58 @@ test('hosted icon final confirmation cannot commit a delayed authority response 
   } finally { gate.release(); }
   assert.equal((await writing).status, 401);
   assert.equal(storedIcon(env.directory), null);
-  assert.equal(env.calls.filter(operation => operation === 'session').length, 2);
+  assert.equal(env.calls.filter(operation => operation === 'session').length, 3);
 });
 
 test('hosted icon final confirmation rejects a changed author personal binding after profile lookup', async t => {
   const env = await fixture(t, true); seedIconConsent(env.directory);
   const { cookie } = await env.entry(200, 'main.owner'); env.calls.length = 0;
-  const gate = env.pause('people');
+  const gate = env.pause('people', 2);
   const writing = equipIcon(env.local, cookie + '; community_browse=reader', 'vip:8');
   await gate.waiting; env.state.ownerPersonal = observer.id; gate.release();
   const response = await writing;
   assert.equal(response.status, 401, await response.clone().text());
   assert.equal(storedIcon(env.directory), null);
   assert.equal(storedIcon(env.directory, observer.id), null);
-  assert.equal(env.calls.filter(operation => operation === 'session').length, 2);
+  assert.equal(env.calls.filter(operation => operation === 'session').length, 3);
 });
 
-test('hosted ordinary identity reads retain one session lookup without duplicate final confirmation', async t => {
+test('hosted identity reads use one bounded final confirmation after profile resolution', async t => {
   const env = await fixture(t), { cookie } = await env.entry(); env.calls.length = 0;
   const response = await fetch(env.local + '/api/community/me', { headers: { cookie } });
   assert.equal(response.status, 200);
   assert.equal((await response.json()).icon, 'vip:1');
-  assert.equal(env.calls.filter(operation => operation === 'session').length, 1);
+  assert.deepEqual(env.calls, ['session','people','session','people']);
+});
+
+test('hosted final authority work is bounded by phases rather than 100 topics or 250 replies',async t=>{
+  const measure = async(topicCount:number,replyCount:number) => {
+    const env=await fixture(t);
+    const seed=createCommunityStore(env.directory),member={kind:'reader' as const,id:readerId};
+    let first='';
+    try {
+      seed.staff.bindOwner(authorId);acceptCommunityConvention(seed,[member]);
+      first=seed.createTopic({board:'qa',author:member,title:'固定身份来源成本第一条',body:'无提及的完整合成内容'}).id;
+      for(let i=1;i<topicCount;i++)seed.createTopic({board:'qa',author:member,title:`固定身份来源成本主题${i}`,body:'同一真实来源账号的合成内容'});
+      for(let i=0;i<replyCount;i++)seed.addReply({topicId:first,author:member,body:`固定身份来源成本完整回复${i}`});
+    } finally {seed.close();}
+    // Finish synchronous fixture writes before opening pooled HTTP connections.
+    // Otherwise parallel test load can outlast the loopback server's idle socket lifetime.
+    const {cookie}=await env.entry();
+    const callsFor = async(path:string) => {
+      env.calls.length=0;
+      const response=await fetch(env.local+'/api/community/'+path,{headers:{cookie}});
+      assert.equal(response.status,200,await response.clone().text());
+      await response.json();return [...env.calls];
+    };
+    return {listing:await callsFor('topics?sort=curated'),thread:await callsFor('topics/'+first)};
+  };
+  const small=await measure(1,0),large=await measure(100,250);
+  assert.deepEqual(small.listing,['session','people','session','people']);
+  assert.deepEqual(large.listing,small.listing);
+  assert.deepEqual(small.thread,['session','people','session','people','session','people']);
+  assert.deepEqual(large.thread,small.thread);
+  t.diagnostic(JSON.stringify({topics:[1,100],listing:small.listing,replies:[0,250],thread:small.thread}));
 });
 
 for (const active of [false, true]) test(`hosted me keeps membership coherent when VIP becomes ${active ? 'active' : 'expired'} after the initial session read`, async t => {
@@ -217,7 +305,7 @@ for (const active of [false, true]) test(`hosted me keeps membership coherent wh
   assert.equal(person.icon, active ? 'vip:1' : null);
   assert.equal(person.iconState.equipped, person.icon);
   assert.equal(person.iconState.available.includes('vip:1'), active);
-  assert.equal(env.calls.filter(operation => operation === 'session').length, 1, 'coherent presentation requires no extra session read');
+  assert.deepEqual(env.calls, ['session','people','session','people'], 'one profile phase and one final source/self confirmation');
 });
 
 test('standalone host exchanges real protocol tickets, boots only community and returns account projection without credentials', async t => {

@@ -144,11 +144,11 @@ for (const sort of ['curated', 'published', 'newest', 'active']) {
     assert.deepEqual(ids(listing), publicIds.slice(0, sort === 'curated' || sort === 'published' ? 6 : 20));
     assert.equal(summaries.length, 1, 'only the initial candidates need latest reply, reactions, views, thumbs and vote summaries');
     assert.equal(access.length, 1, 'one current public access batch follows the people await');
-    assert.equal(access[0].rows, 80);
+    assert.equal(access[0].rows, 100, 'public access covers the full ranked candidate pool so renewed VIP can join the final page');
     assert.deepEqual(access[0].fields, ['id', 'board']);
     assert.equal(/community_(?:replies|reactions|views|images|votes)/.test(access[0].sql), false);
     assert.equal(summaries.every(query => !query.fullBody), true);
-    assert.equal(boards.length, 3, 'initial QA/VIP decisions and a fresh final QA decision are independent of candidate count');
+    assert.equal(boards.length, 4, 'initial and final QA/VIP decisions are independent of candidate count; final VIP also permits a renewed membership');
     assert.equal(JSON.stringify(listing).includes('"board":"vip"'), false);
   });
 }
@@ -297,7 +297,7 @@ for (const sort of ['curated', 'published']) {
     assert.ok(item);
     assert.equal(item.author.name, '帖子作者', 'a replacement is not an unqueried account falsely displayed as deleted');
     assert.equal(item.author.uid, '10004');
-    assert.deepEqual(requests, [['owner:owner'], ['reader:author']], 'only the missing person is queried, not the full topic pool');
+    assert.deepEqual(requests, [['owner:owner'], ['reader:reader'], ['reader:author'], ['reader:reader']], 'one self confirmation per phase; only the missing author is queried, not the full topic pool');
   });
 }
 
@@ -323,7 +323,7 @@ for (const change of ['move', 'hide', 'delete']) test(`a replacement affected by
   assert.equal(listing.total, 5);
   assert.deepEqual(ids(listing), firstSix.slice(1));
   assert.equal(JSON.stringify(listing).includes('REPLACEMENT-MOVED-PRIVATE'), false);
-  assert.deepEqual(requests, [['owner:owner'], ['reader:author']]);
+  assert.deepEqual(requests, [['owner:owner'], ['reader:reader'], ['reader:author'], ['reader:reader']]);
 });
 
 test('replacement identity lookup still rechecks freshly revoked moderator visibility', async t => {
@@ -362,7 +362,7 @@ test('a queried replacement whose account really disappeared keeps the deleted-a
   });
   const listing = await f.list('topics?sort=curated');
   assert.equal(listing.items.find(topic => topic.id === replacement.id).author.name, '已注销用户');
-  assert.deepEqual(requests, [['owner:owner'], ['reader:gone']], 'a missing answer from a real lookup does not trigger an endless retry');
+  assert.deepEqual(requests, [['owner:owner'], ['reader:reader'], ['reader:gone'], ['reader:reader']], 'self confirmation is bounded; a missing answer from a real author lookup does not trigger an endless retry');
 });
 
 test('a replacement latest replier is queried independently of its already known topic author', async t => {
@@ -381,7 +381,7 @@ test('a replacement latest replier is queried independently of its already known
   const item = listing.items.find(topic => topic.id === replacement.id);
   assert.equal(item.author.name, '测试站长');
   assert.equal(item.lastReply.author.name, '会员读者');
-  assert.deepEqual(requests, [['owner:owner'], ['reader:vip']]);
+  assert.deepEqual(requests, [['owner:owner'], ['reader:reader'], ['reader:vip'], ['reader:reader']]);
 });
 
 test('continuous page replacement stops after two missing-person lookups and returns an explicit retry instead of a false deleted author', async t => {
@@ -389,7 +389,7 @@ test('continuous page replacement stops after two missing-person lookups and ret
   for (let i = 0; i < 6; i++) firstSix.push(f.topic(`连续变动初始主题 ${i}`, i / 100).id);
   const replacements = [
     f.topic('第一次补入作者主题', 1, { author: reader('author') }).id,
-    f.topic('第二次补入作者主题', 2, { author: reader('reader') }).id,
+    f.topic('第二次补入作者主题', 2, { author: reader('mod') }).id,
     f.topic('第三次补入作者主题', 3, { author: reader('vip') }).id,
   ];
   const removed = new Set();
@@ -398,13 +398,13 @@ test('continuous page replacement stops after two missing-person lookups and ret
     requests.push(keys);
     const id = keys.includes('owner:owner') ? firstSix[0]
       : keys.includes('reader:author') ? replacements[0]
-      : keys.includes('reader:reader') ? replacements[1] : null;
+      : keys.includes('reader:mod') ? replacements[1] : null;
     if (id && !removed.has(id)) { removed.add(id); f.store.deleteTopic(id); }
   });
   const response = await f.get('topics?sort=published');
   assert.equal(response.status, 409);
   const value = await response.json();
   assert.match(value.error, /更新|重试|重新/);
-  assert.deepEqual(requests, [['owner:owner'], ['reader:author'], ['reader:reader']]);
+  assert.deepEqual(requests, [['owner:owner'], ['reader:reader'], ['reader:author'], ['reader:reader'], ['reader:mod'], ['reader:reader']]);
   assert.equal(JSON.stringify(value).includes('已注销用户'), false);
 });

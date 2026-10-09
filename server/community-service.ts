@@ -95,6 +95,15 @@ export function createCommunityService(options: ServiceOptions) {
     const ownerReaderPreview = actualOwner && browsingAsReader ? createOwnerReaderPreview() : null;
     const owner = actualOwner && !browsingAsReader;
     let staffAccountsValid = true;
+    let membershipVip = viewer.vip;
+    let currentSelfInfo: PersonInfo | undefined;
+    const setMembership = (vip: boolean) => {
+      membershipVip = vip;
+      // Keep the object shared with route destructuring. Preview cosmetics
+      // never become the membership used for visits or check-in rewards.
+      viewer.vip = ownerReaderPreview !== null || vip && !browsingAsReader;
+    };
+    setMembership(membershipVip);
     // An appointment projects ordinary permissions, never the member's earned
     // trust, experience or VIP. Re-read the live role at every authorization use.
     const ordinaryTrust = (author: CommunityAuthor, role: CommunityStaffRole | null) =>
@@ -102,17 +111,39 @@ export function createCommunityService(options: ServiceOptions) {
     const trustLevel = () => ownerReaderPreview?.trustLevel ?? (browsingAsReader ? 1
       : ordinaryTrust(me, staffAccountsValid ? live.staff.state(me)?.role ?? null : null));
     const relatedStaffReaders:CommunityAuthor[]=[];
-    const refreshStaff = async (related:readonly CommunityAuthor[]=[]) => {
+    const refreshStaff = async (related:readonly CommunityAuthor[]=[], confirmSelf = false) => {
       for(const member of related)if(member.kind==='reader'&&!relatedStaffReaders.some(previous=>same(previous,member)))relatedStaffReaders.push(member);
       const currentStaff = live.staff.state(me);
       const ancestors = live.staff.ancestors(me).filter(member => member.kind === 'reader');
-      const readers=[...(currentStaff&&me.kind==='reader'?[me,...ancestors]:[]),...relatedStaffReaders];
+      const staffReaders=[...(currentStaff&&me.kind==='reader'?[me,...ancestors]:[]),...relatedStaffReaders];
+      const readers=[...new Map([...staffReaders, ...(confirmSelf && me.kind==='reader' ? [me] : [])].map(member=>[memberKey(member),member])).values()];
       if(!readers.length){staffAccountsValid=true;return;}
       const map = await people(readers);
       options.assertActive?.(req);
+      if(confirmSelf&&me.kind==='reader') {
+        const info=map.get(memberKey(me));
+        if(!info||info.active===false||viewer.ownerAccountId&&info.ownerReader===false)throw fail('请重新登录后进入社区。',401);
+        currentSelfInfo=info;
+        setMembership(info.vip===true);
+      }
       const current = live.staff.ancestors(me).filter(member => member.kind === 'reader');
-      staffAccountsValid = readers.every(member=>map.get(memberKey(member))?.active===true) && current.length === ancestors.length
+      staffAccountsValid = staffReaders.every(member=>map.get(memberKey(member))?.active===true) && current.length === ancestors.length
         && current.every(member => ancestors.some(previous => same(member, previous)) && map.get(memberKey(member))?.active === true);
+    };
+    const refreshViewer = async () => {
+      let current = await identify(req);
+      options.assertActive?.(req);
+      if(viewer.ownerAccountId) {
+        if(!current||current.kind!=='owner'||current.id!==viewer.ownerAccountId)throw fail('请重新登录后进入社区。',401);
+        current=await options.ownerReaderIdentity?.(req)??null;
+        options.assertActive?.(req);
+      }
+      if(!current||!same(current,me))throw fail('请重新登录后进入社区。',401);
+      setMembership(current.vip===true);
+      // The source lookup itself yields. Resolve the actor and active staff
+      // chain afterward, in one batch, before any synchronous authorization.
+      await refreshStaff([],true);
+      options.assertActive?.(req);
     };
     // A request body may arrive after an appointment changes; check live authorization at use.
     const moderationBoards = () => browsingAsReader || !staffAccountsValid ? [] : live.members.moderationBoards(me);
@@ -120,7 +151,6 @@ export function createCommunityService(options: ServiceOptions) {
     const canStaff: Ctx['canStaff'] = (permission, board) => !browsingAsReader && staffAccountsValid && live.staff.can(me, permission, board);
     const requireStaff: Ctx['requireStaff'] = (permission, board) => { if (!canStaff(permission, board)) throw fail('管理权限发生变化，或没有这项操作的权限。', 403); };
     const canModerateBoard = (board: string) => canStaff('content.inspect', board);
-    viewer = { ...viewer, vip: ownerReaderPreview !== null || viewer.vip && !browsingAsReader };
     const canSeeBoard = (board: string) => live.boards.has(board) && (board !== membersBoard || viewer.vip || owner || moderationBoards().includes(board));
     // Public staff appearance needs the same active account chain as authority.
     // Fetch shared ancestors with the authors in one batch, never once per avatar.
@@ -135,15 +165,19 @@ export function createCommunityService(options: ServiceOptions) {
       if (!current || author.kind === 'owner') return current?.role ?? null;
       // The final refresh may invalidate the viewer after this profile batch
       // was read. Its DTO must use the same final authority as request rules.
-      if (same(author, me) && !staffAccountsValid) return null;
+      if (same(author, me)) return staffAccountsValid ? current.role : null;
       // Re-read the appointment after asynchronous profiles resolve: a revoked
       // chain or a newly appointed, unverified ancestor must not keep its badge.
       return [author, ...live.staff.ancestors(author)].filter(member => member.kind === 'reader')
         .every(member => map.get(memberKey(member))?.active === true) ? current.role : null;
     };
     let ownerAppearance = ownerReaderPreview;
+    const personInfo = (author: CommunityAuthor, map: Map<string, PersonInfo>) => {
+      const info=map.get(memberKey(author));
+      return info&&same(author,me) ? { ...info, ...currentSelfInfo, vip: membershipVip } : info;
+    };
     const appearancePreview = (author: CommunityAuthor, map: Map<string, PersonInfo>) => {
-      const info = map.get(memberKey(author));
+      const info = personInfo(author,map);
       if (author.kind !== 'reader' || !info || info.active === false) return null;
       if (info.ownerReader !== true && !(same(author, me) && ownerReaderPreview)) return null;
       // Reuse the approved owner-personal presentation across every cosmetic
@@ -151,7 +185,7 @@ export function createCommunityService(options: ServiceOptions) {
       return ownerAppearance ??= createOwnerReaderPreview();
     };
     const iconEligibility = (author: CommunityAuthor, map: Map<string, PersonInfo>, badges: CommunityIconEligibility['badges'], levels?: Pick<CommunityIconEligibility, 'growthLevel' | 'vipLevel'>): CommunityIconEligibility => {
-      const info = map.get(memberKey(author));
+      const info = personInfo(author,map);
       if (!info || info.active === false) return { growthLevel: null, trustLevel: -1, vipLevel: null, staffRole: null, badges: [] };
       const preview = appearancePreview(author, map);
       if (preview) return {
@@ -166,7 +200,7 @@ export function createCommunityService(options: ServiceOptions) {
     const iconState = (author: CommunityAuthor, map: Map<string, PersonInfo>) => communityIconState(live.members.iconSelection(author),
       iconEligibility(author, map, live.members.iconHonors(author)));
     const person = (author: CommunityAuthor, map: Map<string, PersonInfo>) => {
-      const info = map.get(memberKey(author));
+      const info = personInfo(author,map);
       if (!info) return { name: '已注销用户', role: author.kind, uid: null, avatar: null, vip: false, level: 0, growth: null, vipGrowth: null, frame: null, color: null, icon: null };
       const decorations = live.members.appearance(author);
       const steward = live.members.steward(author);
@@ -218,14 +252,15 @@ export function createCommunityService(options: ServiceOptions) {
       get mod() { return mod(); },
       get moderationBoards() { return moderationBoards(); },
       get staff() { return browsingAsReader || !staffAccountsValid ? null : live.staff.state(me); },
-      canStaff, requireStaff, refreshStaff,
+      canStaff, requireStaff, refreshStaff, refreshViewer,
+      get membershipVip() { return membershipVip; },
       canSeeBoard, get hiddenBoard() { return canSeeBoard(membersBoard) ? '' : membersBoard; },
       send: (value, status) => { options.assertActive?.(req); sendTo(res, value, status); },
-      json: async () => { const value = await (body ||= readJson(req)); await refreshStaff(); requireConsent(); return value; },
-      people: async authors => { const map = await presentationPeople(authors); await refreshStaff(); requireConsent(); return map; }, person, iconState, topicDTO,
+      json: () => body ||= (async () => { const value = await readJson(req); await refreshViewer(); requireConsent(); return value; })(),
+      people: async authors => { const map = await presentationPeople(authors); await refreshViewer(); requireConsent(); return map; }, person, iconState, topicDTO,
       requireConsent, appearancePreview,
       topicsDTO: async topics => {
-        const map = await presentationPeople(peopleIn(topics)); await refreshStaff(); options.assertActive?.(req);
+        const map = await presentationPeople(peopleIn(topics)); await refreshViewer(); options.assertActive?.(req);
         return topics.filter(topic => {
           const current = live.topicAccess(topic.id);
           return current && current.board === topic.board && canSeeBoard(current.board)
@@ -237,7 +272,7 @@ export function createCommunityService(options: ServiceOptions) {
         live.rateLimits.consume(me, kind, trustLevel());
       },
       auditMutation: async <T>(action: string, execute: () => T, details: CommunityAuditDetails<T> = {}) => {
-        await refreshStaff();
+        await refreshViewer();
         const result = live.audit.run(me, `community-${action}`, () => { requireConsent(); return execute(); }, details);
         await drainFiles();
         await live.audit.flush(auditMirror);
@@ -287,7 +322,7 @@ export function createCommunityService(options: ServiceOptions) {
     if (!allowed() || !uploads) throw fail('图片不存在。', 404);
     let data: Buffer;
     try { data = await readFile(resolve(uploads, `community-${thumb ? 'thumb' : 'image'}-${id}.webp`)); } catch { throw fail('图片不存在。', 404); }
-    await ctx.refreshStaff();
+    await ctx.refreshViewer();
     if (!allowed()) throw fail('图片不存在。', 404);
     // A reviewer can see pending/withdrawn content without making it approved.
     // Re-evaluate publication state after the asynchronous authority check.

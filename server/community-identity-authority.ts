@@ -185,7 +185,7 @@ export function createIdentityAuthority(options: IdentityAuthorityOptions) {
           const authors = input.authors.map(memberValue), map = await options.people(authors);
           const requested = new Set(authors.map(author => `${author.kind}:${author.id}`));
           send(res, [...map].filter(([key]) => requested.has(key)).map(([key, info]) => [key, { name: info.name, uid: info.uid, avatar: info.avatar, vip: info.vip === true, joinedAt: info.joinedAt, bio: info.bio, active: info.active === true,
-            ...(info.ownerReader === true ? { ownerReader: true } : {}) }])); return;
+            ownerReader: info.ownerReader === true }])); return;
         }
         if (value.operation === 'member' || value.operation === 'avatar') {
           if (typeof input.uid !== 'string' || !/^[0-9a-z]{1,15}$/.test(input.uid)) throw invalidInput();

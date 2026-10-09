@@ -182,7 +182,7 @@ async function createTopic(ctx: Ctx, body: Body) {
   // Resolve mentions before the transaction; the creation, reward, notices and
   // saved retry result then form one synchronous commit.
   const mentions = await ctx.mentions(typeof body.body === 'string' ? body.body : '');
-  await ctx.refreshStaff();
+  await ctx.refreshViewer();
   ctx.requireConsent();
   assertNotMuted(ctx);
   if (!ctx.canSeeBoard(board) || !canParticipateBoard(ctx, board)) throw fail('会员茶室只有 VIP 能发帖。', 403);
@@ -280,12 +280,17 @@ export async function contentRoutes(ctx: Ctx): Promise<boolean> {
       return true;
     }
     if (path === 'summary') {
-      const hiddenBoard = ctx.hiddenBoard;
+      let hiddenBoard = ctx.hiddenBoard;
       let summary = live.summary({ limit: 20, hiddenBoard });
-      const hot = await ctx.topicsDTO(summary.hot.filter(topic => ctx.canSeeBoard(topic.board)).slice(0, 5));
+      let hot = await ctx.topicsDTO(summary.hot.filter(topic => ctx.canSeeBoard(topic.board)).slice(0, 5));
       // Person lookup also refreshes live staff/account authorization. Counts,
       // tags and latest titles must use the same final private-board boundary.
-      if (ctx.hiddenBoard !== hiddenBoard) summary = live.summary({ limit: 20, hiddenBoard: ctx.hiddenBoard });
+      for(let attempts=0;ctx.hiddenBoard!==hiddenBoard;attempts++) {
+        if(attempts>=2)throw fail('会员资格正在更新，请重新加载后重试。',409);
+        hiddenBoard=ctx.hiddenBoard;
+        summary=live.summary({limit:20,hiddenBoard});
+        hot=await ctx.topicsDTO(summary.hot.filter(topic=>ctx.canSeeBoard(topic.board)).slice(0,5));
+      }
       const stats = Object.values(summary.boards);
       ctx.send({
         total: stats.reduce((sum, board) => sum + board.topics, 0),
@@ -337,10 +342,10 @@ export async function contentRoutes(ctx: Ctx): Promise<boolean> {
         if (board && !ctx.canSeeBoard(board)) throw fail('没有这个版块。', 404);
         // Every asynchronous identity stage needs fresh public/board access;
         // the ranked summaries already hold the unchanged display fields.
-        const currentTopics = live.publicTopicAccesses(visible.map(topic => topic.id));
+        const currentTopics = live.publicTopicAccesses(all.items.map(topic => topic.id));
         const currentVisibleBoards = visibleBoardsFor(currentTopics, board || undefined);
         const currentById = new Map(currentTopics.map(topic => [topic.id, topic]));
-        return visible.filter(topic => { const current = currentById.get(topic.id); return current && current.board === topic.board && currentVisibleBoards.has(current.board); });
+        return all.items.filter(topic => { const current = currentById.get(topic.id); return current && current.board === topic.board && currentVisibleBoards.has(current.board); });
       };
       let currentVisible = recheckVisible();
       let currentItems = currentVisible.slice((page - 1) * listingPageSize, page * listingPageSize);
@@ -366,8 +371,9 @@ export async function contentRoutes(ctx: Ctx): Promise<boolean> {
     const topicMatch = /^topics\/([^/]+)$/.exec(path);
     if (topicMatch) { ctx.send(await threadDTO(ctx, topicMatch[1])); return true; }
     if (path === 'bookmarks') {
-      const topics = live.topics(live.bookmarks(me)).filter(topic => ctx.canSeeBoard(topic.board));
-      ctx.send({ items: await ctx.topicsDTO(topics), total: topics.length, page: 1, pageSize: topics.length || pageSize });
+      const topics = live.topics(live.bookmarks(me));
+      const items = await ctx.topicsDTO(topics);
+      ctx.send({ items, total: items.length, page: 1, pageSize: items.length || pageSize });
       return true;
     }
     return false;
@@ -388,7 +394,7 @@ export async function contentRoutes(ctx: Ctx): Promise<boolean> {
         assertNotMuted(ctx);
         if (!canParticipateBoard(ctx, topic.board)) throw fail('会员茶室只有 VIP 能回复。', 403);
         const mentions = await ctx.mentions(typeof body.body === 'string' ? body.body : '');
-        await ctx.refreshStaff();
+        await ctx.refreshViewer();
         ctx.requireConsent();
         assertNotMuted(ctx);
         const current = visibleTopic(ctx, topic.id);
