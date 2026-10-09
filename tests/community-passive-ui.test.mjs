@@ -223,7 +223,7 @@ test('a foreground write cancels old passive counts and pauses until its related
     return null;
   }, '#/post/p1');
   await tick(15000);
-  const signal = calls.find(x => passive(x.init)).init.signal;
+  const signal = calls.find(x => passive(x.init) && x.url.endsWith('/topics/p1')).init.signal;
   main.querySelector('[data-action="community-like"]').click(); await flush();
   assert.equal(signal.aborted, true);
   const count = calls.filter(x => passive(x.init)).length;
@@ -277,7 +277,7 @@ test('a newer foreground refresh supersedes already staged passive data in the s
   });
   await tick(15000); foreground = true;
   const retry = w.document.createElement('button'); retry.dataset.action = 'community-retry'; main.append(retry); retry.click(); await flush();
-  assert.equal(calls.find(x => passive(x.init)).init.signal.aborted, true);
+  assert.equal(calls.find(x => passive(x.init) && x.url.includes('/topics?')).init.signal.aborted, true);
   slow.resolve(response({ ...listing, items: [{ ...topic, title: '过时后台结果' }] })); await flush();
   assert.match(main.textContent, /主动最新结果/); assert.doesNotMatch(main.textContent, /过时后台结果/);
 });
@@ -370,9 +370,10 @@ test('a definite hidden thread retires immediately even when its passive summary
   await tick(15000);
   assert.equal(main.querySelector('.community-thread'), null);
   assert.equal(ui.me().uid, person.uid);
-  assert.equal(calls.find(x => passive(x.init)).init.signal.aborted, false);
+  const signal = calls.find(x => passive(x.init) && x.url.endsWith('/summary')).init.signal;
+  assert.equal(signal.aborted, false);
   await tick(10000);
-  assert.equal(calls.find(x => passive(x.init)).init.signal.aborted, true, 'support is still owned by the batch timeout');
+  assert.equal(signal.aborted, true, 'support is still owned by the batch timeout');
   slow.resolve(failure(503)); await flush();
   assert.equal(main.querySelector('.community-thread'), null);
 });

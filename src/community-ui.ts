@@ -332,19 +332,47 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     } finally { businessWrites.delete(operation); foregroundReads.delete(operation); }
   }
   async function requestAPI<T>(path: string, init: RequestInit): Promise<T> {
-    let response: Response;
-    try { response = await request('/api/community/' + path, { credentials: 'same-origin', ...init }); }
-    catch { throw Object.assign(new Error('网络连接失败，请稍后重试。'), { status: 0 }); }
-    const fallbackError = response.status === 413 ? '文件超过上传上限，请缩小后重试。' : '社区暂时无法读取。';
-    let value: { error?: string };
-    try { value = await response.json() as { error?: string }; }
-    catch {
-      throw Object.assign(new Error(response.ok ? '响应读取失败，请稍后重试。' : fallbackError), { status: response.ok ? 0 : response.status });
+    const readResponse = async (options: RequestInit): Promise<T> => {
+      let response: Response;
+      try { response = await request('/api/community/' + path, { credentials: 'same-origin', ...options }); }
+      catch { throw Object.assign(new Error('网络连接失败，请稍后重试。'), { status: 0 }); }
+      const fallbackError = response.status === 413 ? '文件超过上传上限，请缩小后重试。' : '社区暂时无法读取。';
+      let value: { error?: string };
+      try { value = await response.json() as { error?: string }; }
+      catch {
+        throw Object.assign(new Error(response.ok ? '响应读取失败，请稍后重试。' : fallbackError), { status: response.ok ? 0 : response.status });
+      }
+      if (value === null || typeof value !== 'object' || Array.isArray(value))
+        throw Object.assign(new Error('响应读取失败，请稍后重试。'), { status: response.ok ? 0 : response.status });
+      if (!response.ok) throw Object.assign(new Error(value.error || fallbackError), { status: response.status });
+      return value as T;
+    };
+    // Only reads have a deadline. A delayed write remains owned by the existing
+    // idempotent writer; an uncertain POST must never become an automatic retry.
+    if (init.method && init.method.toUpperCase() !== 'GET') return readResponse(init);
+    const controller = new AbortController();
+    const signal = controller.signal;
+    const callerSignal = init.signal;
+    const onCallerAbort = () => controller.abort(callerSignal?.reason);
+    if (callerSignal?.aborted) onCallerAbort();
+    let timedOut = false;
+    const interrupted = () => Object.assign(new Error(timedOut ? '社区读取超时，请稍后重试。' : '社区读取已取消。'), { status: 0 });
+    if (signal.aborted) throw interrupted();
+    callerSignal?.addEventListener('abort', onCallerAbort, { once: true });
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 10000);
+    let onAbort: () => void = () => {};
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      onAbort = () => reject(interrupted());
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+    try {
+      // Include JSON/body decoding, and release the route even when a supplied
+      // request or body reader does not cooperate with its AbortSignal.
+      return await Promise.race([readResponse({ ...init, signal }), cancelled]);
+    } finally {
+      clearTimeout(timer); signal.removeEventListener('abort', onAbort);
+      callerSignal?.removeEventListener('abort', onCallerAbort);
     }
-    if (value === null || typeof value !== 'object' || Array.isArray(value))
-      throw Object.assign(new Error('响应读取失败，请稍后重试。'), { status: response.ok ? 0 : response.status });
-    if (!response.ok) throw Object.assign(new Error(value.error || fallbackError), { status: response.status });
-    return value as T;
   }
   const writeRequests = createCommunityWriteRequest({
     request: api,
