@@ -213,7 +213,8 @@ function header(page) {
   const languageButton = `<button class="language" data-action="language" aria-label="${t("Switch to English", "切换到中文")}">${t("中 / EN", "EN / 中")}</button>`;
   const menuButton = `<button class="icon-button menu-button" data-action="menu" aria-controls="navigation" aria-expanded="false" aria-label="${t("打开菜单", "Open menu")}"><span class="menu-icon-open">${icons.menu}</span><span class="menu-icon-close">${icons.close}</span></button>`;
   const {view} = communityRoute(location.hash);
-  const communityArea = communityEnabled() && inCommunityArea(view);
+  // Recovery pages use shared chrome until the community stylesheet is ready.
+  const communityArea = communityStyleReady && communityEnabled() && inCommunityArea(view);
   communityAppearance.sync(communityArea);
   if (communityArea) {
     // The community is its own area: its own navigation, notifications, and a way back to the main site.
@@ -412,7 +413,7 @@ const communityEntry = createCommunityEntry({
   },
 });
 let communityArrived = false;
-function communityReady() {
+function communityReady({ terminal = false } = {}) {
   if (!communityOnly()) return;
   rewriteCommunityMainSiteLinks(document, siteContent);
   const menu = document.querySelector('#community-account-menu');
@@ -422,6 +423,9 @@ function communityReady() {
     button.innerHTML = `${icons['log-out'] || ''}<span>${t('退出社区', 'Leave community')}</span>`;
     menu.append(button);
   }
+  // A committed recovery/404 shell can be shown without consuming the actual
+  // forum's first arrival. Loading remains behind the initial paper curtain.
+  if (terminal && !main.querySelector('[data-content-state="loading"]')) delete document.body.dataset.communityBoot;
   if (!communityArrived && main.querySelector('[data-community]') && !main.querySelector('[data-content-state="loading"]')) {
     communityArrived = true;
     routeTransitions.arrive();
@@ -679,7 +683,7 @@ function renderView({preserveScroll=false,contentStatus}={}) {
   document.body.classList.toggle("content-open", page !== "home");
   document.body.classList.toggle("blog-open", personalPage(page));
   document.body.classList.toggle("admin-open", page === "admin");
-  const inCommunity = (communityEnabled() || communityEntryDestination(siteContent)) && communityRoute(location.hash).view !== 'unknown';
+  const inCommunity = communityStyleReady && (communityEnabled() || communityEntryDestination(siteContent)) && communityRoute(location.hash).view !== 'unknown';
   syncCommunitySky(inCommunity);
   if(personalPage(page) && !inCommunity && blogPhoto && !blogPhoto.hasAttribute('src')) {
     blogPhoto.sizes=blogPhoto.dataset.backgroundSizes || '100vw';
@@ -728,7 +732,7 @@ function renderView({preserveScroll=false,contentStatus}={}) {
     || communityUI.renderManagement(main, pageMarkup, preserveScroll))) setContentHTML(main, pageMarkup);
   readerUI?.route(page,id);
   cleanCommunity=communityEnabled() && !contentStatus && (page==='community'||page==='post') ? communityUI.mount(main,communityContext()) : ()=>{};
-  communityReady();
+  communityReady({ terminal: contentStatus !== 'loading' && !main.querySelector('[data-community]') });
   cleanReaderAdmin=page==='admin' && adminReadersModule ? adminReadersModule.mountReaderAdmin(main,{english:language==='en'}) : ()=>{};
   const bookRoot=main.querySelector('.book-reader'),bookGeneration=++bookRenderGeneration;
   cleanBookReading=()=>{};
