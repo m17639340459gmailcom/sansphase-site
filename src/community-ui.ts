@@ -17,6 +17,9 @@ import { communityImageBytes, communityNameEffect } from './community-rules.mjs'
 import { communityNewsBoard } from './community-news.mjs';
 import { readNameEffectFile } from './community-equipment-import.mjs';
 import { communityCanManageItems } from './community-management.mjs';
+import { communityIconDefinition } from './community-icon-policy.mjs';
+import { syncCommunityIconPanel, communityIconBrowse, communityIconPanelHTML, communityIconCategory } from './community-icon-display.mjs';
+import type { CommunityIconSelection } from './community-icon-display.ts';
 import type { ShopCategory } from './community-rules.ts';
 import { autosizeCommunityTextarea } from './community-editor-size.mjs';
 import { createCommunityBannerController } from './community-banner-controller.mjs';
@@ -138,6 +141,9 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   let viewerFailure: ReturnType<typeof failure> | null = null;
   let profile: CommunityLoad<CommunityProfile> | null = null;
   let profileWrite: object | null = null;
+  let iconWrite: { identity: number } | null = null;
+  let frameWrite: { identity: number } | null = null;
+  let iconSelection: CommunityIconSelection | undefined;
   let profileRequest = 0;
   let legacyProfileOpened = false;
   const profileDialog = createCommunityProfileDialog({
@@ -546,7 +552,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       reviewSelection.clear(); managementBoard = ''; stewardCandidate = null; stewardLookupRequest++;
     }
     me = { state: 'ready', data: next }; viewerFailure = null; viewerVerified = true; viewerHash = hash;
-    const key = [next.name, next.uid, next.role, next.owner, next.vip, next.avatar, next.frame, next.color, JSON.stringify(next.nameEffect), next.level, JSON.stringify(next.growth), JSON.stringify(next.vipGrowth), next.steward, next.mod, JSON.stringify(next.management), permissionFingerprint(next), JSON.stringify(next.moderationBoards), next.balance, next.checkedIn, next.unread.all].join('|');
+    const key = [next.name, next.uid, next.role, next.owner, next.vip, next.avatar, next.frame, next.color, next.icon, JSON.stringify(next.nameEffect), next.level, JSON.stringify(next.growth), JSON.stringify(next.vipGrowth), next.steward, next.mod, JSON.stringify(next.management), permissionFingerprint(next), JSON.stringify(next.moderationBoards), next.balance, next.checkedIn, next.unread.all].join('|');
     if (key !== headerKey) { headerKey = key; mounted?.ctx.headerChanged?.(); }
     syncConvention();
     return { changedAccount, lostPermission };
@@ -629,7 +635,13 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     await assignLoad(`members/${enc(uid)}?tab=${enc(tab)}`, memberPages.get(key), value => {
       // Reads started before a confirmed profile/background change cannot put
       // its retired appearance back into another cached tab.
-      if (epoch === (memberProfileEpochs.get(uid) || 0)) memberPages.set(key, value);
+      if (epoch === (memberProfileEpochs.get(uid) || 0)) {
+        memberPages.set(key, value);
+        const state = readyData(value)?.iconState;
+        if (tab === 'icons' && state && !iconSelection) {
+          const { kind, page } = communityIconBrowse(state); iconSelection = { kind, page };
+        }
+      }
     });
   }
   async function loadInbox(tab: string) { await assignLoad(`inbox?tab=${enc(tab)}`, inboxes.get(tab), value => { inboxes.set(tab, value); }); }
@@ -707,7 +719,11 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       case 'bookmarks': return [loadBookmarks];
       case 'manage': return [() => loadManage(current.tab === 'convention' ? 'queue' : current.tab), ...(current.tab === 'convention' ? [loadConvention] : [])];
       case 'rules': return [loadModerationContacts, loadConvention];
-      case 'member': return [() => loadMember(current.id, current.tab)];
+      case 'member': return [async () => {
+        const hash = location.hash, identity = frameIdentity;
+        await loadMember(current.id, current.tab);
+        if (current.tab === 'frames' && identity === frameIdentity && hash === location.hash && readyData(memberPages.get(memberKey(current.id, current.tab)))?.self) await loadProfile();
+      }];
       case 'profile': return [loadProfile];
       case 'stardust': return [async () => { await loadStardust(); }];
       case 'inbox': return [() => loadInbox(current.tab)];
@@ -787,7 +803,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   function passiveSelection() {
     const current = route();
     return JSON.stringify([location.hash, sort, queryOf(scopeOf(current)), flow, checkinMonth, replySort,
-      managementBoard, bannerEditor.state().scope, levelExplorer.state(), badgeExplorer.state()]);
+      managementBoard, bannerEditor.state().scope, levelExplorer.state(), badgeExplorer.state(), iconSelection]);
   }
   function passiveAllowed(confirmed = true) {
     if (!mounted || document.visibilityState !== 'visible' || !viewerVerified || viewerFailure || viewerHash !== location.hash
@@ -873,7 +889,9 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       }
       case 'member': {
         const key = memberKey(current.id, current.tab);
-        stage<CommunityMember>(`members/${enc(current.id)}?tab=${enc(current.tab)}`, value => { memberPages.set(key, value); }); break;
+        stage<CommunityMember>(`members/${enc(current.id)}?tab=${enc(current.tab)}`, value => { memberPages.set(key, value); });
+        if (current.tab === 'frames' && readyData(memberPages.get(key))?.self) stage<CommunityProfile>('profile', value => { if (!profileWrite) profile = value; });
+        break;
       }
       case 'stardust': {
         const selected = flow;
@@ -1022,7 +1040,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       case 'checkin': return communityCheckinHTML({ ...common, checkin: checkin || loading, me: viewer });
       case 'bookmarks': return communityBookmarksHTML({ ...common, list: bookmarks || loading });
       case 'manage': return communityManageHTML({ ...common, manage: manages.get(current.tab === 'convention' ? 'queue' : current.tab) || loading, tab: current.tab, itemEditing, shippingOrder, rejecting, deleting, me: viewer, selectedReviews: [...reviewSelection], managementBoard, stewardCandidate, stewardEditingUid, bannerEditor: bannerEditor.state(), boardEditor: boardEditor.state(), convention });
-      case 'member': return communityMemberHTML({ ...common, member: memberPages.get(memberKey(current.id, current.tab)) || loading, me: viewer, muting, badgeSelection: badgeExplorer.state() });
+      case 'member': return communityMemberHTML({ ...common, member: memberPages.get(memberKey(current.id, current.tab)) || loading, me: viewer, muting, badgeSelection: badgeExplorer.state(), iconSelection, frames: profile || loading });
       case 'profile': return communityMemberHTML({ ...common, member: memberPages.get(memberKey(viewer?.uid || readyData(profile)?.person.uid || '', 'topics')) || loading, me: viewer });
       case 'stardust': return communityStardustHTML({ ...common, stardust: stardusts.get(flow) || loading, tab: current.tab, levelSelection: levelExplorer.state() });
       case 'inbox': return communityInboxHTML({ ...common, inbox: inboxes.get(current.tab) || loading, tab: current.tab, me: viewer });
@@ -1361,6 +1379,30 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const sameAccount = currentAccount !== null && paintedAccount === currentAccount;
     const preserveControls = sameAccount && !section.hasAttribute('data-community-pending-route');
     const samePage = paintedPage?.hash === location.hash && paintedPage.frame === frameIdentity;
+    if (sameAccount && samePage && route().view === 'member' && ['icons', 'frames'].includes(route().tab || '') && paintedPage) {
+      const frames = route().tab === 'frames', selector = frames ? '[data-community-frames]' : '[data-community-icons]';
+      const panel = section.querySelector<HTMLElement>(selector), nextPanel = next.querySelector<HTMLElement>(selector);
+      const name = section.querySelector('.community-m-name h1'), nextName = next.querySelector('.community-m-name h1');
+      const previous = document.createElement('template'); previous.innerHTML = paintedPage.markup;
+      const before = previous.content.firstElementChild;
+      const surrounding = (element: Element) => {
+        const copy = element.cloneNode(true) as Element;
+        copy.querySelector(selector)?.remove(); copy.querySelector('.community-m-name h1')?.remove();
+        if (frames) copy.querySelector('.community-m-id > .community-av')?.remove();
+        return copy.outerHTML;
+      };
+      if (panel && nextPanel && name && nextName && before && surrounding(before) === surrounding(next) && syncCommunityIconPanel(panel, nextPanel, frames ? 'community-frame-equip' : 'community-icon-equip')) {
+        rememberPaint(markup, next);
+        if (name.innerHTML !== nextName.innerHTML) name.innerHTML = nextName.innerHTML;
+        if (frames) {
+          const avatar = section.querySelector('.community-m-id > .community-av'), nextAvatar = next.querySelector('.community-m-id > .community-av');
+          const beforeAvatar = before.querySelector('.community-m-id > .community-av');
+          if (avatar && nextAvatar && beforeAvatar?.outerHTML !== nextAvatar.outerHTML) avatar.replaceWith(nextAvatar);
+        }
+        mounted.ctx.painted?.();
+        return;
+      }
+    }
     const resetManagementScroll = section.matches('.community-management-page[data-community-pending-route="true"]')
       && section.dataset.managementPreserveScroll !== 'true';
     if (staged && sameAccount && samePage && paintedPage) {
@@ -2434,7 +2476,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       'community-lightbox', 'community-post-menu', 'community-copy-link', 'community-copy-prompt', 'community-copy-delivery',
       'community-delivery', 'community-delivery-close', 'community-month', 'community-flow', 'community-notice',
       'community-shop-detail',
-      'community-level-mode', 'community-level-select', 'community-badge-family', 'community-badge-tier',
+      'community-level-mode', 'community-level-select', 'community-badge-family', 'community-badge-tier', 'community-icon-category', 'community-icon-page',
     ].includes(action || '')) {
       notify(tr('当前预览仅供查看，请先返回管理身份。', 'This preview is read-only. Restore management first.')); return;
     }
@@ -2616,6 +2658,97 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       case 'community-shop-detail': shopDialog.open(mounted.main.ownerDocument, id, target); return;
       case 'community-redeem': shopDialog.close(); redeeming = id; delivery = null; openPanel('form[data-community-form="redeem"]'); return;
       case 'community-redeem-cancel': redeeming = null; paint(); return;
+      case 'community-icon-category': case 'community-icon-page': {
+        const current = route(), viewer = readyData(me);
+        const member = current.view === 'member' ? readyData(memberPages.get(memberKey(current.id, current.tab))) : null;
+        const panel = target.closest<HTMLElement>('[data-community-icons]');
+        if (!panel || current.tab !== 'icons' || !member?.self || !member.iconState || member.person.uid !== viewer?.uid) return;
+        const kind = communityIconCategory(target.dataset.iconCategory);
+        if (action === 'community-icon-category' && !kind) return;
+        const browse = communityIconBrowse(member.iconState, iconSelection);
+        iconSelection = action === 'community-icon-category' && kind ? { kind, page: 1 }
+          : action === 'community-icon-page' && ['previous', 'next'].includes(target.dataset.iconPage || '')
+            ? { kind: browse.kind, page: browse.page + (target.dataset.iconPage === 'next' ? 1 : -1) } : iconSelection;
+        const nextBrowse = communityIconBrowse(member.iconState, iconSelection);
+        iconSelection = { kind: nextBrowse.kind, page: nextBrowse.page };
+        const template = document.createElement('template');
+        template.innerHTML = communityIconPanelHTML(member.person, member.iconState, !communityReaderReadOnly(viewer), mounted.ctx, iconSelection);
+        const next = template.content.firstElementChild;
+        const collection = panel.querySelector('[data-icon-collection]'), nextCollection = next?.querySelector('[data-icon-collection]');
+        if (!next || !collection || !nextCollection) return;
+        collection.replaceChildren(...nextCollection.childNodes);
+        panel.dataset.iconKind = nextBrowse.kind; panel.dataset.iconCurrentPage = String(nextBrowse.page);
+        for (const button of panel.querySelectorAll('[data-icon-category]')) button.setAttribute('aria-pressed', String(button.getAttribute('data-icon-category') === nextBrowse.kind));
+        const focus = action === 'community-icon-category' ? target : collection.querySelector<HTMLElement>('[data-icon-ref]:not(:disabled)') || collection.querySelector<HTMLElement>('[data-icon-page]:not(:disabled)');
+        focus?.focus({ preventScroll: true });
+        mounted.ctx.painted?.();
+        return;
+      }
+      case 'community-icon-equip': {
+        const current = route(), viewer = readyData(me), identity = frameIdentity;
+        const member = current.view === 'member' ? readyData(memberPages.get(memberKey(current.id, current.tab))) : null;
+        if (iconWrite?.identity === identity || !viewer?.uid || !member?.self || member.person.uid !== viewer.uid || !member.iconState || communityReaderReadOnly(viewer)) return;
+        const ref = target.dataset.iconMode === 'default' ? null : target.dataset.iconMode === 'none' ? '' : target.dataset.iconRef;
+        if (ref === undefined || ref && (!communityIconDefinition(ref) || !member.iconState.available.some(value => value === ref))) return;
+        const write = { identity }; iconWrite = write;
+        const panel = target.closest<HTMLElement>('[data-community-icons]');
+        const controls = [...panel?.querySelectorAll<HTMLButtonElement>('button[data-action="community-icon-equip"]') || []];
+        panel?.setAttribute('aria-busy', 'true');
+        for (const button of controls) button.setAttribute('aria-disabled', 'true');
+        void (async () => {
+          try {
+            await act(target, async () => {
+              await send('shop/equip', { kind: 'icon', ref });
+              if (identity !== frameIdentity) return;
+              invalidateMemberProfile(viewer.uid);
+              notify(ref === '' ? tr('已取下昵称图标。', 'Nickname icon removed.') : ref === null ? tr('已恢复默认图标。', 'Default icon restored.') : tr('已更换昵称图标。', 'Nickname icon updated.'));
+              await reload();
+            });
+          } finally {
+            if (iconWrite === write) iconWrite = null;
+            panel?.removeAttribute('aria-busy');
+            const currentViewer = readyData(me), editable = identity === frameIdentity && currentViewer?.uid === viewer.uid && !communityReaderReadOnly(currentViewer);
+            for (const button of controls) if (button.isConnected) {
+              button.removeAttribute('aria-disabled');
+              button.disabled = !editable || button.dataset.iconLocked === 'true';
+            }
+          }
+        })();
+        return;
+      }
+      case 'community-frame-equip': {
+        const current = route(), viewer = readyData(me), identity = frameIdentity;
+        const member = current.view === 'member' && current.tab === 'frames' ? readyData(memberPages.get(memberKey(current.id, current.tab))) : null;
+        const owned = readyData(profile), ref = target.dataset.frameRef;
+        if (frameWrite?.identity === identity || !viewer?.uid || !member?.self || member.person.uid !== viewer.uid || owned?.person.uid !== viewer.uid || communityReaderReadOnly(viewer)) return;
+        if (ref === undefined || ref && !owned.frames.some(frame => frame.ref === ref)) return;
+        const write = { identity }; frameWrite = write;
+        const panel = target.closest<HTMLElement>('[data-community-frames]');
+        const controls = [...panel?.querySelectorAll<HTMLButtonElement>('button[data-action="community-frame-equip"]') || []];
+        panel?.setAttribute('aria-busy', 'true');
+        for (const button of controls) button.setAttribute('aria-disabled', 'true');
+        void (async () => {
+          try {
+            await act(target, async () => {
+              await send('shop/equip', { kind: 'frame', ref: ref || null });
+              if (identity !== frameIdentity) return;
+              invalidateMemberProfile(viewer.uid);
+              notify(ref ? tr('头像框已设置。', 'Avatar frame selected.') : tr('已取下商城头像框。', 'Shop frame removed.'));
+              await reload();
+            });
+          } finally {
+            if (frameWrite === write) frameWrite = null;
+            panel?.removeAttribute('aria-busy');
+            const currentViewer = readyData(me), currentOwned = readyData(profile);
+            const editable = identity === frameIdentity && currentViewer?.uid === viewer.uid && currentOwned?.person.uid === viewer.uid && !communityReaderReadOnly(currentViewer);
+            for (const button of controls) if (button.isConnected) {
+              button.removeAttribute('aria-disabled');
+              button.disabled = !editable || Boolean(button.dataset.frameRef && !currentOwned?.frames.some(frame => frame.ref === button.dataset.frameRef));
+            }
+          }
+        })();
+        return;
+      }
       case 'community-equip': {
         const uid = readyData(me)?.uid, identity = frameIdentity;
         void act(target, async () => {
@@ -3108,7 +3241,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     managementBoard = ''; stewardCandidate = null; stewardLookupUid = ''; stewardLookupRequest++; stewardBusy = false; stewardEditingUid = null; stewardScopeDraft = null; stewardConfirmation = null;
     checkinRequest++; stardustRequest++;
     levelExplorer.reset();
-    badgeExplorer.reset();
+    badgeExplorer.reset(); iconSelection = undefined;
     frameIdentity++; permissionRevision++; meRequest++; viewerVerified = false; viewerHash = ''; viewerFailure = null; paintedPage = null;
     confirmedPage = null; pendingRoute = null; coreRoute = null; renderedHash = '';
     frameHighlightsPending.clear(); frameHighlights.clear(); listRequests.clear();

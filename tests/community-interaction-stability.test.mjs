@@ -77,6 +77,159 @@ const generalShopStaff = { role: 'general', boards: ['qa'], permissions: [], del
 const generalShopViewer = { ...person, mod: true, staffRole: 'general', staff: generalShopStaff, level: 3, trustLevel: 3 };
 const generalShopData = { ...managementData, owner: false, actorStaff: generalShopStaff, allowedTabs: ['items', 'contact'] };
 
+const iconMember = (icon = null, selected = '') => ({ person: { ...person, icon }, self: true, canMute: false, canAppoint: false,
+  stats: { topics: 0, replies: 0, likes: 0, accepted: 0, featured: 0 }, follows: { followers: 0, following: 0 },
+  counts: { topics: 0, replies: 0, bookmarks: 0 }, topics: [], replies: [], bookmarks: [], badges: [], bio: '', streak: 0,
+  joinedAt: null, muted: null, quick: null, tab: 'icons', iconState: { selected, equipped: icon, available: ['growth:1', 'growth:2', 'trust:0'] } });
+
+test('owned frames load and equip without remounting decoded previews; remove persists and parallel choices cannot race', async t => {
+  let frame = null, writes = 0;
+  const pending = deferred();
+  const fixture = await setup(t, '#/community/u/u1/frames', (url, init) => {
+    if (url.endsWith('/me')) return response({ ...person, frame });
+    if (url.includes('/members/u1?')) return response({ ...iconMember(), person: { ...person, frame }, tab: 'frames' });
+    if (url.endsWith('/profile')) return response({ person, canEditProfile: false, frames: [{ id: 'gold', name: '金色框', ref: 'gold', image: null }, { id: 'orbit', name: '轨道框', ref: 'orbit', image: null }] });
+    if (url.endsWith('/shop/equip')) {
+      writes++; const ref = JSON.parse(init.body).ref;
+      const apply = () => { frame = ref; return response({ frame }); };
+      return writes === 1 ? pending.promise.then(apply) : apply();
+    }
+  });
+  const panel = fixture.main.querySelector('[data-community-frames]');
+  assert.ok(panel);
+  const gold = panel.querySelector('[data-frame-ref="gold"]'), preview = gold.querySelector('.community-av');
+  gold.focus(); gold.click(); panel.querySelector('[data-frame-ref="orbit"]').click(); await turn();
+  assert.equal(writes, 1);
+  pending.resolve(); await turn(); await turn();
+  assert.equal(fixture.main.querySelector('[data-community-frames]'), panel);
+  assert.equal(panel.querySelector('[data-frame-ref="gold"]'), gold);
+  assert.equal(gold.querySelector('.community-av'), preview);
+  assert.equal(fixture.w.document.activeElement, gold);
+  assert.equal(gold.getAttribute('aria-pressed'), 'true');
+  panel.querySelector('[data-frame-ref=""]').click(); await turn(); await turn();
+  assert.equal(frame, null);
+  assert.deepEqual(fixture.requests.filter(call => call.url.endsWith('/shop/equip')).map(call => JSON.parse(call.init.body)), [{ kind: 'frame', ref: 'gold' }, { kind: 'frame', ref: null }]);
+  await fixture.remount('#/community/u/u1/frames');
+  assert.equal(fixture.main.querySelector('[data-frame-ref=""]').getAttribute('aria-pressed'), 'true');
+});
+
+test('a foreign member frames URL does not load private owned frames or permit a forged equip', async t => {
+  const fixture = await setup(t, '#/community/u/other/frames', url => url.includes('/members/other?') ? response({ ...iconMember(), self: false, tab: 'frames', person: { ...person, uid: 'other' } }) : null);
+  assert.equal(fixture.requests.some(call => call.url.endsWith('/profile')), false);
+  assert.equal(fixture.main.querySelector('[data-community-frames]'), null);
+});
+
+test('failed frame saves retain owned previews and reject a ref outside the owned collection', async t => {
+  const fixture = await setup(t, '#/community/u/u1/frames', url => {
+    if (url.includes('/members/u1?')) return response({ ...iconMember(), tab: 'frames' });
+    if (url.endsWith('/profile')) return response({ person, frames: [{ id: 'gold', name: '金色框', ref: 'gold', image: null }] });
+    if (url.endsWith('/shop/equip')) return new Response(JSON.stringify({ error: '请稍后重试' }), { status: 503, headers: { 'Content-Type': 'application/json' } });
+  });
+  const panel = fixture.main.querySelector('[data-community-frames]'), choice = panel.querySelector('[data-frame-ref="gold"]');
+  choice.dataset.frameRef = 'nebula'; choice.click(); await turn();
+  assert.equal(fixture.requests.filter(call => call.url.endsWith('/shop/equip')).length, 0);
+  choice.dataset.frameRef = 'gold'; choice.click(); await turn(); await turn();
+  assert.equal(fixture.main.querySelector('[data-community-frames]'), panel);
+  assert.equal(choice.disabled, false);
+  assert.equal(panel.hasAttribute('aria-busy'), false);
+  assert.equal(choice.hasAttribute('aria-disabled'), false);
+  assert.equal(choice.getAttribute('aria-pressed'), 'false');
+});
+
+test('choosing an icon is serialized, survives a refresh, and keeps take-off distinct from default', async t => {
+  const pending = deferred();
+  let selection = '', effective = null, writes = 0;
+  let headerChanges = 0;
+  const fixture = await setup(t, '#/community/u/u1/icons', (url, init) => {
+    if (url.endsWith('/me')) return response({ ...person, icon: effective });
+    if (url.includes('/members/u1?')) return response(iconMember(effective, selection));
+    if (url.endsWith('/shop/equip')) {
+      writes++;
+      const { ref } = JSON.parse(init.body);
+      const apply = () => { selection = ref; effective = ref || null; return response({ icon: effective }); };
+      return writes === 1 ? pending.promise.then(apply) : Promise.resolve(apply());
+    }
+  }, { headerChanged: () => { headerChanges++; } });
+  const beforeIconChange = headerChanges;
+  const panelBefore = fixture.main.querySelector('[data-community-icons]');
+  const choicesBefore = [...panelBefore.querySelectorAll('[data-icon-ref]')];
+  const artworkBefore = choicesBefore.map(button => button.querySelector('.community-icon-choice-art'));
+  const first = fixture.main.querySelector('[data-icon-ref="growth:1"]');
+  const second = fixture.main.querySelector('[data-icon-ref="growth:2"]');
+  first.click(); second.click(); await turn();
+  assert.equal(writes, 1, 'different buttons cannot race to equip two different selections');
+  assert.equal(fixture.main.querySelector('[data-community-icons]').getAttribute('aria-busy'), 'true');
+  pending.resolve(); await turn(); await turn();
+  assert.equal(fixture.main.querySelector('[data-community-icons]'), panelBefore, 'saving does not replace the icon panel or replay its entry');
+  assert.deepEqual([...panelBefore.querySelectorAll('[data-icon-ref]')], choicesBefore, 'the existing card buttons stay attached');
+  assert.deepEqual(choicesBefore.map(button => button.querySelector('.community-icon-choice-art')), artworkBefore, 'artwork nodes are retained');
+  assert.ok(headerChanges > beforeIconChange, 'changing only the icon refreshes the header for the same account');
+  assert.match(communityAccountHTML({ ...fixture.ctx, me: fixture.ui.me() }), /data-name-icon="growth:1"/);
+  assert.equal(fixture.main.querySelector('.community-m-name [data-name-icon]').dataset.nameIcon, 'growth:1');
+  assert.equal(fixture.main.querySelectorAll('[data-icon-ref][aria-pressed="true"]').length, 1);
+  fixture.main.querySelector('[data-icon-mode="none"]').click(); await turn(); await turn();
+  assert.equal(fixture.main.querySelector('.community-m-name [data-name-icon]'), null);
+  fixture.main.querySelector('[data-icon-mode="default"]').click(); await turn(); await turn();
+  assert.deepEqual(fixture.requests.filter(call => call.url.endsWith('/shop/equip')).map(call => JSON.parse(call.init.body)),
+    [{ kind: 'icon', ref: 'growth:1' }, { kind: 'icon', ref: '' }, { kind: 'icon', ref: null }]);
+  await fixture.remount('#/community/u/u1/icons');
+  assert.equal(fixture.main.querySelector('[data-icon-mode="default"]').getAttribute('aria-pressed'), 'true');
+});
+
+test('locked icon controls cannot submit a forged wearable, and failed saves restore the choice grid', async t => {
+  const notices = [];
+  const fixture = await setup(t, '#/community/u/u1/icons', (url, init) => {
+    if (url.includes('/members/u1?')) return response(iconMember());
+    if (url.endsWith('/shop/equip')) return Promise.resolve(new Response(JSON.stringify({ error: '资格已失效' }), { status: 403, headers: { 'Content-Type': 'application/json' } }));
+  }, { notify: value => notices.push(value) });
+  fixture.main.querySelector('[data-icon-category="staff"]').click();
+  const unavailable = fixture.main.querySelector('[data-icon-ref="staff:general"]');
+  unavailable.disabled = false; unavailable.click(); await turn();
+  assert.equal(fixture.requests.filter(call => call.url.endsWith('/shop/equip')).length, 0);
+  fixture.main.querySelector('[data-icon-category="growth"]').click();
+  fixture.main.querySelector('[data-icon-ref="growth:1"]').click(); await turn(); await turn();
+  assert.equal(fixture.main.querySelector('[data-icon-ref="growth:1"]').disabled, false);
+  assert.equal(fixture.main.querySelector('[data-icon-ref="growth:6"]').disabled, true);
+  assert.equal(fixture.main.querySelector('[data-community-icons]').hasAttribute('aria-busy'), false);
+  assert.equal(fixture.main.querySelector('[data-icon-mode="none"]').getAttribute('aria-pressed'), 'true');
+  assert.ok(notices.includes('资格已失效'));
+});
+
+test('category and page browsing stays local; equipping on a later page retains its cards and focus', async t => {
+  let selection = '', effective = null;
+  const fixture = await setup(t, '#/community/u/u1/icons', (url, init) => {
+    if (url.endsWith('/me')) return response({ ...person, icon: effective });
+    if (url.includes('/members/u1?')) return response({ ...iconMember(effective, selection), iconState: { selected: selection, equipped: effective, available: ['growth:1', 'growth:8'] } });
+    if (url.endsWith('/shop/equip')) { selection = JSON.parse(init.body).ref; effective = selection; return response({ icon: effective }); }
+  });
+  const panel = fixture.main.querySelector('[data-community-icons]'), reads = fixture.requests.length;
+  fixture.main.querySelector('[data-icon-page="next"]').click();
+  assert.equal(panel.dataset.iconCurrentPage, '2');
+  assert.equal(fixture.main.querySelector('[data-icon-ref="growth:1"]'), null);
+  const target = fixture.main.querySelector('[data-icon-ref="growth:8"]'), art = target.querySelector('.community-icon-choice-art');
+  assert.equal(fixture.requests.length, reads, 'browsing does not request the account or catalogue again');
+  target.focus(); target.click(); await turn(); await turn();
+  assert.equal(fixture.main.querySelector('[data-community-icons]'), panel);
+  assert.equal(fixture.main.querySelector('[data-icon-ref="growth:8"]'), target);
+  assert.equal(target.querySelector('.community-icon-choice-art'), art);
+  assert.equal(fixture.w.document.activeElement, target);
+  assert.equal(target.getAttribute('aria-pressed'), 'true');
+});
+
+test('a qualification lost during saving stays grey and disabled after the request finishes', async t => {
+  let saved = false;
+  const fixture = await setup(t, '#/community/u/u1/icons', url => {
+    if (url.endsWith('/me')) return response({ ...person, icon: null });
+    if (url.includes('/members/u1?')) return response(saved ? { ...iconMember(), iconState: { selected: 'growth:1', equipped: null, available: [] } } : iconMember());
+    if (url.endsWith('/shop/equip')) { saved = true; return response({ icon: null }); }
+  });
+  const card = fixture.main.querySelector('[data-icon-ref="growth:1"]');
+  card.click(); await turn(); await turn();
+  assert.equal(fixture.main.querySelector('[data-icon-ref="growth:1"]'), card);
+  assert.equal(card.dataset.iconLocked, 'true'); assert.equal(card.disabled, true);
+  assert.ok(fixture.main.querySelector('.community-icon-expired'));
+});
+
 test('an existing general sees the shared product editor and submits edits and categories without owner-only sections', async t => {
   const item = { id: 'general-edit', cat: 'digital', kind: 'digital', name: '社区工作流', desc: '供社区读者兑换的工作流。', price: 8, stock: null, active: true, delivery: '兑换后内容', builtin: false };
   const f = await setup(t, '#/community/manage/items', url => {

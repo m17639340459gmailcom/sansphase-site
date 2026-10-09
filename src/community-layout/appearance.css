@@ -136,7 +136,7 @@ body.community-open:is(.community-frame-open, .community-management-open)[data-c
 body.community-open:is(.community-frame-open, .community-management-open)[data-community-theme="light"] .community-flag.is-warn { color: var(--cm-warn); background: var(--cm-warn-soft); }
 body.community-open:is(.community-frame-open, .community-management-open)[data-community-theme="light"] .community-flag.is-danger { color: var(--error); background: var(--cm-danger-soft); }
 body.community-open:is(.community-frame-open, .community-management-open)[data-community-theme="light"] .community-flag.is-locked { color: #4f5b6c; background: #dce3e9; }
-body.community-open:is(.community-frame-open, .community-management-open)[data-community-theme="light"] :is(.community-role, .community-lv, .community-vip) { border-color: var(--community-identity-edge); background: var(--community-identity-fill); }
+body.community-open:is(.community-frame-open, .community-management-open)[data-community-theme="light"] :is(.community-lv, .community-vip) { border-color: var(--community-identity-edge); background: var(--community-identity-fill); }
 /* Solid ink is the fallback; clipped gradients use an explicit fill so rank,
    account and hover colours cannot wash out purchased nickname finishes. */
 body.community-open:is(.community-frame-open, .community-management-open)[data-community-theme="light"] :is(a.community-uname.is-color-gold, .is-color-gold) { color: var(--community-name-gold); background-color: transparent; background-image: var(--community-name-gold-shine); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; text-shadow: none; }

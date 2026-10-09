@@ -12,7 +12,7 @@ import { createCommunityBadges } from './community-badges.ts';
 import type { Transaction } from './community-db.ts';
 import type { createCommunityStaff } from './community-staff.ts';
 
-type MemberRow = { level: number; level_day: string | null; steward: number; steward_boards: string | null; frame: string | null; name_color: string | null; cover: string | null; agreed_at: string | null; created_at: string };
+type MemberRow = { level: number; level_day: string | null; steward: number; steward_boards: string | null; frame: string | null; name_color: string | null; cover: string | null; name_icon: string | null; agreed_at: string | null; created_at: string };
 type NoticeRow = {
   id: string; type: string; actor_kind: CommunityAuthor['kind'] | null; actor_id: string | null; topic_id: string | null; reply_id: string | null;
   text: string; data: string | null; link: string | null; count: number; created_at: string; read_at: string | null;
@@ -34,7 +34,8 @@ export function createMembers(db: DatabaseSync, convention: Pick<ReturnType<type
     && value.every(board => typeof board === 'string' && boardIds().includes(board)) && new Set(value).size === value.length;
   const orderedModerationBoards = (boards: readonly string[]) => boardIds().filter(board => boards.includes(board));
   const ensureRow = db.prepare('INSERT OR IGNORE INTO community_members (member_kind, member_id, created_at) VALUES (?, ?, ?)');
-  const memberRow = db.prepare('SELECT level, level_day, steward, steward_boards, frame, name_color, cover, agreed_at, created_at FROM community_members WHERE member_kind = ? AND member_id = ?');
+  const memberRow = db.prepare('SELECT level, level_day, steward, steward_boards, frame, name_color, cover, name_icon, agreed_at, created_at FROM community_members WHERE member_kind = ? AND member_id = ?');
+  const setNameIcon = db.prepare('UPDATE community_members SET name_icon = ? WHERE member_kind = ? AND member_id = ?');
   const saveLevel = db.prepare('UPDATE community_members SET level = ?, level_day = ? WHERE member_kind = ? AND member_id = ?');
   const setStewardRow = db.prepare('UPDATE community_members SET steward = ?, steward_boards = ? WHERE member_kind = ? AND member_id = ?');
   const contactRow = db.prepare('SELECT contact_qq, contact_email FROM community_members WHERE member_kind = ? AND member_id = ?');
@@ -219,6 +220,16 @@ export function createMembers(db: DatabaseSync, convention: Pick<ReturnType<type
       const value = row(member);
       return { frame: value.frame, color: value.name_color, cover: value.cover };
     },
+    appearance(member: CommunityAuthor) {
+      const value = row(member);
+      return { frame: value.frame, color: value.name_color, cover: value.cover, selectedIcon: value.name_icon };
+    },
+    iconSelection: (member: CommunityAuthor) => (memberRow.get(member.kind, member.id) as MemberRow | undefined)?.name_icon ?? null,
+    setIcon(member: CommunityAuthor, ref: string | null) {
+      ensure(member); setNameIcon.run(ref, member.kind, member.id);
+    },
+    iconHonors: achievements.iconHonors,
+    hasIconHonor: achievements.hasIconHonor,
     // Main-site frame projections must not create a membership or award a visit.
     storedDecorations(member: CommunityAuthor) {
       const value = memberRow.get(member.kind, member.id) as MemberRow | undefined;

@@ -1142,7 +1142,7 @@ test("readers post, list, read and reply; the owner can remove anything, readers
   assert.equal(list.total, 2);
   assert.equal(list.items[0].id, id, "the replied topic is most recently active");
   assert.equal(list.items[0].title, "ComfyUI 人脸崩了", "titles are trimmed");
-  assert.deepEqual(list.items[0].author, { name: "林间", role: "reader", uid: "u1", showUid: true, avatar: `/api/community/avatar/u1.webp?v=${avatarId}`, vip: false, level: 1, growth: emptyGrowth, vipGrowth: emptyVIPGrowth, steward: false,staffRole:null, frame: null, color: null });
+  assert.deepEqual(list.items[0].author, { name: "林间", role: "reader", uid: "u1", showUid: true, avatar: `/api/community/avatar/u1.webp?v=${avatarId}`, vip: false, level: 1, growth: emptyGrowth, vipGrowth: emptyVIPGrowth, steward: false,staffRole:null, icon:null, frame: null, color: null });
   assert.equal(list.items[0].replies, 1);
   assert.equal(list.items[0].lastReply.author.name, "远山", "a listed topic names its latest replier");
   assert.equal(list.items[1].lastReply, null);
@@ -1628,7 +1628,7 @@ test("public post people keep a linkable UID while display follows viewer permis
   const { get, post } = await setup(t);
   const { id } = await json(post("topics", topicBody, "reader=r1"));
   await post("members/u5/steward", { on: true,role:"general", boards: allModerationBoards,permissions:communityLegacyStaffPermissions,delegable:[] }, "owner=yes");
-  assert.deepEqual((await json(get(`topics/${id}`, "reader=r2"))).topic.author, { name: "林间", role: "reader", uid: "u1", showUid: false, avatar: `/api/community/avatar/u1.webp?v=${avatarId}`, vip: false, level: 1, growth: emptyGrowth, vipGrowth: emptyVIPGrowth, steward: false,staffRole:null, frame: null, color: null });
+  assert.deepEqual((await json(get(`topics/${id}`, "reader=r2"))).topic.author, { name: "林间", role: "reader", uid: "u1", showUid: false, avatar: `/api/community/avatar/u1.webp?v=${avatarId}`, vip: false, level: 1, growth: emptyGrowth, vipGrowth: emptyVIPGrowth, steward: false,staffRole:null, icon:null, frame: null, color: null });
   assert.equal((await json(get(`topics/${id}`, "reader=r1"))).topic.author.showUid, true);
   assert.equal((await json(get(`topics/${id}`, "reader=s1"))).topic.author.showUid, true);
   assert.equal((await json(get("me", "reader=r1"))).uid, "u1");

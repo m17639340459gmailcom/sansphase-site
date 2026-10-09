@@ -29,7 +29,7 @@ for (const role of ['assistant', 'moderator', 'general']) {
       assert.equal(doc.querySelector('.community-frame-image, .is-frame-image'), null, 'only one frame is displayed while the role is active');
       assert.equal(doc.querySelector('.community-level-badge.is-staff img').getAttribute('src'), badgeSrc(role));
       assert.equal(doc.querySelectorAll('.community-level-badge.is-staff').length, 1);
-      assert.equal(doc.querySelectorAll('.community-level-badge.is-growth, .community-level-badge.is-trust, .community-level-badge.is-vip').length, 3);
+      assert.equal(doc.querySelectorAll('.community-level-badge.is-growth, .community-level-badge.is-trust, .community-level-badge.is-vip').length, 0, 'nicknames have one role icon by default');
     });
     assert.deepEqual(member, before);
   });
@@ -57,7 +57,7 @@ test('fresh own identity overrides a cached appointment, including revocation an
   inspect(avatarHTML(stale, promoted) + nameHTML(stale, promoted) + roleChipHTML(stale, promoted), doc => {
     assert.equal(doc.querySelector('.community-staff-frame img').getAttribute('src'), frameSrc('moderator'));
     assert.equal(doc.querySelector('.community-level-badge.is-staff img').getAttribute('src'), badgeSrc('moderator'));
-    assert.equal(doc.querySelector('.community-lv.is-steward').textContent, '版主');
+    assert.equal(doc.querySelector('.community-lv.is-steward'), null, 'the old text role chip is retired');
   });
   assert.equal(stale.staffRole, 'general');
   inspect(avatarHTML({ ...stale, uid: 'different-member' }, promoted), doc => {

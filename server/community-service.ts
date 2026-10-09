@@ -19,6 +19,8 @@ import { communityApprovedAvatarURL } from './community-avatar-url.ts';
 import { communityLevelRules } from '../src/community-rules.ts';
 import type { CommunityStaffRole } from '../src/community-staff.ts';
 import { canManageCommunityShop } from './community-shop-access.ts';
+import { communityIconDefinition, communityIconState } from '../src/community-icon-policy.ts';
+import type { CommunityIconEligibility } from '../src/community-icon-policy.ts';
 
 export { communityContactReason } from './community-context.ts';
 export type { CommunityViewer, PersonInfo } from './community-context.ts';
@@ -139,23 +141,38 @@ export function createCommunityService(options: ServiceOptions) {
       return [author, ...live.staff.ancestors(author)].filter(member => member.kind === 'reader')
         .every(member => map.get(memberKey(member))?.active === true) ? current.role : null;
     };
+    const iconEligibility = (author: CommunityAuthor, map: Map<string, PersonInfo>, badges: CommunityIconEligibility['badges'], levels?: Pick<CommunityIconEligibility, 'growthLevel' | 'vipLevel'>): CommunityIconEligibility => {
+      const info = map.get(memberKey(author));
+      if (!info || info.active === false) return { growthLevel: null, trustLevel: -1, vipLevel: null, staffRole: null, badges: [] };
+      const role = presentationStaffRole(author, map);
+      return { growthLevel: levels ? levels.growthLevel : live.experience.state(author)?.level ?? null, trustLevel: ordinaryTrust(author, role),
+        vipLevel: levels ? levels.vipLevel : live.experience.vipState(author, info.vip === true)?.level ?? null,
+        staffRole: role === 'owner' ? null : role, badges };
+    };
+    const iconState = (author: CommunityAuthor, map: Map<string, PersonInfo>) => communityIconState(live.members.iconSelection(author),
+      iconEligibility(author, map, live.members.iconHonors(author)));
     const person = (author: CommunityAuthor, map: Map<string, PersonInfo>) => {
       const info = map.get(memberKey(author));
-      if (!info) return { name: '已注销用户', role: author.kind, uid: null, avatar: null, vip: false, level: 0, growth: null, vipGrowth: null, frame: null, color: null };
-      const decorations = live.members.decorations(author);
+      if (!info) return { name: '已注销用户', role: author.kind, uid: null, avatar: null, vip: false, level: 0, growth: null, vipGrowth: null, frame: null, color: null, icon: null };
+      const decorations = live.members.appearance(author);
       const steward = live.members.steward(author);
       const preview = author.kind === 'reader' && info.ownerReader ? createOwnerReaderPreview() : same(author, me) ? ownerReaderPreview : null;
       const staffRole = preview ? null : presentationStaffRole(author, map);
+      const growth = live.experience.state(author), vipGrowth = live.experience.vipState(author, info.vip === true);
+      const choice = communityIconDefinition(decorations.selectedIcon);
+      const badge = choice?.kind === 'badge' && live.members.hasIconHonor(author, choice.family, choice.tier) ? [choice] : [];
+      const icon = communityIconState(decorations.selectedIcon, iconEligibility(author, map, badge, { growthLevel: growth?.level ?? null, vipLevel: vipGrowth?.level ?? null })).equipped;
       const nameEffect = live.economy.nameEffect(decorations.color);
       const canSeeUid = author.kind === 'owner' || same(author, me) || mod();
       return {
         name: info.name, role: preview ? 'reader' : author.kind,
         uid: info.uid,
         showUid: canSeeUid,
-        growth: preview?.growth ?? live.experience.state(author), vipGrowth: preview?.vipGrowth ?? live.experience.vipState(author, info.vip),
+        growth: preview?.growth ?? growth, vipGrowth: preview?.vipGrowth ?? vipGrowth,
         avatar: communityApprovedAvatarURL(info.uid, info.avatar),
         vip: preview ? true : info.vip, level: preview?.trustLevel ?? (same(author, me) && browsingAsReader ? trustLevel() : ordinaryTrust(author, staffRole)), steward: preview ? false : steward,
         staffRole,
+        icon,
         ...(steward ? { moderationBoards: live.members.moderationBoards(author) } : {}), frame: decorations.frame, color: decorations.color, ...(nameEffect ? { nameEffect } : {}),
       };
     };
@@ -191,7 +208,7 @@ export function createCommunityService(options: ServiceOptions) {
       canSeeBoard, get hiddenBoard() { return canSeeBoard(membersBoard) ? '' : membersBoard; },
       send: (value, status) => { options.assertActive?.(req); sendTo(res, value, status); },
       json: async () => { const value = await (body ||= readJson(req)); await refreshStaff(); requireConsent(); return value; },
-      people: async authors => { const map = await presentationPeople(authors); await refreshStaff(); requireConsent(); return map; }, person, topicDTO,
+      people: async authors => { const map = await presentationPeople(authors); await refreshStaff(); requireConsent(); return map; }, person, iconState, topicDTO,
       requireConsent,
       topicsDTO: async topics => {
         const map = await presentationPeople(peopleIn(topics)); await refreshStaff(); options.assertActive?.(req);

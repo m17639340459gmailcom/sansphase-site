@@ -274,11 +274,12 @@ for (const mobile of [false, true]) test(`${mobile ? 'mobile' : 'desktop'} scrol
     const root = window.document.querySelector<HTMLElement>('[data-community-frame]')!;
     const content = root.querySelector('[data-frame-route]')!.firstElementChild;
     const host = mobile ? window.document.documentElement : frame.center()!;
-    const state = () => root.style.getPropertyValue('--community-decoration-play-state');
+    const state = () => window.document.body.style.getPropertyValue('--community-decoration-play-state');
     host.dispatchEvent(new window.Event('scroll'));
     assert.equal(state(), '', 'unchanged position does not pause decoration');
     host.scrollTop = 100; host.dispatchEvent(new window.Event('scroll'));
     assert.equal(state(), 'paused');
+    assert.equal(root.style.getPropertyValue('--community-decoration-play-state'), '', 'header and content inherit the same body pause instead of separate scopes');
     t.mock.timers.tick(500);
     host.scrollTop = 200; host.dispatchEvent(new window.Event('scroll'));
     t.mock.timers.tick(599); assert.equal(state(), 'paused');

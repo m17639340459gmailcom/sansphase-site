@@ -76,7 +76,11 @@ test('visible duplicate marks share one bounded SVG load and isolate IDs and ani
     x.controller.pause();
     assert.equal(x.canvas(0)!.style.getPropertyValue('--community-level-play-state'), 'paused');
     assert.equal(x.canvas(1)!.style.getPropertyValue('--community-level-play-state'), 'paused');
+    assert.equal(x.canvas(0)!.hidden, true, 'scrolling must remove the complex SVG from painting, rather than just freeze its animation');
+    assert.equal(x.mark(0).dataset.levelMotionReady, 'paused', 'the compact static image is visible while its original canvas is parked');
     x.controller.resume();
+    assert.equal(x.canvas(0)!.hidden, false);
+    assert.equal(x.mark(0).dataset.levelMotionReady, 'true');
     assert.equal(x.canvas(0)!.shadowRoot, shadows[0]);
     assert.equal(x.canvas(1)!.shadowRoot, shadows[1]);
     assert.equal(calls.length, 1, 'pause and resume do not reload or replace artwork');

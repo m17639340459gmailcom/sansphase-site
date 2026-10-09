@@ -42,13 +42,13 @@ export function createStableCommunityFrame(document: Document, window: FrameWind
   const resumeDecoration = () => {
     if (decorationTimer !== null) clearTimeout(decorationTimer);
     decorationTimer = null;
-    root?.style.removeProperty('--community-decoration-play-state');
+    document.body.style.removeProperty('--community-decoration-play-state');
     levelMotion?.resume();
   };
   const pauseDecoration = () => {
-    // Freeze only decorative CSS motion, preserving its phase and all content.
-    // Do not rewrite styles on every scroll event or promote individual icons.
-    if (decorationTimer === null) root?.style.setProperty('--community-decoration-play-state', 'paused');
+    // The header and reading frame inherit one decorative pause. Preserve all
+    // content and never rewrite styles on every scroll event or promote icons.
+    if (decorationTimer === null) document.body.style.setProperty('--community-decoration-play-state', 'paused');
     else clearTimeout(decorationTimer);
     levelMotion?.pause();
     decorationTimer = setTimeout(resumeDecoration, 600);

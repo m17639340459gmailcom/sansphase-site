@@ -64,9 +64,13 @@ test('non-owner pickers retain adjacent roles and a direct assistant has no appo
   }
 });
 
-test('appointed role labels remain separate from earned community levels and reader mode', () => {
-  assert.match(levelChipHTML({ ...person, staffRole: 'general' }, common), /总版主/);
-  assert.match(levelChipHTML({ ...person, staffRole: 'moderator' }, common), /版主/);
+test('posting guidance keeps real community levels without reintroducing management text chips', () => {
+  for (const staffRole of ['general', 'moderator', 'assistant', undefined]) {
+    const markup = levelChipHTML({ ...person, staffRole }, common);
+    assert.match(markup, /title="L2"/);
+    assert.doesNotMatch(markup, /总版主|版主|协管|community-role|is-steward/);
+  }
+  assert.equal(levelChipHTML({ ...person, role: 'owner' }, common), '');
   assert.match(levelMarksHTML(person, common), /is-trust/);
   assert.equal(roleChipHTML({ ...person, staffRole: null }, common), '');
   const doc = new JSDOM(communityAccountHTML({ ...common, me: { ...person, staffRole: null, owner: false, mod: false, unread: { all: 0 }, management: { role: 'owner', browsingAsReader: true, interactive: true }, balance: 0 } })).window.document;

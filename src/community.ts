@@ -9,6 +9,9 @@ import { checkinBadgeIconHTML, communityBadgeArtHTML, legacyBadgeArtHTML } from 
 import { communityBadgeFamilies } from './community-badge-policy.mjs';
 import type { BadgeTier, CommunityBadgeState } from './community-badge-policy.ts';
 import { nameEffectVariables } from './community-name-effects.mjs';
+import { communityIconDefinition } from './community-icon-policy.mjs';
+import type { CommunityIconState } from './community-icon-policy.ts';
+import { communityIconArtHTML } from './community-icon-display.mjs';
 import { communityGrowthLevel } from './community-growth.mjs';
 import { communityGrowthArtHTML, communityTrustArtHTML, communityVipArtHTML } from './community-growth-art.mjs';
 import type { CommunityGrowthState, CommunityVIPGrowthState } from './community-growth.ts';
@@ -92,7 +95,7 @@ const subViews: Record<string, CommunityView> = {
 };
 // Pages with their own tabs: the tab is the last part of the address; the first is the default.
 export const communityPageTabs = {
-  member: ["topics", "replies", "badges", "bookmarks"],
+  member: ["topics", "replies", "badges", "icons", "frames", "bookmarks"],
   stardust: ["ledger", "levels", "rules"],
   inbox: ["all", "reply", "thanks", "system"],
   shop: ["all", "look", "card", "digital", "goods", "mine"],
@@ -165,6 +168,7 @@ export function communityRoute(hash: string): CommunityRoute {
 export type CommunityRole = "reader" | "owner";
 // A member as the API shows them: display name, role, public UID and avatar, level, VIP and decorations.
 export type CommunityPerson = {
+  icon?: string | null;
   nameEffect?: NameEffect | null;
   growth?: CommunityGrowthState | null;
   vipGrowth?: CommunityVIPGrowthState | null;
@@ -260,6 +264,7 @@ export type CommunityModerationContact = { qq: string; email: string };
 export type CommunityModerationContactPerson = CommunityModerationContact & { uid: string; name: string; owner: boolean; boards: string[] };
 export type CommunityModerationContacts = { items: CommunityModerationContactPerson[] };
 export type CommunityMe = CommunityPerson & {
+  iconState?: CommunityIconState;
   badgeState?: CommunityBadgeState;
   convention?: { version: string; agreed: boolean };
   management?: { role: CommunityStaffRole | 'steward'; browsingAsReader: boolean; interactive?: true; staff?: CommunityStaffState | null } | null;
@@ -296,7 +301,8 @@ function currentAppearance(person: CommunityPerson, common: Common): CommunityPe
   return viewer?.uid && person.uid === viewer.uid
     ? { ...person, role: viewer.role, avatar: viewer.avatar, frame: viewer.frame, color: viewer.color, nameEffect: viewer.nameEffect,
       growth: viewer.growth === undefined ? person.growth : viewer.growth,
-      staffRole: viewer.staffRole === undefined ? person.staffRole : viewer.staffRole }
+      staffRole: viewer.staffRole === undefined ? person.staffRole : viewer.staffRole,
+      icon: viewer.icon === undefined ? person.icon : viewer.icon }
     : person;
 }
 export function avatarHTML(person: CommunityPerson | null | undefined, common: Common, size: AvatarSize = "md", link = true) {
@@ -324,21 +330,15 @@ const levelTitle = (level: number, t: Translate) => {
   return t(item.name, item.en.charAt(0) + item.en.slice(1).toLowerCase());
 };
 export const communityLevelName = levelTitle;
-// 等级标识：站长是独立角色，协管也不是自动等级；VIP 另起一个标识。
+// 发帖须知保留真实社区等级，管理身份不再生成文字小牌。
 export function levelChipHTML(person: CommunityPerson, common: Common) {
   person = currentAppearance(person, common);
   const { t } = common;
-  if (person.role === "owner") return `<span class="community-role">${t("站长", "Owner")}</span>`;
-  const role = communityStaffRoles.find(item => item.id === person.staffRole);
-  if (role || person.staffRole === undefined && person.steward) {
-    const label = role ? t(role.name, role.nameEn) : t('协管', 'Steward');
-    const legacyIcon = role ? '' : '<span class="community-steward-icon" aria-hidden="true">⬟</span>';
-    return `<span class="community-lv is-steward" title="${label}">${legacyIcon}${label}</span>`;
-  }
+  if (person.role === 'owner') return '';
   const level = Math.max(0, Math.min(3, person.level ?? 0));
   return `<span class="community-lv is-lv${level}" title="L${level}">${levelTitle(level, t)}</span>`;
 }
-// 带文字的成长标识，只用于“我的”入口里的等级一栏；昵称旁用 levelMarksHTML。
+// 带文字的成长标识，只用于“我的”入口里的等级一栏；昵称旁使用单枚自选图标。
 export function growthChipHTML(person: CommunityPerson, common: Common) {
   person = currentAppearance(person, common);
   if (person.role === 'owner' || !person.growth) return '';
@@ -346,10 +346,10 @@ export function growthChipHTML(person: CommunityPerson, common: Common) {
   const label = t(item.name, item.en);
   return `<span class="community-growth-chip" title="${esc(t(`成长等级：${label}`, `Growth level: ${label}`))}">${communityGrowthArtHTML(item.level, true)}<span>${esc(label)}</span></span>`;
 }
-// 昵称旁依次显示成长、权限、VIP 与有效管理职位，名称放在 title 与无障碍标签里。
+// 独立等级预览保留成长、权限、VIP 与有效管理职位的完整图形。
 // 站长没有等级；旧版协管响应不推算权限或职位图标；缺少成长字段时不推算成长等级。
 // 会员档位由服务端已记录的有效访问日确定；旧响应仅显示起始会员图标。
-// `large` 用于个人主页：图标单独成行放在昵称上方，尺寸加大。
+// `large` 供独立预览放大；个人资料昵称使用 communityNameIconHTML。
 export function levelMarksHTML(person: CommunityPerson, common: Common, large = false) {
   person = currentAppearance(person, common);
   if (person.role === 'owner') return '';
@@ -381,13 +381,25 @@ export function staffMarkHTML(person: CommunityPerson, common: Common): string {
   const label = t(`管理身份：${role.name}`, `Management role: ${role.nameEn}`);
   return `<span class="community-level-badge is-staff" role="img" aria-label="${esc(label)}" title="${esc(label)}">${communityStaffArtHTML(staffRole, 'badge')}</span>`;
 }
-export function roleChipHTML(person: CommunityPerson, common: Common): string {
+export function roleChipHTML(_person: CommunityPerson, _common: Common): string {
+  // Compatibility for older callers: nickname role text chips were removed.
+  return '';
+}
+// Nicknames use one server-validated selection. Legacy DTOs use the same quiet
+// defaults until their next refresh; level explorers keep their full catalogue.
+export function communityNameIconHTML(person: CommunityPerson, common: Common): string {
   person = currentAppearance(person, common);
-  return person.role === 'owner' || communityStaffRoles.some(role => role.id === person.staffRole) || person.staffRole === undefined && person.steward
-    ? levelChipHTML(person, common) : '';
+  const { t, esc } = common;
+  const role = person.role === 'owner' ? null : communityStaffArtRole(person.staffRole);
+  const vipRank = person.vipGrowth?.active && Number.isInteger(person.vipGrowth.level) && (person.vipGrowth.level ?? 0) >= 1 && (person.vipGrowth.level ?? 0) <= 8 ? person.vipGrowth.level : 1;
+  const fallback = role ? `staff:${role}` : person.vip && person.role !== 'owner' ? `vip:${vipRank}` : null;
+  const icon = communityIconDefinition(person.icon === undefined ? fallback : person.icon);
+  if (!icon || icon.kind === 'staff' && icon.role !== role || icon.kind === 'vip' && !person.vip) return '';
+  const label = t(icon.name, icon.en);
+  return `<span class="community-level-marks"><span class="community-level-badge is-${icon.kind}" data-name-icon="${esc(icon.ref)}" role="img" aria-label="${esc(label)}" title="${esc(label)}">${communityIconArtHTML(icon)}</span></span>`;
 }
 function nameWithMarksHTML(label: string, person: CommunityPerson, common: Common, marked = true) {
-  const marks = marked ? levelMarksHTML(person, common) : '';
+  const marks = marked ? communityNameIconHTML(person, common) : '';
   return marks ? `<span class="community-name">${label}${marks}</span>` : label;
 }
 function nameAttributes(person: CommunityPerson) {
@@ -395,7 +407,7 @@ function nameAttributes(person: CommunityPerson) {
   const effect = communityNameEffect(person.nameEffect);
   return `class="community-uname${color ? ` is-color-${color}` : ""}"${effect ? ` data-name-effect="${effect.style}" style="${nameEffectVariables(effect)}"` : ''}`;
 }
-// `marked` 为 false 时只输出昵称，供把等级图标另行摆放的页面使用。
+// `marked` 为 false 时只输出昵称，供独立预览或纯文字标签使用。
 export function nameLabelHTML(person: CommunityPerson, common: Common, marked = true) {
   const { esc } = common;
   person = currentAppearance(person, common);
@@ -409,7 +421,7 @@ export function nameHTML(person: CommunityPerson, common: Common) {
   return nameWithMarksHTML(label, person, common);
 }
 export const whoHTML = (person: CommunityPerson, common: Common) =>
-  `<span class="community-who">${nameHTML(person, common)}${roleChipHTML(person, common)}</span>`;
+  `<span class="community-who">${nameHTML(person, common)}</span>`;
 export const dot = `<span class="community-dot" aria-hidden="true"></span>`;
 export const boardName = (id: string, t: Translate) => {
   const board = communityBoard(id);
@@ -617,7 +629,7 @@ export function communityAccountHTML({ t, esc, icons, nickname, author, me = nul
   const activeRole = communityStaffRoles.find(item => item.id === me?.staffRole);
   const roleTitle = activeRole ? t(activeRole.name, activeRole.nameEn)
     : me?.staffRole === undefined && me?.mod && me.steward && !browsingAsReader ? t('协管', 'Moderator') : null;
-  const head = me ? `<div class="community-menu-head">${avatarHTML(me, common, "sm", false)}<div><b>${nameLabelHTML(me, common)}</b><span>${me.owner ? t("站长", "Owner") : roleTitle || levelTitle(me.level ?? 0, t)}${me.uid ? ` · UID ${esc(me.uid)}` : ""}</span></div></div>` : "";
+  const head = me ? `<div class="community-menu-head">${avatarHTML(me, common, "sm", false)}<div><b title="${esc(me.name)}">${nameLabelHTML(me, common)}</b><span>${me.owner ? t("站长", "Owner") : roleTitle || levelTitle(me.level ?? 0, t)}${me.uid ? ` · UID ${esc(me.uid)}` : ""}</span></div></div>` : "";
   const personal = me
     ? (me.uid ? item(memberHref(me.uid), "user", t("我的主页", "My page")) : "")
       + item(stardustHref(), "star", t("我的星尘", "My stardust"), `<span class="community-menu-num">${me.balance}</span>`)
@@ -632,7 +644,9 @@ export function communityAccountHTML({ t, esc, icons, nickname, author, me = nul
   const button = me
     ? `${avatarHTML(me, common, "xs", false)}${nameLabelHTML(me, common)}`
     : `<span>${label}</span>`;
-  return `${bell}<div class="community-account"><button type="button" class="account-button${me ? " has-avatar" : ""}" data-action="community-account" aria-haspopup="menu" aria-expanded="false" aria-controls="community-account-menu">${button}${icons["chevron-down"] || ""}</button>`
+  const accountName = me?.name || nickname;
+  const accountLabel = accountName ? ` title="${esc(accountName)}" aria-label="${esc(t(`${accountName}，打开账号菜单`, `${accountName}, open account menu`))}"` : '';
+  return `${bell}<div class="community-account"><button type="button" class="account-button${me ? " has-avatar" : ""}" data-action="community-account"${accountLabel} aria-haspopup="menu" aria-expanded="false" aria-controls="community-account-menu">${button}${icons["chevron-down"] || ""}</button>`
     + `<div class="community-account-menu" id="community-account-menu" role="menu" hidden>${head}${personal}${account}</div></div>`;
 }
 
@@ -672,7 +686,7 @@ function communityCuratedHTML(items: readonly CommunityTopic[], common: Common, 
   const { t, esc, now = Date.now(), icons = {} } = common;
   const rows = items.map((topic, index) => {
     const title = topic.board === 'moments' && !topic.hasTitle ? plainText(topic.excerpt || topic.title) : topic.title;
-    const authorLabel = nameLabelHTML(topic.author, common, false) + staffMarkHTML(topic.author, common);
+    const authorLabel = nameLabelHTML(topic.author, common);
     const author = topic.author.uid ? `<a class="community-curated-author" href="${memberHref(topic.author.uid)}">${avatarHTML(topic.author, common, 'xs', false)}${authorLabel}</a>`
       : `<span class="community-curated-author">${avatarHTML(topic.author, common, 'xs', false)}${authorLabel}</span>`;
     return `<li class="community-curated-row${topic.glow ? ' is-glow' : ''}" data-topic-id="${esc(topic.id)}"><span class="community-curated-rank${index < 3 ? ' is-top' : ''}" aria-hidden="true">${String(index + 1).padStart(2, '0')}</span>`

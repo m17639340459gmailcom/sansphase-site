@@ -288,7 +288,7 @@
 :is(.community-page[data-community="home"][data-home-design="feed"], [data-community-frame]) .community-feed-byline:not(:has(> .community-av)) > :is(.community-who, time) { grid-column: 1; }
 :is(.community-page[data-community="home"][data-home-design="feed"], [data-community-frame]) .community-feed-byline .community-who { flex-wrap: wrap; gap: 5px; font-size: 14px; line-height: 20px; }
 :is(.community-page[data-community="home"][data-home-design="feed"], [data-community-frame]) .community-feed-byline .community-uname:not(.is-color-gold, .is-color-aurora) { color: var(--text); overflow-wrap: anywhere; }
-:is(.community-page[data-community="home"][data-home-design="feed"], [data-community-frame]) .community-feed-byline :is(.community-lv, .community-role, .community-vip) { font-size: 12px; line-height: 18px; border-color: var(--community-identity-edge, rgb(190 210 237 / 16%)); background: var(--community-identity-fill, transparent); }
+:is(.community-page[data-community="home"][data-home-design="feed"], [data-community-frame]) .community-feed-byline :is(.community-lv, .community-vip) { font-size: 12px; line-height: 18px; border-color: var(--community-identity-edge, rgb(190 210 237 / 16%)); background: var(--community-identity-fill, transparent); }
 :is(.community-page[data-community="home"][data-home-design="feed"], [data-community-frame]) .community-feed-byline time { font-size: 13px; line-height: 1.6; color: var(--dim); overflow-wrap: anywhere; }
 
 :is(.community-page[data-community="home"][data-home-design="feed"], [data-community-frame]) .community-topic h3 {

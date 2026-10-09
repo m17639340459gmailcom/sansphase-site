@@ -37,6 +37,8 @@ const canonicalFiles = [
   "blog-background.css",
   "author.css",
   "community.css",
+  "community-icon-policy.mjs",
+  "community-icon-display.mjs",
   "community-banner-controller.mjs",
   "community-banner-editor.mjs",
   "community-frame-banners.mjs",
@@ -134,4 +136,17 @@ test('shared staff catalogs ship at the compiled browser path without TypeScript
   assert.ok(communityStaffCapabilities.some(item => item.id === 'profile.nickname.advise'));
   for (const name of ['community', 'community-ui', 'community-pages', 'community-management', 'community-stewards', 'community-level-explorer'])
     assert.doesNotMatch(await readFile(`dist/${name}.mjs`, 'utf8'), /(?:from\s*|import\s*\()["'][^"']*\.ts["']/);
+});
+
+test('single icon selection ships with a complete compiled browser dependency chain', async () => {
+  for (const name of ['community-icon-policy', 'community-icon-display', 'community', 'community-ui', 'community-pages']) {
+    const file = `${name}.mjs`;
+    assert.ok(typedBrowserModules.has(file));
+    assert.doesNotMatch(await readFile(`dist/${file}`, 'utf8'), /(?:from\s*|import\s*\()["'][^"']*\.ts["']/);
+  }
+  const { communityIconDefinition } = await import('../dist/community-icon-policy.mjs');
+  const { communityIconArtHTML, communityIconPanelHTML } = await import('../dist/community-icon-display.mjs');
+  assert.match(communityIconArtHTML(communityIconDefinition('staff:general')), /data-staff-art="badge-general"/);
+  assert.equal(typeof communityIconPanelHTML, 'function');
+  await verifySite('dist');
 });

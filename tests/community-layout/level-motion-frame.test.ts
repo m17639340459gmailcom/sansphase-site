@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import { createStableCommunityFrame } from '../../src/community-layout/stable-frame.ts';
-import { nameLabelHTML, whoHTML, type CommunityPerson } from '../../src/community.ts';
+import { nameLabelHTML, levelMarksHTML, type CommunityPerson } from '../../src/community.ts';
 import { communityLevelExplorerHTML } from '../../src/community-level-explorer.ts';
 import type { CommunityStardust } from '../../src/community-pages.ts';
 
@@ -23,9 +23,12 @@ const person: CommunityPerson = { name: '测试读者', uid: '10001', role: 'rea
   vipGrowth: { active: true, level: 8, days: 365, nextDays: null, remaining: 0, multiplier: 1, progress: 1 } };
 const common = { t: (zh: string) => zh, esc: (value?: unknown) => String(value ?? ''), icons: {} };
 const staffDecoration = '<span class="community-av"><span class="community-staff-frame" data-staff-art="frame-general"><img class="community-staff-art-image" src="/assets/community/staff/compact/frame-general.webp?v=staff-20261009-r2"></span></span><span class="community-staff-art" data-staff-art="badge-general"><img class="community-staff-art-image" src="/assets/community/staff/compact/badge-general.webp?v=staff-20261009-r2"></span>';
-const headerTemplate = (name = person.name, unread = 0, staff = false) => `<header id="site-header"><div class="community-brand-group">社区</div><nav id="navigation" class="nav community-nav"><a href="#/community/home">首页</a></nav><div class="header-actions">${staff ? staffDecoration : ''}${nameLabelHTML({ ...person, name }, common)}<button aria-label="通知">通知<span class="community-nav-dot">${unread}</span></button></div></header>`;
+// Exercise every artwork family in the motion controller; real nickname
+// surfaces are separately tested with their single equipped icon.
+const allArtwork = (name = person.name) => nameLabelHTML({ ...person, name }, common, false) + levelMarksHTML(person, common);
+const headerTemplate = (name = person.name, unread = 0, staff = false) => `<header id="site-header"><div class="community-brand-group">社区</div><nav id="navigation" class="nav community-nav"><a href="#/community/home">首页</a></nav><div class="header-actions">${staff ? staffDecoration : ''}${allArtwork(name)}<button aria-label="通知">通知<span class="community-nav-dot">${unread}</span></button></div></header>`;
 const header = headerTemplate();
-const page = `<section data-community="member"><p>${whoHTML(person, common)}</p><form><textarea>未发送的回复</textarea></form></section>`;
+const page = `<section data-community="member"><p>${allArtwork()}</p><form><textarea>未发送的回复</textarea></form></section>`;
 const summary = '<section data-community="home"><div class="community-banner-side"><dl class="community-stats"><dd>1</dd></dl></div></section>';
 
 function setup(t: TestContext, mobile: boolean, supplied?: typeof fetch, staff = false, catalogue = '') {
@@ -235,6 +238,8 @@ test('an unchanged enhanced header keeps its artwork mounted while real account 
     assert.equal(canvases[i].shadowRoot, shadows[i]);
   }
   x.input(); x.scroll(180);
+  assert.equal(x.frame.header(header), true);
+  assert.equal(bar.querySelector('.header-actions'), actions, 'the parked scroll state must not make an unchanged account remount');
   assert.equal(x.frame.header(headerTemplate('已更新的读者', 2)), true);
   const updated = bar.querySelector('.header-actions')!;
   assert.notEqual(updated, actions, 'real nickname and unread changes still update the header');

@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { communityTags, communityRules, communityUsages, communityResourceKinds, communityResourcePrices, imageLimit } from '../src/community-rules.mjs';
 import type { PromptMode } from '../src/community-rules.ts';
 import type { CommunityPerson } from '../src/community.ts';
+import type { CommunityIconState } from '../src/community-icon-policy.ts';
 import { fail } from './community-db.ts';
 import type { CommunityAuthor } from './community-db.ts';
 import type { CommunityAuditDetails } from './community-audit.ts';
@@ -67,6 +68,7 @@ export type Ctx = {
   json: () => Promise<Body>;
   people: (authors: CommunityAuthor[]) => Promise<Map<string, PersonInfo>>;
   person: (author: CommunityAuthor, map: Map<string, PersonInfo>) => CommunityPerson;
+  iconState: (author: CommunityAuthor, map: Map<string, PersonInfo>) => CommunityIconState;
   topicDTO: (topic: StoredTopic, map: Map<string, PersonInfo>) => Record<string, unknown>;
   topicsDTO: (topics: StoredTopic[]) => Promise<Record<string, unknown>[]>;
   throttle: (kind: 'topic' | 'reply' | 'image' | 'report' | 'action') => void;

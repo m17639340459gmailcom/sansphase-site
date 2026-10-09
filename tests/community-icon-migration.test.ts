@@ -1,0 +1,41 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { migrateCommunity } from '../server/payload/community-migration.ts';
+import { communityTablesReady } from '../server/community-store.ts';
+
+test('an existing membership gains only nullable name_icon after a snapshot, with rows and files preserved and a no-op repeat', async t => {
+  const directory = await mkdtemp(resolve(tmpdir(), 'community-icon-upgrade-'));
+  t.after(() => rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
+  new DatabaseSync(resolve(directory, 'content.db')).close();
+  // Build the existing schema in another process, keeping sqlite backup() lifetimes independent.
+  await promisify(execFile)(process.execPath, ['scripts/migrate-community.mjs', directory], { cwd: resolve('.') });
+  const old = new DatabaseSync(resolve(directory, 'content.db'));
+  old.exec('ALTER TABLE community_members DROP COLUMN name_icon');
+  old.prepare("INSERT INTO community_members(member_kind,member_id,level,frame,name_color,created_at) VALUES('reader','prior',2,'gold','aurora','2026-01-01T00:00:00Z')").run();
+  const before = old.prepare('SELECT * FROM community_members').all(); old.close();
+  await writeFile(resolve(directory, 'private-sentinel'), 'private synthetic data');
+  assert.equal(communityTablesReady(directory), false);
+  const backups = (await readdir(resolve(directory, 'schema-backups'))).length;
+  const result = await migrateCommunity(directory); assert.equal(result.changed, true); assert.ok(result.backup);
+  const backup = new DatabaseSync(result.backup!, { readOnly: true });
+  assert.equal(backup.prepare('PRAGMA table_info(community_members)').all().some(row => row.name === 'name_icon'), false);
+  assert.deepEqual(backup.prepare('SELECT * FROM community_members').all(), before); backup.close();
+  const current = new DatabaseSync(resolve(directory, 'content.db'));
+  const columns = current.prepare('PRAGMA table_info(community_members)').all();
+  assert.equal(columns.find(row => row.name === 'name_icon')?.notnull, 0);
+  const rows = current.prepare('SELECT * FROM community_members').all();
+  assert.deepEqual(rows.map(({ name_icon, ...row }) => { assert.equal(name_icon, null); return row; }), before.map(row => ({ ...row })));
+  current.prepare("UPDATE community_members SET name_icon='' WHERE member_id='prior'").run(); current.close();
+  assert.equal(communityTablesReady(directory), true);
+  assert.deepEqual(await migrateCommunity(directory), { changed: false });
+  assert.equal((await readdir(resolve(directory, 'schema-backups'))).length, backups + 1);
+  assert.equal(await readFile(resolve(directory, 'private-sentinel'), 'utf8'), 'private synthetic data');
+  const reopened = new DatabaseSync(resolve(directory, 'content.db'), { readOnly: true });
+  assert.equal(reopened.prepare("SELECT name_icon FROM community_members WHERE member_id='prior'").get()?.name_icon, ''); reopened.close();
+});

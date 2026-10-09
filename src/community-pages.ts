@@ -3,7 +3,7 @@
 
 import {
   communityBoards, boardName, boardHref, postHref, memberHref, stardustHref, inboxHref, shopHref, manageHref, communityHomeHref, rulesHref,
-  avatarHTML, whoHTML, nameHTML, nameLabelHTML, growthChipHTML, levelMarksHTML, roleChipHTML, badgeHTML, cardHead, moreLink, bannerHTML, statsHTML, emptyHTML, communityManagementRole, communityManagementHref, communityReaderReadOnly,
+  avatarHTML, whoHTML, nameHTML, nameLabelHTML, growthChipHTML, badgeHTML, cardHead, moreLink, bannerHTML, statsHTML, emptyHTML, communityManagementRole, communityManagementHref, communityReaderReadOnly,
   communityStatusHTML, communityTopicsHTML, communityBodyHTML, relativeTime, beijingTime, readyData, communityLevelName, plainText,
 } from './community.mjs';
 import type { Common, CommunityLoad, CommunityMe, CommunityPerson, CommunityTopic, CommunityUnread, CommunityInventory, CommunityModerationContacts, CommunityBoardCatalog, Translate } from './community.ts';
@@ -37,6 +37,11 @@ import type { CommunityConvention } from './community-convention.ts';
 import { communityBadgeExplorerHTML, communityBadgeFamilyState, communityBadgeLegacyHTML, communityBadgeTierName } from './community-badge-explorer.mjs';
 import type { CommunityBadgeSelection } from './community-badge-explorer.ts';
 import type { BadgeFamilyId, CommunityBadgeState } from './community-badge-policy.ts';
+import { communityIconPanelHTML } from './community-icon-display.mjs';
+import type { CommunityIconState } from './community-icon-policy.ts';
+import type { CommunityIconSelection } from './community-icon-display.ts';
+import { communityProfileFramesHTML } from './community-profile.mjs';
+import type { CommunityProfile } from './community-profile.ts';
 import { communityBadgeFamilies, communityBadgeTiers, communityBadgeCommonRules, communityBadgeCommonRulesEn } from './community-badge-policy.mjs';
 
 /* ---------- 接口返回的数据 ---------- */
@@ -78,6 +83,7 @@ export type CommunityRank = {
 };
 export type CommunityMemberReply = { id: string; topicId: string; topicTitle: string; board: string; body: string; createdAt: string; likes: number; images?: { id: string; width: number; height: number }[] };
 export type CommunityMember = {
+  iconState?: CommunityIconState;
   staff?: CommunityStaffState | null;
   background?: CommunityProfileImage | null;
   coverImage?: string | null;
@@ -478,8 +484,8 @@ function mutePanelHTML(uid: string, { t, esc }: Common) {
     + `<div class="community-form-actions"><button type="button" class="community-button" data-action="community-mute-cancel">${t("取消", "Cancel")}</button><button type="submit" class="community-button is-danger">${t("确认禁言", "Mute")}</button></div></form>`;
 }
 
-type MemberOptions = Common & { member: CommunityLoad<CommunityMember>; me?: CommunityMe | null; muting?: boolean; badgeSelection?: CommunityBadgeSelection };
-export function communityMemberHTML({ member, me = null, muting = false, badgeSelection, ...common }: MemberOptions) {
+type MemberOptions = Common & { member: CommunityLoad<CommunityMember>; me?: CommunityMe | null; muting?: boolean; badgeSelection?: CommunityBadgeSelection; iconSelection?: CommunityIconSelection; frames?: CommunityLoad<CommunityProfile> };
+export function communityMemberHTML({ member, me = null, muting = false, badgeSelection, iconSelection, frames, ...common }: MemberOptions) {
   const { t, esc, now = Date.now(), icons = {} } = common;
   const data = readyData(member);
   if (!data) return pageOf("member", common, member);
@@ -490,14 +496,18 @@ export function communityMemberHTML({ member, me = null, muting = false, badgeSe
     [memberHref(uid), t(`主题 ${data.counts.topics}`, `Topics ${data.counts.topics}`)],
     [memberHref(uid, "replies"), t(`回复 ${data.counts.replies}`, `Replies ${data.counts.replies}`)],
     [memberHref(uid, "badges"), t(`徽章 ${data.badgeState ? data.badgeState.families.filter(family => family.tier).length : data.badges.length}`, `Badges ${data.badgeState ? data.badgeState.families.filter(family => family.tier).length : data.badges.length}`)],
+    ...(data.self ? [[memberHref(uid, 'icons'), t('图标', 'Icons')] as [string, string]] : []),
+    ...(data.self ? [[memberHref(uid, 'frames'), t('头像框', 'Frames')] as [string, string]] : []),
     ...(data.self ? [[memberHref(uid, "bookmarks"), t(`收藏 ${data.counts.bookmarks}`, `Bookmarks ${data.counts.bookmarks}`)] as [string, string]] : []),
   ];
-  const index = String(["topics", "replies", "badges", "bookmarks"].indexOf(data.tab));
+  const index = String(tabs.findIndex(([href]) => href === memberHref(uid, data.tab === 'topics' ? '' : data.tab)));
   let body: string;
   if (data.tab === "replies") body = data.replies.length
     ? `<ul class="community-rep-list">${data.replies.map((reply) => `<li><a class="community-rep-ref" href="${postHref(reply.topicId)}">${esc(reply.topicTitle)}</a><div class="community-text is-small">${communityBodyHTML(reply.body, esc, {}, reply.images?.map(image => image.id) || [])}</div><span class="community-muted">${relativeTime(reply.createdAt, now, t)} · ${t(`${reply.likes} 赞`, `${reply.likes} likes`)}</span></li>`).join("")}</ul>`
     : emptyHTML(common, t("还没有回复过", "No replies yet"));
   else if (data.tab === "badges") body = communityBadgeExplorerHTML(data.badgeState, data.badges, common, badgeSelection);
+  else if (data.tab === 'icons' && data.self) body = communityIconPanelHTML(person, data.iconState, Boolean(me && me.uid === uid && !communityReaderReadOnly(me)), common, iconSelection);
+  else if (data.tab === 'frames' && data.self) body = communityProfileFramesHTML(frames || { state: 'loading' }, me, common);
   else if (data.tab === "bookmarks") body = data.bookmarks.length ? communityTopicsHTML(data.bookmarks, common, { showAuthor: false }) : emptyHTML(common, t("还没有收藏", "No bookmarks yet"), t("在帖子下面点“收藏”，就会出现在这里。", "Use “Bookmark” under a post to keep it here."));
   else body = data.topics.length ? communityTopicsHTML(data.topics, common, { showAuthor: false }) : emptyHTML(common, t("还没有发过主题", "No topics yet"));
   const actions = [
@@ -520,7 +530,7 @@ export function communityMemberHTML({ member, me = null, muting = false, badgeSe
   const hue = [...person.name].reduce((sum, char) => sum + (char.codePointAt(0) || 0), 0) % 360;
   return `<section class="page community-page community-member" data-community="member" data-tab="${esc(data.tab)}">`
     + `<header class="community-m-hero community-rv" style="--i:0;--h:${hue}"><div class="community-m-intro"><div class="community-m-cover${background ? ' has-image' : cover || ' is-default-cover'}" aria-hidden="true">${background ? `<img src="${esc(background)}" alt="" decoding="async">` : '<i></i><i></i>'}</div>`
-    + `<div class="community-m-id">${avatarHTML(person, common, "xl", false)}<div class="community-m-name">${levelMarksHTML(person, common, true)}<h1>${nameLabelHTML(person, common, false)}</h1><div class="community-m-tags">${roleChipHTML(person, common)}${person.uid && person.showUid ? `<span class="community-muted is-mono">UID ${esc(person.uid)}</span>` : ""}</div>`
+    + `<div class="community-m-id">${avatarHTML(person, common, "xl", false)}<div class="community-m-name"><h1>${nameLabelHTML(person, common)}</h1><div class="community-m-tags">${person.uid && person.showUid ? `<span class="community-muted is-mono">UID ${esc(person.uid)}</span>` : ""}</div>`
     + (data.bio ? `<p>${esc(data.bio)}</p>` : "") + `<p class="community-muted">${days ? t(`加入 ${days} 天`, `Joined ${days} days`) : ""}${days && data.streak ? " · " : ""}${data.streak ? t(`连签 ${data.streak} 天`, `${data.streak}-day streak`) : ""}</p></div>`
     + `<div class="community-m-acts">${actions}</div></div></div>`
     + `<dl class="community-m-stats"><div><dt>${t("主题", "Topics")}</dt><dd>${stats.topics}</dd></div><div><dt>${t("回复", "Replies")}</dt><dd>${stats.replies}</dd></div><div><dt>${t("收到的赞", "Likes")}</dt><dd>${stats.likes}</dd></div><div><dt>${t("被采纳", "Accepted")}</dt><dd>${stats.accepted}</dd></div><div><dt>${t("精华", "Featured")}</dt><dd>${stats.featured}</dd></div><div><dt>${t("关注者", "Followers")}</dt><dd>${data.follows.followers}</dd></div></dl></header>`

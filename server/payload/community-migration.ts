@@ -484,6 +484,8 @@ const columns: Array<[string, string, string]> = [
   // Voluntary public moderation contacts are separate from private reader credentials.
   ['community_members', 'contact_qq', 'TEXT'],
   ['community_members', 'contact_email', 'TEXT'],
+  // Null follows the current default; empty string explicitly removes the name icon.
+  ['community_members', 'name_icon', 'TEXT'],
   ['community_members', 'agreed_version', 'TEXT'],
   ['community_members', 'convention_read_version', 'TEXT'],
   ['community_members', 'convention_read_at', 'INTEGER'],

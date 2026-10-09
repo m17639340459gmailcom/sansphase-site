@@ -129,7 +129,8 @@ export function createCommunityLevelMotion(document: Document, request?: typeof 
     const canvas = document.createElement('span');
     canvas.className = 'community-level-motion-canvas';
     // Shadow boundaries isolate the original IDs, selectors and keyframes.
-    // Clone only at idle; later scroll events change play-state alone.
+    // Clone only at idle; scrolling parks this same canvas behind its static
+    // image so transformed SVG descendants cannot paint apart from the text.
     const shadow = canvas.attachShadow({ mode: 'open' });
     const style = document.createElement('style'); style.textContent = playbackStyle;
     const artwork = document.importNode(svg, true);
@@ -150,7 +151,11 @@ export function createCommunityLevelMotion(document: Document, request?: typeof 
     }
     const state = eligible(mark) ? 'running' : 'paused';
     if (mark.canvas) {
-      if (mark.canvas.style.getPropertyValue('--community-level-play-state') !== state) mark.canvas.style.setProperty('--community-level-play-state', state);
+      if (mark.canvas.style.getPropertyValue('--community-level-play-state') !== state) {
+        mark.canvas.style.setProperty('--community-level-play-state', state);
+        mark.canvas.hidden = state !== 'running';
+        mark.element.dataset.levelMotionReady = state === 'running' ? 'true' : 'paused';
+      }
       return;
     }
     if (state !== 'running' || mark.pending) return;

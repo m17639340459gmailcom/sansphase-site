@@ -55,6 +55,9 @@ export function createCommunityBadges(db: DatabaseSync, tx: Transaction, notify:
     ? db.prepare('SELECT created_at FROM readers WHERE id=?') : null;
   const setJoined = db.prepare('UPDATE community_members SET badge_account_created_at=? WHERE member_kind=? AND member_id=?');
   const honors = db.prepare('SELECT family,tier,created_at,revoked_at,restored_at,evidence FROM community_badge_honors WHERE member_kind=? AND member_id=?');
+  // Public names only need confirmed eligibility, never progress or evidence recomputation.
+  const iconHonors = db.prepare("SELECT family,tier FROM community_badge_honors WHERE member_kind=? AND member_id=? AND (revoked_at IS NULL OR revoked_at='' OR restored_at>=revoked_at)");
+  const iconHonor = db.prepare("SELECT 1 FROM community_badge_honors WHERE member_kind=? AND member_id=? AND family=? AND tier=? AND (revoked_at IS NULL OR revoked_at='' OR restored_at>=revoked_at)");
   const legacy = db.prepare('SELECT badge AS id,created_at AS achievedAt,revoked_at AS revokedAt FROM community_badges WHERE member_kind=? AND member_id=? ORDER BY created_at,rowid');
   const insertHonor = db.prepare('INSERT OR IGNORE INTO community_badge_honors(member_kind,member_id,family,tier,created_at,evidence) VALUES(?,?,?,?,?,?)');
   const insertExclusion = db.prepare('INSERT OR IGNORE INTO community_badge_exclusions(kind,source_id,actor_key,reason,by_kind,by_id,created_at) VALUES(?,?,?,?,?,?,?)');
@@ -226,6 +229,8 @@ export function createCommunityBadges(db: DatabaseSync, tx: Transaction, notify:
     });
   }
   return { state, metrics: (member: CommunityAuthor, context: BadgeContext = {}) => collect(member, context).metrics, review, restore, reverseViolation,
+    iconHonors: (member: CommunityAuthor) => iconHonors.all(member.kind, member.id) as Array<{ family: BadgeFamilyId; tier: BadgeTier }>,
+    hasIconHonor: (member: CommunityAuthor, family: BadgeFamilyId, tier: BadgeTier) => Boolean(iconHonor.get(member.kind, member.id, family, tier)),
     reviewDetails: (member: CommunityAuthor) => ({ honors: honors.all(member.kind, member.id), reviews: db.prepare('SELECT family,tier,action,reason,evidence,by_kind,by_id,created_at FROM community_badge_honor_reviews WHERE member_kind=? AND member_id=? ORDER BY created_at DESC').all(member.kind, member.id) }),
   };
 }

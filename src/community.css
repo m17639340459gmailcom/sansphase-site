@@ -122,12 +122,17 @@ body.community-open #blog-backdrop::after { display: none; }
 }
 
 /* 账号菜单：主页、星尘、通知、收藏，以及对应权限的账号和管理入口 */
-.community-account { position: relative; }
-.community-account .account-button { gap: 6px; }
-.community-account .account-button.has-avatar { padding-left: 5px; }
+#site-header.community-header > .header-actions { min-width: 0; max-width: 100%; }
+#site-header.community-header > .header-actions > :not(.community-account) { flex-shrink: 0; }
+.community-account { position: relative; flex: 0 1 auto; min-width: 0; max-width: 100%; }
+.community-account .account-button { display: inline-grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; min-width: 0; max-width: min(46vw, 420px); }
+.community-account .account-button.has-avatar { grid-template-columns: auto minmax(0, 1fr) auto; min-height: 44px; padding-inline: 12px; }
+/* Reserve the frame's painted radius; it must never overlap the name column. */
+.community-account .account-button > .community-av.is-staff-frame { margin: 8px; }
+.community-account .account-button > .community-av:is(.is-frame-image, .is-frame-orbit) { margin: 5px; }
 .community-account .account-button > span:not(.community-av) { max-width: 10em; overflow: hidden; text-overflow: ellipsis; }
-.community-account .account-button > .community-name { max-width: none; flex-wrap: nowrap; overflow: visible; }
-.community-account .account-button .community-name > .community-uname { max-width: 10em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.community-account .account-button > .community-name { display: inline-grid; grid-template-columns: minmax(3em, 1fr) auto; align-items: center; gap: 8px; min-width: 0; max-width: none; overflow: visible; }
+.community-account .account-button .community-uname { min-width: 0; max-width: 10em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .community-account .account-button > .ui-icon { width: 14px; height: 14px; color: var(--muted); transition: transform 0.2s; }
 .community-account .account-button[aria-expanded="true"] > .ui-icon { transform: rotate(180deg); }
 .community-account-menu {
@@ -334,10 +339,6 @@ body.community-open[data-community-theme="light"] .community-uname[data-name-eff
 body.community-open .community-uname:is([data-name-effect="gradient"], [data-name-effect="shimmer"]) { color: transparent; background-image: linear-gradient(110deg, var(--name-ink-start), var(--name-ink-end), var(--name-ink-start)); background-color: transparent; -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
 body.community-open .community-uname[data-name-effect="shimmer"] { background-size: 200% 100%; animation: community-sheen 5s linear infinite; animation-play-state: var(--community-decoration-play-state, running); }
 @keyframes community-sheen { to { background-position: 200% 0; } }
-.community-role { display: inline-flex; align-items: center; gap: 4px; padding: 0 6px; border: 1px solid rgb(255 255 255 / 48%); border-radius: 5px; background: rgb(255 255 255 / 8%); color: var(--text); font-size: 12px; font-weight: 600; line-height: 17px; white-space: nowrap; }
-.community-role::before { content: "◇"; font-size: 12px; line-height: 1; }
-.community-lv.is-steward { display: inline-flex; align-items: center; gap: 4px; border-radius: 9px; color: var(--cm-lv3); }
-.community-steward-icon { font-size: 12px; line-height: 1; }
 .community-lv { padding: 0 6px; border: 1px solid currentColor; border-radius: 5px; color: var(--lv); font-size: 12px; line-height: 17px; letter-spacing: 0.04em; white-space: nowrap; }
 .is-lv0 { --lv: var(--cm-lv0); } .is-lv1 { --lv: var(--cm-lv1); } .is-lv2 { --lv: var(--cm-lv2); } .is-lv3 { --lv: var(--cm-lv3); } .is-lv4 { --lv: var(--cm-lv4); }
 .community-dot { width: 3px; height: 3px; flex-shrink: 0; border-radius: 50%; background: var(--cm-faint); }
@@ -1180,10 +1181,11 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-growth-art, .community-trust-art, .community-vip-art, .community-staff-art { position: relative; display: inline-block; flex: 0 0 auto; width: 100%; aspect-ratio: 1; isolation: isolate; line-height: 0; vertical-align: middle; background: none; border: 0; transform-origin: 50% 55%; }
 .community-growth-art-image, .community-trust-art-image, .community-vip-art-image, .community-staff-art > img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .community-level-motion-canvas { position: absolute; inset: 0; display: block; pointer-events: none; }
-[data-level-motion-ready] > :is(.community-growth-art-image, .community-trust-art-image, .community-vip-art-image, .community-staff-art-image) { visibility: hidden; }
+.community-level-motion-canvas[hidden] { display: none; }
+[data-level-motion-ready="true"] > :is(.community-growth-art-image, .community-trust-art-image, .community-vip-art-image, .community-staff-art-image) { visibility: hidden; }
 .community-level-emblem .community-growth-art, .community-level-emblem .community-trust-art { width: 88%; }
 .community-growth-chip .community-growth-art { width: 20px; height: 20px; }
-/* 昵称旁的三枚等级图标。三套图形占各自画布的比例不同：成长星盘的盘面只有画布的 50%～61%，权限菱形
+/* 昵称旁的单枚图标。三套图形占各自画布的比例不同：成长星盘的盘面只有画布的 50%～61%，权限菱形
    对角 96%、VIP 六角 76%。框按比例取不同大小，让三枚看起来一样大；负外边距收回各自的留白。 */
 .community-level-marks { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; }
 .community-level-badge { display: inline-flex; flex: 0 0 auto; width: 28px; height: 28px; }
@@ -1191,7 +1193,9 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-level-badge.is-trust { width: 30px; height: 30px; margin-inline: -2px; }
 .community-level-badge.is-vip { width: 30px; height: 30px; margin-inline: -3px; }
 .community-level-badge.is-staff { width: 36px; height: 36px; margin: -3px; }
-/* 个人主页：图标在昵称上方单独成行，按同样的比例放大。 */
+.community-level-badge.is-badge { width: 26px; height: 32px; align-items: center; }
+.community-level-badge.is-badge > .community-badge-art { width: 100%; }
+/* 独立等级预览沿用大尺寸；昵称位置只使用上面的单枚紧凑图标。 */
 .community-level-marks.is-large { gap: 8px; justify-self: start; margin-block: 2px 4px; }
 .community-level-marks.is-large .community-level-badge.is-growth { width: 64px; height: 64px; margin: -10px; }
 .community-level-marks.is-large .community-level-badge.is-trust { width: 48px; height: 48px; margin-inline: -3px; }
@@ -1297,6 +1301,7 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-nc-sample { font-family: var(--font-serif); font-size: 26px; font-weight: 600; letter-spacing: 0.1em; }
 .community-nc-sample .community-uname { font: inherit; }
 .community-m-name h1 .community-uname { font: inherit; }
+.community-m-name h1 .community-name { flex-wrap: nowrap; gap: 10px; }
 .community-cover-sample, .community-m-cover { position: relative; overflow: hidden; }
 .community-cover-sample { width: 132px; max-width: 80%; height: 72px; border: 1px solid var(--line-strong); border-radius: 8px; background: linear-gradient(160deg, #0c1220, #070a10); }
 .community-cover-sample i, .community-m-cover i { position: absolute; inset: -30%; background: radial-gradient(30% 40% at 30% 40%, hsl(var(--h, 210) 60% 60% / 35%), transparent 70%); animation: community-drift-cover 14s ease-in-out infinite alternate; animation-play-state: var(--community-decoration-play-state, running); }
@@ -1368,6 +1373,34 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-o-st { padding: 1px 9px; border: 1px solid color-mix(in srgb, var(--o) 45%, transparent); border-radius: var(--pill); font-size: 12px; color: var(--o); white-space: nowrap; }
 
 /* ================= 成员主页 ================= */
+.community-icon-panel { display: grid; gap: 22px; padding: 24px; }
+.community-icon-panel-head { display: flex; align-items: start; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
+.community-icon-panel-head h2 { margin: 0 0 8px; font: 600 22px/1.4 var(--font-serif); color: var(--signal); }
+.community-icon-panel-head p { max-width: 36em; margin: 0; }
+.community-icon-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.community-icon-current { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--text); }
+.community-icon-current > span:last-child { margin-left: auto; font-size: 12px; color: var(--dim); }
+.community-icon-expired { margin: 0; padding: 12px 14px; border-left: 2px solid var(--cm-warn); color: var(--muted); font-size: 13px; line-height: 1.7; }
+.community-icon-group { display: grid; gap: 12px; }
+.community-icon-group h3 { margin: 0; font: 600 16px/1.4 var(--font); }
+.community-icon-categories { flex-wrap: wrap; gap: 8px 20px; }
+.community-icon-pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 18px; }
+.community-icon-pagination > span { font-size: 12px; color: var(--muted); }
+.community-icon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(124px, 1fr)); gap: 12px; }
+.community-icon-choice { display: grid; justify-items: center; align-content: start; gap: 8px; min-width: 0; padding: 12px 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--community-reading-control, var(--surface-2)); color: var(--text); font: inherit; cursor: pointer; }
+.community-icon-choice-art { display: grid; place-items: center; width: 64px; height: 72px; line-height: 0; }
+.community-icon-choice-art > span { width: 64px; height: 64px; }
+.community-icon-choice-art.is-badge > span { width: 56px; height: 68px; }
+.community-icon-choice b { max-width: 100%; font-size: 13px; line-height: 1.5; font-weight: 500; overflow-wrap: anywhere; }
+.community-icon-choice-status { color: var(--dim); font-size: 11px; line-height: 1.5; }
+.community-icon-choice:is(.is-selected, :focus-visible) { border-color: var(--signal); background: var(--cm-signal-soft); }
+.community-icon-choice:focus-visible { outline: 1px solid var(--focus-edge); outline-offset: 3px; }
+.community-icon-choice:hover:enabled { border-color: var(--line-strong); background: var(--cm-signal-soft); }
+.community-icon-choice[data-icon-locked="true"] .community-icon-choice-art { filter: grayscale(1); opacity: .5; }
+.community-icon-choice:disabled { cursor: default; opacity: 1; }
+.community-icon-panel .community-badge-art::before, .community-icon-panel .community-badge-art::after { animation: none; }
+.community-frame-grid { grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); }
+.community-frame-choice-preview { display: grid; place-items: center; width: 110px; height: 120px; }
 .community-page.community-member { width: min(1000px, calc(100% - 32px)); }
 .community-m-hero { overflow: hidden; border: 1px solid var(--line); border-radius: 24px; background: var(--community-reading-card, var(--cm-panel)); }
 .community-m-intro { position: relative; isolation: isolate; display: grid; align-items: end; min-height: 250px; padding: 106px 26px 22px; }
@@ -1552,6 +1585,7 @@ a.community-queue-title:hover { text-decoration: underline; text-underline-offse
   .community-banner { padding: 20px; }
   .community-brand span { display: none; }
   .community-brand-group { gap: 8px; }
+  .community-account .account-button.has-avatar { grid-template-columns: auto auto; }
   .community-account .account-button.has-avatar > span:not(.community-av) { display: none; }
   .community-board-hero { padding: 18px 18px 22px; }
   .community-topic { grid-template-columns: 32px minmax(0, 1fr) 40px; gap: 10px; padding: 14px; }
