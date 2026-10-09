@@ -205,9 +205,16 @@ export function createCommunityHostRuntime(config: CommunityHostConfig, client: 
     res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'private, no-store' });
     res.end(JSON.stringify({ error: '账号管理请前往主站。' }));
   };
+  const identifiedRequests = new WeakSet<IncomingMessage>();
   const communityService = createCommunityService({
     store, directory, siteOrigin, ownerId: authorId, profile, drainFileQueue,
-    identify: async req => current(req).identity.viewer,
+    identify: async req => {
+      // Initial reads reuse the middleware confirmation. Existing final
+      // authority checks after an async operation must read the source again.
+      if (identifiedRequests.has(req)) return (await access.revalidate(req)).identity.viewer;
+      identifiedRequests.add(req);
+      return current(req).identity.viewer;
+    },
     ownerReaderIdentity: async req => { const personal = ownerReader(req); return personal ? { kind: 'reader', id: personal.id, name: personal.nickname, vip: personal.vip } : null; },
     assertActive: req => { current(req); },
     people: async (authors: CommunityAuthor[]) => {

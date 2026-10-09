@@ -68,6 +68,7 @@ export type Ctx = {
   json: () => Promise<Body>;
   people: (authors: CommunityAuthor[]) => Promise<Map<string, PersonInfo>>;
   person: (author: CommunityAuthor, map: Map<string, PersonInfo>) => CommunityPerson;
+  appearancePreview: (author: CommunityAuthor, map: Map<string, PersonInfo>) => OwnerReaderPreview | null;
   iconState: (author: CommunityAuthor, map: Map<string, PersonInfo>) => CommunityIconState;
   topicDTO: (topic: StoredTopic, map: Map<string, PersonInfo>) => Record<string, unknown>;
   topicsDTO: (topics: StoredTopic[]) => Promise<Record<string, unknown>[]>;

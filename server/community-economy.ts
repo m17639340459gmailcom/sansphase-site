@@ -64,6 +64,8 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
   const visibleImage = db.prepare('SELECT 1 FROM community_shop_items WHERE image = ? AND active = 1 LIMIT 1');
   const redeemedImage = db.prepare(`SELECT 1 FROM community_orders o JOIN community_shop_items i ON i.id = o.item
     WHERE i.image = ? AND o.member_kind = ? AND o.member_id = ? AND o.status != 'cancelled' LIMIT 1`);
+  const ownedImage = db.prepare(`SELECT 1 FROM community_owned o JOIN community_shop_items i ON i.id = o.item
+    WHERE i.image = ? AND o.member_kind = ? AND o.member_id = ? LIMIT 1`);
   const equippedImage = db.prepare('SELECT 1 FROM community_members WHERE frame = ? OR cover = ? LIMIT 1');
   const itemOwned = db.prepare('SELECT 1 FROM community_owned WHERE item = ? LIMIT 1');
   const itemOrdered = db.prepare('SELECT 1 FROM community_orders WHERE item = ? LIMIT 1');
@@ -363,7 +365,7 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
       return { cover: item ? ref : null, coverName: item?.name ?? null,
         coverImage: item?.image && ref === `image:${item.image}` && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(item.image) ? `/api/community/images/${item.image}.webp` : null };
     },
-    imageVisible: (id: string, member: CommunityAuthor) => Boolean(visibleImage.get(id) || redeemedImage.get(id, member.kind, member.id) || equippedImage.get(`image:${id}`, `image:${id}`)),
+    imageVisible: (id: string, member: CommunityAuthor) => Boolean(visibleImage.get(id) || redeemedImage.get(id, member.kind, member.id) || ownedImage.get(id, member.kind, member.id) || equippedImage.get(`image:${id}`, `image:${id}`)),
     setItemActive(id: string, active: boolean, now = Date.now()) {
       return tx(() => {
         if (typeof active !== 'boolean') throw fail('上架状态需要是布尔值。');

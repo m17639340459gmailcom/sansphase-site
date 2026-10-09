@@ -187,6 +187,17 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     return current.view === 'member' ? memberKey(current.id, current.tab)
       : current.view === 'profile' ? memberKey(readyData(me)?.uid || '', 'topics') : null;
   });
+  let iconQualificationRevision = 0;
+  function cacheMember(key: string, value: CommunityLoad<CommunityMember>, readRevision: number) {
+    const viewer = readyData(me);
+    // A profile read started before a confirmed qualification change must
+    // not restore its older icon catalogue when it arrives afterwards.
+    if (readRevision !== iconQualificationRevision && viewerVerified && viewer?.iconState
+      && value.state === 'ready' && value.data.self && value.data.person.uid === viewer.uid) {
+      value = { ...value, data: { ...value.data, iconState: viewer.iconState } };
+    }
+    memberPages.set(key, value);
+  }
   const memberProfileEpochs = new Map<string, number>();
   const badgeExplorer = createCommunityBadgeExplorer({
     root: () => route().view === 'member' && route().tab === 'badges' ? mounted?.main.querySelector<HTMLElement>('[data-badge-explorer]') || null : null,
@@ -368,9 +379,21 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         // previous account. Never attach another account's progress to it.
         if (visit.uid !== current.uid) { clearData(); await refresh(); return false; }
         activeVisitDone = key;
+        const qualificationChanged = viewer.growth?.level !== visit.growth?.level
+          || viewer.vipGrowth?.active !== visit.vipGrowth?.active || viewer.vipGrowth?.level !== visit.vipGrowth?.level;
         viewer.growth = visit.growth; viewer.vipGrowth = visit.vipGrowth;
         for (const value of stardusts.values()) if (value.state === 'ready') {
           value.data.growth = visit.growth; value.data.vipGrowth = visit.vipGrowth;
+        }
+        // Progress alone needs no extra read. A tier change must reconcile the
+        // server's default/explicit icon and eligibility, rather than inventing
+        // a new selection from the displayed level. The daily key is already
+        // committed, so the refresh cannot submit another entrance. Refresh
+        // also establishes the page's matching identity gate; a nested me-only
+        // read would retire the original gate without completing the page.
+        if (qualificationChanged) {
+          await refresh();
+          if (identity !== frameIdentity || activeVisitPending?.token !== token || !mounted || readyData(me)?.uid !== current.uid) return false;
         }
         headerKey = ''; mounted.ctx.headerChanged?.();
         return true;
@@ -540,6 +563,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     return { changedAccount, lostPermission };
   }
   function commitMe(next: CommunityMe, hash: string) {
+    if (JSON.stringify(readyData(me)?.iconState) !== JSON.stringify(next.iconState)) iconQualificationRevision++;
     const { changedAccount, lostPermission } = identityChange(next);
     if (changedAccount) clearData(false);
     else if (lostPermission) {
@@ -552,6 +576,11 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       reviewSelection.clear(); managementBoard = ''; stewardCandidate = null; stewardLookupRequest++;
     }
     me = { state: 'ready', data: next }; viewerFailure = null; viewerVerified = true; viewerHash = hash;
+    if (next.uid && next.iconState) for (const [key, value] of memberPages) {
+      if (value.state === 'ready' && value.data.self && value.data.person.uid === next.uid) {
+        memberPages.set(key, { ...value, data: { ...value.data, iconState: next.iconState } });
+      }
+    }
     const key = [next.name, next.uid, next.role, next.owner, next.vip, next.avatar, next.frame, next.color, next.icon, JSON.stringify(next.nameEffect), next.level, JSON.stringify(next.growth), JSON.stringify(next.vipGrowth), next.steward, next.mod, JSON.stringify(next.management), permissionFingerprint(next), JSON.stringify(next.moderationBoards), next.balance, next.checkedIn, next.unread.all].join('|');
     if (key !== headerKey) { headerKey = key; mounted?.ctx.headerChanged?.(); }
     syncConvention();
@@ -631,12 +660,12 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     return current;
   }
   async function loadMember(uid: string, tab: string) {
-    const key = memberKey(uid, tab), epoch = memberProfileEpochs.get(uid) || 0;
+    const key = memberKey(uid, tab), epoch = memberProfileEpochs.get(uid) || 0, iconRevision = iconQualificationRevision;
     await assignLoad(`members/${enc(uid)}?tab=${enc(tab)}`, memberPages.get(key), value => {
       // Reads started before a confirmed profile/background change cannot put
       // its retired appearance back into another cached tab.
       if (epoch === (memberProfileEpochs.get(uid) || 0)) {
-        memberPages.set(key, value);
+        cacheMember(key, value, iconRevision);
         const state = readyData(value)?.iconState;
         if (tab === 'icons' && state && !iconSelection) {
           const { kind } = communityIconBrowse(state); iconSelection = { kind };
@@ -888,8 +917,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         stage<CommunityManage | CommunityBoardManagement>(`manage?tab=${enc(tab)}`, value => { const normalized = normalizeManagement(value); manages.set(tab, normalized); syncBoardCatalog(readyData(normalized)?.boardCatalog); }); break;
       }
       case 'member': {
-        const key = memberKey(current.id, current.tab);
-        stage<CommunityMember>(`members/${enc(current.id)}?tab=${enc(current.tab)}`, value => { memberPages.set(key, value); });
+        const key = memberKey(current.id, current.tab), iconRevision = iconQualificationRevision;
+        stage<CommunityMember>(`members/${enc(current.id)}?tab=${enc(current.tab)}`, value => { cacheMember(key, value, iconRevision); });
         if (current.tab === 'frames' && readyData(memberPages.get(key))?.self) stage<CommunityProfile>('profile', value => { if (!profileWrite) profile = value; });
         break;
       }

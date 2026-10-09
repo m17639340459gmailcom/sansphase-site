@@ -141,9 +141,23 @@ export function createCommunityService(options: ServiceOptions) {
       return [author, ...live.staff.ancestors(author)].filter(member => member.kind === 'reader')
         .every(member => map.get(memberKey(member))?.active === true) ? current.role : null;
     };
+    let ownerAppearance = ownerReaderPreview;
+    const appearancePreview = (author: CommunityAuthor, map: Map<string, PersonInfo>) => {
+      const info = map.get(memberKey(author));
+      if (author.kind !== 'reader' || !info || info.active === false) return null;
+      if (info.ownerReader !== true && !(same(author, me) && ownerReaderPreview)) return null;
+      // Reuse the approved owner-personal presentation across every cosmetic
+      // surface. This is not a membership, experience or achievement award.
+      return ownerAppearance ??= createOwnerReaderPreview();
+    };
     const iconEligibility = (author: CommunityAuthor, map: Map<string, PersonInfo>, badges: CommunityIconEligibility['badges'], levels?: Pick<CommunityIconEligibility, 'growthLevel' | 'vipLevel'>): CommunityIconEligibility => {
       const info = map.get(memberKey(author));
       if (!info || info.active === false) return { growthLevel: null, trustLevel: -1, vipLevel: null, staffRole: null, badges: [] };
+      const preview = appearancePreview(author, map);
+      if (preview) return {
+        growthLevel: preview.growth.level, trustLevel: preview.trustLevel, vipLevel: preview.vipGrowth.level, staffRole: null,
+        badges: preview.badgeState.families.flatMap(family => family.tiers.filter(tier => tier.achieved).map(tier => ({ family: family.id, tier: tier.tier }))),
+      };
       const role = presentationStaffRole(author, map);
       return { growthLevel: levels ? levels.growthLevel : live.experience.state(author)?.level ?? null, trustLevel: ordinaryTrust(author, role),
         vipLevel: levels ? levels.vipLevel : live.experience.vipState(author, info.vip === true)?.level ?? null,
@@ -156,7 +170,7 @@ export function createCommunityService(options: ServiceOptions) {
       if (!info) return { name: '已注销用户', role: author.kind, uid: null, avatar: null, vip: false, level: 0, growth: null, vipGrowth: null, frame: null, color: null, icon: null };
       const decorations = live.members.appearance(author);
       const steward = live.members.steward(author);
-      const preview = author.kind === 'reader' && info.ownerReader ? createOwnerReaderPreview() : same(author, me) ? ownerReaderPreview : null;
+      const preview = appearancePreview(author, map);
       const staffRole = preview ? null : presentationStaffRole(author, map);
       const growth = live.experience.state(author), vipGrowth = live.experience.vipState(author, info.vip === true);
       const choice = communityIconDefinition(decorations.selectedIcon);
@@ -209,7 +223,7 @@ export function createCommunityService(options: ServiceOptions) {
       send: (value, status) => { options.assertActive?.(req); sendTo(res, value, status); },
       json: async () => { const value = await (body ||= readJson(req)); await refreshStaff(); requireConsent(); return value; },
       people: async authors => { const map = await presentationPeople(authors); await refreshStaff(); requireConsent(); return map; }, person, iconState, topicDTO,
-      requireConsent,
+      requireConsent, appearancePreview,
       topicsDTO: async topics => {
         const map = await presentationPeople(peopleIn(topics)); await refreshStaff(); options.assertActive?.(req);
         return topics.filter(topic => {

@@ -3,8 +3,9 @@ import { evaluateCommunityBadges, emptyBadgeMetrics, communityBadgeTiers } from 
 import type { CommunityBadgeState } from '../src/community-badge-policy.ts';
 import { maximumCommunityExperienceProjection } from './community-experience.ts';
 
-// Only a verified owner in the existing reader perspective may receive this
-// projection. It changes DTOs, never accounts, balances, awards or management.
+// Only the verified, explicitly linked owner-personal reader receives this
+// presentation, including its public profile. It changes DTOs, never account
+// membership, balances, awards or management authority.
 export function createOwnerReaderPreview() {
   const badgeState: CommunityBadgeState = evaluateCommunityBadges(emptyBadgeMetrics());
   badgeState.families = badgeState.families.map(family => ({

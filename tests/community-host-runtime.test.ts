@@ -25,7 +25,7 @@ const observer = { ...reader, id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', uid: '
 let template: string;
 test.before(async () => { template = await mkdtemp(resolve(tmpdir(), 'host-runtime-template-')); await prepareCommunityHostDirectory(template); });
 test.after(() => rm(template, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
-async function fixture(t: test.TestContext) {
+async function fixture(t: test.TestContext, withOwner = false) {
   const base = await mkdtemp(resolve(tmpdir(), 'host-runtime-'));
   const directory = resolve(base, 'private-community');
   const root = resolve(base, 'public');
@@ -35,12 +35,15 @@ async function fixture(t: test.TestContext) {
   await copyFile(resolve(template, 'community-host.db'), resolve(directory, 'community-host.db'));
   await writeFile(resolve(root, 'index.html'), '<!doctype html><html><head></head><body><main id="app"></main></body></html>');
   prepareIdentityStore(mainDirectory);
-  const state = { enabled: true, vip: true, unavailable: false };
-  let paused: { operation: string; started: () => void; release: Promise<void> } | null = null;
+  const state = { enabled: true, vip: true, unavailable: false, subject: readerId, ownerPersonal: readerId };
+  const calls: string[] = [];
+  let paused: { operation: string; remaining: number; started: () => void; release: Promise<void> } | null = null;
   const authority = createIdentityAuthority({ directory: mainDirectory, siteOrigin: main, communityOrigin: community, ownerId: authorId, secret, stateEncryptionKey: 'separate-test-encryption-key-at-least-32-chars',
-    readerIdentity: async req => { if (state.unavailable) throw Error('private source failure'); const account = req.headers.cookie === 'sansphase_reader_session=main.token' ? reader : req.headers.cookie === 'sansphase_reader_session=main.observer' ? observer : null; return state.enabled && account ? { ...account, vip: state.vip } : null; },
-    ownerIdentity: async () => null,
-    people: async authors => new Map(authors.flatMap(author => { const account = [reader, observer].find(item => item.id === author.id); return account ? [[`${author.kind}:${author.id}`, { name: account.nickname, uid: account.uid, avatar: avatarId, bio: account.signature, vip: state.vip, joinedAt: '2026-01-01T00:00:00Z' }] as const] : []; })),
+    readerIdentity: async req => { if (state.unavailable) throw Error('private source failure'); const account = req.headers.cookie === 'sansphase_reader_session=main.token' ? state.subject === readerId ? reader : observer : req.headers.cookie === 'sansphase_reader_session=main.observer' ? observer : null; return state.enabled && account ? { ...account, vip: state.vip } : null; },
+    ownerIdentity: async req => withOwner && req.headers.cookie === 'sansphase_author_session=main.owner' ? { name: '测试作者' } : null,
+    ownerReaderIdentity: async () => withOwner ? { ...(state.ownerPersonal === readerId ? reader : observer), vip: state.vip } : null,
+    people: async authors => new Map(authors.flatMap(author => { const account = [reader, observer].find(item => item.id === author.id); return account ? [[`${author.kind}:${author.id}`, { name: account.nickname, uid: account.uid, avatar: avatarId, bio: account.signature, vip: state.vip, active: state.enabled, joinedAt: '2026-01-01T00:00:00Z',
+      ...(withOwner && account.id === state.ownerPersonal ? { ownerReader: true as const } : {}) }] as const] : []; })),
     findMember: async uid => { const account = [reader, observer].find(item => item.uid === uid); return account ? { kind: 'reader', id: account.id } : null; },
     findByNames: async names => new Map(names.filter(name => name === reader.nickname).map(name => [name, { kind: 'reader' as const, id: readerId }])),
     avatar: async () => Buffer.from('approved-avatar'),
@@ -52,8 +55,9 @@ async function fixture(t: test.TestContext) {
     const url = new URL(String(input));
     assert.equal(url.origin, main);
     const response = await fetch(localMain + url.pathname, options);
-    const operation = JSON.parse(String(options?.body || '{}')).operation;
-    if (paused?.operation === operation) { const gate = paused; paused = null; gate.started(); await gate.release; }
+    const operation = String(JSON.parse(String(options?.body || '{}')).operation);
+    calls.push(operation);
+    if (paused?.operation === operation && --paused.remaining === 0) { const gate = paused; paused = null; gate.started(); await gate.release; }
     return response;
   } });
   const runtime = createCommunityHostRuntime({ directory, siteOrigin: community, mainSiteOrigin: main, bridgeSecret: secret, authorId }, client);
@@ -62,7 +66,7 @@ async function fixture(t: test.TestContext) {
   const local = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   t.after(async () => { await new Promise<void>(done => server.close(() => done())); await new Promise<void>(done => mainServer.close(() => done())); authority.close(); await runtime.close(); await rm(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
   const entry = async (expectedStatus = 200, mainToken = 'main.token') => {
-    const issued = await fetch(localMain + '/api/community-entry', { method: 'POST', headers: { Origin: main, 'X-Reader-Request': '1', Cookie: `sansphase_reader_session=${mainToken}` } });
+    const issued = await fetch(localMain + '/api/community-entry', { method: 'POST', headers: { Origin: main, 'X-Reader-Request': '1', Cookie: `${mainToken === 'main.owner' ? 'sansphase_author_session' : 'sansphase_reader_session'}=${mainToken}` } });
     assert.equal(issued.status, 200);
     const issuedBody = await issued.json();
     const bindingCookie = issued.headers.getSetCookie()[0];
@@ -73,11 +77,11 @@ async function fixture(t: test.TestContext) {
     const cookie = response.headers.getSetCookie().find(value => value.startsWith('sansphase_community_session='))?.split(';')[0] || '';
     return { cookie, ticket, bindingCookie, response };
   };
-  const pause = (operation: string) => {
+  const pause = (operation: string, occurrence = 1) => {
     let started!: () => void, release!: () => void;
     const waiting = new Promise<void>(done => { started = done; });
     const held = new Promise<void>(done => { release = done; });
-    paused = { operation, started, release: held };
+    paused = { operation, remaining: occurrence, started, release: held };
     return { waiting, release };
   };
   const purge = async () => {
@@ -85,8 +89,136 @@ async function fixture(t: test.TestContext) {
     const response = await fetch(local + path, { method: 'POST', headers: signIdentityRequest({ secret, method: 'POST', path, body }), body });
     assert.equal(response.status, 200); return response;
   };
-  return { directory, runtime, local, state, entry, pause, purge };
+  return { directory, runtime, local, state, entry, pause, purge, calls };
 }
+
+function seedIconConsent(directory: string) {
+  const seed = createCommunityStore(directory);
+  try { acceptCommunityConvention(seed, [{ kind: 'reader', id: readerId }, { kind: 'reader', id: observer.id }]); }
+  finally { seed.close(); }
+}
+function storedIcon(directory: string, id = readerId) {
+  const db = new DatabaseSync(resolve(directory, 'content.db'), { readOnly: true });
+  try { return db.prepare("SELECT name_icon FROM community_members WHERE member_kind='reader' AND member_id=?").get(id)?.name_icon ?? null; }
+  finally { db.close(); }
+}
+const equipIcon = (local: string, cookie: string, ref = 'vip:1') => fetch(local + '/api/community/shop/equip', {
+  method: 'POST', headers: { cookie, Origin: community, 'X-Reader-Request': '1', 'Content-Type': 'application/json' },
+  body: JSON.stringify({ kind: 'icon', ref }),
+});
+
+test('hosted icon final confirmation rejects VIP expiry after the initial session read', async t => {
+  const env = await fixture(t); seedIconConsent(env.directory);
+  const { cookie } = await env.entry(); env.calls.length = 0;
+  const gate = env.pause('session');
+  const writing = equipIcon(env.local, cookie);
+  await gate.waiting; env.state.vip = false; gate.release();
+  const response = await writing;
+  assert.equal(response.status, 403, await response.clone().text());
+  assert.equal(storedIcon(env.directory), null);
+  assert.equal(env.calls.filter(operation => operation === 'session').length, 2, 'initial session lookup and one final authority check');
+});
+
+test('hosted icon final confirmation accepts renewed VIP after the initial session read', async t => {
+  const env = await fixture(t); seedIconConsent(env.directory); env.state.vip = false;
+  const { cookie } = await env.entry(); env.calls.length = 0;
+  const gate = env.pause('session');
+  const writing = equipIcon(env.local, cookie);
+  await gate.waiting; env.state.vip = true; gate.release();
+  const response = await writing;
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.equal((await response.json()).icon, 'vip:1');
+  assert.equal(storedIcon(env.directory), 'vip:1');
+  assert.equal(env.calls.filter(operation => operation === 'session').length, 2);
+});
+
+for (const change of ['revoked', 'different principal'] as const) test(`hosted icon final confirmation refuses a ${change} source after profile lookup`, async t => {
+  const env = await fixture(t); seedIconConsent(env.directory);
+  const { cookie } = await env.entry(); env.calls.length = 0;
+  const gate = env.pause('people');
+  const writing = equipIcon(env.local, cookie);
+  await gate.waiting;
+  if (change === 'revoked') env.state.enabled = false;
+  else env.state.subject = observer.id;
+  gate.release();
+  const response = await writing;
+  assert.equal(response.status, 401, await response.clone().text());
+  assert.equal(storedIcon(env.directory), null);
+  assert.equal(storedIcon(env.directory, observer.id), null, 'a changed source cannot write to either account');
+  assert.equal(env.calls.filter(operation => operation === 'session').length, 2);
+});
+
+test('hosted icon final confirmation remains guarded by local logout during remote profile lookup', async t => {
+  const env = await fixture(t); seedIconConsent(env.directory);
+  const { cookie } = await env.entry();
+  const gate = env.pause('people');
+  const writing = equipIcon(env.local, cookie);
+  await gate.waiting;
+  const logout = await fetch(env.local + '/api/reader/logout', { method: 'POST', headers: { cookie, Origin: community, 'X-Reader-Request': '1' } });
+  assert.equal(logout.status, 200); gate.release();
+  assert.equal((await writing).status, 401);
+  assert.equal(storedIcon(env.directory), null);
+});
+
+test('hosted icon final confirmation cannot commit a delayed authority response after local logout', async t => {
+  const env = await fixture(t); seedIconConsent(env.directory);
+  const { cookie } = await env.entry(); env.calls.length = 0;
+  const gate = env.pause('session', 2);
+  const writing = equipIcon(env.local, cookie);
+  // Racing against completion gives a missing final read a deterministic
+  // failure instead of leaving the test waiting for a request that never runs.
+  const reachedFinalRead = await Promise.race([gate.waiting.then(() => true), writing.then(() => false)]);
+  if (!reachedFinalRead) {
+    assert.equal((await writing).status, 401, 'the protected write finished before its final authority read');
+    assert.equal(storedIcon(env.directory), null);
+    return;
+  }
+  try {
+    const logout = await fetch(env.local + '/api/reader/logout', { method: 'POST', headers: { cookie, Origin: community, 'X-Reader-Request': '1' } });
+    assert.equal(logout.status, 200);
+  } finally { gate.release(); }
+  assert.equal((await writing).status, 401);
+  assert.equal(storedIcon(env.directory), null);
+  assert.equal(env.calls.filter(operation => operation === 'session').length, 2);
+});
+
+test('hosted icon final confirmation rejects a changed author personal binding after profile lookup', async t => {
+  const env = await fixture(t, true); seedIconConsent(env.directory);
+  const { cookie } = await env.entry(200, 'main.owner'); env.calls.length = 0;
+  const gate = env.pause('people');
+  const writing = equipIcon(env.local, cookie + '; community_browse=reader', 'vip:8');
+  await gate.waiting; env.state.ownerPersonal = observer.id; gate.release();
+  const response = await writing;
+  assert.equal(response.status, 401, await response.clone().text());
+  assert.equal(storedIcon(env.directory), null);
+  assert.equal(storedIcon(env.directory, observer.id), null);
+  assert.equal(env.calls.filter(operation => operation === 'session').length, 2);
+});
+
+test('hosted ordinary identity reads retain one session lookup without duplicate final confirmation', async t => {
+  const env = await fixture(t), { cookie } = await env.entry(); env.calls.length = 0;
+  const response = await fetch(env.local + '/api/community/me', { headers: { cookie } });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).icon, 'vip:1');
+  assert.equal(env.calls.filter(operation => operation === 'session').length, 1);
+});
+
+for (const active of [false, true]) test(`hosted me keeps membership coherent when VIP becomes ${active ? 'active' : 'expired'} after the initial session read`, async t => {
+  const env = await fixture(t); env.state.vip = !active;
+  const { cookie } = await env.entry(); env.calls.length = 0;
+  const gate = env.pause('session');
+  const reading = fetch(env.local + '/api/community/me', { headers: { cookie } });
+  await gate.waiting; env.state.vip = active; gate.release();
+  const response = await reading;
+  assert.equal(response.status, 200, await response.clone().text());
+  const person = await response.json();
+  assert.equal(person.vip, active, 'membership, level and icon use the same newer profile projection');
+  assert.equal(person.vipGrowth.active, active);
+  assert.equal(person.icon, active ? 'vip:1' : null);
+  assert.equal(person.iconState.equipped, person.icon);
+  assert.equal(person.iconState.available.includes('vip:1'), active);
+  assert.equal(env.calls.filter(operation => operation === 'session').length, 1, 'coherent presentation requires no extra session read');
+});
 
 test('standalone host exchanges real protocol tickets, boots only community and returns account projection without credentials', async t => {
   const env = await fixture(t), { cookie, ticket, bindingCookie } = await env.entry();

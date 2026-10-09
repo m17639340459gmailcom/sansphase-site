@@ -82,6 +82,111 @@ const iconMember = (icon = null, selected = '') => ({ person: { ...person, icon 
   counts: { topics: 0, replies: 0, bookmarks: 0 }, topics: [], replies: [], bookmarks: [], badges: [], bio: '', streak: 0,
   joinedAt: null, muted: null, quick: null, tab: 'icons', iconState: { selected, equipped: icon, available: ['growth:1', 'growth:2', 'trust:0'] } });
 
+async function visitQualificationFixture(t, { selected = null, growthOnly = false, changed = true, delayed = false } = {}) {
+  let visited = false, anotherAccount = false;
+  const pending = deferred();
+  const growth = after => ({ level: after && changed ? 2 : 1, points: after ? changed ? 1210 : 120 : changed ? 1190 : 100, configured: true });
+  const vipGrowth = after => {
+    const days = after ? changed ? 30 : 11 : changed ? 29 : 10;
+    const nextDays = after && changed ? 90 : 30;
+    return { active: !growthOnly, level: growthOnly ? null : after && changed ? 2 : 1,
+      days, nextDays, remaining: nextDays - days, multiplier: growthOnly ? 1 : after && changed ? 3 : 2,
+      progress: after && changed ? 0 : days / 30 };
+  };
+  const current = () => {
+    if (anotherAccount) return { ...person, uid: 'u2', vip: false, growth: { level: 1, points: 0, configured: false },
+      vipGrowth: { active: false, level: null }, icon: null, iconState: { selected: '', equipped: null, available: ['growth:1', 'trust:0'] } };
+    const available = ['growth:1', ...(visited && changed ? ['growth:2'] : []), 'trust:0',
+      ...(growthOnly ? [] : ['vip:1', ...(visited && changed ? ['vip:2'] : [])])];
+    const equipped = selected === null ? growthOnly ? null : visited && changed ? 'vip:2' : 'vip:1' : selected || null;
+    return { ...person, vip: !growthOnly, growth: growth(visited), vipGrowth: vipGrowth(visited), icon: equipped,
+      iconState: { selected, equipped, available } };
+  };
+  const fixture = await setup(t, '#/community/u/u1/icons', async (url) => {
+    if (url.endsWith('/me')) return response(current());
+    if (url.includes('/members/')) {
+      const viewer = current();
+      return response({ ...iconMember(viewer.icon, viewer.iconState.selected), person: viewer, iconState: viewer.iconState });
+    }
+    if (url.endsWith('/active/visit')) {
+      if (delayed) await pending.promise;
+      visited = true;
+      return response({ uid: 'u1', visited: true, awarded: 20, growth: growth(true), vipGrowth: vipGrowth(true) });
+    }
+    return null;
+  });
+  return { ...fixture, selectOtherAccount: () => { anotherAccount = true; }, release: pending.resolve };
+}
+
+const settleQualificationUI = async () => { for (let i = 0; i < 6; i++) await turn(); };
+
+test('an active visit upgrades the default VIP icon and catalogue together when the thirtieth membership day arrives', async t => {
+  const fixture = await visitQualificationFixture(t);
+  await settleQualificationUI();
+  const viewer = fixture.ui.me();
+  assert.equal(viewer.vipGrowth.level, 2);
+  assert.equal(viewer.iconState.selected, null);
+  assert.equal(viewer.icon, 'vip:2');
+  assert.equal(viewer.iconState.equipped, 'vip:2');
+  assert.ok(viewer.iconState.available.includes('vip:2'));
+  assert.equal(fixture.main.querySelector('[data-icon-ref="vip:2"]').disabled, false, 'the displayed catalogue receives the new server eligibility');
+  assert.equal(fixture.requests.filter(call => call.url.endsWith('/me')).length, 2, 'a changed tier refreshes server identity once');
+  assert.equal(fixture.requests.filter(call => call.url.endsWith('/active/visit')).length, 1, 'identity reconciliation cannot award another entrance');
+});
+
+for (const selected of ['vip:1', '']) {
+  test(`an active VIP tier upgrade preserves ${selected || 'explicit none'} while refreshing available qualifications`, async t => {
+    const fixture = await visitQualificationFixture(t, { selected });
+    await settleQualificationUI();
+    const viewer = fixture.ui.me();
+    assert.equal(viewer.vipGrowth.level, 2);
+    assert.equal(viewer.iconState.selected, selected);
+    assert.equal(viewer.icon, selected || null);
+    assert.ok(viewer.iconState.available.includes('vip:2'));
+    assert.equal(fixture.requests.filter(call => call.url.endsWith('/active/visit')).length, 1);
+  });
+}
+
+test('a growth upgrade from an active entrance unlocks its icon without fabricating VIP membership', async t => {
+  const fixture = await visitQualificationFixture(t, { growthOnly: true, selected: 'growth:1' });
+  await settleQualificationUI();
+  const viewer = fixture.ui.me();
+  assert.equal(viewer.growth.level, 2);
+  assert.equal(viewer.icon, 'growth:1');
+  assert.ok(viewer.iconState.available.includes('growth:2'));
+  assert.equal(viewer.iconState.available.some(ref => ref.startsWith('vip:')), false);
+  assert.equal(fixture.main.querySelector('[data-icon-ref="growth:2"]').disabled, false);
+  assert.equal(fixture.requests.filter(call => call.url.endsWith('/active/visit')).length, 1);
+});
+
+test('an active visit within existing tiers updates progress without another identity read or entrance write', async t => {
+  const fixture = await visitQualificationFixture(t, { changed: false });
+  await settleQualificationUI();
+  const viewer = fixture.ui.me();
+  assert.equal(viewer.growth.points, 120);
+  assert.equal(viewer.vipGrowth.days, 11);
+  assert.equal(viewer.icon, 'vip:1');
+  assert.deepEqual(viewer.iconState.available, ['growth:1', 'trust:0', 'vip:1']);
+  assert.equal(fixture.requests.filter(call => call.url.endsWith('/me')).length, 1);
+  assert.equal(fixture.requests.filter(call => call.url.endsWith('/active/visit')).length, 1);
+});
+
+test('a previous account active visit cannot refresh or unlock icons on the replacement account', async t => {
+  const fixture = await visitQualificationFixture(t, { delayed: true });
+  assert.equal(fixture.requests.filter(call => call.url.endsWith('/active/visit')).length, 1);
+  fixture.selectOtherAccount(); fixture.ui.clear();
+  await fixture.remount('#/community/u/u2/icons'); await settleQualificationUI();
+  const readsBeforeOldResponse = fixture.requests.filter(call => call.url.endsWith('/me')).length;
+  fixture.release(); await settleQualificationUI();
+  const viewer = fixture.ui.me();
+  assert.equal(viewer.uid, 'u2');
+  assert.equal(viewer.growth.level, 1);
+  assert.equal(viewer.icon, null);
+  assert.deepEqual(viewer.iconState.available, ['growth:1', 'trust:0']);
+  assert.equal(fixture.requests.filter(call => call.url.endsWith('/me')).length, readsBeforeOldResponse);
+  assert.equal(fixture.requests.filter(call => call.url.endsWith('/active/visit')).length, 1);
+});
+
 test('owned frames load and equip without remounting decoded previews; remove persists and parallel choices cannot race', async t => {
   let frame = null, writes = 0;
   const pending = deferred();

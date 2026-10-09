@@ -124,6 +124,67 @@ test('a transparent custom frame is real owned equipment and remains usable afte
   assert.equal((await post(`manage/items/${id}`, { ...frameInput, image: null })).status, 400);
 });
 
+test('an off-sale custom frame with legacy ownership and no order retains private artwork access before and after wearing', async t => {
+  const { directory, post, get, upload, store } = await setup(t);
+  const uploaded = await upload(await frameBytes());
+  assert.equal(uploaded.status, 201);
+  const image = await uploaded.json();
+  const created = await post('manage/items', { ...input, cat: 'look', kind: 'frame', image: image.id, delivery: '', active: false });
+  assert.equal(created.status, 201);
+  const { id } = await created.json(), ref = `image:${image.id}`;
+  const member = { kind: 'reader', id: 'reader' };
+  const db = new DatabaseSync(resolve(directory, 'content.db'));
+  try {
+    // Existing migration and bridge fixtures preserve entitlement rows even
+    // when the historical account has no corresponding order record.
+    db.prepare('INSERT INTO community_owned(member_kind,member_id,item,created_at) VALUES(?,?,?,?)')
+      .run(member.kind, member.id, id, new Date().toISOString());
+  } finally { db.close(); }
+  assert.equal(store.economy.orders(member).length, 0);
+  assert.equal(store.members.decorations(member).frame, null);
+  const mine = await (await get('shop/mine')).json();
+  assert.ok(mine.looks.some(item => item.id === id && item.ref === ref));
+
+  await t.test('the owner can read the unworn off-sale artwork without an order', async () => {
+    assert.equal((await get(`images/${image.id}.webp`)).status, 200);
+  });
+  await t.test('another member cannot use the ownership record to read or equip an unworn frame', async () => {
+    assert.equal((await get(`images/${image.id}.webp`, 'other')).status, 404);
+    assert.equal((await post('shop/equip', { kind: 'frame', ref }, 'other')).status, 403);
+  });
+  await t.test('the existing owned frame can still be equipped and publicly displayed', async () => {
+    assert.equal((await post('shop/equip', { kind: 'frame', ref }, 'reader')).status, 200);
+    assert.equal((await get(`images/${image.id}.webp`)).status, 200);
+    assert.equal((await get(`images/${image.id}.webp`, 'other')).status, 200, 'equipped frames keep their existing public display rule');
+  });
+  assert.equal((await post('shop/equip', { kind: 'frame', ref: null }, 'reader')).status, 200);
+  await t.test('removing a frame preserves the owner artwork access', async () => {
+    assert.equal((await get(`images/${image.id}.webp`)).status, 200);
+    assert.ok(store.economy.owned(member).has(id));
+    assert.equal(store.economy.orders(member).length, 0);
+  });
+  await t.test('the removed off-sale frame remains private to unrelated members', async () => {
+    assert.equal((await get(`images/${image.id}.webp`, 'other')).status, 404);
+    assert.equal((await post('shop/equip', { kind: 'frame', ref }, 'other')).status, 403);
+  });
+  await t.test('ownership does not bypass private image purposes or orphan shop uploads', async () => {
+    const sql = new DatabaseSync(resolve(directory, 'content.db'));
+    try {
+      // A historical product reference cannot turn a private content/profile/
+      // banner upload into shop artwork merely because an owned row exists.
+      for (const purpose of ['content', 'profile', 'banner']) {
+        sql.prepare('UPDATE community_images SET purpose=? WHERE id=?').run(purpose, image.id);
+        assert.equal((await get(`images/${image.id}.webp`)).status, 404, purpose);
+      }
+    } finally {
+      sql.prepare("UPDATE community_images SET purpose='shop' WHERE id=?").run(image.id);
+      sql.close();
+    }
+    const orphan = await (await upload(await frameBytes())).json();
+    assert.equal((await get(`images/${orphan.id}.webp`)).status, 404);
+  });
+});
+
 test('opaque images, missing assets and fake frame references cannot become equipment', async t => {
   const { post, upload } = await setup(t);
   const opaque = await (await upload(await frameBytes(false))).json();

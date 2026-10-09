@@ -58,6 +58,13 @@ export function createCommunityHostAccess({ store, client, siteOrigin, mainSiteO
   if (siteOrigin !== 'https://community.sansphase.com' || mainSiteOrigin !== 'https://www.sansphase.com') throw Error('Community host origins must be fixed HTTPS production origins.');
   if (secret.length < 32) throw Error('Community bridge secret is required.');
   const context = new AsyncLocalStorage<CommunityHostContext>();
+  const current = (req?: IncomingMessage) => {
+    const value = context.getStore();
+    if (!value || req && value.req !== req) return null;
+    const alive = store.session(value.token);
+    return alive && alive.tokenHash === value.session.tokenHash && alive.sessionRef === value.session.sessionRef
+      && alive.createdAt === value.session.createdAt ? value : null;
+  };
   const ownRequest = (req: IncomingMessage) => req.headers.origin === siteOrigin && req.headers['x-reader-request'] === '1';
   const entryPage = (req: IncomingMessage, res: ServerResponse) => {
     const html = `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>从主站进入社区 · 無相</title><style>${entryStyle}</style><script type="module" src="/community-entry-exchange.mjs"></script></head><body><main><h1>请从主站进入社区</h1><p data-entry-status>本次进入会话尚未建立。请返回主站，点击社区入口。</p><a href="${escapes(mainSiteOrigin)}/#/community">返回主站</a></main></body></html>`;
@@ -142,11 +149,16 @@ export function createCommunityHostAccess({ store, client, siteOrigin, mainSiteO
       json(res, { error: status === 401 || status === 403 ? '进入会话已失效，请从主站重新进入。' : '身份服务暂时不可用，请稍后再试。', ...(status === 401 || status === 403 ? { code: 'COMMUNITY_ENTRY_REQUIRED', mainSiteOrigin } : {}) }, status === 401 || status === 403 ? 401 : 503);
     }
   };
-  return { requestMiddleware, current(req?: IncomingMessage) {
-    const value = context.getStore();
-    if (!value || req && value.req !== req) return null;
-    const alive = store.session(value.token);
-    return alive && alive.tokenHash === value.session.tokenHash && alive.sessionRef === value.session.sessionRef && alive.createdAt === value.session.createdAt ? value : null;
+  return { requestMiddleware, current, async revalidate(req: IncomingMessage) {
+    const value = current(req);
+    if (!value) throw Object.assign(Error('Identity changed or revoked.'), { status: 401 });
+    const identity = await client.request<IdentityDTO>('session', { sessionRef: value.session.sessionRef });
+    // A final remote confirmation can itself outlive logout or a changed
+    // principal. Replace only this request's snapshot after both checks.
+    if (current(req) !== value || identity.viewer.kind !== value.session.kind || identity.viewer.id !== value.session.id)
+      throw Object.assign(Error('Identity changed or revoked.'), { status: 401 });
+    value.identity = identity;
+    return value;
   } };
 }
 export type CommunityHostAccess = ReturnType<typeof createCommunityHostAccess>;

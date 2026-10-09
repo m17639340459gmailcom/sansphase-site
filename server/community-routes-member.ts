@@ -3,7 +3,6 @@ import { experienceCatalogue, vipCatalogue } from './community-experience.ts';
 import { fail, same, memberKey } from './community-db.ts';
 import type { CommunityAuthor } from './community-db.ts';
 import type { Ctx } from './community-context.ts';
-import { createOwnerReaderPreview } from './community-owner-reader-preview.ts';
 import { communityStaffDefaultPermissions } from '../src/community-staff.ts';
 import type { CommunityStaffRole, CommunityStaffPermission } from '../src/community-staff.ts';
 import { communityIconDefinition } from '../src/community-icon-policy.ts';
@@ -48,7 +47,8 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
       }).length : 0;
       const orders = ctx.owner ? economy.goodsOrders().filter(order => order.status === 'pending').length : 0;
       ctx.send({
-        ...ctx.person(me, map), vip: viewer.vip, owner: ctx.owner, mod: ctx.mod, trustLevel: ctx.trustLevel, moderationBoards: ctx.moderationBoards, balance: ledger.balance(me),
+        ...ctx.person(me, map), vip: me.kind === 'reader' && !ctx.browsingAsReader ? map.get(memberKey(me))?.vip === true : viewer.vip,
+        owner: ctx.owner, mod: ctx.mod, trustLevel: ctx.trustLevel, moderationBoards: ctx.moderationBoards, balance: ledger.balance(me),
         staff: ctx.staff,
         management: ctx.actualMod ? { role: ctx.actualOwner ? 'owner' : live.staff.state(me)?.role ?? null, staff: live.staff.state(ctx.actualOwner ? ctx.ownerMember : me), browsingAsReader: ctx.browsingAsReader,
           ...(ctx.actualOwner && ctx.browsingAsReader && !ctx.readOnly ? { interactive: true } : {}) } : null,
@@ -59,7 +59,7 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
         unread: members.unread(me), agreed: members.agreed(me), inventory: economy.inventory(me),
         muted: muted ? { until: muted.until, reason: muted.reason } : null,
         manageTodo: ctx.mod ? queue.topics.length + queue.replies.length + reports + orders : 0,
-        badgeState: ctx.ownerReaderPreview?.badgeState ?? members.badgeState(me, { joinedAt: map.get(memberKey(me))?.joinedAt }),
+        badgeState: ctx.appearancePreview(me, map)?.badgeState ?? members.badgeState(me, { joinedAt: map.get(memberKey(me))?.joinedAt }),
         iconState: ctx.iconState(me, map),
       });
       return true;
@@ -74,7 +74,7 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
         checkedIn, streak, dailyReward: checkinReward(false, map.get(memberKey(me))?.vip === true).base, balance: ledger.balance(me), gainedToday: ledger.gainedToday(me), behaviourToday: ledger.behaviourToday(me), vip: viewer.vip, owner: ctx.owner, browsingAsReader: ctx.browsingAsReader, readOnly: ctx.readOnly, uid: ctx.person(me, map).uid,
         month, days: economy.checkinDays(me, `${month}-01`, `${month}-31`), monthBonus: economy.monthBonus(me, month), checkinsToday: economy.checkinsToday(),
         earlyBirds: early.map(bird => ({ person: ctx.person(bird.member, map), at: bird.at })),
-        makeup: economy.makeupState(me, { vip: viewer.vip }), badges: members.badges(me), badgeState: ctx.ownerReaderPreview?.badgeState ?? members.badgeState(me, { joinedAt: map.get(memberKey(me))?.joinedAt }),
+        makeup: economy.makeupState(me, { vip: map.get(memberKey(me))?.vip === true }), badges: members.badges(me), badgeState: ctx.appearancePreview(me, map)?.badgeState ?? members.badgeState(me, { joinedAt: map.get(memberKey(me))?.joinedAt }),
       });
       return true;
     }
@@ -90,14 +90,14 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
       }
       // What else a row is about: the item redeemed or refunded, or the day made up.
       const detail = (ref: { kind: string; id: string } | null) => ref?.kind === 'item' ? economy.item(ref.id)?.name ?? null : ref?.kind === 'day' || ref?.kind === 'month' ? ref.id : null;
-      const profile = (await ctx.people([me])).get(memberKey(me));
-      const level = ctx.level;
+      const map = await ctx.people([me]), profile = map.get(memberKey(me)), appearance = ctx.appearancePreview(me, map);
+      const level = appearance?.trustLevel ?? ctx.level;
       ctx.send({
         balance: ledger.balance(me), gainedToday: ledger.gainedToday(me), behaviourToday: ledger.behaviourToday(me), dailyCap: r.dailyCap,
         checkedIn: economy.checked(me), month: ledger.month(me), flow,
         ledger: rows.map(({ ref, ...row }) => ({ ...row, topic: titles.get(row.id) || null, detail: detail(ref) })),
         level, owner: ctx.owner, vip: ctx.ownerReaderPreview !== null || me.kind === 'reader' && profile?.vip === true, browsingAsReader: ctx.browsingAsReader, readOnly: ctx.readOnly, steward: members.steward(me), staffRole: ctx.staff?.role ?? null, stats: members.stats(me),
-        growth: ctx.ownerReaderPreview?.growth ?? live.experience.state(me), vipGrowth: ctx.ownerReaderPreview?.vipGrowth ?? live.experience.vipState(me, profile?.vip === true), experienceCatalogue, vipCatalogue,
+        growth: appearance?.growth ?? live.experience.state(me), vipGrowth: appearance?.vipGrowth ?? live.experience.vipState(me, profile?.vip === true), experienceCatalogue, vipCatalogue,
         progress: ctx.owner || level >= 3 ? null : members.levelProgress(me, level),
       });
       return true;
@@ -157,7 +157,7 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
         ...economy.coverDecoration(member), background: live.profileBackgrounds.state(member).approved,
         streak: economy.currentStreak(member), stats: { ...stats, topics: topics.length, replies: replies.length },
         follows: members.followCounts(member), following: !self && members.following(me, member), self, badges: members.badges(member),
-        badgeState: info.ownerReader ? createOwnerReaderPreview().badgeState : self && ctx.ownerReaderPreview ? ctx.ownerReaderPreview.badgeState : members.badgeState(member, { joinedAt: info.joinedAt }),
+        badgeState: ctx.appearancePreview(member, map)?.badgeState ?? members.badgeState(member, { joinedAt: info.joinedAt }),
         ...(self ? { iconState: ctx.iconState(member, map) } : {}),
         muted: (self || ctx.mod) && muted ? { id: muted.id, until: muted.until, reason: muted.reason } : null,
         canMute: ctx.canStaff('member.mute') && !self && member.kind === 'reader' && (()=>{try{live.staff.protect(me,member);return true;}catch{return false;}})(), canAppoint: ctx.canStaff('staff.appoint') && live.staff.canAppoint(me, member), steward: members.steward(member),
@@ -203,10 +203,16 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
       const map = await ctx.people([me]);
       // Reading an asynchronous request body may outlive the original session
       // or membership. Reuse the actual account service immediately before write.
-      const current = await ctx.options.identify(ctx.req);
+      let current = await ctx.options.identify(ctx.req);
+      if (viewer.ownerAccountId) {
+        if (!current || current.kind !== 'owner' || current.id !== viewer.ownerAccountId) throw fail('请重新登录后进入社区。', 401);
+        current = await ctx.options.ownerReaderIdentity?.(ctx.req) ?? null;
+      }
       if (!current || current.kind !== me.kind || current.id !== me.id) throw fail('请重新登录后进入社区。', 401);
       ctx.throttle('action');
-      ctx.send({ uid: map.get(memberKey(me))?.uid ?? null, ...live.experience.visit(me, { vip: current.vip }) });
+      const visit = live.experience.visit(me, { vip: current.vip }), appearance = ctx.appearancePreview(me, map);
+      ctx.send({ uid: map.get(memberKey(me))?.uid ?? null, ...visit,
+        growth: appearance?.growth ?? visit.growth, vipGrowth: appearance?.vipGrowth ?? visit.vipGrowth });
       return true;
     }
     case 'convention/read':
@@ -236,10 +242,22 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
       }
       if (!current || current.kind !== me.kind || current.id !== me.id) throw fail('请重新登录后签到。', 401);
       ctx.throttle('action');
-      ctx.send(economy.checkin(me, { vip: profile.vip === true }));
+      ctx.send(economy.checkin(me, { vip: current.vip === true }));
       return true;
     }
-    case 'checkin/makeup': ctx.throttle('action'); ctx.send(economy.makeup(me, String(body.day || ''), { vip: viewer.vip })); return true;
+    case 'checkin/makeup': {
+      const profile = (await ctx.people([me])).get(memberKey(me));
+      if (!profile || profile.active === false) throw fail('请重新登录后补签。', 401);
+      let current = await ctx.options.identify(ctx.req);
+      if (viewer.ownerAccountId) {
+        if (!current || current.kind !== 'owner' || current.id !== viewer.ownerAccountId) throw fail('请重新登录后补签。', 401);
+        current = await ctx.options.ownerReaderIdentity?.(ctx.req) ?? null;
+      }
+      if (!current || current.kind !== me.kind || current.id !== me.id) throw fail('请重新登录后补签。', 401);
+      ctx.throttle('action');
+      ctx.send(economy.makeup(me, String(body.day || ''), { vip: current.vip === true }));
+      return true;
+    }
     case 'inbox/read-all': ctx.send({ read: members.readAll(me) }); return true;
     case 'inbox/read': {
       const notice = members.notice(me, String(body.id || ''));

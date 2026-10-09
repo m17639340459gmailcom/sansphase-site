@@ -299,8 +299,11 @@ export type AvatarSize = "xs" | "sm" | "md" | "lg" | "xl";
 function currentAppearance(person: CommunityPerson, common: Common): CommunityPerson {
   const viewer = common.meForSort;
   return viewer?.uid && person.uid === viewer.uid
-    ? { ...person, role: viewer.role, avatar: viewer.avatar, frame: viewer.frame, color: viewer.color, nameEffect: viewer.nameEffect,
+    ? { ...person, name: viewer.name, role: viewer.role, avatar: viewer.avatar, frame: viewer.frame, color: viewer.color, nameEffect: viewer.nameEffect,
       growth: viewer.growth === undefined ? person.growth : viewer.growth,
+      vip: viewer.vip === undefined ? person.vip : viewer.vip,
+      vipGrowth: viewer.vipGrowth === undefined ? person.vipGrowth : viewer.vipGrowth,
+      level: viewer.level === undefined ? person.level : viewer.level,
       staffRole: viewer.staffRole === undefined ? person.staffRole : viewer.staffRole,
       icon: viewer.icon === undefined ? person.icon : viewer.icon }
     : person;
@@ -391,10 +394,13 @@ export function communityNameIconHTML(person: CommunityPerson, common: Common): 
   person = currentAppearance(person, common);
   const { t, esc } = common;
   const role = person.role === 'owner' ? null : communityStaffArtRole(person.staffRole);
+  // Display qualification may be the approved owner-personal projection;
+  // it does not change the membership flag used for actual operations.
+  const vipAppearance = person.vipGrowth?.active ?? person.vip;
   const vipRank = person.vipGrowth?.active && Number.isInteger(person.vipGrowth.level) && (person.vipGrowth.level ?? 0) >= 1 && (person.vipGrowth.level ?? 0) <= 8 ? person.vipGrowth.level : 1;
-  const fallback = role ? `staff:${role}` : person.vip && person.role !== 'owner' ? `vip:${vipRank}` : null;
+  const fallback = role ? `staff:${role}` : vipAppearance && person.role !== 'owner' ? `vip:${vipRank}` : null;
   const icon = communityIconDefinition(person.icon === undefined ? fallback : person.icon);
-  if (!icon || icon.kind === 'staff' && icon.role !== role || icon.kind === 'vip' && !person.vip) return '';
+  if (!icon || icon.kind === 'staff' && icon.role !== role || icon.kind === 'vip' && !vipAppearance) return '';
   const label = t(icon.name, icon.en);
   return `<span class="community-level-marks"><span class="community-level-badge is-${icon.kind}" data-name-icon="${esc(icon.ref)}" role="img" aria-label="${esc(label)}" title="${esc(label)}">${communityIconArtHTML(icon)}</span></span>`;
 }
