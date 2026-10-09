@@ -8,11 +8,13 @@ import { parseRoute } from '../src/core.ts';
 import { publicRoute } from '../src/access-policy.ts';
 import { communityHostRoute, communityEntryDestination } from '../src/community-entry.ts';
 import { rewriteCommunityMainSiteLinks } from '../src/community-entry.ts';
-import { communityView, communityRoute, inCommunityArea, communityHeaderHTML, communityAccountHTML, communityLandingHTML } from '../src/community.ts';
+import { communityView, communityRoute, inCommunityArea } from '../src/community-routing.ts';
+import { communityLandingHTML } from '../src/community-introduction.ts';
+import { communityHeaderHTML, communityAccountHTML } from '../src/community.ts';
 import { readerGate } from '../src/reader-ui.ts';
 import { setContentHTML } from '../src/content-images.ts';
 import { createRouteTransitions } from '../src/route-transition.ts';
-import { createCommunityAppearance } from '../src/community-layout/appearance.ts';
+import { createCommunityAppearance } from '../src/community-appearance.ts';
 import { ensureRouteStyle } from '../src/route-styles.ts';
 import { communityHostDocument } from '../server/community-host-document.ts';
 
@@ -39,7 +41,7 @@ function setup(t) {
     communityOnly: () => false, communityEnabled: () => false, communityEntry: { cancel() {} },
     readerAccessEnabled: true, renderGeneration: 0, loadedContentKey: '', remotePage: null,
     filterPage: '', activeCategory: 'all', activeQuery: '', catalogPageNumber: 1,
-    communityView: () => 'unknown', communityStyleReady: false, ensureRouteStyle: async () => {},
+    communityView: () => 'unknown', inCommunityArea, communityModule: {}, communityStyleReady: false, ensureRouteStyle: async () => {},
     prepareCommunityLanding: async () => {}, catalogState: () => ({ page: context.catalogPageNumber, category: context.activeCategory, query: context.activeQuery }),
     vipBookPrompt: { open() { promptOpened++; } }, loadAdminReaders: async () => ({}), adminReadersModule: null,
     acceptContent(query, value) {
@@ -308,7 +310,9 @@ function setupCommunityBoot(t, { only = true, hash = '#/community/home', reader 
     setContentHTML(root, markup) { commits.push(markup); setContentHTML(root, markup); },
     communityOnly: () => siteContent.communityOnly === true, communityEnabled: () => siteContent.communityEnabled === true,
     readerAccessEnabled: true, communityEntry: { cancel: noop, state: () => 'idle' },
-    renderGeneration: 0, loadedContentKey: '', remotePage: null, communityStyleReady: false, ensureRouteStyle,
+    // These existing stylesheet/DOM tests already own the forum controller;
+    // the separate runtime-loading suite covers the cold module boundary.
+    renderGeneration: 0, loadedContentKey: '', remotePage: null, communityModule: {}, communityStyleReady: false, ensureRouteStyle,
     prepareCommunityLanding: async () => {}, contentReader: { cancel: noop, presentation: { release: noop, clear: noop } },
     filterPage: '', activeCategory: 'all', activeQuery: '', catalogPageNumber: 1, catalogState: () => ({}), contentQuery: () => null,
     vipBookPrompt: null, language: 'zh', t: zh => zh, icons: {}, arrow: '', esc: value => String(value ?? ''),

@@ -312,7 +312,7 @@ test("topic rows follow the demo: avatars, level and VIP marks, decorations, fla
   assert.match(flagged, /<span class="community-flag is-danger">已隐藏<\/span>[\s\S]*<span class="community-flag is-warn">可能失效<\/span>/);
   assert.doesNotMatch(flagged.slice(flagged.indexOf('href="#/post/p"') - 400), /悬赏 50/, "a paid bounty is not advertised");
   const rows2 = communityTopicsHTML([topic("s", { board: "showcase", tags: ["Midjourney", "提示词", "效率"], thumbs: ["i1", "i2"], likes: 4 })], common);
-  assert.match(rows2, /class="community-topic-thumbs"[^>]*><img src="\/api\/community\/images\/i1\.thumb\.webp"[^>]*><img src="\/api\/community\/images\/i2\.thumb\.webp"/);
+  assert.match(rows2, /class="community-topic-thumbs"[^>]*><img src="\/api\/community\/images\/i1\.webp\?w=384"[^>]*><img src="\/api\/community\/images\/i2\.webp\?w=384"/);
   assert.equal(count(rows2, /class="community-tag"/g), 2, "two tags at most in a row");
   assert.match(rows2, /<small>4 赞<\/small>/);
 });

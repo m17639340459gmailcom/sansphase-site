@@ -62,7 +62,7 @@ test('the candidate list uses the first body image as one cover in every board',
     const topic = { id: board, board, title: '标题', author: common.me, thumbs: [id, 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'] };
     const doc = new JSDOM(communityTopicsHTML([topic], { ...common, showTopicCovers: true })).window.document;
     assert.equal(doc.querySelectorAll('.community-topic-thumbs img').length, 1);
-    assert.equal(doc.querySelector('.community-topic-thumbs img').getAttribute('src'), `/api/community/images/${id}.webp`, 'a single cover must start with the complete image instead of a cropped thumbnail');
+    assert.equal(doc.querySelector('.community-topic-thumbs img').getAttribute('src'), `/api/community/images/${id}.webp?w=768`, 'a single cover starts with one complete-proportion list image');
     assert.equal(doc.querySelector('.community-topic-thumbs img').getAttribute('loading'), 'lazy');
   }
 });
@@ -75,7 +75,7 @@ test('single image previews preserve the complete source while multi-image previ
       try {
         const images = [...dom.window.document.querySelectorAll('.community-topic-thumbs img')];
         assert.equal(images.length, count);
-        assert.deepEqual(images.map(image => image.getAttribute('src')), ids.map(value => `/api/community/images/${value}${count === 1 ? '' : '.thumb'}.webp`));
+        assert.deepEqual(images.map(image => image.getAttribute('src')), ids.map(value => `/api/community/images/${value}.webp?w=${count === 1 ? 768 : 384}`));
       } finally { dom.window.close(); }
     }
   }

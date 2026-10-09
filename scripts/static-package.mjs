@@ -6,7 +6,7 @@ import ts from 'typescript';
 // Standard modulepreload lets the browser fetch the already required static
 // graph together, without discovering each dependency after another round trip.
 // Dynamic imports (the author editor and the landing sky) stay on demand.
-async function staticModuleGraph(root, files) {
+async function staticModuleGraph(root, files, entry = 'app.mjs') {
   const available = new Set(files.map(file => file.path).filter(path => /\.m?js$/.test(path)));
   const visited = new Set();
   async function visit(path) {
@@ -21,8 +21,8 @@ async function staticModuleGraph(root, files) {
       await visit(target);
     }
   }
-  await visit('app.mjs');
-  return [...visited].filter(path => path !== 'app.mjs').sort();
+  await visit(entry);
+  return [...visited].filter(path => path !== entry).sort();
 }
 
 export function rewriteStaticHtml(html, delivery) {
@@ -62,7 +62,10 @@ export async function packageStaticFiles(root, origin) {
     await mkdir(dirname(destination), {recursive:true});
     await copyFile(resolve(root,file.path), destination);
   }
-  const delivery = {origin,prefix,files,modulepreloads:await staticModuleGraph(root, files)};
+  const communityEntry = 'community-runtime-client.mjs';
+  const communityModulepreloads = files.some(file => file.path === communityEntry)
+    ? [communityEntry, ...await staticModuleGraph(root, files, communityEntry)] : [];
+  const delivery = {origin,prefix,files,modulepreloads:await staticModuleGraph(root, files),communityModulepreloads};
   await writeFile(resolve(root,"static-delivery.json"),JSON.stringify(delivery,null,2));
   await writeFile(resolve(root,"index.html"),rewriteStaticHtml(await readFile(resolve(root,"index.html"),"utf8"),delivery));
   return delivery;

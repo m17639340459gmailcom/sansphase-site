@@ -1,2 +1,2 @@
 // Source adapter for Node tests while the browser receives compiled output.
-export * from './admin-route.ts';
+export * from './community-runtime-client.ts';

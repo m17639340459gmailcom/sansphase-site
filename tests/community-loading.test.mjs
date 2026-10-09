@@ -246,7 +246,7 @@ for (const hash of ['#/community/home', '#/post/p1']) test(`supporting reads pre
   assert.equal(selection.toString(), selected);
 });
 
-test('staged paints retain a promoted full community image on the same route and account', async t => {
+test('staged paints retain a decoded community image at the same width on the same route and account', async t => {
   const imageId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   let revision = 0;
   const slow = deferred();
@@ -259,12 +259,26 @@ test('staged paints retain a promoted full community image on the same route and
   assert.ok(newest); newest.click(); await settle();
   assert.equal(main.querySelector('[data-sort="newest"]').getAttribute('aria-pressed'), 'true');
   const image = main.querySelector('.community-topic-thumbs img');
-  assert.ok(image); image.src = `/api/community/images/${imageId}.webp`;
+  assert.ok(image); assert.equal(image.getAttribute('src'),`/api/community/images/${imageId}.webp?w=768`);
   slow.resolve(response(summary)); await settle();
   assert.equal(main.querySelector('.community-topic-thumbs img'), image);
   revision++; retry(); await settle();
   assert.equal(main.querySelector('.community-topic-thumbs img'), image);
-  assert.equal(image.getAttribute('src'), `/api/community/images/${imageId}.webp`, 'a full image never reverts to its thumbnail');
+  assert.equal(image.getAttribute('src'), `/api/community/images/${imageId}.webp?w=768`);
+});
+
+for(const source of ['?w=384','?w=768&extra=1','?w=768#part','?w=768&w=768','.thumb.webp?w=768','full','external','srcset']) test(`community repaint refuses a different image source or quality: ${source}`,async t=>{
+  const id='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const {main}=await setup(t,url=>url.includes('/topics?')?response({...listing,items:[{...listing.items[0],board:'showcase',thumbs:[id]}]}):null);
+  main.querySelector('[data-action="community-sort"][data-sort="newest"]').click();await settle();
+  const first=main.querySelector('.community-topic-thumbs img');assert.ok(first);
+  const original=`/api/community/images/${id}.webp`;
+  if(source==='srcset')first.setAttribute('srcset',`${original}?w=384 384w`);
+  else first.src=source==='full'?original:source==='external'?`https://other.example${original}?w=768`:source.startsWith('.thumb')?`/api/community/images/${id}${source}`:original+source;
+  main.querySelector('[data-action="community-sort"][data-sort="active"]').click();await settle();
+  const next=main.querySelector('.community-topic-thumbs img');
+  assert.notEqual(next,first);assert.equal(next.getAttribute('src'),original+'?w=768');assert.equal(next.hasAttribute('srcset'),false);
+  assert.equal(next.getAttribute('width'),'84');assert.equal(next.getAttribute('height'),'60');
 });
 
 test('explicit concurrent refreshes each reach the authority and a later refresh does not reuse completed identity', async t => {

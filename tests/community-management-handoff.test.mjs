@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { JSDOM } from 'jsdom';
 import { createCommunityUI } from '../src/community-ui.ts';
+import * as communityRuntime from '../src/community-runtime-client.ts';
 import { setContentHTML } from '../src/content-images.ts';
 import { createStableCommunityFrame } from '../src/community-layout/stable-frame.ts';
 import { createCommunityStore } from '../server/community-store.ts';
@@ -41,7 +42,7 @@ const start = app.indexOf('  cleanCommunity();\n  const pageMarkup =');
 const end = app.indexOf("  cleanReaderAdmin=page==='admin'", start);
 assert.ok(start > 0 && end > start, 'find the formal app cleanup/render/mount entry');
 assert.match(app.slice(start, end), /communityReady\(/, 'retain the formal readiness call after mounting');
-const applicationRender = new Function('main', 'views', 'communityFrame', 'communityUI', 'communityContext', 'setContentHTML',
+const applicationRender = new Function('main', 'views', 'communityFrame', 'communityUI', 'communityModule', 'communityContext', 'setContentHTML',
   'cleanCommunity', 'communityReady', 'communityEnabled', 'preserveScroll', `"use strict"; const page='community', contentStatus=null, readerUI=null, id='';
   ${app.slice(start, end)}
   return cleanCommunity;`);
@@ -78,7 +79,9 @@ async function setup(t, handle = () => null, first = '#/community/manage', width
   let cleanup = () => {};
   const render = (hash, preserveScroll = false) => {
     w.history.replaceState(null, '', hash);
-    cleanup = applicationRender(main, { community: () => ui.html(ctx) }, frame, ui, () => ctx, setContentHTML, cleanup, () => {}, () => true, preserveScroll);
+    // These handoff fixtures start after preparation; keep the real runtime
+    // namespace present while executing the formal app cleanup/render/mount branch.
+    cleanup = applicationRender(main, { community: () => ui.html(ctx) }, frame, ui, communityRuntime, () => ctx, setContentHTML, cleanup, () => {}, () => true, preserveScroll);
   };
   t.after(() => {
     w.history.replaceState(null, '', '#/home'); cleanup(); frame.dispose();

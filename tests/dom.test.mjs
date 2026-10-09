@@ -14,6 +14,7 @@ import * as homePreload from '../dist/home-preload.mjs';
 import * as contentReader from '../dist/content-reader.mjs';
 import * as navigationPrefetch from '../dist/navigation-prefetch.mjs';
 import {mountRouteAssets} from '../dist/route-assets.mjs';
+import {createDeferredModuleLoader} from '../src/admin-route.mjs';
 import * as core from "../dist/core.mjs";
 import * as data from "./fixtures/site-data.mjs";
 import {
@@ -299,7 +300,7 @@ for (const mode of [null, false, true, 'hk', 'hk-reduced']) test(typeof mode ===
       return libraryModule(new URL("../dist/ui.bundle.mjs", import.meta.url));
     if (specifier === './book-shell.mjs' || specifier === './vip-book-prompt.mjs')
       return libraryModule(new URL('../dist/' + specifier.slice(2), import.meta.url));
-    if (['./community.mjs', './community-ui.mjs', './community-sky.mjs', './community-layout.mjs', './community-landing.mjs', './community-entry.mjs'].includes(specifier))
+    if (['./community.mjs', './community-ui.mjs', './community-sky.mjs', './community-layout.mjs', './community-landing.mjs', './community-entry.mjs', './community-appearance.mjs', './community-routing.mjs', './community-introduction.mjs'].includes(specifier))
       return libraryModule(new URL('../dist/' + specifier.slice(2), import.meta.url));
     if (specifier === './catalog.mjs')
       return libraryModule(new URL('../dist/catalog.mjs', import.meta.url));
@@ -316,7 +317,7 @@ for (const mode of [null, false, true, 'hk', 'hk-reduced']) test(typeof mode ===
       specifier === './site-copy.mjs' ? siteCopy :
       specifier === './route-assets.mjs' ? {mountRouteAssets:win=>mountRouteAssets(win,{loadAuthor:async()=>{},loadBackground:async()=>{}})} :
       specifier === './route-styles.mjs' ? {ensureRouteStyle:async()=>{}} :
-      specifier === './admin-route.mjs' ? {loadAdminReaders:async()=>({adminReadersPage:()=>'<section class="page"><h1>用户管理</h1></section>',mountReaderAdmin:()=>()=>{}})} :
+      specifier === './admin-route.mjs' ? {createDeferredModuleLoader,loadAdminReaders:async()=>({adminReadersPage:()=>'<section class="page"><h1>用户管理</h1></section>',mountReaderAdmin:()=>()=>{}})} :
       specifier === './home-preload.mjs' ? {...homePreload,preparePageImages:(...args)=>{homeActivity.warmups++;return homePreload.preparePageImages(...args);}} :
       specifier === './image-sources.mjs' ? imageSources :
       specifier.includes("visitor-location") ? visitorLocation :

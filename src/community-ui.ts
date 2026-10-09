@@ -1390,15 +1390,16 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       && coreRoute?.hash === location.hash && coreRoute.frame === frameIdentity)
       confirmedPage = { hash: location.hash, frame: frameIdentity, revision: permissionRevision, account, markup };
   }
-  // The feed enhances thumbnails to originals after painting. Both URLs name
-  // one protected file, but only for this origin and the existing UUID route.
+  // Old full/thumbnail URLs retain their shared identity. List variants keep
+  // their width so a decoded lower-resolution image cannot replace a larger one.
   function imageKey(image: HTMLImageElement) {
     const source = image.getAttribute('src') || '';
     try {
       const url = new URL(source, location.href);
-      if (url.origin === location.origin && !url.search && !url.hash) {
+      if (url.origin === location.origin && !url.hash && !image.hasAttribute('srcset')) {
         const id = /^\/api\/community\/images\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\.thumb)?\.webp$/.exec(url.pathname)?.[1];
-        if (id) return `community:${id}|${image.className}`;
+        if (id&&!url.search) return `community:${id}|${image.className}`;
+        if(id&&!url.pathname.endsWith('.thumb.webp')&&/^\?w=(384|768)$/.test(url.search)) return `community:${id}|${url.search}|${image.className}`;
       }
     } catch { /* An unrelated URL keeps its exact identity. */ }
     return `${source}|${image.className}`;

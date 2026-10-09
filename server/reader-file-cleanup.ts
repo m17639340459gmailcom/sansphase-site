@@ -2,6 +2,7 @@ import { unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { createReaderWorkflow } from './reader-workflow.ts';
+import { removeImageVariants } from './image-variants.ts';
 
 export type CleanupPayload = { find?: (options: { collection: 'readers'; limit: 1; depth: 0; where: { avatar: { equals: string } } }) => Promise<unknown> };
 type CleanupOptions = { workflow: ReturnType<typeof createReaderWorkflow>; payload: CleanupPayload; directory: string; ids?: string[] | null; limit?: number };
@@ -25,7 +26,12 @@ export async function cleanReaderFiles({ workflow, payload, directory, ids = nul
       : Boolean(workflow.profileByAvatar(id));
     if (active) { workflow.fileFailed(row.id, '仍被当前资料引用'); result.protected++; continue; }
     try {
-      await unlink(resolve(directory, 'uploads', row.filename));
+      const path=resolve(directory,'uploads',row.filename);
+      if(row.filename.startsWith('community-image-')) await removeImageVariants(directory,path,async()=>{
+        if(communityImageRegistered(directory,id)) throw Error('仍被当前资料引用');
+        await unlink(path);
+      });
+      else await unlink(path);
       workflow.fileCleaned(row.id); result.cleaned++;
     } catch (error) {
       if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') { workflow.fileCleaned(row.id); result.cleaned++; }

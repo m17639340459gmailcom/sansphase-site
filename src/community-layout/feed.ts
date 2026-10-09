@@ -1,4 +1,3 @@
-import { imageSrc } from "../community.ts";
 import { createFeedPublicationTime } from "./feed-publication-time.ts";
 
 type ReversibleMove = { current: () => boolean; restore: () => void };
@@ -93,26 +92,6 @@ function createFeedHeader(host: HTMLElement) {
   };
 }
 
-/** Only the exact existing community thumbnail route is eligible; unknown URLs stay untouched. */
-function useFullImage(image: HTMLImageElement): ReversibleMove | null {
-  const original = image.getAttribute("src");
-  if (!original || image.hasAttribute("srcset")) return null;
-  let url: URL;
-  try { url = new URL(original, image.ownerDocument.baseURI); } catch { return null; }
-  if (url.origin !== new URL(image.ownerDocument.baseURI).origin || url.search || url.hash) return null;
-  const id = /^\/api\/community\/images\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.thumb\.webp$/.exec(url.pathname)?.[1];
-  if (!id) return null;
-  const full = imageSrc(id, false);
-  image.setAttribute("src", full);
-  return {
-    current: () => image.getAttribute("src") === full && !image.hasAttribute("srcset"),
-    restore: () => {
-      // Do not overwrite a new source provided by the application's renderer.
-      if (image.getAttribute("src") === full) image.setAttribute("src", original);
-    },
-  };
-}
-
 /** Keep the existing avatar with its author/time; markers retain their exact original positions. */
 export function moveByline(topic: HTMLElement): ReversibleMove | null {
   const main = topic.querySelector<HTMLElement>(":scope > .community-topic-main");
@@ -173,7 +152,6 @@ function moveMainBeforeAside(host: HTMLElement): ReversibleMove | null {
 /** Reuses the community runtime's observer; a stable sync performs no DOM mutations. */
 export function createFeedLayout(host: HTMLElement): { sync: () => void; release: () => void } {
   const bylines = new Map<HTMLElement, ReversibleMove>();
-  const images = new Map<HTMLImageElement, ReversibleMove>();
   const header = createFeedHeader(host);
 
   const publicationTime = createFeedPublicationTime(host);
@@ -196,17 +174,6 @@ export function createFeedLayout(host: HTMLElement): { sync: () => void; release
         const byline = moveByline(topic);
         if (byline) bylines.set(topic, byline);
       }
-      for (const [image, source] of images) {
-        if (host.contains(image) && source.current()) continue;
-        source.restore();
-        images.delete(image);
-      }
-      for (const image of host.querySelectorAll<HTMLImageElement>(".community-topic-thumbs img")) {
-        if (images.has(image)) continue;
-        const source = useFullImage(image);
-        if (source) images.set(image, source);
-      }
-
       publicationTime.sync();
     },
     release: () => {
@@ -214,8 +181,6 @@ export function createFeedLayout(host: HTMLElement): { sync: () => void; release
       publicationTime.release();
       for (const byline of bylines.values()) byline.restore();
       bylines.clear();
-      for (const source of images.values()) source.restore();
-      images.clear();
       header.release();
       columns?.restore();
       columns = null;

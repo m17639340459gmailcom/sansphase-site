@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { communityApprovedAvatarURL, isApprovedAvatarVersion } from './community-avatar-url.ts';
 import { LRUCache } from 'lru-cache';
+import { removeImageVariants } from './image-variants.ts';
 import { appendFile, lstat, readFile, realpath, unlink } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, resolve, sep } from 'node:path';
@@ -106,7 +107,12 @@ export function createCommunityHostRuntime(config: CommunityHostConfig, client: 
         // The registry is checked again immediately before unlink. A queued
         // rolled-back purge can therefore never remove a still-used picture.
         if (contentDb.prepare('SELECT 1 FROM community_images WHERE id=?').get(id)) { retained++; continue; }
-        await unlink(path); hostStore.completeFile(entry.filename); removed++;
+        if(entry.filename.startsWith('community-image-')) await removeImageVariants(directory,path,async()=>{
+          if(contentDb.prepare('SELECT 1 FROM community_images WHERE id=?').get(id)) throw Error('Community image remains registered.');
+          await unlink(path);
+        });
+        else await unlink(path);
+        hostStore.completeFile(entry.filename); removed++;
       } catch (error) {
         if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') { hostStore.completeFile(entry.filename); removed++; }
         else { hostStore.retryFile(entry.filename); retained++; }

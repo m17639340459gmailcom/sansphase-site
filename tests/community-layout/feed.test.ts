@@ -228,11 +228,11 @@ test("feed accepts a replacement banner and its current summary without reviving
   assert.equal(host.contains(oldBanner), false);
 });
 
-test("feed upgrades only known same-origin community thumbnails and restores their exact attributes", (t) => {
+test("feed leaves image URLs and sizing attributes unchanged during sync and release", (t) => {
   const { document, host } = fixture(t);
   const images = host.querySelector(".community-topic-thumbs")!;
   const id = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-  const sources = [`/api/community/images/${id}.thumb.webp`, `http://localhost/api/community/images/${id}.thumb.webp`, `https://other.example/api/community/images/${id}.thumb.webp`, `/api/community/images/${id}.thumb.webp?custom=1`, "/fixture.webp", "/api/community/images/not-an-id.thumb.webp"];
+  const sources = [`/api/community/images/${id}.webp?w=768`, `/api/community/images/${id}.webp?w=384`, `/api/community/images/${id}.thumb.webp`, `http://localhost/api/community/images/${id}.thumb.webp`, `https://other.example/api/community/images/${id}.thumb.webp`, `/api/community/images/${id}.thumb.webp?custom=1`, "/fixture.webp", "/api/community/images/not-an-id.thumb.webp"];
   images.replaceChildren(...sources.map(src => {
     const img = document.createElement("img");
     img.setAttribute("src", src);
@@ -242,12 +242,16 @@ test("feed upgrades only known same-origin community thumbnails and restores the
     return img;
   }));
   const original = images.innerHTML;
+  const observer = new document.defaultView!.MutationObserver(() => {});
+  observer.observe(images, { subtree: true, attributes: true, attributeFilter: ['src', 'width', 'height'] });
   const feed = createFeedLayout(host);
-  feed.sync();
+  feed.sync(); feed.sync();
   const next = Array.from(images.querySelectorAll("img"));
-  assert.deepEqual(next.map(img => img.getAttribute("src")), [`/api/community/images/${id}.webp`, `/api/community/images/${id}.webp`, ...sources.slice(2)]);
+  assert.deepEqual(next.map(img => img.getAttribute("src")), sources);
   assert.ok(next.every(img => img.width === 84 && img.height === 60 && img.getAttribute("loading") === "lazy"));
   feed.release();
+  assert.equal(observer.takeRecords().length, 0, 'enhancement must not trigger a second image URL or sizing change');
+  observer.disconnect();
   assert.equal(images.innerHTML, original);
 });
 

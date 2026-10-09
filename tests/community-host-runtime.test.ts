@@ -14,6 +14,8 @@ import { createCommunityHostStore, prepareCommunityHostDirectory } from '../serv
 import { communityHostProductionOptions, createCommunityHostRuntime } from '../server/community-host-runtime.ts';
 import { createCommunityStore } from '../server/community-store.ts';
 import { acceptCommunityConvention } from './fixtures/community-convention-consent.ts';
+import sharp from 'sharp';
+import { createImageVariants } from '../server/image-variants.ts';
 
 const main = 'https://www.sansphase.com';
 const community = 'https://community.sansphase.com';
@@ -399,18 +401,23 @@ test('persistent image queue protects registered files and signed purge removes 
   const image = `community-image-${id}.webp`, thumb = `community-thumb-${id}.webp`;
   store.addImage({ id, uploader: { kind: 'reader', id: readerId }, width: 32, height: 32 });
   const topic = store.createTopic({ board: 'qa', author: { kind: 'reader', id: readerId }, title: '待删除的帖子', body: '正文内容正文内容', images: [id] });
-  await writeFile(resolve(env.directory, 'uploads', image), 'registered image');
+  const fullPath=resolve(env.directory,'uploads',image);
+  await sharp({create:{width:1600,height:900,channels:4,background:'#4477aacc'}}).webp().toFile(fullPath);
+  const original=await readFile(fullPath),cached=await createImageVariants(env.directory)(fullPath,768,'image/webp',true);
+  assert.ok(cached);
   await writeFile(resolve(env.directory, 'uploads', thumb), 'registered thumb');
   await writeFile(resolve(env.directory, 'uploads', 'unknown.keep'), 'preserve');
   host.queueFile(image, 'simulated-rollback');
   assert.equal((await env.runtime.drainFileQueue()).retained, 1);
-  assert.equal(await readFile(resolve(env.directory, 'uploads', image), 'utf8'), 'registered image');
+  assert.deepEqual(await readFile(fullPath), original);
+  await readFile(cached);
   store.close(); host.close();
   const path = '/api/community-identity/purge';
   const body = JSON.stringify({ operation: 'purge', input: { readerId } });
   const response = await fetch(env.local + path, { method: 'POST', headers: signIdentityRequest({ secret, method: 'POST', path, body }), body });
   assert.equal(response.status, 200);
   await assert.rejects(readFile(resolve(env.directory, 'uploads', image)), { code: 'ENOENT' });
+  await assert.rejects(readFile(cached), {code:'ENOENT'});
   await assert.rejects(readFile(resolve(env.directory, 'uploads', thumb)), { code: 'ENOENT' });
   assert.equal(await readFile(resolve(env.directory, 'uploads', 'unknown.keep'), 'utf8'), 'preserve');
   const db = new DatabaseSync(resolve(env.directory, 'content.db'), { readOnly: true });

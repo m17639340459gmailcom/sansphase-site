@@ -213,20 +213,20 @@ for(const role of ['self','moderator','ordinary']) test(`member bookmarks retain
   assert.deepEqual(value.bookmarks.map(topic=>topic.id),allowed?[subject.id]:[]);
 });
 
-for (const conditional of [false, true]) for (const thumb of [false, true]) {
-  test(`private ${thumb ? 'thumbnail' : 'image'} rechecks VIP after file await before ${conditional ? '304' : 'bytes'}`, async t => {
+for (const conditional of [false, true]) for (const kind of ['image','thumb','variant']) {
+  test(`private ${kind} rechecks VIP after file await before ${conditional ? '304' : 'bytes'}`, async t => {
     const f = await setup(t), vip = reader('vip'), id = randomUUID();
     f.store.addImage({ id, uploader: vip, width: 800, height: 600 });
     f.topic('附件资格末次校验', 0, { board: 'vip', author: vip, images: [id] });
-    const filename = resolve(f.directory, 'uploads', `community-${thumb ? 'thumb' : 'image'}-${id}.webp`);
-    await fs.writeFile(filename, 'private synthetic image bytes');
-    const url = `images/${id}${thumb ? '.thumb' : ''}.webp`, baseline = await f.get(url, 'vip');
+    const filename = resolve(f.directory, 'uploads', `community-${kind==='thumb' ? 'thumb' : 'image'}-${id}.webp`);
+    await fs.writeFile(filename, kind==='variant'?await sharp({create:{width:1600,height:900,channels:4,background:'#4477aacc'}}).webp().toBuffer():'private synthetic image bytes');
+    const url = `images/${id}${kind==='thumb' ? '.thumb' : ''}.webp${kind==='variant'?'?w=768':''}`, baseline = await f.get(url, 'vip');
     assert.equal(baseline.status, 200);
     const etag = baseline.headers.get('etag'); await baseline.arrayBuffer();
     const original = fs.readFile; let awaited = false;
     const read = t.mock.method(fs, 'readFile', async (...args) => {
       const bytes = await original(...args);
-      if (String(args[0]) === filename) { awaited = true; f.accounts.get('vip').vip = false; }
+      if (String(args[0]) === filename || kind==='variant'&&String(args[0]).startsWith(resolve(f.directory,'image-cache'))) { awaited = true; f.accounts.get('vip').vip = false; }
       return bytes;
     });
     syncBuiltinESMExports();

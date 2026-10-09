@@ -2,9 +2,13 @@
 export const typedBrowserModules = new Set([
   'access-policy.mjs',
   'admin-readers.mjs',
+  'admin-route.mjs',
   'book-progress.mjs',
   'catalog.mjs',
   'community.mjs',
+  'community-routing.mjs',
+  'community-introduction.mjs',
+  'community-runtime-client.mjs',
   'community-icon-policy.mjs',
   'community-icon-display.mjs',
   'community-news.mjs',

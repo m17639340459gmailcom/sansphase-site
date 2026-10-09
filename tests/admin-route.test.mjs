@@ -26,3 +26,17 @@ test("a failed admin module download is retried on the next visit", async () => 
   assert.ok((await load()).adminReadersPage);
   assert.equal(attempts, 2);
 });
+
+test('a stalled deferred module releases its deadline and retries without adopting a late attempt', async () => {
+  let attempts = 0, resolveOld;
+  const old = new Promise(resolve => { resolveOld = resolve; });
+  const current = { ready: true };
+  const load = createDeferredModuleLoader(() => ++attempts === 1 ? old : Promise.resolve(current), { timeoutMs: 10 });
+  const first = load();
+  assert.equal(load(), first, 'concurrent requests share the deadline');
+  await assert.rejects(Promise.race([first, new Promise((_, reject) => setTimeout(() => reject(new Error('test deadline missing')), 100))]), /timed out/);
+  assert.equal(await load(), current);
+  resolveOld({ ready: false }); await new Promise(resolve => setTimeout(resolve, 0));
+  assert.equal(await load(), current, 'late completion cannot replace the successful retry');
+  assert.equal(attempts, 2);
+});

@@ -48,3 +48,19 @@ test('preloads only the transitive static app graph, including shared chunks and
     assert.ok(!html.includes('/author.mjs'));
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test('community-specific early loading is recorded separately and never preloads the forum on the main site', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'sansphase-community-preload-'));
+  try {
+    await writeFile(join(root, 'index.html'), '<html><head><script type="module" src="./app.mjs"></script></head></html>');
+    await writeFile(join(root, 'app.mjs'), 'import "./shared.mjs"; const forum=()=>import("./community-runtime-client.mjs");');
+    await writeFile(join(root, 'shared.mjs'), 'export const value=1;');
+    await writeFile(join(root, 'community-runtime-client.mjs'), 'export * from "./community-ui.mjs";');
+    await writeFile(join(root, 'community-ui.mjs'), 'import "./shared.mjs"; export const forum=1;');
+    const delivery = await packageStaticFiles(root, 'https://static.example');
+    assert.deepEqual(delivery.modulepreloads, ['shared.mjs']);
+    assert.deepEqual(delivery.communityModulepreloads, ['community-runtime-client.mjs', 'community-ui.mjs', 'shared.mjs']);
+    const html = await readFile(join(root, 'index.html'), 'utf8');
+    assert.ok(!html.includes('/community-ui.mjs')); assert.ok(!html.includes('/community-runtime-client.mjs'));
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

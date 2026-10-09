@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { readFile } from 'node:fs/promises';
-import { createCommunityAppearance } from '../src/community-layout/appearance.ts';
+import { createCommunityAppearance } from '../src/community-appearance.ts';
 import { communityHostDocument } from '../server/community-host-document.ts';
 
 test('community HTML starts its own stylesheet early, retaining shared layout while omitting unused renderer styles', () => {
@@ -26,6 +26,35 @@ test('community HTML starts its own stylesheet early, retaining shared layout wh
   }
 });
 
+test('community HTML preloads its deferred runtime graph once using the existing static delivery base', () => {
+  for (const base of ['', 'https://static.sansphase.com/assets/site/0123456789abcdef01234567/']) {
+    const prefix = base || './', cors = base ? ' crossorigin="anonymous"' : '';
+    for (const alreadyPresent of [false, true]) {
+      const existing = alreadyPresent ? `<link rel="modulepreload" href="${prefix}community-runtime-client.mjs"${cors}>` : '';
+      const html = `<html${base ? ` data-static-base="${base}"` : ''}><head><link rel="modulepreload" href="${prefix}core.mjs"${cors}>${existing}</head><body><main id="main"></main></body></html>`;
+      const doc = new JSDOM(communityHostDocument(html, ['community-runtime-client.mjs', 'community-ui.mjs', 'community-runtime-client.mjs'])).window.document;
+      for (const file of ['community-runtime-client.mjs', 'community-ui.mjs', 'core.mjs']) {
+        const links = doc.querySelectorAll(`link[rel="modulepreload"][href="${prefix}${file}"]`);
+        assert.equal(links.length, 1, `${file} is neither duplicated nor omitted`);
+        assert.equal(links[0]?.getAttribute('crossorigin'), base ? 'anonymous' : null);
+      }
+      assert.equal(doc.querySelectorAll('link[rel="modulepreload"]').length, 3);
+      assert.equal(new JSDOM(html).window.document.querySelector('link[href$="community-ui.mjs"]'), null, 'the shared main-site HTML is not changed');
+    }
+  }
+});
+
+test('community HTML without a delivery manifest still preloads the deferred runtime entry', () => {
+  for (const base of ['', 'https://static.sansphase.com/assets/site/0123456789abcdef01234567/']) {
+    const prefix = base || './';
+    const html = `<html${base ? ` data-static-base="${base}"` : ''}><head></head><body></body></html>`;
+    const doc = new JSDOM(communityHostDocument(html)).window.document;
+    const links = doc.querySelectorAll(`link[rel="modulepreload"][href="${prefix}community-runtime-client.mjs"]`);
+    assert.equal(links.length, 1);
+    assert.equal(links[0]?.getAttribute('crossorigin'), base ? 'anonymous' : null);
+  }
+});
+
 test('the waiting community document paints paper before application modules load, leaving main-site appearance alone', async () => {
   const css = await readFile(new URL('../src/styles-foundation.css', import.meta.url), 'utf8');
   const html = `<html><head><style>${css}</style></head><body><main id="main"></main></body></html>`;
@@ -44,7 +73,9 @@ test('the waiting community document paints paper before application modules loa
 
 test('the community-only application hook adopts light before its first asynchronous render without changing the main-site hook', async () => {
   const source = await readFile(new URL('../src/app.mjs', import.meta.url), 'utf8');
-  const hook = source.slice(source.indexOf('if (communityOnly()) {'), source.indexOf('\nif (communityEnabled()) startCommunityLayout'));
+  const start = source.indexOf('if (communityOnly()) {'), end = source.indexOf('\nconst readerAccessEnabled', start);
+  assert.ok(start >= 0 && end > start, 'extract the actual first community-only hook');
+  const hook = source.slice(start, end);
   for (const community of [false, true]) {
     const dom = new JSDOM('<body><div id="site-startup"></div></body>', { url: 'https://community.sansphase.com/#/community/home', runScripts: 'outside-only' });
     try {

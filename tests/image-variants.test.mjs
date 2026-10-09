@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp, mkdir, readFile, stat, rm} from 'node:fs/promises';
+import {mkdtemp, mkdir, readFile, stat, rm, readdir, unlink} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {resolve} from 'node:path';
 import {randomUUID, createHash} from 'node:crypto';
 import sharp from 'sharp';
 import {createImageVariants} from '../server/image-variants.ts';
+import * as imageVariants from '../server/image-variants.ts';
 import {createPayloadStore} from '../server/payload/store.ts';
 import {createContentService} from '../server/content-service.ts';
 import {createPreviewServer} from '../server.mjs';
@@ -78,4 +79,65 @@ test('resized media and 304 responses require current publication; downloads rem
   published=false;
   assert.equal((await fetch(url,{headers:{'If-None-Match':etag}})).status,404);
  } finally {if(server)await new Promise(r=>{server.close(r);server.closeAllConnections();});await rm(dir,{recursive:true,force:true});}
+});
+
+test('image variant cleanup removes both cache modes before deleting the original and leaves unrelated files intact', async () => {
+ const dir=await mkdtemp(resolve(tmpdir(),'sansphase-variant-cleanup-'));
+ try {
+  const source=resolve(dir,'source.png'),other=resolve(dir,'other.png');
+  for(const file of [source,other]) await sharp({create:{width:1600,height:900,channels:4,background:'#4477aacc'}}).png().toFile(file);
+  const variant=createImageVariants(dir);
+  const paths=await Promise.all([variant(source,384,'image/png'),variant(source,768,'image/png',true),variant(other,384,'image/png',true)]);
+  assert.ok(paths.every(Boolean));
+  await imageVariants.removeImageVariants(dir,source,()=>unlink(source));
+  for(const path of paths.slice(0,2)) await assert.rejects(stat(path),{code:'ENOENT'});
+  await assert.rejects(stat(source),{code:'ENOENT'});
+  assert.ok((await stat(paths[2])).isFile());
+  assert.ok((await stat(other)).isFile());
+  assert.equal((await readdir(resolve(dir,'image-cache'))).some(name=>name.endsWith('.tmp')),false);
+ } finally {await rm(dir,{recursive:true,force:true});}
+});
+
+test('image cleanup waits for active generation shared across factories before removing cached bytes and the original', async t => {
+ const dir=await mkdtemp(resolve(tmpdir(),'sansphase-variant-active-'));
+ let release;
+ const held=new Promise(done=>{release=done;});
+ try {
+  const source=resolve(dir,'source.png');
+  await sharp({create:{width:1800,height:1200,channels:4,background:'#4466aacc'}}).png().toFile(source);
+  let entered;const waiting=new Promise(done=>{entered=done;});
+  const metadata=sharp.prototype.metadata;let calls=0;
+  t.mock.method(sharp.prototype,'metadata',async function(...args){calls++;entered();await held;return metadata.apply(this,args);});
+  const first=createImageVariants(dir)(source,768,'image/png',true);
+  await waiting;
+  const duplicate=createImageVariants(dir)(source,768,'image/png',true);
+  let deleted=false;
+  const removing=imageVariants.removeImageVariants(dir,source,async()=>{deleted=true;await unlink(source);});
+  await new Promise(done=>setImmediate(done));
+  assert.equal(deleted,false,'source deletion cannot overtake active libvips work');
+  assert.ok((await stat(source)).isFile());
+  release();
+  const [path,other]=await Promise.all([first,duplicate]);
+  await removing;
+  assert.ok(path);assert.equal(other,path);assert.equal(calls,1,'factories coalesce the same in-flight width');
+  await assert.rejects(stat(path),{code:'ENOENT'});await assert.rejects(stat(source),{code:'ENOENT'});
+  assert.deepEqual(await readdir(resolve(dir,'image-cache')),[]);
+ } finally {release();await rm(dir,{recursive:true,force:true});}
+});
+
+test('a failed image cleanup retains the original for regeneration and retry', async () => {
+ const dir=await mkdtemp(resolve(tmpdir(),'sansphase-variant-queue-'));
+ try {
+  const source=resolve(dir,'source.png');
+  await sharp({create:{width:1800,height:1200,channels:4,background:'#4466aacc'}}).png().toFile(source);
+  const variant=createImageVariants(dir);
+  const first=variant(source,768,'image/png',true);
+  await first;
+  await assert.rejects(imageVariants.removeImageVariants(dir,source,async()=>{throw Error('synthetic delete failure');}),/synthetic/);
+  assert.ok((await stat(source)).isFile());
+  const regenerated=await variant(source,768,'image/png',true);assert.ok(regenerated);
+  await imageVariants.removeImageVariants(dir,source,()=>unlink(source));
+  await assert.rejects(stat(regenerated),{code:'ENOENT'});
+  await assert.rejects(stat(source),{code:'ENOENT'});
+ } finally {await rm(dir,{recursive:true,force:true});}
 });

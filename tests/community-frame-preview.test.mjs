@@ -222,7 +222,7 @@ for (const change of ['account', 'permission']) test(`a confirmed ${change} chan
   assert.ok(main.querySelector('.community-thread'));
 });
 
-for (const count of [1, 2]) for (const outcome of ['ready', 'abort', 'denied']) test(`real hashchange keeps the held ${count}-image feed enhancement and releases it once after ${outcome}`, async t => {
+for (const count of [1, 2]) for (const outcome of ['ready', 'abort', 'denied']) test(`real hashchange keeps the held ${count}-image list sources and releases the feed layout after ${outcome}`, async t => {
   const imageId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   let navigating = false;
   const identity = deferred(), content = deferred();
@@ -235,10 +235,15 @@ for (const count of [1, 2]) for (const outcome of ['ready', 'abort', 'denied']) 
   }, count === 1);
   const newest = main.querySelector('[data-action="community-sort"][data-sort="newest"]'); assert.ok(newest);
   newest.click(); await turn();
-  const source = main.querySelector('[data-community="home"]'), image = source.querySelector('.community-topic-thumbs img');
-  assert.ok(image); assert.equal(image.getAttribute('src'), `/api/community/images/${imageId}.webp`);
-  let releases = 0; const setAttribute = image.setAttribute.bind(image);
-  image.setAttribute = (name, value) => { if (name === 'src' && value.endsWith('.thumb.webp')) releases++; setAttribute(name, value); };
+  const source = main.querySelector('[data-community="home"]'), images = [...source.querySelectorAll('.community-topic-thumbs img')];
+  const imageSource = `/api/community/images/${imageId}.webp?w=${count === 1 ? 768 : 384}`;
+  assert.equal(images.length, count);
+  let sourceChanges = 0;
+  for (const image of images) {
+    assert.equal(image.getAttribute('src'), imageSource);
+    const setAttribute = image.setAttribute.bind(image);
+    image.setAttribute = (name, value) => { if (name === 'src') sourceChanges++; setAttribute(name, value); };
+  }
   // The real layout registers its listener before app.mjs registers rendering.
   // Dispatch in that order; marking the route before hashchange hides the bug.
   const renderRoute = () => render(w.location.hash);
@@ -246,12 +251,16 @@ for (const count of [1, 2]) for (const outcome of ['ready', 'abort', 'denied']) 
   const changeRoute = hash => { w.history.replaceState(null, '', hash); w.dispatchEvent(new w.HashChangeEvent('hashchange')); };
   navigating = true; changeRoute('#/post/p1'); await turn();
   assert.equal(source.dataset.homeDesign, 'feed');
-  assert.equal(image.isConnected, true); assert.equal(releases, 0);
-  assert.equal(image.getAttribute('src'), `/api/community/images/${imageId}.webp`);
+  assert.deepEqual([...source.querySelectorAll('.community-topic-thumbs img')], images, 'retain the decoded image nodes while authority and content are pending');
+  assert.ok(images.every(image => image.isConnected)); assert.equal(sourceChanges, 0);
+  for (const image of images) assert.equal(image.getAttribute('src'), imageSource);
   if (outcome === 'abort') { changeRoute('#/community/boards/tools'); await turn(); }
   identity.resolve(outcome === 'denied' ? { ok: false, status: 401, json: async () => ({ error: 'signed out' }) } : response(person));
   content.resolve(response(thread)); await turn();
-  assert.equal(source.isConnected, false); assert.equal(releases, count === 1 ? 0 : 1, 'single previews stay complete; converted multi-image sources restore exactly once after the held page retires');
+  assert.equal(source.isConnected, false);
+  assert.ok(images.every(image => !image.isConnected));
+  assert.equal(sourceChanges, 0, 'retiring the layout cannot downgrade or restart complete-proportion list images');
+  for (const image of images) assert.equal(image.getAttribute('src'), imageSource);
   assert.equal(source.hasAttribute('data-home-design'), false);
   if (outcome === 'ready') assert.equal(main.querySelector('[data-community="post"]').dataset.threadDesign, 'feed');
   if (outcome === 'abort') assert.equal(main.querySelector('[data-community="board"]').dataset.homeDesign, 'feed');

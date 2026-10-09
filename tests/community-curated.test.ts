@@ -60,7 +60,7 @@ test('curated board and tag pages retain ordinary post images and excerpts while
     try {
       assert.equal(dom.window.document.querySelector('.community-curated'), null);
       assert.equal(dom.window.document.querySelectorAll('.community-topic').length, 1);
-      assert.equal(dom.window.document.querySelector('.community-topic-thumbs img')?.getAttribute('src'), '/api/community/images/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.webp');
+      assert.equal(dom.window.document.querySelector('.community-topic-thumbs img')?.getAttribute('src'), '/api/community/images/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.webp?w=768');
       assert.equal(dom.window.document.querySelector('.community-topic-thumbs')?.getAttribute('href'), '#/post/one');
       assert.match(dom.window.document.querySelector('.community-topic-excerpt')!.textContent!, /普通列表摘要/);
       assert.equal(dom.window.document.querySelector('[data-sort="curated"]')?.getAttribute('aria-pressed'), 'true');

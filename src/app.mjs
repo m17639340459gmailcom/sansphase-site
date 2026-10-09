@@ -10,18 +10,27 @@ import {mountNavSlider} from './nav-slider.mjs';
 import {DEPART_MS} from './journey.mjs';
 import {createContentReader,contentQuery} from './content-reader.mjs';
 import {readerGate,readerPage,mountReaderUI} from './reader-ui.mjs';
-import {loadAdminReaders} from './admin-route.mjs';
+import {loadAdminReaders, createDeferredModuleLoader} from './admin-route.mjs';
 import {publicRoute} from './access-policy.mjs';
 import {bookShell} from './book-shell.mjs';
 import {vipBookGate,mountVipBookPrompt} from './vip-book-prompt.mjs';
 import {mountRouteAssets} from './route-assets.mjs';
 import {ensureRouteStyle} from './route-styles.mjs';
-import {createStableCommunityFrame, createCommunityAppearance, startCommunityLayout} from './community-layout.mjs';
-const communityFrame = createStableCommunityFrame(document, window, fetch.bind(window));
+import {createCommunityAppearance} from './community-appearance.mjs';
+import {communityView,communityRoute,inCommunityArea} from './community-routing.mjs';
+import {communityLandingHTML} from './community-introduction.mjs';
 const communityAppearance = createCommunityAppearance(document, window);
-import {communityView,communityRoute,inCommunityArea,communityHeaderHTML,communityAccountHTML,communityLandingHTML} from './community.mjs';
-import {createCommunityUI} from './community-ui.mjs';
-import {mountCommunitySky} from './community-sky.mjs';
+let communityModule = null, communityFrame = null, communityUI = null;
+let communityHeaderHTML, communityAccountHTML, mountCommunitySky;
+const loadCommunityRuntime = createDeferredModuleLoader(() => import('./community-runtime-client.mjs'), { timeoutMs: 30000 });
+function activateCommunityRuntime(module) {
+  if (communityModule) return;
+  communityFrame = module.createStableCommunityFrame(document, window, fetch.bind(window));
+  communityUI = module.createCommunityUI();
+  ({communityHeaderHTML, communityAccountHTML, mountCommunitySky} = module);
+  module.startCommunityLayout(document, window);
+  communityModule = module;
+}
 mountRouteAssets(window);
 import {
   escapeHTML as esc,
@@ -65,7 +74,6 @@ if (communityOnly()) {
   if (initialRoute.kind === 'main') location.replace(initialRoute.url);
   else if (initialRoute.hash !== location.hash) history.replaceState(history.state, '', location.pathname + location.search + initialRoute.hash);
 }
-if (communityEnabled()) startCommunityLayout(document, window);
 const readerAccessEnabled = Boolean(siteContent && Object.hasOwn(siteContent, 'reader'));
 let notes = siteContent?.notes ?? [];
 let resources = siteContent?.resources ?? [];
@@ -214,7 +222,7 @@ function header(page) {
   const menuButton = `<button class="icon-button menu-button" data-action="menu" aria-controls="navigation" aria-expanded="false" aria-label="${t("打开菜单", "Open menu")}"><span class="menu-icon-open">${icons.menu}</span><span class="menu-icon-close">${icons.close}</span></button>`;
   const {view} = communityRoute(location.hash);
   // Recovery pages use shared chrome until the community stylesheet is ready.
-  const communityArea = communityStyleReady && communityEnabled() && inCommunityArea(view);
+  const communityArea = Boolean(communityModule) && communityStyleReady && communityEnabled() && inCommunityArea(view);
   communityAppearance.sync(communityArea);
   if (communityArea) {
     // The community is its own area: its own navigation, notifications, and a way back to the main site.
@@ -400,7 +408,6 @@ function closedPage(section, title, message) {
   return `<section class="page catalog-page" data-section="${section}">${pageHeading(section.toUpperCase(),title,message)}<div class="empty" data-content-state="not-open"><p>${t('你可以先浏览博客、作品与资料。','Explore the blog, projects and learning materials.')}</p><a class="button" href="#/notes">${t('浏览博客','Read the blog')} ${arrow}</a></div></section>`;
 }
 // Every community page after the landing page comes from the community UI.
-const communityUI = createCommunityUI();
 const communityEntry = createCommunityEntry({
   config: () => siteContent,
   request: (url, init) => fetch(url, init),
@@ -440,7 +447,7 @@ function syncCommunitySky(inCommunity) {
   document.body.classList.toggle('community-open', inCommunity);
   document.body.classList.toggle('community-management-open', inCommunity && view === 'manage');
   document.body.classList.toggle('community-landing-open', inCommunity && view === 'landing');
-  if (inCommunity && view !== 'landing') cleanCommunitySky ??= mountCommunitySky(document.querySelector('#blog-backdrop'), window, { parallax: () => false, pauseWhileScrolling: true });
+  if (inCommunity && view !== 'landing' && mountCommunitySky) cleanCommunitySky ??= mountCommunitySky(document.querySelector('#blog-backdrop'), window, { parallax: () => false, pauseWhileScrolling: true });
   else { cleanCommunitySky?.(); cleanCommunitySky = null; }
 }
 // The header reads the community's `me` (bell, balance, level); when that changes it is redrawn,
@@ -460,12 +467,12 @@ document.addEventListener('focusout', event => {
 const communityContext = () => ({t, esc, icons, notify: (message) => toast(message), members: Boolean(siteContent?.reader?.vip || siteContent?.author),
   mountSelect: mountCommunitySelect,
   ownerAvatar: siteContent?.profile?.avatar || null, headerChanged: refreshCommunityHeader,
-  showPostingTips: !communityFrame.enabled(),
-  showActiveMembers: !communityFrame.enabled(),
-  showHomeCompose: !communityFrame.enabled(),
-  simpleCompose: communityFrame.enabled(),
-  painted: () => { if (communityFrame.enabled()) communityFrame.sync(communityUI.frameHTML(communityContext())); communityReady(); },
-  beforePaint: communityFrame.enabled() ? communityFrame.preserveReadingPosition : undefined});
+  showPostingTips: !communityFrame?.enabled(),
+  showActiveMembers: !communityFrame?.enabled(),
+  showHomeCompose: !communityFrame?.enabled(),
+  simpleCompose: communityFrame?.enabled(),
+  painted: () => { if (communityFrame?.enabled()) communityFrame.sync(communityUI.frameHTML(communityContext())); communityReady(); },
+  beforePaint: communityFrame?.enabled() ? communityFrame.preserveReadingPosition : undefined});
 // The header is rebuilt on every route, so a route change also closes the menu.
 function setCommunityAccountMenu(open) {
   const button = document.querySelector('[data-action="community-account"]');
@@ -592,6 +599,8 @@ async function render(options={}) {
   renderView({...options,contentStatus:'auth'});
   return;
  }
+ const communityRuntime = communityEnabled() && inCommunityArea(communityView(route.page, route.id)) && !communityModule
+  ? loadCommunityRuntime().then(module => ({ module }), () => null) : null;
  const bookStyle = route.page==='resource-center' && route.id ? ensureRouteStyle(document,'book').then(()=>true,()=>false) : null;
  // Wait for the community stylesheet only on the first visit; later renders
  // (language switch, sorting) stay synchronous. A failed load exposes retry.
@@ -645,6 +654,12 @@ async function render(options={}) {
   if (generation !== renderGeneration) return;
   if (!ready) { renderView({ ...options, contentStatus: 'error' }); return; }
  }
+ if (communityRuntime) {
+  const ready = await communityRuntime;
+  if (generation !== renderGeneration) return;
+  if (!ready) { renderView({ ...options, contentStatus: 'error' }); return; }
+  activateCommunityRuntime(ready.module);
+ }
  renderView(options);
  if(contentVerified)contentReader.presentation?.commit(document.querySelector('#main'),query);
  window.sansphasePageSession?.commit();
@@ -697,7 +712,7 @@ function renderView({preserveScroll=false,contentStatus}={}) {
   else homeRoot?.removeAttribute("role");
   cleanStage.setCovered?.(page !== "home");
   cleanStage.setLanguage?.(language === "en");
-  if (!communityEnabled() || !communityFrame.enabled() || contentStatus) communityFrame.dispose();
+  if (!communityEnabled() || !communityFrame?.enabled() || contentStatus) communityFrame?.dispose();
   header(page);
   const views = {
     home,
@@ -728,10 +743,10 @@ function renderView({preserveScroll=false,contentStatus}={}) {
   cleanReaderAdmin();
   cleanCommunity();
   const pageMarkup = contentStatus ? contentStatus==='auth' ? readerGate(language==='en') : contentStatus==='vip' ? vipBookGate(language==='en') : contentMessage(contentStatus==='error') : (views[page] || notFound)();
-  if (!communityEnabled() || contentStatus || !(communityFrame.render(main, pageMarkup, communityUI.frameHTML(communityContext()))
+  if (!communityEnabled() || !communityModule || contentStatus || !(communityFrame.render(main, pageMarkup, communityUI.frameHTML(communityContext()))
     || communityUI.renderManagement(main, pageMarkup, preserveScroll))) setContentHTML(main, pageMarkup);
   readerUI?.route(page,id);
-  cleanCommunity=communityEnabled() && !contentStatus && (page==='community'||page==='post') ? communityUI.mount(main,communityContext()) : ()=>{};
+  cleanCommunity=communityEnabled() && communityModule && !contentStatus && (page==='community'||page==='post') ? communityUI.mount(main,communityContext()) : ()=>{};
   communityReady({ terminal: contentStatus !== 'loading' && !main.querySelector('[data-community]') });
   cleanReaderAdmin=page==='admin' && adminReadersModule ? adminReadersModule.mountReaderAdmin(main,{english:language==='en'}) : ()=>{};
   const bookRoot=main.querySelector('.book-reader'),bookGeneration=++bookRenderGeneration;
@@ -995,7 +1010,7 @@ document.addEventListener("click", (e) => {
     case "community-browse-mode": {
       setCommunityAccountMenu(false);
       a.blur();
-      void communityUI.setBrowsing(a.dataset.reader === 'true');
+      void communityUI?.setBrowsing(a.dataset.reader === 'true');
       break;
     }
     case "blog-notice-prev":
@@ -1122,9 +1137,9 @@ window.addEventListener("hashchange", (event) => {
   const update = () => {
     const rendering = render(preserveManagementScroll ? { preserveScroll: true } : undefined);
     // The community frame resets its active desktop/mobile scroll host itself.
-    if ((!communityEnabled() || !communityFrame.enabled()) && !preserveManagementScroll
+    if ((!communityEnabled() || !communityFrame?.enabled()) && !preserveManagementScroll
       && !main.querySelector('.community-management-page[data-community-pending-route="true"]')) window.scrollTo({ top: 0, behavior: "instant" });
-    ((communityEnabled() && communityFrame.center()) || (to === "home"
+    ((communityEnabled() && communityFrame?.center()) || (to === "home"
       ? homeRoot?.querySelector(".universe-stage") || main
       : main
     )).focus({ preventScroll: true });
@@ -1157,14 +1172,14 @@ window.addEventListener('author:identity',event=>{
   if(!siteContent)return;
   contentReader.clear();loadedContentKey='';
   siteContent.author=event.detail;
-  communityUI.clear();
+  communityUI?.clear();
   render({preserveScroll:true});
 });
 window.addEventListener('reader:identity',event=>{
   if(!siteContent)return;
   contentReader.clear();loadedContentKey='';remotePage=null;
   siteContent.reader=event.detail;
-  communityUI.clear();
+  communityUI?.clear();
   render();
 });
 readerUI=mountReaderUI({render,readIdentity:()=>siteContent?.reader || null,onIdentity(value){

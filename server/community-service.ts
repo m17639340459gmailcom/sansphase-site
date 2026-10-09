@@ -21,6 +21,7 @@ import type { CommunityStaffRole } from '../src/community-staff.ts';
 import { canManageCommunityShop } from './community-shop-access.ts';
 import { communityIconDefinition, communityIconState } from '../src/community-icon-policy.ts';
 import type { CommunityIconEligibility } from '../src/community-icon-policy.ts';
+import { createImageVariants, removeImageVariants } from './image-variants.ts';
 
 export { communityContactReason } from './community-context.ts';
 export type { CommunityViewer, PersonInfo } from './community-context.ts';
@@ -40,6 +41,7 @@ export function createCommunityService(options: ServiceOptions) {
   const ownerMember: CommunityAuthor = { kind: 'owner', id: options.ownerId || 'owner' };
   store?.staff.bindOwner(ownerMember.id);
   const uploads = directory ? resolve(directory, 'uploads') : '';
+  const imageVariant = directory ? createImageVariants(directory) : null;
   const words = (options.words || []).map(word => word.normalize('NFKC').toLowerCase().trim()).filter(Boolean);
   let lastUpkeep = 0;
   const writeAudit = options.audit;
@@ -77,8 +79,15 @@ export function createCommunityService(options: ServiceOptions) {
     if (uploads) {
       const ids = store.sweepImages(now);
       if (options.drainFileQueue) await drainFiles();
-      else for (const id of ids) for (const kind of ['image', 'thumb'])
-        await unlink(resolve(uploads, `community-${kind}-${id}.webp`)).catch(() => {});
+      else for (const id of ids) for (const kind of ['image', 'thumb']) {
+        if(store.image(id)) continue;
+        const path=resolve(uploads, `community-${kind}-${id}.webp`);
+        if(kind==='image'&&directory) await removeImageVariants(directory,path,async()=>{
+          if(store.image(id)) throw Error('Community image remains registered.');
+          await unlink(path);
+        }).catch(()=>{});
+        else await unlink(path).catch(() => {});
+      }
     }
   }
 
@@ -325,8 +334,20 @@ export function createCommunityService(options: ServiceOptions) {
         && (ctx.live.economy.imageVisible(id, ctx.me) || canManageCommunityShop(ctx) && ctx.live.economy.customItems().some(item => item.image === id));
     };
     if (!allowed() || !uploads) throw fail('图片不存在。', 404);
+    const original=resolve(uploads, `community-${thumb ? 'thumb' : 'image'}-${id}.webp`);
+    let source=original;
+    const parameters=[...ctx.url.searchParams.entries()];
+    const width=!thumb&&parameters.length===1&&parameters[0][0]==='w'&&/^(384|768)$/.test(parameters[0][1]) ? Number(parameters[0][1]) : 0;
+    if(width&&imageVariant&&ctx.live.image(id)?.purpose==='content') {
+      try {source=await imageVariant(original,width,'image/webp',true)||original;}
+      catch { /* A derived cache failure must not interrupt the existing source delivery. */ }
+    }
     let data: Buffer;
-    try { data = await readFile(resolve(uploads, `community-${thumb ? 'thumb' : 'image'}-${id}.webp`)); } catch { throw fail('图片不存在。', 404); }
+    try { data = await readFile(source); }
+    catch {
+      if(source===original) throw fail('图片不存在。',404);
+      try {data=await readFile(original);} catch {throw fail('图片不存在。',404);}
+    }
     await ctx.refreshViewer();
     if (!allowed()) throw fail('图片不存在。', 404);
     // A reviewer can see pending/withdrawn content without making it approved.

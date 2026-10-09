@@ -57,6 +57,13 @@ export function createPreviewServer({
 } = {}) {
   const rootPath = resolve(root);
   const communityOpen = communityEnabled === true && Boolean(communityService);
+  let communityModules;
+  const loadCommunityModules = () => communityModules ??= readFile(resolve(rootPath, 'static-delivery.json'), 'utf8')
+    .then(text => {
+      const delivery = JSON.parse(text);
+      return Array.isArray(delivery.communityModulepreloads) && delivery.communityModulepreloads.length
+        ? delivery.communityModulepreloads : undefined;
+    }).catch(error => { if (error.code === 'ENOENT') return undefined; throw error; });
   const rootPrefix = rootPath.endsWith(sep) ? rootPath : rootPath + sep;
   const handle = async (req, res) => {
     let fileHandle;
@@ -268,7 +275,7 @@ export function createPreviewServer({
             return;
           }
           let html = await readFile(resolve(rootPath, "index.html"), "utf8");
-          if (communityOnly) html = communityHostDocument(html);
+          if (communityOnly) html = communityHostDocument(html, await loadCommunityModules());
           if (data.profile?.background) {
             html = html.replaceAll(
               "./assets/materials/blog-space.png",

@@ -10,6 +10,8 @@ import { createCommunityStore } from '../server/community-store.ts';
 import { createReaderWorkflow } from '../server/reader-workflow.ts';
 import { cleanReaderFiles } from '../server/reader-file-cleanup.ts';
 import { removeReaderAccount, resumeReaderCleanup } from '../server/reader-account-removal.ts';
+import sharp from 'sharp';
+import { createImageVariants } from '../server/image-variants.ts';
 
 let template: string;
 test.before(async () => {
@@ -123,16 +125,20 @@ test('SQL failure rolls back content; queued files remain protected until a retr
   db.prepare('INSERT INTO community_images(id,uploader_kind,uploader_id,topic_id,width,height,created_at) VALUES (?,\'reader\',?,?,1,1,?)').run(image, old.id, target.id, at);
   await mkdir(resolve(directory, 'uploads'));
   const file = resolve(directory, 'uploads', `community-image-${image}.webp`);
-  await writeFile(file, 'file');
+  await sharp({create:{width:1600,height:900,channels:4,background:'#4477aacc'}}).webp().toFile(file);
+  const cached=await createImageVariants(directory)(file,768,'image/webp',true);
+  assert.ok(cached);
   db.exec("CREATE TRIGGER fail_cleanup BEFORE DELETE ON community_replies BEGIN SELECT RAISE(ABORT,'injected cleanup failure'); END");
   assert.throws(() => store.purgeReaderData(old.id, workflow.queueFile), /injected/);
   assert.ok(store.topic(target.id));
   assert.equal((await cleanReaderFiles({ directory, workflow, payload: {} })).protected, 2);
   await access(file);
+  await access(cached);
   db.exec('DROP TRIGGER fail_cleanup');
   store.purgeReaderData(old.id, workflow.queueFile);
   assert.equal((await cleanReaderFiles({ directory, workflow, payload: {} })).cleaned, 2);
   await assert.rejects(access(file));
+  await assert.rejects(access(cached), {code:'ENOENT'});
 });
 
 test('reader deletion failure cannot purge content; persisted follow-up jobs survive cleanup failure', async t => {

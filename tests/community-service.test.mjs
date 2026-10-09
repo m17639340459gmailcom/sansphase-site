@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { copyFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, rm, writeFile, readFile, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -108,6 +108,63 @@ async function setup(t, { store: withStore = true, simplePosting = false, useDef
   return { get, post, upload, siteOrigin, store, audits, setLevel, credit, directory };
 }
 const json = async (response) => (await response).json();
+
+test('community list variants preserve complete image proportions and alpha, cache smaller bytes, and leave stored files unchanged', async t => {
+  const { get, upload, store, directory } = await setup(t);
+  const sharp = (await import('sharp')).default;
+  const input=await sharp({create:{width:1600,height:900,channels:4,background:'#6288aabb'}}).png().toBuffer();
+  const image=await json(upload(input));
+  store.createTopic({...topicBody,author:{kind:'reader',id:'r1'},images:[image.id]});
+  const fullPath=resolve(directory,'uploads',`community-image-${image.id}.webp`),thumbPath=resolve(directory,'uploads',`community-thumb-${image.id}.webp`);
+  const original=await readFile(fullPath),thumb=await readFile(thumbPath);
+  const fullResponse=await get(`images/${image.id}.webp`,'reader=r2'),fullTag=fullResponse.headers.get('etag');await fullResponse.arrayBuffer();
+  for(const width of [384,768]) {
+    const response=await get(`images/${image.id}.webp?w=${width}`,'reader=r2',{'If-None-Match':fullTag});
+    assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'private, no-cache');
+    const bytes=Buffer.from(await response.arrayBuffer()),meta=await sharp(bytes).metadata();
+    assert.equal(meta.width,width);assert.equal(meta.height,width*9/16);assert.equal(meta.hasAlpha,true);assert.ok(bytes.length<original.length);
+    assert.notEqual(response.headers.get('etag'),fullTag);
+    const again=await get(`images/${image.id}.webp?w=${width}`,'reader=r2',{'If-None-Match':response.headers.get('etag')});assert.equal(again.status,304);
+  }
+  assert.deepEqual(await readFile(fullPath),original);assert.deepEqual(await readFile(thumbPath),thumb);
+  assert.equal((await readdir(resolve(directory,'image-cache'))).filter(name=>name.endsWith('.webp')).length,2);
+  for(const suffix of ['?w=960','?w=0','?w=768&other=1','?w=384&w=768']) {
+    const response=await get(`images/${image.id}.webp${suffix}`,'reader=r2');assert.deepEqual(Buffer.from(await response.arrayBuffer()),original);
+  }
+  const cropped=await get(`images/${image.id}.thumb.webp?w=384`,'reader=r2');assert.deepEqual(Buffer.from(await cropped.arrayBuffer()),thumb);
+});
+
+test('community list variant bytes and validators cannot bypass permission changes after asynchronous work', async t => {
+  const {get,upload,store}=await setup(t),sharp=(await import('sharp')).default;
+  const image=await json(upload(await sharp({create:{width:1600,height:900,channels:4,background:'#4477aacc'}}).png().toBuffer()));
+  const topic=store.createTopic({...topicBody,author:{kind:'reader',id:'r1'},images:[image.id]});
+  const url=`images/${image.id}.webp?w=768`,first=await get(url,'reader=r2'),etag=first.headers.get('etag');await first.arrayBuffer();assert.ok(etag);
+  const original=store.image.bind(store);let reads=0;
+  t.mock.method(store,'image',id=>{if(++reads===2)store.hide({kind:'topic',id:topic.id},'synthetic visibility change');return original(id);});
+  const denied=await get(url,'reader=r2',{'If-None-Match':etag});assert.equal(denied.status,404);assert.equal(denied.headers.get('etag'),null);
+  assert.equal(denied.headers.get('cache-control'),'private, no-store');
+});
+
+test('community variant generation failures fall back to existing complete image delivery',async t=>{
+  const {get,upload,store,directory}=await setup(t),sharp=(await import('sharp')).default;
+  const image=await json(upload(await sharp({create:{width:1600,height:900,channels:3,background:'#446688'}}).png().toBuffer()));
+  store.createTopic({...topicBody,author:{kind:'reader',id:'r1'},images:[image.id]});
+  await writeFile(resolve(directory,'image-cache'),'synthetic unavailable cache directory');
+  const original=await readFile(resolve(directory,'uploads',`community-image-${image.id}.webp`));
+  const response=await get(`images/${image.id}.webp?w=768`,'reader=r2');assert.equal(response.status,200);
+  assert.deepEqual(Buffer.from(await response.arrayBuffer()),original);
+});
+
+test('fallback image upkeep preserves files registered again after stale-image selection',async t=>{
+  const {get,store,directory}=await setup(t),id='cccccccc-cccc-4ccc-8ccc-cccccccccccc',uploader={kind:'reader',id:'r1'};
+  store.addImage({id,uploader,width:1600,height:900,now:'2020-01-01T00:00:00Z'});
+  const full=resolve(directory,'uploads',`community-image-${id}.webp`),thumb=resolve(directory,'uploads',`community-thumb-${id}.webp`);
+  await writeFile(full,'synthetic registered image');await writeFile(thumb,'synthetic registered thumbnail');
+  const sweep=store.sweepImages.bind(store);let restored=false;
+  t.mock.method(store,'sweepImages',now=>{const selected=sweep(now);assert.ok(selected.includes(id));store.addImage({id,uploader,width:1600,height:900});restored=true;return selected;});
+  const response=await get(`images/${id}.webp`);assert.equal(restored,true);assert.equal(response.status,200);
+  assert.equal(await readFile(full,'utf8'),'synthetic registered image');assert.equal(await readFile(thumb,'utf8'),'synthetic registered thumbnail');
+});
 
 test('VIP daily check-in responses use authoritative membership and ignore client reward and VIP fields', async t => {
   const { get, post, store } = await setup(t);
@@ -292,7 +349,7 @@ test('pending topic and background images never cache or return 304 to uploaders
   await writeFile(resolve(directory,'uploads',`community-image-${background}.webp`),await png());
   await writeFile(resolve(directory,'uploads',`community-thumb-${background}.webp`),await png());
   store.profileBackgrounds.submit(author,background);
-  for(const id of [image.id,background])for(const cookie of ['reader=r1','owner=yes'])for(const suffix of ['.webp','.thumb.webp']) {
+  for(const id of [image.id,background])for(const cookie of ['reader=r1','owner=yes'])for(const suffix of ['.webp','.thumb.webp','.webp?w=768']) {
     const response=await get(`images/${id}${suffix}`,cookie,{'If-None-Match':'*'});
     assert.equal(response.status,200);assert.equal(response.headers.get('cache-control'),'private, no-store');assert.equal(response.headers.get('etag'),null);await response.arrayBuffer();
   }
@@ -886,6 +943,10 @@ test('product GIF and animated WebP keep frames and timing, with a static thumbn
     assert.equal(response.status, 201);
     const image = await response.json();
     const full = await (await get(`images/${image.id}.webp`, 'owner=yes')).arrayBuffer();
+    for(const width of [384,768]) {
+      const variant=await get(`images/${image.id}.webp?w=${width}`,'owner=yes');
+      assert.deepEqual(Buffer.from(await variant.arrayBuffer()),Buffer.from(full),'product artwork stays original even when a list width is requested');
+    }
     const meta = await sharp(Buffer.from(full), { animated: true }).metadata();
     assert.equal(meta.pages, 2); assert.deepEqual(meta.delay, [100, 200]);
     assert.deepEqual([store.image(image.id).width, store.image(image.id).height], [32, 32]);

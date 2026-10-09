@@ -145,7 +145,7 @@ for (const board of ['qa', 'showcase']) test(`opening ${board} directly retains 
   } });
   assert.equal(f.main.querySelector('.community-results .community-curated'), null);
   assert.equal(f.main.querySelectorAll('.community-results .community-topic').length, 6);
-  assert.equal(f.main.querySelectorAll(`.community-results .community-topic-thumbs img[src="/api/community/images/${image}.webp"]`).length, 6);
+  assert.equal(f.main.querySelectorAll(`.community-results .community-topic-thumbs img[src="/api/community/images/${image}.webp?w=768"]`).length, 6);
   assert.match(f.main.querySelector('.community-results .community-topic-excerpt')?.textContent || '', /正文摘要\s*1/);
   assert.equal(f.main.querySelector('.community-topic-thumbs')?.getAttribute('href'), '#/post/p1');
   assert.equal(f.calls.filter(call => call.url.startsWith('/api/community/topics?') && params(call.url).get('sort') === 'curated').length, 1, 'restoring images adds no extra reads of the visible post list');
