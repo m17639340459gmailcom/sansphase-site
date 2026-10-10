@@ -83,7 +83,7 @@ test('management can add, upload and save a standalone image through its actual 
   assert.equal(main.querySelector('.community-banner-source'), null);
   const field = main.querySelector('[data-banner-file]');
   assert.ok(field);
-  Object.defineProperty(field, 'files', { value: [new File(['image'], 'banner.png', { type: 'image/png' })] });
+  Object.defineProperty(field, 'files', { value: [new File([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==', 'base64')], 'banner.png', { type: 'image/png' })] });
   field.dispatchEvent(new w.Event('change', { bubbles: true })); await turn();
   assert.ok(main.querySelector('.community-banner-preview.is-image > img'));
   main.querySelector('form[data-community-form="banners"]').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true })); await turn();

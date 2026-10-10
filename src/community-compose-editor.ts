@@ -35,7 +35,7 @@ export function composeMarkdown(node: JSONContent): string {
   return children().join('\n\n');
 }
 
-type Options = { request: typeof fetch; prepare: (file: File) => Promise<Blob>; t: Translate; owner?: boolean | (() => boolean) };
+type Options = { request: typeof fetch; prepare: (file: File, signal: AbortSignal) => Promise<Blob>; t: Translate; owner?: boolean | (() => boolean) };
 export type CommunityComposeEditor = ReturnType<typeof mountCommunityComposeEditor>;
 
 export function mountCommunityComposeEditor(root: HTMLElement, { request, prepare, t, owner = false }: Options) {
@@ -165,7 +165,7 @@ export function mountCommunityComposeEditor(root: HTMLElement, { request, prepar
     const messages: string[] = [];
     const typed = files.filter(file => imageTypes.has(file.type));
     if (typed.length !== files.length) messages.push(t('只支持 JPG、PNG、WebP 图片，不支持视频。', 'Only JPG, PNG and WebP images are supported, not videos.'));
-    const cap = communityImageBytes(typeof owner === 'function' ? owner() : owner), label = `${cap / 1024 ** 2}MB`;
+    const cap = communityImageBytes(true), label = `${cap / 1024 ** 2}MB`;
     const valid = typed.filter(file => file.size <= cap);
     if (valid.length !== typed.length) messages.push(t(`单张图片不能超过 ${label}。`, `Each image must be ${label} or smaller.`));
     const max = Number(root.dataset.imageMax || 0);
@@ -178,7 +178,9 @@ export function mountCommunityComposeEditor(root: HTMLElement, { request, prepar
     }
     const batch = selected.map(file => {
       const id = crypto.randomUUID();
-      jobs.set(id, { file, preview: URL.createObjectURL(file) });
+      // Originals have not passed dimensions/format checks yet. Keep the
+      // existing upload placeholder instead of decoding all originals at once.
+      jobs.set(id, { file, preview: '' });
       return id;
     });
     const content: JSONContent[] = text ? text.split(/\r?\n/).map(line => ({ type: 'paragraph', content: line ? [{ type: 'text', text: line }] : [] })) : [];
@@ -189,9 +191,13 @@ export function mountCommunityComposeEditor(root: HTMLElement, { request, prepar
     await Promise.all(batch.map(async id => {
       const job = jobs.get(id)!;
       try {
-        const blob = await prepare(job.file);
+        const blob = await prepare(job.file, abort.signal);
         if (destroyed || findUpload(id) === undefined) return;
-        const form = new FormData(); form.append('file', blob, job.file.name);
+        if (blob.size > communityImageBytes(typeof owner === 'function' ? owner() : owner)) throw new Error(t('图片自动压缩后仍超过 2MB，请换一张较小的图片。', 'The compressed image is still too large. Choose a smaller image.'));
+        job.preview = URL.createObjectURL(blob);
+        const preparedPosition = findUpload(id);
+        if (preparedPosition !== undefined) editor.view.dispatch(editor.state.tr.setNodeMarkup(preparedPosition, undefined, { ...editor.state.doc.nodeAt(preparedPosition)!.attrs }).setMeta('addToHistory', false));
+        const form = new FormData(); form.append('file', blob, blob instanceof File ? blob.name : job.file.name);
         const response = await request('/api/community/images', { method: 'POST', credentials: 'same-origin', headers: { 'X-Reader-Request': '1' }, body: form, signal: abort.signal });
         const result = await response.json() as { id?: string; error?: string };
         if (!response.ok || !result.id || !imageIdFromPath(`/api/community/images/${result.id}.webp`)) throw new Error(result.error || t('图片上传失败，请移除后重试。', 'Upload failed. Remove the image and try again.'));

@@ -8,6 +8,7 @@ import * as richModule from '../src/community-compose-editor.ts';
 import { readFile } from 'node:fs/promises';
 import { transform } from 'esbuild';
 import { typedBrowserModules } from '../scripts/typed-browser-modules.mjs';
+import { uploadImageFile } from './fixtures/upload-image-file.mjs';
 
 const flush = async () => { for (let i = 0; i < 12; i++) await setImmediate(); };
 const waitFor = async (ready, message) => {
@@ -322,7 +323,7 @@ test('first image selection after preparation uploads exactly once and preparati
   const image = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   const f = await setup(t, deferred(), url => url.endsWith('/images') ? response({ id: image }) : null);
   const root = f.root(), picker = root.querySelector('input[type=file]');
-  const photo = Object.assign(new Blob(['image'], { type: 'image/png' }), { name: 'first.png' });
+  const photo = uploadImageFile('first.png');
   assert.equal(picker.disabled, true);
   Object.defineProperty(picker, 'files', { configurable: true, value: [photo] });
   picker.dispatchEvent(new f.w.Event('change', { bubbles: true })); await flush();
@@ -332,6 +333,7 @@ test('first image selection after preparation uploads exactly once and preparati
   assert.equal(f.calls.filter(call => call.url.endsWith('/images')).length, 0);
   Object.defineProperty(picker, 'files', { configurable: true, value: [photo] });
   picker.dispatchEvent(new f.w.Event('change', { bubbles: true })); await flush();
+  await waitFor(() => root.querySelector('textarea').value.includes(image), 'prepared valid image upload completes after its async header inspection');
   assert.equal(f.calls.filter(call => call.url.endsWith('/images')).length, 1);
   assert.match(root.querySelector('textarea').value, new RegExp(image));
 });

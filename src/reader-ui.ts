@@ -1,6 +1,7 @@
 import { escapeHTML as esc } from './core.mjs';
 import { renderMembership, mountMembershipClock, membershipSummary } from './reader-membership.mjs';
 import { readerImageBytes, uploadSizeLabel } from './upload-policy.mjs';
+import { prepareUploadImage } from './upload-image.mjs';
 import { validReaderNickname } from './reader-policy.mjs';
 import { readerFrameDecoration, readerFrameOwner, readerFrameSettingsHTML, retainReaderFrame, mountReaderFrames } from './reader-frames.mjs';
 
@@ -95,7 +96,8 @@ export function mountReaderUI({ render, onIdentity, english = () => false, onLog
   const tr = (zh: string, en: string) => english() ? en : zh;
   const membershipClock = mountMembershipClock(document, english);
   let identityEpoch = 0;
-  const invalidateIdentity = () => { identityEpoch++; };
+  let avatarPreparation: AbortController | null = null;
+  const invalidateIdentity = () => { avatarPreparation?.abort(); avatarPreparation = null; identityEpoch++; };
   document.defaultView?.addEventListener('reader:identity', invalidateIdentity);
   document.defaultView?.addEventListener('author:identity', invalidateIdentity);
   const identityStamp = () => ({ epoch: identityEpoch, owner: readerFrameOwner(readIdentity()) });
@@ -222,20 +224,32 @@ export function mountReaderUI({ render, onIdentity, english = () => false, onLog
     const file = input.files?.[0];
     if (!file) return;
     input.value = '';
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > readerImageBytes) {
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
       avatarMessage(tr(`请选择不超过 ${avatarSizeLabel} 的 JPG、PNG 或 WebP 图片。`, `Choose a JPG, PNG or WebP image up to ${avatarSizeLabel}.`)); return;
     }
     const button = document.querySelector<HTMLButtonElement>('[data-reader-avatar-pick]');
     const identity = identityStamp();
+    const controller = new AbortController(); avatarPreparation?.abort(); avatarPreparation = controller;
+    const originalHash = location.hash;
+    const currentUpload = () => avatarPreparation === controller && !controller.signal.aborted && currentIdentity(identity) && location.hash === originalHash && input.isConnected;
+    const leave = () => { if (location.hash !== originalHash || !currentIdentity(identity)) controller.abort(); };
+    document.defaultView?.addEventListener('hashchange', leave);
     if (button) button.disabled = true;
     avatarMessage(tr('头像上传中…', 'Uploading avatar…'));
     try {
-      const form = new FormData(); form.append('file', file);
-      const response = await fetch('/api/reader/avatar', { method: 'POST', credentials: 'same-origin', headers: { 'X-Reader-Request': '1' }, body: form });
+      const prepared = await prepareUploadImage(file, { signal: controller.signal });
+      if (!currentUpload()) return;
+      const form = new FormData(); form.append('file', prepared);
+      const response = await fetch('/api/reader/avatar', { method: 'POST', credentials: 'same-origin', headers: { 'X-Reader-Request': '1' }, body: form, signal: controller.signal });
       const value = await response.json() as ApiResult;
+      if (!currentUpload()) return;
       if (!response.ok) throw new Error(value.error || tr('上传失败，请重试。', 'Upload failed. Please try again.'));
       if (profileIdentity(value, identity)) avatarMessage(tr('头像已提交审核；通过后会自动更新。', 'Avatar submitted for review and will update after approval.'));
-    } catch (error) { if (currentIdentity(identity)) { avatarMessage(errorMessage(error)); if (button) button.disabled = false; } }
+    } catch (error) { if (currentUpload()) avatarMessage(errorMessage(error)); }
+    finally {
+      document.defaultView?.removeEventListener('hashchange', leave);
+      if (avatarPreparation === controller) { avatarPreparation = null; if (button?.isConnected) button.disabled = false; }
+    }
   });
   document.addEventListener('submit', async event => {
     const form = (event.target as Element | null)?.closest<HTMLFormElement>('[data-reader-form]');

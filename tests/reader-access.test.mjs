@@ -5,6 +5,7 @@ import { createPreviewServer } from '../server.mjs';
 import { JSDOM } from 'jsdom';
 import { readerPage, mountReaderUI } from '../src/reader-ui.mjs';
 import { readFile } from 'node:fs/promises';
+import { waitForImageState } from './fixtures/upload-image-file.mjs';
 
 const data = {
   source: 'cms', profile: { name: 'Author' }, announcements: [],
@@ -309,24 +310,29 @@ test('a signed-in owner enters the writing studio, with management kept inside i
   assert.doesNotMatch(html, /data-reader-form="login"/);
 });
 
-test('reader avatar files above 2 MB are rejected before making an upload request', () => {
+test('reader avatar original files above 25 MiB are rejected before making an upload request', async () => {
   const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://127.0.0.1/#/account' });
-  const previousDocument = globalThis.document, previousFetch = globalThis.fetch;
+  const previousDocument = globalThis.document, previousFetch = globalThis.fetch, previousLocation = globalThis.location;
   let calls = 0;
   globalThis.document = dom.window.document;
+  globalThis.location = dom.window.location;
   globalThis.fetch = async () => { calls++; throw new Error('Unexpected upload'); };
   try {
     document.body.innerHTML = readerPage('account', '', { uid: '0008', nickname: '读者', email: 'reader@example.test', vip: false });
     mountReaderUI({ render: () => {}, onIdentity: () => {} });
     const input = document.querySelector('[data-reader-avatar-file]');
-    const file = new dom.window.File([new Uint8Array(2 * 1024 ** 2 + 1)], 'large.png', { type: 'image/png' });
+    const file = new dom.window.File([new Uint8Array(25 * 1024 ** 2 + 1)], 'large.png', { type: 'image/png' });
     Object.defineProperty(input, 'files', { value: [file] });
     input.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    await waitForImageState(() => /25MB/.test(document.querySelector('[data-reader-avatar-message]').textContent), 'the avatar preparation rejection must complete');
     assert.equal(calls, 0);
-    assert.match(document.querySelector('[data-reader-avatar-message]').textContent, /2 MB/);
+    assert.match(document.querySelector('[data-reader-avatar-message]').textContent, /25MB/);
+    assert.equal(document.querySelector('[data-reader-avatar-pick]').disabled, false);
   } finally {
     globalThis.document = previousDocument;
     globalThis.fetch = previousFetch;
+    if (previousLocation === undefined) Reflect.deleteProperty(globalThis, 'location');
+    else globalThis.location = previousLocation;
     dom.window.close();
   }
 });

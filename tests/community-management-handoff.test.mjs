@@ -16,6 +16,7 @@ import { createCommunityService } from '../server/community-service.ts';
 import { migrateCommunity } from '../server/payload/community-migration.ts';
 import { communityStaffCapabilities } from '../src/community-staff.ts';
 import { acceptCommunityConvention } from './fixtures/community-convention-consent.ts';
+import { uploadImageFile } from './fixtures/upload-image-file.mjs';
 
 const owner = { name: '作者', uid: 'owner', role: 'owner', owner: true, mod: true, vip: true, agreed: true,
   checkedIn: true, streak: 1, nextReward: { total: 1 }, unread: { all: 0 }, balance: 0, inventory: {}, moderationBoards: ['qa', 'tools'],
@@ -463,7 +464,7 @@ for (const outcome of ['complete', 'rejected']) test(`an already started banner 
     return null;
   }, '#/community/manage/banners');
   main.querySelector('[data-action="community-banner-add-image"]').click();
-  const file = new File(['image'], 'banner.webp', { type: 'image/webp' }), selected = main.querySelector('[data-banner-file]');
+  const file = uploadImageFile('banner.webp', 'image/webp'), selected = main.querySelector('[data-banner-file]');
   Object.defineProperty(selected, 'files', { value: [file] }); selected.dispatchEvent(new w.Event('change', { bubbles: true }));
   await until(() => calls.some(call => call.url.includes('/manage/banner-image?')), 'the original upload reaches the existing endpoint');
   const field = main.querySelector('[data-banner-file]'), form = field.form;
@@ -502,7 +503,7 @@ test('old management forms, file selection and drop cannot write during navigati
   }, '#/community/manage/items');
   main.querySelector('[data-action="community-item-edit"]').click();
   const form = main.querySelector('[data-community-form="item"]'), field = form.querySelector('[data-community-item-upload]');
-  const file = new File(['image'], 'test.webp', { type: 'image/webp' });
+  const file = uploadImageFile('test.webp', 'image/webp');
   hold = true; render('#/community/manage/content'); await turn();
   assert.equal(form.isConnected, true); assert.ok(form.closest('[inert]'));
   const writes = calls.filter(call => call.options.method === 'POST').length;

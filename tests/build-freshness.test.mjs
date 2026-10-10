@@ -143,6 +143,20 @@ test('page DTO cache bundles its dependency at the stable browser module path', 
   await verifySite('dist');
 });
 
+test('upload compression ships self-hosted browser modules and notices without eagerly loading its codec', async () => {
+  const output = await readFile('dist/upload-image.mjs', 'utf8');
+  assert.equal(output, (await transform(await readFile('src/upload-image.ts', 'utf8'), { loader: 'ts', format: 'esm', target: 'es2022' })).code);
+  assert.match(output, /import\("\.\/image-compression-library\.mjs"\)/);
+  assert.match(output, /import\("\.\/upload-image-metadata\.mjs"\)/);
+  assert.doesNotMatch(output, /from ["']\.\/image-compression-library/);
+  for (const [file, exported] of [['image-compression-library', 'compressStaticImage'], ['upload-image-metadata', 'inspectUploadImage']]) {
+    assert.equal(typeof (await import(`../dist/${file}.mjs`))[exported], 'function');
+    assert.doesNotMatch(await readFile(`dist/${file}.mjs`, 'utf8'), /from\s*["'](?:compressorjs|image-size|[^"']*\.ts)["']/);
+  }
+  for (const library of ['compressorjs', 'image-size']) assert.match(await readFile(`dist/assets/licenses/${library}-LICENSE.txt`, 'utf8'), /MIT/);
+  await verifySite('dist');
+});
+
 test('shared staff catalogs ship at the compiled browser path without TypeScript imports', async () => {
   const file = 'community-staff.mjs';
   assert.ok(typedBrowserModules.has(file));

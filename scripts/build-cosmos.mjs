@@ -43,6 +43,8 @@ const result = await build({
     "community-shop-dialog": "src/community-shop-dialog.ts",
     "community-profile-crop": "src/community-profile-crop.ts",
     "community-page-cache": "src/community-page-cache.ts",
+    "image-compression-library": "src/image-compression-library.ts",
+    "upload-image-metadata": "src/upload-image-metadata.ts",
   },
   bundle: true,
   format: "esm",
@@ -145,6 +147,7 @@ for (const file of [
   "community-growth-art.mjs",
   "community-level-explorer.mjs",
   "upload-policy.mjs",
+  "upload-image.mjs",
   "community-sky.mjs",
   "community-body-images.mjs",
   "community-badge-icons.mjs",
@@ -193,6 +196,8 @@ await build({
 });
 const destination = `${outdir}/assets/licenses`;
 await mkdir(destination, { recursive: true });
+await copyFile(new URL('../LICENSE', import.meta.resolve('compressorjs')), `${destination}/compressorjs-LICENSE.txt`);
+await copyFile(new URL('../../LICENSE', import.meta.resolve('image-size')), `${destination}/image-size-LICENSE.txt`);
 await mkdir(`${outdir}/assets/fonts`, { recursive: true });
 await copyFile(new URL("./files/new-tegomin-latin-400-normal.woff2", import.meta.resolve("@fontsource/new-tegomin/latin.css")), `${outdir}/assets/fonts/new-tegomin-latin.woff2`);
 await copyFile(new URL("./LICENSE", import.meta.resolve("@fontsource/new-tegomin/latin.css")), `${destination}/new-tegomin-OFL.txt`);

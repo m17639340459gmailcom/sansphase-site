@@ -11,6 +11,7 @@ import {readMusicTracks,musicTracksMarkup} from './music-settings.mjs';
 import {rememberedAccount,rememberSuccessfulLogin} from './login-preferences.mjs';
 import {uploadAuthorFile} from './author-upload.mjs';
 import {uploadLimits,uploadSizeLabel} from './upload-policy.mjs';
+import {prepareUploadImage} from './upload-image.mjs';
 import {imageSources,imageSourceSet} from './image-sources.mjs';
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
@@ -33,6 +34,8 @@ const names = () => ({
 });
 const payload = document.querySelector("#site-content");
 let author = payload ? JSON.parse(payload.textContent).author : null;
+let authorIdentityEpoch = 0;
+const authorUploads = new Set();
 let editor, cardColorPicker,
   dirty = false,
   busy = false,
@@ -459,7 +462,10 @@ async function open(detail = {}) {
     feedback(error.message, true);
   }
 }
-window.addEventListener("author:identity", event => { author = event.detail; });
+window.addEventListener("author:identity", event => {
+  authorIdentityEpoch++; for(const controller of authorUploads)controller.abort();
+  authorUploads.clear(); author = event.detail;
+});
 document.addEventListener("click", (event) => {
   const loginButton = event.target.closest("[data-author-login]");
   const entry = event.target.closest("[data-author-open]");
@@ -724,20 +730,28 @@ shell.addEventListener("change", (event) => {
   if(input.dataset.upload==='body'&&editor&&!imagePosition)imagePosition=captureImagePosition(editor,shell.querySelector('.author-panel'));
   task(async () => {
     const uploaded = input.files[0];
+    const identity=authorIdentityEpoch, uploadOwner=host;
     const target=input.dataset.upload;
     if(target==='music' && readMusicTracks(host).length>=100) throw new Error(uiText("歌单最多 100 首，请先移除部分歌曲。", "The playlist has reached 100 tracks. Remove some tracks first."));
     const limits=await api('upload');
+    if(identity!==authorIdentityEpoch || uploadOwner!==host || !input.isConnected)throw new DOMException('账号或页面已切换，请重新选择图片。','AbortError');
     const cap=target==='music'||uploaded.type.startsWith('audio/')?limits.maxAudioBytes:uploaded.type.startsWith('image/')?limits.maxImageBytes:limits.maxFileBytes;
     if(uploaded.size>cap) throw new Error(`${uiText("此类文件最多 ", "The limit for this file type is ")}${uploadSizeLabel(cap)}${uiText("。",".")}`);
     feedback(uiText("正在上传 0%…", "Uploading 0%…"));
-    const data=new FormData(); data.set('file',uploaded);
-    if(['background','music'].includes(target)) data.set('purpose',target);
     const controller=new AbortController();
+    authorUploads.add(controller);
     const cancel=document.createElement('button');cancel.type='button';cancel.textContent=uiText("取消上传", "Cancel upload");
     cancel.onclick=()=>controller.abort();host.querySelector('.author-feedback').after(cancel);
     let saved;
-    try { saved=await uploadAuthorFile(data,{signal:controller.signal,onProgress:percent=>feedback(percent===100?uiText("传输完成，正在保存…", "Transfer complete. Saving…"):`${uiText("正在上传 ", "Uploading ")}${percent}%…`)}); }
-    finally {cancel.remove();input.value='';}
+    try {
+      const prepared=['image/jpeg','image/png','image/webp','image/gif'].includes(uploaded.type)?await prepareUploadImage(uploaded,{signal:controller.signal,allowAnimation:true}):uploaded;
+      if(identity!==authorIdentityEpoch || uploadOwner!==host || !input.isConnected)throw new DOMException('账号或页面已切换，请重新选择图片。','AbortError');
+      const data=new FormData();data.set('file',prepared);
+      if(['background','music'].includes(target))data.set('purpose',target);
+      saved=await uploadAuthorFile(data,{signal:controller.signal,onProgress:percent=>feedback(percent===100?uiText("传输完成，正在保存…", "Transfer complete. Saving…"):`${uiText("正在上传 ", "Uploading ")}${percent}%…`)});
+      if(controller.signal.aborted || identity!==authorIdentityEpoch || uploadOwner!==host || !input.isConnected)throw new DOMException('账号或页面已切换，请重新选择图片。','AbortError');
+    }
+    finally {authorUploads.delete(controller);cancel.remove();input.value='';}
     if(target==='music') {
       const tracks=readMusicTracks(host);
       tracks.push({title:saved.name,url:'/api/media/'+saved.id});

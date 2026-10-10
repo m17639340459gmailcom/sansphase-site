@@ -116,7 +116,7 @@ test('an independent image uses the existing upload and save APIs without a topi
   await ui.save();
   assert.equal(writes.length, 0, 'empty image drafts must not be published');
   assert.match(ui.state().message || '', /上传.*图片/);
-  const file = new File(['image'], 'banner.png', { type: 'image/png' });
+  const file = new File([Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==', 'base64')], 'banner.png', { type: 'image/png' });
   ui.change({ matches: () => true, dataset: { index: '0' }, files: [file], value: '' } as unknown as HTMLInputElement);
   await turn();
   assert.equal(writes[0].path, 'manage/banner-image?scope=qa');

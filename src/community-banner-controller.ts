@@ -1,4 +1,5 @@
 import { communityImageBytes } from './community-rules.mjs';
+import { prepareUploadImage } from './upload-image.mjs';
 import type { CommunityBannerConfig } from './community-banners.ts';
 import type { CommunityBannerEditorState } from './community-banner-editor.ts';
 import type { CommunityListing, CommunityLoad, Translate } from './community.ts';
@@ -27,12 +28,14 @@ export function createCommunityBannerController(options: Options) {
   let busy = false;
   let message = '';
   let epoch = 0;
+  let imagePreparation: AbortController | null = null;
   let searchRequest = 0;
   let loadedKey = '';
   const paint = () => { if (options.active()) options.paint(); };
   const draft = () => drafts.get(scope) || null;
   const valid = () => Boolean(options.active() && configs.some(config => config.scope === scope));
   const reset = () => {
+    imagePreparation?.abort(); imagePreparation = null;
     epoch++; searchRequest++; configs = []; drafts.clear(); conflicts.clear(); scope = ''; query = ''; loadedKey = '';
     candidates = { state: 'loading' }; busy = false; message = '';
   };
@@ -58,7 +61,7 @@ export function createCommunityBannerController(options: Options) {
     const allowed = new Set(next.map(config => config.scope));
     for (const key of drafts.keys()) if (!allowed.has(key)) drafts.delete(key);
     for (const key of conflicts) if (!allowed.has(key)) conflicts.delete(key);
-    if (scope && !allowed.has(scope)) { epoch++; searchRequest++; busy = false; loadedKey = ''; message = ''; }
+    if (scope && !allowed.has(scope)) { imagePreparation?.abort(); imagePreparation = null; epoch++; searchRequest++; busy = false; loadedKey = ''; message = ''; }
     for (const config of next) {
       const previous = configs.find(item => item.scope === config.scope);
       if (!drafts.has(config.scope) || editable(drafts.get(config.scope)) === editable(previous)) drafts.set(config.scope, copy(config));
@@ -148,17 +151,27 @@ export function createCommunityBannerController(options: Options) {
     const item = draft()?.items[index];
     if (!valid() || busy || !item || !file) return;
     if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) { message = options.t('横幅封面支持 JPG、PNG、WebP 图片。', 'Choose a JPG, PNG or WebP cover.'); paint(); return; }
-    if (file.size > communityImageBytes(options.owner())) { message = options.owner() ? options.t('封面不能超过 25MB。', 'Covers cannot exceed 25MB.') : options.t('封面不能超过 2MB。', 'Covers cannot exceed 2MB.'); paint(); return; }
+    if (file.size > communityImageBytes(true)) { message = options.t('原图不能超过 25MB。', 'Original images cannot exceed 25MB.'); paint(); return; }
     const identity = epoch, selected = scope;
-    const body = new FormData(); body.append('file', file);
+    const controller = new AbortController(); imagePreparation = controller;
+    const leave = () => { if (!valid() || identity !== epoch || selected !== scope) controller.abort(); };
+    if (typeof window !== 'undefined') window.addEventListener('hashchange', leave);
     busy = true; message = options.t('正在上传封面…', 'Uploading cover…'); paint();
     try {
+      const prepared = await prepareUploadImage(file, { signal: controller.signal });
+      if (identity !== epoch || selected !== scope || draft()?.items[index] !== item || !valid()) return;
+      if (prepared.size > communityImageBytes(options.owner())) throw new Error(options.t('图片自动压缩后仍过大，请换一张图片。', 'The compressed image is still too large. Choose another image.'));
+      const body = new FormData(); body.append('file', prepared);
       const image = await options.request<{ id: string }>(`manage/banner-image?scope=${encodeURIComponent(selected)}`, { method: 'POST', headers: { 'X-Reader-Request': '1' }, body });
       if (identity !== epoch || selected !== scope || draft()?.items[index] !== item) return;
       item.cover = image.id; item.image = image.id;
       message = options.t('封面已上传，保存后生效。', 'Cover uploaded. Save to publish it.');
     } catch (error) { if (identity === epoch && selected === scope) message = error instanceof Error ? error.message : options.t('封面上传失败。', 'Could not upload the cover.'); }
-    finally { if (identity === epoch && selected === scope) { busy = false; paint(); } }
+    finally {
+      if (typeof window !== 'undefined') window.removeEventListener('hashchange', leave);
+      if (imagePreparation === controller) imagePreparation = null;
+      if (identity === epoch && selected === scope) { busy = false; paint(); }
+    }
   }
   function change(field: HTMLInputElement) {
     if (!field.matches('[data-banner-file]')) return false;

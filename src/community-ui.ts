@@ -1,4 +1,5 @@
 import { createBookImageViewer } from './book-image-viewer.mjs';
+import { prepareUploadImage } from './upload-image.mjs';
 // 社区页面的数据和交互：读接口、排序、搜索、加载更多、发帖（按版块类型）、编辑、回复（引用、@、排序）、
 // 赞、收藏、感谢、采纳、举报、删除、悬赏、提示词解锁、资源投票、付费置顶和高亮、签到和补签、星尘明细、
 // 兑换所、关注、通知，以及站长和协管的置顶、精华、锁帖、移动、审核、禁言、举报处理、发货和上架。
@@ -123,6 +124,24 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   const banners = new Map<string, CommunityLoad<CommunityBannerConfig>>();
   const bannerRequests = new Map<string, Promise<void>>();
   let frameIdentity = 0;
+  const imagePreparations = new Set<AbortController>();
+  const cancelImagePreparations = () => { for (const controller of imagePreparations) controller.abort(); imagePreparations.clear(); };
+  async function prepareScopedImage(file: File, allowAnimation = false, present = () => true) {
+    const identity = frameIdentity, hash = location.hash, controller = new AbortController();
+    const leave = () => { if (identity !== frameIdentity || hash !== location.hash || !present()) controller.abort(); };
+    imagePreparations.add(controller);
+    window.addEventListener('hashchange', leave);
+    window.addEventListener('pagehide', leave);
+    try {
+      leave();
+      const prepared = await prepareUploadImage(file, { allowAnimation, signal: controller.signal });
+      leave(); if (controller.signal.aborted) throw controller.signal.reason ?? new DOMException('图片处理已取消。', 'AbortError');
+      return prepared;
+    } finally {
+      imagePreparations.delete(controller);
+      window.removeEventListener('hashchange', leave); window.removeEventListener('pagehide', leave);
+    }
+  }
   let permissionRevision = 0;
   let paintedAccount: string | null = null;
   let paintedPage: { hash: string; frame: number; markup: string; style: string | null; main: string | null; banner: string | null; aside: string | null; news: string | null } | null = null;
@@ -260,7 +279,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     load: loadComposeEditor,
     current: () => mounted ? { main: mounted.main, frame: frameIdentity, hash: location.hash } : null,
     mount: (module, root) => {
-      const editor = module.mountCommunityComposeEditor(root, { request, prepare: async file => file, t: tr, owner: () => Boolean(readyData(me)?.owner) });
+      const editor = module.mountCommunityComposeEditor(root, { request, prepare: (file, signal) => prepareUploadImage(file, { signal }), t: tr, owner: () => Boolean(readyData(me)?.owner) });
       editors.set(root, editor); return editor;
     },
     removed: root => { editors.delete(root); },
@@ -2463,7 +2482,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const form = mounted?.main.querySelector<Form>('form[data-community-form="topic"]');
     const board = form ? checkedOf(form, 'board') : current.board;
     const max = imageLimit(mounted?.ctx.simpleCompose && board === 'tools' ? 'qa' : board, level());
-    const cap = communityImageBytes(Boolean(readyData(me)?.owner));
+    const cap = communityImageBytes(true);
     const typed = [...files].filter(file => ['image/jpeg', 'image/png', 'image/webp'].includes(file.type));
     const images = typed.filter(file => file.size <= cap);
     if (typed.length !== images.length) notify(tr(`单张图片不能超过 ${cap / 1024 ** 2}MB。`, `Each image must be ${cap / 1024 ** 2}MB or smaller.`));
@@ -2477,18 +2496,21 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (!chosen.length) return;
     const entries = chosen.map(file => ({ name: file.name, state: 'uploading' as CommunityUpload['state'] } as CommunityUpload));
     uploads.push(...entries);
+    const identity = frameIdentity, selectedHash = location.hash;
     paint();
     await Promise.all(chosen.map(async (file, i) => {
       const entry = entries[i];
       try {
+        const prepared = await prepareScopedImage(file, false, () => uploads.includes(entry));
+        if (identity !== frameIdentity || selectedHash !== location.hash || !uploads.includes(entry)) return;
         const form = new FormData();
-        form.append('file', file, file.name);
+        form.append('file', prepared, prepared.name);
         const response = await request('/api/community/images', { method: 'POST', credentials: 'same-origin', headers: { 'X-Reader-Request': '1' }, body: form });
         const value = await response.json().catch(() => ({})) as { id?: string; error?: string };
         if (!response.ok || !value.id) throw new Error(value.error || tr('上传失败', 'Upload failed'));
         Object.assign(entry, { id: value.id, state: 'ready' });
       } catch (error) { Object.assign(entry, { state: 'error', message: message(error) }); }
-      paint();
+      if (identity === frameIdentity && selectedHash === location.hash) paint();
     }));
   }
 
@@ -3130,7 +3152,9 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     setEquipmentBusy(form, true);
     say(tr('正在上传商品图片…', 'Uploading product image…'));
     try {
-      const body = new FormData(); body.append('file', file);
+      const prepared = await prepareScopedImage(file, true, () => form.isConnected && canManageItems());
+      if (!form.isConnected || identity !== frameIdentity || !canManageItems()) return;
+      const body = new FormData(); body.append('file', prepared);
       const image = await api<{ id: string; frameReady: boolean }>('manage/item-image', { method: 'POST', headers: { 'X-Reader-Request': '1' }, body });
       if (!form.isConnected || identity !== frameIdentity) return;
       const value = fieldOf(form, 'image'); if (value) value.value = image.id;
@@ -3324,6 +3348,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   };
 
   function clearData(clearWrites = true) {
+    cancelImagePreparations();
     editorPreparation.clear();
     shopDialog.close();
     closeImageViewer();
@@ -3475,6 +3500,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         void refresh();
       }
       return () => {
+        cancelImagePreparations();
         shopDialog.close();
         closeImageViewer();
         passiveRefresh?.stop(); passiveRefresh = null;

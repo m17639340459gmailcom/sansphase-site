@@ -5,6 +5,7 @@ import { createCommunityUI } from '../src/community-ui.ts';
 import { communityHeaderHTML, communityRoute, communityBoardHTML, communityBoards } from '../src/community.ts';
 import { createStableCommunityFrame } from '../src/community-layout/stable-frame.ts';
 import { startCommunityLayout } from '../src/community-layout/runtime.ts';
+import { uploadImageFile, waitForImageState } from './fixtures/upload-image-file.mjs';
 
 const turn = () => new Promise(resolve => setTimeout(resolve, 30));
 const person = { name: '测试成员', uid: 'u1', role: 'reader', level: 1, owner: false, mod: false, vip: true, balance: 30, checkedIn: false, streak: 1, nextReward: { total: 1, bonus: 0 }, unread: { all: 0 }, inventory: {}, agreed: true };
@@ -502,11 +503,11 @@ test('simple compose rejects empty body and videos, while image upload preserves
   form.elements.platform.value = 'Windows';
   form.querySelector('[data-compose-extras]').open = true;
   center.dispatchEvent(new w.Event('wheel')); center.scrollTop = 260;
-  choose(Object.assign(new Blob(['mock-png'], { type: 'image/png' }), { name: 'demo.png' }));
-  await turn();
+  choose(uploadImageFile('demo.png'));
+  await waitForImageState(() => finishUpload, 'valid compose image reaches upload after header inspection');
   assert.ok(finishUpload);
   finishUpload(response({ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }));
-  await turn();
+  await waitForImageState(() => form.elements.body.value.includes('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'), 'uploaded image is inserted into its original compose draft');
   form = main.querySelector('form[data-community-form="topic"]');
   assert.match(form.elements.body.value, /实际截图及说明/);
   assert.match(form.elements.body.value, /!\[图片\]\(\/api\/community\/images\/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa\.webp\)/);

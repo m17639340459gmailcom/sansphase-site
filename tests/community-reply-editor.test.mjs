@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { createCommunityUI } from '../src/community-ui.ts';
 import { bodyImageContent } from '../src/community-body-images.ts';
+import { uploadImageFile, waitForImageState } from './fixtures/upload-image-file.mjs';
 
 const image = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const turn = () => new Promise(resolve => setTimeout(resolve, 30));
@@ -52,8 +53,9 @@ test('two inline reply editors retain their own images and draft through quotes,
     Object.defineProperty(event, 'clipboardData', { value: { files, items: [], getData: type => type === 'text/plain' ? text : '' } });
     root.querySelector('.community-rich-body').dispatchEvent(event);
   };
-  const photo = Object.assign(new Blob(['image'], { type: 'image/png' }), { name: 'image.png' });
-  paste(replyRoot, '回复截图说明', [photo]); await turn();
+  const photo = uploadImageFile('image.png');
+  paste(replyRoot, '回复截图说明', [photo]);
+  await waitForImageState(() => finishUpload, 'reply image reaches the upload endpoint after async preflight');
   const send = () => main.querySelector('.community-reply-form').dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
   send(); await turn();
   assert.equal(calls.filter(call => call.url.endsWith('/topics/p1/replies')).length, 0);

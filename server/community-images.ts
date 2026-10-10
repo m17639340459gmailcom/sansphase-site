@@ -7,6 +7,7 @@ import { withStreamUpload } from './stream-upload.ts';
 import { fail } from './community-db.ts';
 import type { Ctx } from './community-context.ts';
 import { requireCommunityShopManagement } from './community-shop-access.ts';
+import { compressCommunityUpload } from './community-upload-compression.ts';
 
 async function usableFrame(image: Buffer, width: number, height: number) {
   if (width !== height) return false;
@@ -54,7 +55,13 @@ export async function saveCommunityImage(ctx: Ctx, shop = false, bannerScope?: s
       if (metadata.format !== formats[file.mimetype] || !metadata.width || !metadata.height) throw fail('图片无法读取，请换一张。');
       if ((metadata.pages || 1) > 120 || metadata.width * metadata.height > 40_000_000) throw fail('动态图过长或分辨率过大，请缩短后上传。');
       const output = await source.rotate().resize(2048, 2048, { fit: 'inside', withoutEnlargement: true }).webp({ quality: 82, effort: 4 }).toBuffer({ resolveWithObject: true });
-      full = output.data; width = output.info.width; height = output.info.pageHeight || output.info.height;
+      full = await compressCommunityUpload(output.data);
+      width = output.info.width; height = output.info.pageHeight || output.info.height;
+      if (full !== output.data) {
+        const compressed = await sharp(full, { animated: shop, limitInputPixels: 40_000_000 }).metadata();
+        if (!compressed.width || !compressed.height) throw fail('图片无法读取，请换一张。');
+        width = compressed.width; height = compressed.pageHeight || compressed.height;
+      }
       thumb = await sharp(input, { limitInputPixels: 40_000_000, animated: false }).rotate().resize(480, 480, { fit: 'cover', position: 'attention' }).webp({ quality: 76, effort: 4 }).toBuffer();
     } catch (error) {
       if (error && typeof error === 'object' && 'status' in error) throw error;

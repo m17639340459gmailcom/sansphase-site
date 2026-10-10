@@ -8,7 +8,7 @@ import { bodyImageContent } from '../src/community-body-images.ts';
 const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const turn = () => new Promise(resolve => setTimeout(resolve, 25));
 const esc = value => String(value ?? '').replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
-function setup(t, content = '前文\n\n后文', request = async () => ({ ok: true, json: async () => ({ id }) }), owner = false) {
+function setup(t, content = '前文\n\n后文', request = async () => ({ ok: true, json: async () => ({ id }) }), owner = false, prepare = async file => file) {
   const dom = new JSDOM(`<form>${editorHTML({ id: 'community-body', rows: 10, value: content, placeholder: '正文', label: '正文', limits: [1, 10000], inlineImages: true, imageMax: 4 }, { t: zh => zh, esc })}</form>`, { pretendToBeVisual: true, url: 'http://localhost:4212/' });
   const w = dom.window;
   const names = ['window', 'document', 'Node', 'HTMLElement', 'MutationObserver', 'getComputedStyle', 'requestAnimationFrame', 'cancelAnimationFrame'];
@@ -18,7 +18,7 @@ function setup(t, content = '前文\n\n后文', request = async () => ({ ok: tru
   w.Range.prototype.getBoundingClientRect = () => ({ top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 });
   const calls = [];
   const wrapper = w.document.querySelector('[data-inline-editor]');
-  const control = mountCommunityComposeEditor(wrapper, { t: zh => zh, owner, prepare: async file => file, request: async (...args) => { calls.push(args); return request(...args); } });
+  const control = mountCommunityComposeEditor(wrapper, { t: zh => zh, owner, prepare, request: async (...args) => { calls.push(args); return request(...args); } });
   t.after(() => { control.destroy(); for (const [name, value] of previous) { if (value === undefined) delete globalThis[name]; else globalThis[name] = value; } w.close(); });
   const paste = (files, text = '') => {
     const event = new w.Event('paste', { bubbles: true, cancelable: true });
@@ -32,13 +32,37 @@ function setup(t, content = '前文\n\n后文', request = async () => ({ ok: tru
 
 test('an oversized pasted image is rejected before preparation or upload; surrounding text is kept', async t => {
   const { wrapper, control, paste, calls } = setup(t, '原文');
-  const large = Object.assign(new Blob([new Uint8Array(2 * 1024 ** 2 + 1)], { type: 'image/png' }), { name: 'large.png' });
+  const large = Object.assign(new Blob([new Uint8Array(25 * 1024 ** 2 + 1)], { type: 'image/png' }), { name: 'large.png' });
   paste([large], '粘贴文字');
   await turn();
   assert.equal(calls.length, 0);
-  assert.match(wrapper.querySelector('[role=status]').textContent, /2MB/);
+  assert.match(wrapper.querySelector('[role=status]').textContent, /25MB/);
   assert.match(control.field.value, /粘贴文字/);
   assert.equal(wrapper.querySelector('.community-inline-upload'), null);
+});
+
+test('a reader large image is prepared before upload and retains its inline position and converted filename', async t => {
+  const preparations = [];
+  const compressed = new File(['compressed'], 'large.webp', { type: 'image/webp' });
+  const { control, paste, calls } = setup(t, '前文', undefined, false, async (source, signal) => {
+    preparations.push({ source, signal }); return compressed;
+  });
+  const original = new File([new Uint8Array(3 * 1024 ** 2)], 'large.png', { type: 'image/png' });
+  paste([original], '粘贴文字'); await turn();
+  assert.equal(preparations.length, 1);
+  assert.equal(preparations[0].source, original);
+  assert.equal(preparations[0].signal.aborted, false);
+  assert.equal(calls.length, 1);
+  const sent = calls[0][1].body.get('file');
+  assert.equal(sent.name, 'large.webp'); assert.equal(sent.size, compressed.size);
+  assert.match(control.field.value, /粘贴文字/);
+  assert.match(control.field.value, new RegExp(id));
+});
+
+test('a malformed preparation result exceeding the reader ceiling never uploads', async t => {
+  const { control, paste, calls, file } = setup(t, '前文', undefined, false, async () => new File([new Uint8Array(2 * 1024 ** 2 + 1)], 'large.webp', { type: 'image/webp' }));
+  paste([file()]); await turn();
+  assert.equal(calls.length, 0); assert.equal(control.state().failed, true);
 });
 
 test('the author can paste an image above the reader limit, and a reset clears the rich editor', async t => {

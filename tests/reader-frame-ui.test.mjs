@@ -2,14 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
 import { readFile } from 'node:fs/promises';
+import { File as NativeFile } from 'node:buffer';
+import { randomBytes } from 'node:crypto';
 import postcss from 'postcss';
+import sharp from 'sharp';
 import { readerPage, mountReaderUI } from '../src/reader-ui.ts';
+import { uploadImageFile, waitForImageState } from './fixtures/upload-image-file.mjs';
 
 const uuid = '11111111-1111-4111-8111-111111111111';
 const image = `/api/reader/frame/${uuid}.webp`;
 const account = { uid: '10001', nickname: '读者', email: 'reader@example.test', phone: '13800138000', signature: '已通过个签', avatar: null, frame: null, frameImage: null, vip: false };
 const state = (frame = null, extra = {}) => ({ frame, frameImage: frame === `image:${uuid}` ? image : null, available: true, items: [{ id: 'frame-gold', name: '金环', ref: 'gold', image: null }, { id: uuid, name: '自定义星光', ref: `image:${uuid}`, image }], ...extra });
 const turn = () => new Promise(resolve => setImmediate(resolve));
+const NativeFormData = globalThis.FormData;
 
 test('the VIP moon frame joins the existing main-site owned selector and equips without replacing profile inputs', async t => {
   const s = setup(t, { ...account, vip: true });
@@ -45,7 +50,15 @@ function setup(t, initial = account) {
   let respond = async (_url, init) => state(init?.method === 'POST' ? JSON.parse(init.body).ref : identity.frame);
   const globals = new Map();
   for (const [key, value] of Object.entries({ document: doc, window: win, location: win.location, history: win.history, CustomEvent: win.CustomEvent, FormData: win.FormData,
-    fetch: async (url, init) => { calls.push({ url, init }); return new Response(JSON.stringify(await respond(url, init)), { headers: { 'content-type': 'application/json' } }); } })) {
+    fetch: async (url, init) => {
+      const call = { url, init }; calls.push(call);
+      try {
+        const response = new Response(JSON.stringify(await respond(url, init)), { headers: { 'content-type': 'application/json' } });
+        const readJSON = response.json.bind(response);
+        response.json = async () => { try { return await readJSON(); } finally { call.bodyRead = true; } };
+        return response;
+      } catch (error) { call.failed = true; throw error; }
+    } })) {
     globals.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
     Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
   }
@@ -174,10 +187,11 @@ test('late profile and avatar replies cannot replace a cleared, different, or re
         if (action === 'profile') s.doc.querySelector('[data-reader-form="profile"]').requestSubmit();
         else if (action === 'avatar') {
           const input = s.doc.querySelector('[data-reader-avatar-file]');
-          Object.defineProperty(input, 'files', { value: [new s.win.File(['image'], 'avatar.webp', { type: 'image/webp' })] });
+          Object.defineProperty(input, 'files', { value: [uploadImageFile('avatar.webp', 'image/webp', s.win)] });
           input.dispatchEvent(new s.win.Event('change', { bubbles: true }));
         } else s.doc.querySelector('[data-reader-avatar-remove]').click();
-        await turn(); assert.equal(s.calls.length, 1);
+        await waitForImageState(() => s.calls.length === 1 && typeof reply === 'function', 'the actual profile/avatar request must start before its identity changes');
+        assert.equal(s.calls.length, 1);
         const next = change === 'clear' ? null : { ...account, ...(change === 'different' ? { uid: '10002', email: 'other@example.test' } : {}), nickname: '当前账号', signature: '当前资料' };
         s.switchAccount(next);
         reply({ ...old, nickname: '迟到的旧资料', signature: '过期的签名', pendingAvatar: true }); await turn();
@@ -188,6 +202,71 @@ test('late profile and avatar replies cannot replace a cleared, different, or re
       });
     }
   }
+});
+
+test('a superseded same-account avatar request cannot commit a late result or overwrite the latest upload state', async t => {
+  for (const outcome of ['success', 'error']) {
+    await t.test(outcome, async subt => {
+      const s = setup(subt, { ...account, frame: 'gold' });
+      const replies = [];
+      s.respond(() => new Promise((resolve, reject) => { replies.push({ resolve, reject }); }));
+      const input = s.doc.querySelector('[data-reader-avatar-file]');
+      const choose = name => {
+        Object.defineProperty(input, 'files', { configurable: true, value: [uploadImageFile(name, 'image/webp', s.win)] });
+        input.dispatchEvent(new s.win.Event('change', { bubbles: true }));
+      };
+      const { frame: _frame, frameImage: _frameImage, ...response } = s.identity();
+      choose('first.webp');
+      await waitForImageState(() => replies.length === 1, 'the first real avatar request must start');
+      choose('latest.webp');
+      await waitForImageState(() => replies.length === 2, 'the latest real avatar request must start');
+      assert.equal(s.calls.length, 2);
+      const uploading = s.doc.querySelector('[data-reader-avatar-message]').textContent;
+      assert.match(uploading, /上传中/);
+      assert.equal(s.doc.querySelector('[data-reader-avatar-pick]').disabled, true);
+      if (outcome === 'success') replies[0].resolve({ ...response, nickname: '旧头像请求资料', pendingAvatar: true });
+      else replies[0].reject(new Error('old-avatar-network-failure'));
+      await waitForImageState(() => s.calls[0].bodyRead || s.calls[0].failed, 'the superseded response must settle before checking its effects');
+      await turn();
+      try {
+        assert.equal(s.identities(), 0, 'the superseded avatar response must not update the same account');
+        assert.equal(s.identity().nickname, account.nickname);
+        assert.equal(s.doc.querySelector('[data-reader-avatar-message]').textContent, uploading, 'the superseded error must not replace current upload feedback');
+        assert.equal(s.doc.querySelector('[data-reader-avatar-pick]').disabled, true, 'the latest upload remains busy after an old error');
+        assert.equal(s.doc.querySelector('[data-reader-avatar-file]'), input);
+      } finally {
+        replies[1].resolve({ ...response, nickname: '最新头像请求资料', pendingAvatar: true });
+        await waitForImageState(() => s.calls[1].bodyRead, 'the latest response must finish before the fixture closes');
+        await turn();
+      }
+      assert.equal(s.identities(), 1);
+      assert.equal(s.identity().nickname, '最新头像请求资料');
+      assert.equal(s.identity().frame, 'gold');
+      assert.equal(s.identity().pendingAvatar, true);
+      assert.match(s.doc.querySelector('[data-reader-avatar-message]').textContent, /提交审核/);
+    });
+  }
+});
+
+test('a late avatar response after leaving the account hash cannot commit even while its original input is still connected', async t => {
+  const s = setup(t, { ...account, frame: 'gold' });
+  const initial = { ...s.identity() };
+  let reply;
+  s.respond(() => new Promise(resolve => { reply = resolve; }));
+  const input = s.doc.querySelector('[data-reader-avatar-file]');
+  Object.defineProperty(input, 'files', { value: [uploadImageFile('avatar.webp', 'image/webp', s.win)] });
+  input.dispatchEvent(new s.win.Event('change', { bubbles: true }));
+  await waitForImageState(() => typeof reply === 'function', 'the real avatar request must start before route leave');
+  s.win.location.hash = '#/notes';
+  await turn();
+  assert.equal(input.isConnected, true, 'a route change alone must invalidate a still-connected old input');
+  reply({ ...initial, nickname: '离开页面后的旧头像资料', pendingAvatar: true });
+  await waitForImageState(() => s.calls[0].bodyRead, 'the old avatar response must finish before checking identity');
+  await turn();
+  assert.equal(s.identities(), 0);
+  assert.deepEqual(s.identity(), initial);
+  assert.equal(s.win.location.hash, '#/notes');
+  assert.equal(s.calls.length, 1);
 });
 
 test('a profile save begun before owner sign-out cannot restore the revoked personal identity when its reply arrives', async t => {
@@ -365,10 +444,10 @@ test('ordinary profile and avatar responses preserve only the same account equip
       if (action === 'profile') s.doc.querySelector('[data-reader-form="profile"]').dispatchEvent(new s.win.Event('submit', { bubbles: true, cancelable: true }));
       else if (action === 'avatar') {
         const input = s.doc.querySelector('[data-reader-avatar-file]');
-        Object.defineProperty(input, 'files', { value: [new s.win.File(['image'], 'avatar.webp', { type: 'image/webp' })] });
+        Object.defineProperty(input, 'files', { value: [uploadImageFile('avatar.webp', 'image/webp', s.win)] });
         input.dispatchEvent(new s.win.Event('change', { bubbles: true }));
       } else s.doc.querySelector('[data-reader-avatar-remove]').click();
-      await turn();
+      await waitForImageState(() => s.identities() === 1, 'the real profile/avatar response must finish before checking its retained frame');
       assert.equal(s.calls.length, 1); assert.equal(s.calls[0].url, `/api/reader/${action}`);
       assert.equal(s.identity().frame, `image:${uuid}`); assert.equal(s.identity().frameImage, image);
       assert.equal(s.doc.querySelector('.reader-profile-frame-image')?.getAttribute('src'), image);
@@ -389,4 +468,102 @@ test('an explicit frame clear and a different account response cannot inherit a 
       assert.equal(s.calls.length, 1);
     });
   }
+});
+
+test('a valid avatar above 2 MiB is compressed by the actual codec before its multipart request while retaining the equipped frame', async t => {
+  const s = setup(t, { ...account, frame: `image:${uuid}`, frameImage: image });
+  const urls = new Map();
+  let encodings = 0;
+  // A Node-only canvas adapter exercises the pinned CompressorJS and real
+  // encoded pixels. It does not represent browser performance or native UI.
+  class ImageAdapter {
+    complete = false;
+    set src(value) {
+      this.url = value;
+      if (!value) return;
+      void (async () => {
+        const source = urls.get(value);
+        assert.ok(source, 'the codec must decode the selected file, not make a remote request');
+        this.bytes = Buffer.from(await source.arrayBuffer());
+        const metadata = await sharp(this.bytes).metadata();
+        this.width = this.naturalWidth = metadata.width;
+        this.height = this.naturalHeight = metadata.height;
+        this.complete = true;
+        this.onload?.();
+      })().catch(() => this.onerror?.());
+    }
+    get src() { return this.url || ''; }
+  }
+  class ReaderAdapter {
+    readAsArrayBuffer(file) {
+      void file.arrayBuffer().then(result => { this.result = result; this.onload?.({ target: this }); this.onloadend?.(); });
+    }
+    abort() { this.onabort?.(); }
+  }
+  s.win.HTMLCanvasElement.prototype.getContext = function () {
+    return { fillRect() {}, save() {}, restore() {}, translate() {}, scale() {},
+      createImageData: (width, height) => ({ data: new Uint8ClampedArray(width * height * 4) }),
+      putImageData: value => { this.imageData = value; },
+      getImageData: () => this.imageData,
+      rotate: radians => { this.rotation = Math.round(radians * 180 / Math.PI); },
+      drawImage: value => { this.image = value; },
+    };
+  };
+  s.win.HTMLCanvasElement.prototype.toBlob = function (callback, type, quality) {
+    encodings++;
+    void sharp(this.image.bytes).rotate(this.rotation || 0).resize(this.width, this.height, { fit: 'fill' })
+      .webp({ quality: Math.round(quality * 100) }).toBuffer()
+      .then(bytes => callback(new Blob([bytes], { type })), () => callback(null));
+  };
+  s.win.FileReader = ReaderAdapter;
+  s.win.URL.createObjectURL = file => { const url = `blob:avatar-${urls.size}`; urls.set(url, file); return url; };
+  s.win.URL.revokeObjectURL = url => { urls.delete(url); };
+  const previousImage = Object.getOwnPropertyDescriptor(globalThis, 'Image');
+  const previousRevoke = URL.revokeObjectURL;
+  Object.defineProperty(globalThis, 'Image', { configurable: true, writable: true, value: ImageAdapter });
+  URL.revokeObjectURL = s.win.URL.revokeObjectURL;
+  // The upload has no HTML-form argument. Native multipart preserves the real
+  // File bytes produced by the compressor instead of jsdom stringifying them.
+  globalThis.FormData = NativeFormData;
+  t.after(() => {
+    URL.revokeObjectURL = previousRevoke;
+    if (previousImage) Object.defineProperty(globalThis, 'Image', previousImage);
+    else Reflect.deleteProperty(globalThis, 'Image');
+  });
+  const pixels = randomBytes(1024 * 1024 * 4);
+  for (let offset = 3; offset < pixels.length; offset += 4) pixels[offset] = 128;
+  const original = await sharp(pixels, { raw: { width: 1024, height: 1024, channels: 4 } }).png().toBuffer();
+  const file = new NativeFile([original], 'avatar.png', { type: 'image/png' });
+  assert.ok(file.size > 2 * 1024 ** 2 && file.size <= 25 * 1024 ** 2, 'the real image must exercise compression rather than the small-file or original-size rejection path');
+  const { frame: _frame, frameImage: _frameImage, ...response } = s.identity();
+  s.respond(async () => ({ ...response, pendingAvatar: true }));
+  const input = s.doc.querySelector('[data-reader-avatar-file]');
+  Object.defineProperty(input, 'files', { value: [file] });
+  input.dispatchEvent(new s.win.Event('change', { bubbles: true }));
+  await waitForImageState(() => s.identities() === 1, 'the actual codec and avatar request must finish');
+  assert.equal(s.calls.length, 1);
+  const { url, init } = s.calls[0];
+  assert.equal(url, '/api/reader/avatar');
+  assert.equal(init.method, 'POST');
+  assert.equal(init.credentials, 'same-origin');
+  assert.equal(init.headers['X-Reader-Request'], '1');
+  assert.ok(init.body instanceof NativeFormData);
+  const sent = init.body.get('file');
+  assert.ok(sent instanceof NativeFile);
+  assert.ok(sent.size > 0 && sent.size <= 2 * 1024 ** 2);
+  assert.equal(sent.type, 'image/webp');
+  assert.equal(sent.name, 'avatar.webp');
+  const sentBytes = Buffer.from(await sent.arrayBuffer());
+  assert.notDeepEqual(sentBytes, original);
+  const metadata = await sharp(sentBytes).metadata();
+  assert.equal(metadata.format, 'webp');
+  assert.equal(metadata.width, 1024);
+  assert.equal(metadata.height, 1024);
+  assert.equal(metadata.hasAlpha, true);
+  assert.equal(encodings, 1);
+  assert.equal(urls.size, 0);
+  assert.equal(s.identity().frame, `image:${uuid}`);
+  assert.equal(s.identity().frameImage, image);
+  assert.equal(s.identity().pendingAvatar, true);
+  assert.match(s.doc.querySelector('[data-reader-avatar-message]').textContent, /提交审核/);
 });

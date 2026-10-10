@@ -1,5 +1,6 @@
 // TypeScript sources emitted at stable browser .mjs paths.
 export const typedBrowserModules = new Set([
+  'upload-image.mjs',
   'access-policy.mjs',
   'admin-readers.mjs',
   'admin-route.mjs',
