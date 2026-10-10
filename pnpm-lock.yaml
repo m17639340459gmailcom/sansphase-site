@@ -19,11 +19,11 @@ importers:
         specifier: 5.3.0
         version: 5.3.0
       '@payloadcms/db-sqlite':
-        specifier: 3.89.0
-        version: 3.89.0(payload@3.89.0(graphql@16.14.2)(typescript@5.9.3))
+        specifier: 3.90.2
+        version: 3.90.2(payload@3.90.2(graphql@16.14.2)(typescript@5.9.3))
       '@payloadcms/email-nodemailer':
-        specifier: 3.89.0
-        version: 3.89.0(payload@3.89.0(graphql@16.14.2)(typescript@5.9.3))
+        specifier: 3.90.2
+        version: 3.90.2(payload@3.90.2(graphql@16.14.2)(typescript@5.9.3))
       '@radix-ui/react-select':
         specifier: 2.3.7
         version: 2.3.7(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -94,8 +94,8 @@ importers:
         specifier: 1.0.11
         version: 1.0.11
       payload:
-        specifier: 3.89.0
-        version: 3.89.0(graphql@16.14.2)(typescript@5.9.3)
+        specifier: 3.90.2
+        version: 3.90.2(graphql@16.14.2)(typescript@5.9.3)
       plyr:
         specifier: 3.8.4
         version: 3.8.4
@@ -844,24 +844,24 @@ packages:
   '@next/env@15.5.25':
     resolution: {integrity: sha512-42h1lLr07vl4gawALP1hsgRZjHB1xYa58JfUfHwr0f7jG/zhPakh5GHkADHXOC9ZxUvlQFOPIrp7s6qX4DezPQ==}
 
-  '@payloadcms/db-sqlite@3.89.0':
-    resolution: {integrity: sha512-0qY1k3fGxAXoe3r44mm3Iku1BIUeRgjDYq0kIvRdcls+PVOT/7nXsIZgTkjrNn5Cu4mujLIpTVwDGsTcN0fI2w==}
+  '@payloadcms/db-sqlite@3.90.2':
+    resolution: {integrity: sha512-lkcr6HTPe+8K0atSkXp7hYUJHUAKMiheW0BWwkavjSkBF8UDRuhjaD08gCdRF9QuWVJjxO9YEe15NZsouB5ayQ==}
     peerDependencies:
-      payload: 3.89.0
+      payload: 3.90.2
 
-  '@payloadcms/drizzle@3.89.0':
-    resolution: {integrity: sha512-/Ijf87WfIaIGDrlAQBOXcNxRZy+IDfpZQvpmJpA4BwO7PEVMqU6nHSUYVgbFHy6+4XYHvsTp31/4xo06yQwiOw==}
+  '@payloadcms/drizzle@3.90.2':
+    resolution: {integrity: sha512-C5r0gimzaq6ih21jh3VPQNNRxFYCi6JhTgkcbf2c/xGF7MEEzNzDn3DgfFFe4zeDE4iuC9glYrXFs85AKghq8w==}
     peerDependencies:
-      payload: 3.89.0
+      payload: 3.90.2
 
-  '@payloadcms/email-nodemailer@3.89.0':
-    resolution: {integrity: sha512-keCjt+wgo3qmV9uBJoBe1p1pZBSDp6kp51lJV1bpMlu5EURHuFg+X0M/VAu/d9ZfOVMjrBaier8+6GNvTtNRYA==}
+  '@payloadcms/email-nodemailer@3.90.2':
+    resolution: {integrity: sha512-HpkEpnXYi6sFtbKB8qi9rL234gsMS5c0DJg2zag8+sYyad23xrUPytKT6PxI4HYdsIs+GRkQSmpjCgLmwi5ojw==}
     engines: {node: ^18.20.2 || >=20.9.0}
     peerDependencies:
-      payload: 3.89.0
+      payload: 3.90.2
 
-  '@payloadcms/translations@3.89.0':
-    resolution: {integrity: sha512-XLPOdv9NoPcqr21zBTu0uyJk0qGRIF7JVl2H2UTecpweQSMlQCackhUKWz1LKBO7QcKgkNSVHFnMNcizRDcPDg==}
+  '@payloadcms/translations@3.90.2':
+    resolution: {integrity: sha512-BGpXyw22ndzL6URrK28qlk2qIsksH8mbWpU/n8vaTt8W6O87KoniX4lJ82m5o0FR/wjWqzcuVRsE0TNX3/7gHg==}
 
   '@pinojs/redact@0.4.0':
     resolution: {integrity: sha512-k2ENnmBugE/rzQfEcdWHcCY+/FM3VLzH9cYEsbdsoqrvzAKRhUZeRNhAZvB8OitQJ1TBed3yqWtdjzS6wJKBwg==}
@@ -2021,8 +2021,8 @@ packages:
   path-to-regexp@6.3.0:
     resolution: {integrity: sha512-Yhpw4T9C6hPpgPeA28us07OJeqZ5EzQTkbfwuhsUg0c237RomFoETJgmp2sa3F/41gfLE6G5cqcYwznmeEeOlQ==}
 
-  payload@3.89.0:
-    resolution: {integrity: sha512-n0rDsMDTlKkNDqNllSLow1xEn2XaktD2oyi6Gl7i/LAD7xRBaS+tj27ca9EeNM5QmoGSd734UCHYj5Vr4JQYNA==}
+  payload@3.90.2:
+    resolution: {integrity: sha512-Qn+nRiMEVOrClVg7mkCHqCKc7x5DAKQZ+jZQm6lqtLfHTS6fuGXqeOzgy5/woWquN4awRUCNgIGu2uYVNn5uvQ==}
     engines: {node: ^18.20.2 || >=20.9.0}
     hasBin: true
     peerDependencies:
@@ -2222,6 +2222,10 @@ packages:
   sanitize-html@2.17.7:
     resolution: {integrity: sha512-PGtEkc9cbnedU3s9TmzDbpsZ8w086g/0Q8k8/oIO1NLNU3i5k9yn835CrjJSajp1KMmkisbO1qPXxNKO3welAg==}
     engines: {node: '>=22.12.0'}
+
+  sax@1.6.1:
+    resolution: {integrity: sha512-42tBVwLWnaQvW5zc4HbZrTuWccECCZfBi92FDuwtqxasH+JbPB3/FOKb1m222K42R4WxuxzzMsTswfzgtSu64Q==}
+    engines: {node: '>=11.0.0'}
 
   saxes@6.0.0:
     resolution: {integrity: sha512-xAg7SOnEhrm5zI3puOOKyy1OMcMlIJZYNJY7xLBwSze0UjhPLnWfj2GF2EpT0jmzaJKIWKHLsaSSajf35bcYnA==}
@@ -3050,14 +3054,14 @@ snapshots:
 
   '@next/env@15.5.25': {}
 
-  '@payloadcms/db-sqlite@3.89.0(payload@3.89.0(graphql@16.14.2)(typescript@5.9.3))':
+  '@payloadcms/db-sqlite@3.90.2(payload@3.90.2(graphql@16.14.2)(typescript@5.9.3))':
     dependencies:
       '@libsql/client': 0.14.0
-      '@payloadcms/drizzle': 3.89.0(@libsql/client@0.14.0)(payload@3.89.0(graphql@16.14.2)(typescript@5.9.3))
+      '@payloadcms/drizzle': 3.90.2(@libsql/client@0.14.0)(payload@3.90.2(graphql@16.14.2)(typescript@5.9.3))
       console-table-printer: 2.12.1
       drizzle-kit: 0.31.7
       drizzle-orm: 0.45.2(@libsql/client@0.14.0)
-      payload: 3.89.0(graphql@16.14.2)(typescript@5.9.3)
+      payload: 3.90.2(graphql@16.14.2)(typescript@5.9.3)
       prompts: 2.4.2
       to-snake-case: 1.0.0
       uuid: 13.0.2
@@ -3094,12 +3098,12 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@payloadcms/drizzle@3.89.0(@libsql/client@0.14.0)(payload@3.89.0(graphql@16.14.2)(typescript@5.9.3))':
+  '@payloadcms/drizzle@3.90.2(@libsql/client@0.14.0)(payload@3.90.2(graphql@16.14.2)(typescript@5.9.3))':
     dependencies:
       console-table-printer: 2.12.1
       dequal: 2.0.3
       drizzle-orm: 0.45.2(@libsql/client@0.14.0)
-      payload: 3.89.0(graphql@16.14.2)(typescript@5.9.3)
+      payload: 3.90.2(graphql@16.14.2)(typescript@5.9.3)
       prompts: 2.4.2
       to-snake-case: 1.0.0
       uuid: 13.0.2
@@ -3134,12 +3138,12 @@ snapshots:
       - sql.js
       - sqlite3
 
-  '@payloadcms/email-nodemailer@3.89.0(payload@3.89.0(graphql@16.14.2)(typescript@5.9.3))':
+  '@payloadcms/email-nodemailer@3.90.2(payload@3.90.2(graphql@16.14.2)(typescript@5.9.3))':
     dependencies:
       nodemailer: 10.0.9
-      payload: 3.89.0(graphql@16.14.2)(typescript@5.9.3)
+      payload: 3.90.2(graphql@16.14.2)(typescript@5.9.3)
 
-  '@payloadcms/translations@3.89.0':
+  '@payloadcms/translations@3.90.2':
     dependencies:
       date-fns: 4.1.0
 
@@ -4225,10 +4229,10 @@ snapshots:
 
   path-to-regexp@6.3.0: {}
 
-  payload@3.89.0(graphql@16.14.2)(typescript@5.9.3):
+  payload@3.90.2(graphql@16.14.2)(typescript@5.9.3):
     dependencies:
       '@next/env': 15.5.25
-      '@payloadcms/translations': 3.89.0
+      '@payloadcms/translations': 3.90.2
       '@types/busboy': 1.5.4
       ajv: 8.18.0
       bson-objectid: 2.0.4
@@ -4254,6 +4258,7 @@ snapshots:
       qs-esm: 8.0.1
       range-parser: 1.2.1
       sanitize-filename: 1.6.3
+      sax: 1.6.1
       ts-essentials: 10.0.3(typescript@5.9.3)
       tsx: 4.22.4
       undici: 7.29.1
@@ -4498,6 +4503,8 @@ snapshots:
       launder: 1.7.1
       parse-srcset: 1.0.2
       postcss: 8.5.28
+
+  sax@1.6.1: {}
 
   saxes@6.0.0:
     dependencies:

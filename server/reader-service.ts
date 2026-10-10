@@ -357,7 +357,7 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
           // overrideAccess field that was not part of this service's runtime call.
           try { result = await payload.resetPassword({ collection: 'readers', data: { token, password: newPassword } } as Parameters<Payload['resetPassword']>[0]); }
           catch { throw fail('重置链接无效或已过期。'); }
-          // Payload issues a new session on reset but retains old sessions.
+          // Payload 3.90 revokes old sessions on reset and creates a new one.
           // Revoke all of them so a stolen cookie cannot outlive recovery.
           await logoutOperation({ collection: payload.collections.readers,
             req: await localReq(result.user), allSessions: true });

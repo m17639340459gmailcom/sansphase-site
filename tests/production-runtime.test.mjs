@@ -11,6 +11,30 @@ import { getPayload } from 'payload';
 import { makePayloadConfig } from '../server/payload/config.ts';
 import { migrateReaderAccounts } from '../server/payload/reader-migration.ts';
 import { migrateCommunity } from '../server/payload/community-migration.ts';
+import { DatabaseSync } from 'node:sqlite';
+
+test('production startup rejects an unprepared auth schema before opening the account runtime', {timeout:30000}, async()=>{
+  const directory=await mkdtemp(resolve(tmpdir(),'sansphase-auth-readiness-'));
+  const dataDirectory=resolve(directory,'data');await mkdir(dataDirectory);
+  const dbPath=resolve(dataDirectory,'content.db');
+  const db=new DatabaseSync(dbPath);
+  db.exec("CREATE TABLE authors (id TEXT PRIMARY KEY, email TEXT); CREATE TABLE readers (id TEXT PRIMARY KEY, email TEXT); INSERT INTO authors VALUES ('fixture-author','owner@example.test');");
+  db.close();
+  const before=await readFile(dbPath);
+  const config=resolve(directory,'private.json');
+  await writeFile(config,JSON.stringify({directory:dataDirectory,secret:randomBytes(48).toString('hex'),authorId:randomUUID(),siteOrigin:'https://www.sansphase.com'}));
+  await writeFile(resolve(dataDirectory,'migration-complete.json'),JSON.stringify({provider:'payload'}));
+  try {
+    const result=await new Promise((done,reject)=>{
+      const child=spawn(process.execPath,['--input-type=module','-e',"import {createPayloadRuntime} from './server/payload/runtime.ts'; await createPayloadRuntime(process.argv[1]);",config],{windowsHide:true,stdio:['ignore','pipe','pipe']});
+      let output='';child.stdout.on('data',bytes=>output+=bytes);child.stderr.on('data',bytes=>output+=bytes);
+      child.on('error',reject);child.on('close',code=>done({code,output}));
+    });
+    assert.notEqual(result.code,0);
+    assert.match(result.output,/auth.*schema.*(?:ready|prepared|migration)|(?:ready|prepared|migration).*auth.*schema/is);
+    assert.deepEqual(await readFile(dbPath),before,'failed readiness must not change account data');
+  } finally { await rm(directory,{recursive:true,force:true,maxRetries:10,retryDelay:100}); }
+});
 
 test('production entry starts with an isolated restored database and exposes only public routes',{timeout:60000},async()=>{
   const directory=await mkdtemp(resolve(tmpdir(),'sansphase-production-'));

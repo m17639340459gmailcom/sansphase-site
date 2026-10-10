@@ -6,6 +6,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { getPayload } from "payload";
 import { makePayloadConfig } from "./config.ts";
+import { assertPayloadAuthSchemaReady } from './auth-security-migration.ts';
 import { createPayloadStore } from "./store.ts";
 import { createAuthorService } from "../author-service.ts";
 import { createReaderService } from '../reader-service.ts';
@@ -59,6 +60,9 @@ export async function createPayloadRuntime(
   );
   if (manifest.provider !== "payload")
     throw new Error("Payload data has not passed migration validation.");
+  // Existing production databases are upgraded explicitly with a verified
+  // backup. Startup only checks readiness; it never enables schema push.
+  if (settings.push !== true) assertPayloadAuthSchemaReady(settings.directory);
   const payload = await getPayload({ config: makePayloadConfig(settings) });
   const loginLedger = createLoginLedger(settings.directory);
   const uidStore = createReaderUidStore(settings.directory);

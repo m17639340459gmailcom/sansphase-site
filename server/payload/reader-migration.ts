@@ -37,7 +37,7 @@ export async function migrateReaderAccounts(directory:string) {
       if (!column(db,name,field)) throw Error(`Apply the earlier site migration first: ${name}.${field}`);
     if (table(db, 'readers')) {
       for (const name of ['email', 'nickname', '_verified', 'disabled']) if (!column(db, 'readers', name)) throw Error(`Reader schema is incomplete: ${name}`);
-      if (!column(db, 'readers', 'phone') || !column(db, 'readers', 'signature') || !column(db, 'readers', 'avatar') || !column(db, 'readers', 'vip_started_at') || !column(db, 'readers', 'vip_until') || !table(db, 'login_events') || missingUid(db) || !trigger(db, 'reader_uids_on_insert')) {
+      if (!column(db, 'readers', 'phone') || !column(db, 'readers', 'signature') || !column(db, 'readers', 'avatar') || !column(db, 'readers', 'vip_started_at') || !column(db, 'readers', 'vip_until') || !column(db, 'readers', 'reset_password_requested_at') || !table(db, 'login_events') || missingUid(db) || !trigger(db, 'reader_uids_on_insert')) {
         const backupDir = resolve(root, 'schema-backups');
         await mkdir(backupDir, { recursive: true });
         const backupPath = resolve(backupDir, `before-reader-schema-${new Date().toISOString().replaceAll(/[:.]/g, '-')}.db`);
@@ -49,6 +49,7 @@ export async function migrateReaderAccounts(directory:string) {
           if (!column(db, 'readers', 'avatar')) db.exec('ALTER TABLE readers ADD COLUMN avatar text');
           if (!column(db, 'readers', 'vip_started_at')) db.exec('ALTER TABLE readers ADD COLUMN vip_started_at text');
           if (!column(db, 'readers', 'vip_until')) db.exec('ALTER TABLE readers ADD COLUMN vip_until text');
+          if (!column(db, 'readers', 'reset_password_requested_at')) db.exec('ALTER TABLE readers ADD COLUMN reset_password_requested_at text');
           if (!table(db, 'login_events')) db.exec(loginEventsSchema);
           ensureUids(db);
           db.exec('COMMIT');
@@ -77,6 +78,7 @@ export async function migrateReaderAccounts(directory:string) {
         email text NOT NULL,
         reset_password_token text,
         reset_password_expiration text,
+        reset_password_requested_at text,
         salt text,
         hash text,
         _verified integer,
