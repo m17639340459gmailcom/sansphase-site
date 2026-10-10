@@ -13,6 +13,22 @@ m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
 
 
+def create_verification_sidecars(path, filename='content.db'):
+    """Real SQLite creates the exact empty artifacts observed on both hosts."""
+    file=path/filename
+    with closing(sqlite3.connect(file)) as db:
+        db.execute('PRAGMA journal_mode=WAL');db.execute('PRAGMA wal_checkpoint(TRUNCATE)')
+    manifest=json.loads((path/'backup-manifest.json').read_text())
+    for entry in manifest['files']:
+        if entry['path']==filename:
+            entry['sha256']=m.digest(file)
+            if 'bytes' in entry:entry['bytes']=file.stat().st_size
+    (path/'backup-manifest.json').write_text(json.dumps(manifest))
+    with closing(sqlite3.connect(file.as_uri()+'?mode=ro',uri=True)) as db:
+        db.execute('PRAGMA integrity_check').fetchall()
+    return path/(filename+'-wal'),path/(filename+'-shm')
+
+
 class MaintenanceTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -51,7 +67,9 @@ class MaintenanceTests(unittest.TestCase):
         path=self.backup('payload-manual',40)
         data=json.loads((path/'backup-manifest.json').read_text());data.pop('createdAt')
         (path/'backup-manifest.json').write_text(json.dumps(data))
+        (path/'table-audit.json').write_text('{}')
         self.assertEqual(m.backup_candidates(self.root/'backups',2000000000),[])
+        self.assertTrue((path/'table-audit.json').exists())
 
     def test_unknown_provider_and_incomplete_old_backup_are_preserved(self):
         for i in range(3):self.backup('payload-'+str(i),i)
@@ -86,6 +104,81 @@ class MaintenanceTests(unittest.TestCase):
         (paths[0]/'backup-manifest.json').write_text(json.dumps(value))
         with self.assertRaises(ValueError):m.backup_candidates(self.root/'backups',2000000000)
         self.assertTrue(all(p.exists() for p in paths))
+
+    def test_exact_registered_empty_verification_sidecars_are_known_and_preserved(self):
+        path=self.backup('payload-main',0);wal,shm=create_verification_sidecars(path)
+        self.assertEqual(wal.stat().st_size,0);self.assertEqual(shm.stat().st_size,32768)
+        self.assertEqual(m.digest(shm),'fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb')
+        before={f.name:m.digest(f) for f in path.iterdir()}
+        with mock.patch.object(m,'live_references',return_value=[]):m.verify_backup(path)
+        self.assertEqual({f.name:m.digest(f) for f in path.iterdir()},before)
+
+    def test_nonempty_wal_different_shm_or_orphan_sidecar_stops_retained_validation(self):
+        for defect in ['nonempty-wal','different-shm','missing-wal','missing-shm']:
+            with self.subTest(defect=defect):
+                path=self.backup('payload-'+defect,0);wal,shm=create_verification_sidecars(path)
+                if defect=='nonempty-wal':wal.write_bytes(b'uncommitted bytes')
+                elif defect=='different-shm':shm.write_bytes(b'X'*32768)
+                elif defect=='missing-wal':wal.unlink()
+                else:shm.unlink()
+                with mock.patch.object(m,'live_references',return_value=[]):
+                    with self.assertRaises(ValueError):m.verify_backup(path)
+                self.assertTrue(path.exists())
+
+    def test_unknown_database_sidecars_and_active_reference_are_refused(self):
+        path=self.backup('payload-unknown-db',0)
+        (path/'unregistered.db-wal').write_bytes(b'');(path/'unregistered.db-shm').write_bytes(bytes(32768))
+        with mock.patch.object(m,'live_references',return_value=[]):
+            with self.assertRaises(ValueError):m.verify_backup(path)
+        path=self.backup('payload-in-use',0);wal,shm=create_verification_sidecars(path)
+        for reference in [str(path),str(path/'content.db'),str(wal),str(shm)]:
+            with mock.patch.object(m,'live_references',return_value=[reference]):
+                with self.assertRaises(ValueError):m.verify_backup(path)
+
+    def test_nonempty_wal_on_old_candidate_is_preserved(self):
+        for i in range(3):self.backup('payload-'+str(i),i)
+        path=self.backup('payload-old',40);wal,shm=create_verification_sidecars(path);wal.write_bytes(b'keep')
+        with mock.patch.object(m,'live_references',return_value=[]):
+            self.assertEqual(m.backup_candidates(self.root/'backups',2000000000),[])
+        self.assertTrue(wal.exists());self.assertTrue(shm.exists())
+
+    def test_nested_identity_database_empty_artifacts_are_recognized(self):
+        path=self.backup('payload-nested',0);identity=path/'recovery-only/community-identity.db'
+        identity.parent.mkdir();m.shutil.copyfile(path/'content.db',identity)
+        manifest=json.loads((path/'backup-manifest.json').read_text())
+        manifest['files'].append({'path':'recovery-only/community-identity.db','sha256':m.digest(identity)})
+        (path/'backup-manifest.json').write_text(json.dumps(manifest))
+        wal,shm=create_verification_sidecars(path,'recovery-only/community-identity.db')
+        with mock.patch.object(m,'live_references',return_value=[]):m.verify_backup(path)
+        self.assertTrue(wal.exists());self.assertTrue(shm.exists())
+
+    def test_reference_inspection_failure_never_treats_exact_pair_as_unused(self):
+        path=self.backup('payload-unreadable-process',0);create_verification_sidecars(path)
+        with mock.patch.object(m,'live_references',side_effect=PermissionError('fixture')):
+            with self.assertRaises(PermissionError):m.verify_backup(path)
+        self.assertTrue(path.exists())
+
+    def test_sidecar_change_after_exact_match_never_passes_validation(self):
+        path=self.backup('payload-sidecar-raced',0);wal,shm=create_verification_sidecars(path)
+        matching=m.verification_sidecars
+        def changed(source,seen,actual_files):
+            result=matching(source,seen,actual_files)
+            wal.write_bytes(b'appeared during validation')
+            return result
+        with mock.patch.object(m,'live_references',return_value=[]), mock.patch.object(m,'verification_sidecars',side_effect=changed):
+            with self.assertRaises(ValueError):m.verify_backup(path)
+        self.assertTrue(wal.exists());self.assertTrue(shm.exists())
+
+    @unittest.skipIf(os.name=='nt','real Linux file links')
+    def test_empty_sidecar_symlink_or_hardlink_is_not_accepted(self):
+        path=self.backup('payload-linked',0);wal,shm=create_verification_sidecars(path)
+        external=self.root/'external-empty';external.write_bytes(b'');wal.unlink();wal.symlink_to(external)
+        with mock.patch.object(m,'live_references',return_value=[]):
+            with self.assertRaises(ValueError):m.verify_backup(path)
+        wal.unlink();os.link(external,wal)
+        with mock.patch.object(m,'live_references',return_value=[]):
+            with self.assertRaises(ValueError):m.verify_backup(path)
+        self.assertTrue(external.exists())
 
     def test_parent_symlink_and_candidate_mount_are_refused(self):
         path=self.root/'mount';path.mkdir()
@@ -393,15 +486,21 @@ class CommunityMaintenanceTests(unittest.TestCase):
 
     def test_official_validator_runs_existing_cli_and_never_exposes_stdout_or_stderr(self):
         path=self.backup('community-verified',0)
-        result=mock.Mock(returncode=0,stdout=json.dumps({'directory':str(path),'files':3}),stderr='')
-        with mock.patch.object(m.subprocess,'run',return_value=result) as run:
+        captured=[]
+        def verifier(command,**kwargs):
+            copied=Path(command[-1]);captured.append(copied)
+            self.assertNotEqual(copied,path)
+            self.assertEqual(m.digest(copied/'content.db'),m.digest(path/'content.db'))
+            return mock.Mock(returncode=0,stdout=json.dumps({'directory':str(copied),'files':3}),stderr='')
+        with mock.patch.object(m.subprocess,'run',side_effect=verifier) as run:
             self.validator.stop()
             try:m.verify_community_backup(path)
             finally:self.validator.start()
         command=run.call_args.args[0]
-        self.assertEqual(command[0],'/usr/bin/node');self.assertEqual(command[-2:],['--verify',str(path)])
+        self.assertEqual(command[0],'/usr/bin/node');self.assertEqual(command[-2:],[ '--verify',str(captured[0])])
         self.assertTrue(command[1].endswith('/scripts/backup-community.mjs'))
         self.assertTrue(run.call_args.kwargs['capture_output'])
+        self.assertFalse(captured[0].exists())
         result=mock.Mock(returncode=1,stdout='PRIVATE CONFIG',stderr='PRIVATE SECRET')
         with mock.patch.object(m.subprocess,'run',return_value=result):
             self.validator.stop()
@@ -409,6 +508,71 @@ class CommunityMaintenanceTests(unittest.TestCase):
                 with self.assertRaises(ValueError) as error:m.verify_community_backup(path)
                 self.assertNotIn('PRIVATE',str(error.exception))
             finally:self.validator.start()
+
+    def test_official_validator_sidecar_writes_are_isolated_from_source_backup(self):
+        path=self.backup('community-isolated',0);before={f.name:m.digest(f) for f in path.iterdir()}
+        captured=[]
+        def verifier(command,**kwargs):
+            copied=Path(command[-1]);captured.append(copied)
+            create_verification_sidecars(copied,'community-host.db')
+            return mock.Mock(returncode=0,stdout=json.dumps({'directory':str(copied),'files':3}),stderr='')
+        self.validator.stop()
+        try:
+            with mock.patch.object(m.subprocess,'run',side_effect=verifier):m.verify_backup(path,'community')
+        finally:self.validator.start()
+        self.assertEqual({f.name:m.digest(f) for f in path.iterdir()},before)
+        self.assertFalse(captured[0].exists())
+
+    def test_source_change_while_isolated_validation_runs_refuses_rotation(self):
+        path=self.backup('community-raced',0)
+        def verifier(command,**kwargs):
+            (path/'unknown-appeared.txt').write_text('keep')
+            return mock.Mock(returncode=0,stdout=json.dumps({'directory':command[-1],'files':3}),stderr='')
+        self.validator.stop()
+        try:
+            with mock.patch.object(m.subprocess,'run',side_effect=verifier):
+                with self.assertRaises(ValueError):m.verify_backup(path,'community')
+        finally:self.validator.start()
+        self.assertEqual((path/'unknown-appeared.txt').read_text(),'keep')
+
+    def test_source_change_during_copy_stops_before_official_validator_runs(self):
+        path=self.backup('community-copy-raced',0);copytree=m.shutil.copytree
+        def copying(source,destination,**kwargs):
+            result=copytree(source,destination,**kwargs)
+            (path/'unknown-after-copy.txt').write_text('keep')
+            return result
+        self.validator.stop()
+        try:
+            with mock.patch.object(m.shutil,'copytree',side_effect=copying), mock.patch.object(m.subprocess,'run') as run:
+                with self.assertRaises(ValueError):m.verify_backup(path,'community')
+                run.assert_not_called()
+        finally:self.validator.start()
+        self.assertEqual((path/'unknown-after-copy.txt').read_text(),'keep')
+
+    def test_official_validator_failure_categories_and_private_copy_cleanup(self):
+        path=self.backup('community-invalid-result',0)
+        cases=[
+            (m.subprocess.TimeoutExpired('fixture PRIVATE',1),'timed out'),
+            (OSError('fixture PRIVATE'),'unavailable'),
+            (mock.Mock(returncode=0,stdout='PRIVATE malformed',stderr='PRIVATE'),'invalid JSON'),
+            (mock.Mock(returncode=0,stdout=json.dumps({'directory':str(path),'files':3}),stderr='PRIVATE'),'invalid summary'),
+        ]
+        self.validator.stop()
+        try:
+            for outcome,category in cases:
+                with self.subTest(category=category):
+                    arguments={'side_effect':outcome} if isinstance(outcome,Exception) else {'return_value':outcome}
+                    with mock.patch.object(m.subprocess,'run',**arguments) as run:
+                        with self.assertRaises(ValueError) as error:m.verify_community_backup(path)
+                        self.assertIn(category,str(error.exception));self.assertNotIn('PRIVATE',str(error.exception))
+                        self.assertFalse(Path(run.call_args.args[0][-1]).exists())
+        finally:self.validator.start()
+
+    def test_existing_exact_sidecars_pass_in_both_database_profiles(self):
+        path=self.backup('community-existing-artifacts',0);wal,shm=create_verification_sidecars(path,'community-host.db')
+        before={f.name:m.digest(f) for f in path.iterdir()}
+        with mock.patch.object(m,'live_references',return_value=[]):m.verify_backup(path,'community')
+        self.assertEqual({f.name:m.digest(f) for f in path.iterdir()},before)
 
     def test_community_planner_refuses_nonbackup_categories(self):
         with self.assertRaises(ValueError):m.plan(self.root,categories=('releases',),profile='community')

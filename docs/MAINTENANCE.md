@@ -81,6 +81,10 @@ Payload 3.90.2 认证升级后的常规回滚必须保留新版认证依赖与�
 
 社区轮换使用独立 `sansphase-community-maintenance.timer`，北京时间每天 06:30、最多随机延迟十五分钟，安排在每日社区备份后，降低 CPU 和磁盘优先级。它复用现有 `scripts/backup-community.mjs --verify` 核对两份库、上传引用和清单，不重写社区备份逻辑。
 
+SQLite 的只读 WAL 校验仍可能在可写的备份目录生成辅助文件，见 [SQLite 官方只读 WAL 说明](https://www.sqlite.org/wal.html#read_only_databases)。两站已复验的已知产物仅限：清单登记的 `.db` 同路径同时存在零字节 `-wal` 和 32,768 字节 `-shm`，后者 SHA-256 为 `fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb`，且二者均为无符号链接、无硬链接的普通文件，备份没有进程或配置引用。维护工具只将这对精确匹配的空校验产物识别为已知文件，验证时原样保留。非空 WAL、其他 SHM、单独的辅助文件、未登记数据库的辅助文件和其他未知文件继续拒绝；近期保留副本异常则停止整批轮换，旧异常副本保留。
+
+社区官方校验在 Python 标准库建立的私有完整临时副本中执行，不再直接运行于正式备份；复制前后及校验结束时核对源目录身份和文件状态，源快照变化则停止。临时副本逐份创建并在本次验证结束后清理，因此校验期间需要足够容纳最大单份社区备份的临时磁盘空间；它不修改在线数据库、账号或上传目录。
+
 社区删除另要求 `/var/log/sansphase-maintenance/community-offsite.json` 为 root 所有且权限 600。该回执使用 `sansphase-verified-offsite-v1` schema，`profile: community`、带时区的实际 `verifiedAt`，以及恰好三项 `backups`：每项保存已复验的真实目录名、`manifestSha256` 和异地 `archiveSha256`。只能在本机实际完成异地校验后安装，不能用伪造的 verified 标志代替验证。三份恢复锚点永久额外保留，后续新备份仍另按最新三份及十四天规则管理；更换锚点前重新完成异地校验。这是已完成异地验证的证明，不代表已经建设持续自动异地备份。
 
 ```sh

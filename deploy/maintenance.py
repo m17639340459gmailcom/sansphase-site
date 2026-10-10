@@ -19,6 +19,11 @@ import tempfile
 import time
 
 DAY = 86400
+# Produced by the existing SQLite read-only WAL verifier on both deployed DB
+# roles. Only this exact, paired empty artifact is known; WAL data is never
+# ignored or removed as part of backup verification.
+VERIFICATION_SHM_BYTES = 32768
+VERIFICATION_SHM_SHA256 = 'fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa06129b8549389eb'
 RECEIPT_ROOT = Path('/var/log/sansphase-maintenance')
 PROFILES = {
     'main': {'base': 'opt/sansphase', 'backup': 'var/backups/sansphase',
@@ -129,31 +134,94 @@ def plain_tree(path):
                 raise ValueError('Candidate contains a mount')
 
 
+def backup_tree_fingerprint(path):
+    """Bind an isolated validation to an unchanged, regular source tree."""
+    path = Path(path)
+    plain_tree(path)
+    entries = {}
+    for base, directories, files in os.walk(path, followlinks=False):
+        for child in [Path(base), *(Path(base) / name for name in directories + files)]:
+            entry = child.lstat()
+            if (child.resolve(strict=True) != child.absolute()
+                or not (stat.S_ISREG(entry.st_mode) or stat.S_ISDIR(entry.st_mode))
+                or (stat.S_ISREG(entry.st_mode) and entry.st_nlink != 1)):
+                raise ValueError('Unsafe backup validation source')
+            entries[child.relative_to(path).as_posix()] = (entry.st_dev, entry.st_ino,
+                entry.st_mode, entry.st_size, entry.st_mtime_ns, entry.st_ctime_ns)
+    return entries
+
+
 def verify_community_backup(path):
     """Use the existing community validator, including both DB roles and images.
 
+    SQLite read-only validation can create WAL/SHM files. Run the existing
+    official CLI on a private complete copy, never on the source snapshot.
     Captured verifier output is private and is never forwarded to logs/errors.
     """
-    command = ['/usr/bin/node', '/opt/sansphase-community/current/scripts/backup-community.mjs', '--verify', str(path)]
-    try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=1800)
-    except subprocess.TimeoutExpired:
-        raise ValueError('Community backup verifier timed out') from None
-    except OSError:
-        raise ValueError('Community backup verifier is unavailable') from None
-    if result.returncode != 0:
-        raise ValueError(f'Community backup verifier failed (exit {result.returncode})')
-    try:
-        summary = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        raise ValueError('Community backup verifier returned invalid JSON') from None
-    if not isinstance(summary, dict) or summary.get('directory') != str(path) or summary.get('files') != len(read_backup_manifest(path, 'community')['files']):
-        raise ValueError('Community backup verifier returned an invalid summary')
+    path = Path(path)
+    before = backup_tree_fingerprint(path)
+    manifest = read_backup_manifest(path, 'community')
+    with tempfile.TemporaryDirectory(prefix='sansphase-community-backup-verify-') as temporary:
+        copied = Path(temporary) / 'backup'
+        # copytree is the standard library copy implementation. Preserve links
+        # as links so a source race cannot make the copier traverse a new link;
+        # the copied tree is checked before the official verifier reads it.
+        shutil.copytree(path, copied, symlinks=True)
+        backup_tree_fingerprint(copied)
+        if backup_tree_fingerprint(path) != before:
+            raise ValueError('Backup changed during isolated validation')
+        command = ['/usr/bin/node', '/opt/sansphase-community/current/scripts/backup-community.mjs', '--verify', str(copied)]
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=1800)
+        except subprocess.TimeoutExpired:
+            raise ValueError('Community backup verifier timed out') from None
+        except OSError:
+            raise ValueError('Community backup verifier is unavailable') from None
+        if result.returncode != 0:
+            raise ValueError(f'Community backup verifier failed (exit {result.returncode})')
+        try:
+            summary = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            raise ValueError('Community backup verifier returned invalid JSON') from None
+        if not isinstance(summary, dict) or summary.get('directory') != str(copied) or summary.get('files') != len(manifest['files']):
+            raise ValueError('Community backup verifier returned an invalid summary')
+        if backup_tree_fingerprint(path) != before:
+            raise ValueError('Backup changed during isolated validation')
+
+
+def verification_sidecars(path, seen, actual_files):
+    """Accept only previously verified empty SQLite validation artifacts."""
+    extras = actual_files - seen - {'backup-manifest.json'}
+    if not extras:
+        return set()
+    known = set()
+    for database in sorted(name for name in seen if Path(name).suffix == '.db'):
+        pair = {database + '-wal', database + '-shm'}
+        if not extras & pair:
+            continue
+        if not pair <= extras:
+            raise ValueError('Incomplete SQLite verification artifacts')
+        for name in pair:
+            file = path / name
+            entry = file.lstat()
+            if not stat.S_ISREG(entry.st_mode) or file.resolve(strict=True) != file.absolute() or entry.st_nlink != 1:
+                raise ValueError('Unsafe SQLite verification artifact')
+        wal, shm = path / (database + '-wal'), path / (database + '-shm')
+        if wal.stat().st_size != 0 or shm.stat().st_size != VERIFICATION_SHM_BYTES or digest(shm) != VERIFICATION_SHM_SHA256:
+            raise ValueError('Unknown SQLite verification artifact')
+        known.update(pair)
+    if extras != known:
+        raise ValueError('Unknown file in backup')
+    # Existing root process/config inspection is deliberately fail-closed. A
+    # live reader, writer or recovery process makes even an exact pair unsafe.
+    if referenced(path, live_references()):
+        raise ValueError('SQLite verification artifacts are in use')
+    return known
 
 
 def verify_backup(path, profile='main'):
     path = Path(path)
-    plain_tree(path)
+    before = backup_tree_fingerprint(path)
     manifest = read_backup_manifest(path, profile)
     seen = set()
     expected_directories = {'uploads'}
@@ -179,10 +247,13 @@ def verify_backup(path, profile='main'):
             if directory.is_symlink() or directory.relative_to(path).as_posix() not in expected_directories:
                 raise ValueError('Unknown directory in backup')
         actual_files.update((Path(base) / name).relative_to(path).as_posix() for name in files)
-    if actual_files != seen | {'backup-manifest.json'}:
+    known_sidecars = verification_sidecars(path, seen, actual_files)
+    if actual_files != seen | {'backup-manifest.json'} | known_sidecars:
         raise ValueError('Unknown file in backup')
     if profile == 'community':
         verify_community_backup(path)
+    if backup_tree_fingerprint(path) != before:
+        raise ValueError('Backup changed during validation')
     return manifest
 
 
