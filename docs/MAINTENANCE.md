@@ -21,7 +21,7 @@
 | 正式备份 | `/var/backups/sansphase` | `/var/backups/sansphase-community` |
 | 维护工具、回执 | `/opt/sansphase-maintenance`、`/var/log/sansphase-maintenance` | `/opt/sansphase-maintenance`、`/var/log/sansphase-maintenance` |
 
-隔离恢复与测试产物使用单独的维护工作目录，不再新增到正式备份根目录或当前 release。已有用途不明的副本先核对、留存恢复证明，再按清单处理；目录名字不是删除凭证。
+隔离恢复与测试产物使用单独的维护工作目录，不再新增到正式备份根目录或当前 release。已核对的构建测试产物归档到私有 `/var/lib/sansphase-maintenance/artifacts/<host-release>`；先核对异地恢复副本、文件哈希与运行引用，再处理精确清单，不移动浏览器使用的 dist。已有用途不明的副本先核对、留存恢复证明，再按清单处理；目录名字不是删除凭证。
 
 整理前使用 SQLite backup API 保存一致快照，复制上传文件和私有配置；将快照下载到本机并校验 SHA-256、所有清单文件及 SQLite 完整性。需要恢复时只能恢复到新目录验证，不能覆盖在线目录。保护性全量备份可能包含短时注册请求等私有数据，应按备份访问权限保管，不公开。
 
@@ -73,11 +73,25 @@ Payload 3.90.2 认证升级后的常规回滚必须保留新版认证依赖与�
 
 ## 运维执行
 
-`deploy/maintenance.py` 默认仅输出计划，不删除。生产脚本安装于 `/opt/sansphase-maintenance/maintenance.py`，与应用版本目录分离。回执保存到私有 `/var/log/sansphase-maintenance/`。
+`deploy/maintenance.py` 默认仅输出计划，不删除。生产脚本安装于 `/opt/sansphase-maintenance/maintenance.py`，与应用版本目录分离。默认 `--profile main` 使用主站固定目录；`--profile community` 只允许社区正式备份类别，不能清理其他目录。回执保存到 root 私有 `/var/log/sansphase-maintenance/`。未知目录、清单外文件、缺少日期或旧的损坏备份保留；已知近期或最新三份备份校验失败则整批停止，不退化为更旧的三份。
 
 人工收尾：使用 `--categories releases,publication,stages,checks --plan /var/log/sansphase-maintenance/PLAN.json` 生成计划；确认当前及回滚版本、备份、进程引用及清单后，再加 `--apply`。两次计划不一致会拒绝执行。脚本不清理实时数据，也不清理静态资源或业务日志。
 
 自动轮换：`sansphase-maintenance.timer` 每日调用 `--rotate-backups`，只清理已验证保留副本以外的过期备份；不会自动删除发布版本、验证数据库、用户、文章或头像。服务使用 systemd 写入目录限制，不能写入生产数据目录。保留每日备份的原有服务和时间安排。
+
+社区轮换使用独立 `sansphase-community-maintenance.timer`，北京时间每天 06:30、最多随机延迟十五分钟，安排在每日社区备份后，降低 CPU 和磁盘优先级。它复用现有 `scripts/backup-community.mjs --verify` 核对两份库、上传引用和清单，不重写社区备份逻辑。
+
+社区删除另要求 `/var/log/sansphase-maintenance/community-offsite.json` 为 root 所有且权限 600。该回执使用 `sansphase-verified-offsite-v1` schema，`profile: community`、带时区的实际 `verifiedAt`，以及恰好三项 `backups`：每项保存已复验的真实目录名、`manifestSha256` 和异地 `archiveSha256`。只能在本机实际完成异地校验后安装，不能用伪造的 verified 标志代替验证。三份恢复锚点永久额外保留，后续新备份仍另按最新三份及十四天规则管理；更换锚点前重新完成异地校验。这是已完成异地验证的证明，不代表已经建设持续自动异地备份。
+
+```sh
+# 社区只生成计划；核对后以相同参数追加 --apply。
+sudo python3 /opt/sansphase-maintenance/maintenance.py \
+  --profile community \
+  --offsite-receipt /var/log/sansphase-maintenance/community-offsite.json \
+  --plan /var/log/sansphase-maintenance/community-backup-rotation.json
+```
+
+删除使用 Python 标准库的 FD 安全 rmtree，逐项核对父目录与候选身份；平台缺少保护时拒绝执行。第一项删除前写入进行中回执，每项成功后原子更新，失败停止并保留已完成清单。维护工具按提交版本单独安装与验收，不需要切换网站版本或修改在线数据库。
 
 ## 验证与后续发布
 

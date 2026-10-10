@@ -1,0 +1,11 @@
+[Unit]
+Description=SANSPHASE daily verified community backup rotation
+
+[Timer]
+OnCalendar=*-*-* 06:30:00 Asia/Shanghai
+RandomizedDelaySec=15m
+Persistent=true
+Unit=sansphase-community-maintenance.service
+
+[Install]
+WantedBy=timers.target
