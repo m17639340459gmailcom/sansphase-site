@@ -21,14 +21,14 @@
 | 构建与发布清单 | `scripts/build-site.mjs`、`build-cosmos.mjs`、`typed-browser-modules.mjs`、`publication-files.mjs` | 构建和发布测试 |
 | 社区首页、板块横幅 | `src/community-banner-controller.ts`、`community-banner-editor.ts`、`community-frame-banners.ts`、`community-layout/feed-showcase.ts`；`server/community-banners.ts`、`server/payload/community-migration.ts` | community-banners、community-banner-controller、community-banner-editor、feed-showcase、feed-carousel 测试 |
 | 社区交互、签到、同页阅读位置 | `src/community-ui.ts`、`community.ts`、`community-pages.ts`、`community-layout/feed-shell.ts`；`server/community-routes-member.ts` | community-interaction-stability、community-document-scroll、community-checkin-stars、community-service 测试 |
-| 社区成长、信任与 VIP 等级浏览（经验晋级未启用） | `src/community-growth.ts` 定义草案；`community-level-explorer.ts`、`community-growth-art.ts` 提供等级浏览；`server/community-service.ts`、`community-routes-member.ts` 提供真实会员状态 | community-growth、community-growth-ui、community-level-explorer、community-service 测试 |
+| 社区成长、信任与 VIP 等级 | `src/community-growth.ts` 定义展示类型；`community-level-explorer.ts`、`community-growth-art.ts` 提供等级浏览；`server/community-experience.ts`、`community-service.ts`、`community-routes-member.ts` 提供真实经验与会员状态 | community-growth、community-experience、community-growth-ui、community-level-explorer、community-service 测试 |
 | 社区公约与十秒确认 | `src/community-convention.ts`、`community-convention-consent.ts`、`community-ui.ts`；`server/community-convention.ts` | community-convention、community-convention-consent-ui 测试 |
 | 版主负责板块与申诉联系方式 | `src/community-management.ts`、`community-post.ts`；`server/community-members.ts`、`community-moderation-contact.ts`、`community-routes-manage.ts` | community-moderator-scope、community-board-moderation、community-moderation-contact、community-contacts-ui 测试 |
 | 邮箱验证码、昵称和 IP 登录名额 | `src/reader-policy.ts`、`reader-ui.ts`；`server/reader-workflow.ts`、`reader-service.ts`、`login-ledger.ts` | reader-workflow、reader-integration、reader-policy、login-ledger-limit 测试 |
 | 半年未登录账号及关联社区数据清理 | `server/reader-retention-policy.ts`、`reader-retention.ts`、`reader-account-removal.ts`、`community-reader-cleanup.ts`、`reader-file-cleanup.ts` | reader-retention、reader-community-cleanup 测试 |
 | 社区结算、奖励、请求重试与限速 | `server/community-economy.ts`、`community-ledger.ts`、`community-store.ts`、`community-requests.ts`、`community-rate-limits.ts`；`src/community-write-request.ts` | community-concurrency、community-store、community-service、community-rate-limits、community-write-request 测试 |
 | 社区管理审计与文件镜像 | `server/community-audit.ts`、`community-service.ts`、`community-runtime.ts`、`community-routes-manage.ts`、`community-review.ts` | community-audit、community-service、community-board-moderation 测试 |
-| 服务与备份维护 | `deploy/`、`scripts/backup-payload.mjs`、`restore-payload.mjs` | 备份恢复、Linux 维护测试 |
+| 服务与备份维护 | `deploy/`；主站 `scripts/backup-payload.mjs`、`restore-payload.mjs`；社区 `scripts/backup-community.mjs`、`restore-community.mjs` | 主站及 community-host 备份恢复、Linux 维护测试 |
 
 同一单元格内省略目录前缀的文件与首个文件同目录。具体测试名可用 `rg --files tests` 查找。
 

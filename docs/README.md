@@ -19,14 +19,18 @@
 | [社区横幅设置](COMMUNITY-BANNERS.md) | 首页与板块的独立配置、管理权限、封面、轮播和数据迁移 |
 | [星尘获取规则](COMMUNITY-STARDUST-RULES.md) | 已实施的 v4 获取上限、内容收入边界；兑换建议尚未批准 |
 | [社区公约与规则入口](COMMUNITY-CONVENTION.md) | 公约正文、规则位置、申诉与版主自愿公开联系方式 |
-| [社区经验方案](COMMUNITY-EXPERIENCE-RULES.md) | 十级成长、VIP1～VIP8 有效会员登录日与登录经验加速；缺席日不增长，尚未启用结算 |
+| [社区经验规则](COMMUNITY-EXPERIENCE-RULES.md) | 当前十级成长、VIP1～VIP8 有效会员成长日与登录经验加速；缺席日不增长 |
+| [香港社区部署](COMMUNITY-HOSTING.md) | 主站账号与独立社区的身份、数据、备份和运行边界 |
+| [认证安全升级](PAYLOAD-AUTH-UPGRADE.md) | 当前 Payload 版本、迁移与兼容回滚 |
 | [静态交付](STATIC-DELIVERY.md) | 版本资源与 CDN |
 | [TypeScript 迁移](TYPESCRIPT-MIGRATION.md) | TS 源码和兼容入口 |
 | [大文件上传](UPLOAD-15GB.md) | 容量与限制 |
 
-## 最近正式发布
+## 当前运行与历史发布
 
-[2026-10-02 编辑器、顶栏与点击修复](INTERACTION-RELEASE-20261002.md)：已部署；社区另行集成，本次未部署社区。
+主站与香港社区已部署。具体运行源码、静态资源版本与验收记录以 `/healthz` 和私有发布回执为准；不把仅在本地修改或提交的文档版本当成已上线应用。当前操作遵循上面的维护指南，带日期的记录保留其当时语境。
+
+[2026-10-02 编辑器、顶栏与点击修复](INTERACTION-RELEASE-20261002.md)：该次已部署；“未部署社区”只说明当次发布范围。
 
 上一版本：[2026-10-01 黑洞、导航与代码清理](RELEASE-BLACK-HOLE-20261001.md)。
 

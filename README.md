@@ -8,7 +8,7 @@
 
 [![Build & tests](https://github.com/m17639340459gmailcom/sansphase-site/actions/workflows/check.yml/badge.svg)](https://github.com/m17639340459gmailcom/sansphase-site/actions/workflows/check.yml)
 ![Node.js 24](https://img.shields.io/badge/Node.js-24-88b8a5?style=flat-square)
-![Payload 3.89](https://img.shields.io/badge/Payload-3.89-a7b8dc?style=flat-square)
+![Payload 3.90.2](https://img.shields.io/badge/Payload-3.90.2-a7b8dc?style=flat-square)
 ![Release candidate](https://img.shields.io/badge/Status-release_candidate-c2abd8?style=flat-square)
 
 [使用说明](docs/AUTHOR-GUIDE.md) · [项目结构](ARCHITECTURE.md) · [部署指南](docs/DEPLOYMENT.md) · [发布流程](docs/RELEASE-PROCESS.md) · [维护与数据保护](docs/MAINTENANCE.md)
@@ -21,9 +21,9 @@
 
 **SANSPHASE / 無相** 是一个以星空、玻璃材质和三维场景为视觉语言的个人网站。访客浏览文章与作品，作者登录后直接在前台编辑、上传和发布，日常操作集中在「作者模式」中。
 
-内容由自托管的 **Payload + SQLite** 保存，网站与后端运行在同一个 Node.js 进程里。前端效果、内容数据与部署配置分别维护，统一从源码构建。
+主站内容与账号由自托管的 **Payload + SQLite** 保存，主站前后台运行在同一个 Node.js 进程里。香港社区使用独立进程和数据库，通过身份桥接复用主站账号、UID 与 VIP。前端效果、内容数据与部署配置分别维护，统一从源码构建。
 
-> 当前源码为 **1.0.0-rc.1 发布候选版**。主站既有版本的部署记录见发布文档；本轮社区、账号与排版更新仅完成源码交付和上线准备，未部署至生产。公开仓库包含源码和测试，不包含站长账号、私有配置、真实数据库及上传文件。
+> 软件版本仍标记 **1.0.0-rc.1**，主站与香港社区已部署。具体线上版本以各站 `/healthz` 和私有发布回执为准；源码提交和版本名称本身不代表部署成功。公开仓库包含源码和测试，不包含站长账号、私有配置、真实数据库及上传文件。
 
 ## 可以做什么
 
@@ -39,7 +39,7 @@
 | 社区治理 | 待审与举报、管理审计、版本化公约及十秒阅读确认、申诉联系方式 |
 | 自托管维护 | 构建校验、健康检查、数据库与媒体备份、恢复和部署模板 |
 
-音乐平台分享链接保留跳转入口，酷狗账号歌单尚不支持站内直接播放。有声自动播放受浏览器限制。读者注册、邮箱验证码、个人资料、VIP 权限及用户管理已实现。成长等级和 VIP 倍率页面可浏览，但经验结算与 VIP1–VIP8 自动升级尚未启用；不能把展示草案视为已生效权益。VIP 在线支付和订单尚未包含在正式版本。
+音乐平台分享链接保留跳转入口，酷狗账号歌单尚不支持站内直接播放。有声自动播放受浏览器限制。读者注册、邮箱验证码、个人资料、VIP 权限及用户管理已实现。成长等级与 VIP1–VIP8 使用服务器经验和有效会员成长日；会员有效期、等级与管理任命分别核验。规则见 [社区经验与 VIP](docs/COMMUNITY-EXPERIENCE-RULES.md)。VIP 在线支付和订单尚未包含在正式版本。
 
 ## 网站怎样运行
 

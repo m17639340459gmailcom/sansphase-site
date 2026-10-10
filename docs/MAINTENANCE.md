@@ -8,19 +8,28 @@
 
 每次变更提交可审查的 Git 差异；仅添加明确源码清单，不执行 `git add .`。先检查凭据和真实用户资料，再提交。发布标签和维护标签分开；维护标签不代表已将新应用上线。
 
-`src/` 负责前端；`server/reader-*` 负责读者认证、账号、VIP、审核与生命周期；`server/author-service.mjs` 负责作者内容操作；`server/community-*` 负责社区帖子与回复；`server/payload/` 负责存储；`deploy/` 是系统部署和运维工具。后台界面和服务有独立模块，但仍与网站运行在同一应用内。
+`src/` 负责前端；`server/reader-*` 负责读者认证、账号、VIP、审核与生命周期；`server/author-service.ts` 负责作者内容操作；`server/community-*` 负责社区业务与独立主机；`server/payload/` 负责主站存储；`deploy/` 是系统部署和运维工具。主站后台与主站运行在同一应用内；香港社区使用独立进程与数据库，通过身份桥接复用主站账号，见 [香港社区部署边界](COMMUNITY-HOSTING.md)。
 
 ## 必须保护的数据
 
-生产持久数据位于私有配置指定目录，当前是 `/var/lib/sansphase/payload`。数据库、VIP 期限、读者头像、审核中头像、作者上传、配置、注册工作流均不属于旧发布清理范围。图片及音频缓存维持现状。
+生产持久数据以私有配置为准：主站当前位于 `/var/lib/sansphase/payload`，香港社区位于 `/var/lib/sansphase-community/data`。数据库、VIP 期限、读者头像、审核中头像、作者上传、配置、注册工作流均不属于旧发布清理范围。图片及音频缓存维持现状。不得因为早期文档只列主站目录，就遗漏香港备份或移动在线数据。
+
+| 用途 | 主站 | 香港社区 |
+| --- | --- | --- |
+| 当前代码链接、版本 | `/opt/sansphase/current`、`/opt/sansphase/releases` | `/opt/sansphase-community/current`、`/opt/sansphase-community/releases` |
+| 私有配置 | `/etc/sansphase/payload.json` | `/etc/sansphase-community/community.json` |
+| 正式备份 | `/var/backups/sansphase` | `/var/backups/sansphase-community` |
+| 维护工具、回执 | `/opt/sansphase-maintenance`、`/var/log/sansphase-maintenance` | `/opt/sansphase-maintenance`、`/var/log/sansphase-maintenance` |
+
+隔离恢复与测试产物使用单独的维护工作目录，不再新增到正式备份根目录或当前 release。已有用途不明的副本先核对、留存恢复证明，再按清单处理；目录名字不是删除凭证。
 
 整理前使用 SQLite backup API 保存一致快照，复制上传文件和私有配置；将快照下载到本机并校验 SHA-256、所有清单文件及 SQLite 完整性。需要恢复时只能恢复到新目录验证，不能覆盖在线目录。保护性全量备份可能包含短时注册请求等私有数据，应按备份访问权限保管，不公开。
 
 ## 社区数据
 
-社区数据是读者持久内容，全部放在 `content.db` 里、以 `community_` 开头的表中：帖子、回复、编辑记录、赞、收藏、浏览、图片登记、举报；星尘流水、签到和补签；兑换所物品、兑换订单、已拥有的装扮和资源、道具卡；提示词解锁、资源“仍可用 / 已失效”投票；成员（信任等级、协管、装扮、公约同意时间）、访问天数、关注、通知、徽章和禁言记录。它们随现有 `content.db` 备份一起备份，不另建数据库。帖子和回复删除为软删除：记录保留，只是不再显示；编辑前的内容保留在编辑记录里供审核。
+社区业务保存在 `content.db` 的 `community_` 表中：帖子、回复、编辑记录、赞、收藏、浏览、图片登记、举报；星尘流水、签到和补签；兑换所物品、兑换订单、已拥有的装扮和资源、道具卡；提示词解锁、资源“仍可用 / 已失效”投票；成员（信任等级、协管、装扮、公约同意时间）、访问天数、关注、通知、徽章和禁言记录。早期主站内嵌模式随主站 `content.db` 备份；当前香港独立模式还必须备份 `community-host.db` 中的进入会话、防重放与重试队列。香港不保存主站账号表；主站另保存 `reader-workflow.db` 和 `community-identity.db`，不能只备份一份 content.db 就宣称两站恢复完整。帖子和回复删除为软删除：记录保留，只是不再显示；编辑前的内容保留在编辑记录里供审核。
 
-社区图片在上传时重新编码为 WebP，放在数据目录的 `uploads/` 下（`community-image-<id>.webp` 和缩略图 `community-thumb-<id>.webp`）。`scripts/backup-payload.mjs` 按 `community_images` 表把它们一起写进备份清单，包括从帖子里移除、只做了软删除的图片。上传后一天内没有发出去的图片，会在之后的社区请求里（最多每分钟一次）连同文件一起清掉；同一步也处理超过 7 天没人采纳的悬赏（退回一半）。
+社区图片在上传时重新编码为 WebP，放在数据目录的 `uploads/` 下（`community-image-<id>.webp` 和缩略图 `community-thumb-<id>.webp`）。主站内嵌模式由 `scripts/backup-payload.mjs` 按 `community_images` 表写入备份清单，当前香港由 `scripts/backup-community.mjs` 备份社区库和完整上传目录，包括从帖子里移除、只做了软删除的图片。上传后一天内没有发出去的图片，会在之后的社区请求里（最多每分钟一次）连同文件一起清掉；同一步也处理超过 7 天没人采纳的悬赏（退回一半）。
 
 首页与各板块的独立横幅配置保存在 `community_banners`、`community_banner_entries`，自定义封面登记在同一 `community_images` 表并保存在上述上传目录。它们随数据库和上传备份一并保留，不属于源码或旧版本清理。已有商品或横幅引用的图片不会按未使用上传过期删除；备份时这些引用的原图或缩略图缺失会使备份失败，不能把不完整结果当成成功备份。隐藏或删除关联帖子会停止公开展示，不会因此物理删除可恢复的配置。更新横幅表和图片用途约束仍使用既有社区迁移工具，先备份再事务迁移；详见 [横幅维护](COMMUNITY-BANNERS.md)。
 
