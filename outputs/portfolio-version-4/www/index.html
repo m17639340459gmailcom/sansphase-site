@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en" data-lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0a0b0f">
+  <title>SANSPHASE — 無相 · Portfolio &amp; Journal · Version 4</title>
+  <meta name="description" content="無相 SANSPHASE — portfolio and journal. Version 4 demo.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='10' fill='%230a0b0f'/%3E%3Ctext x='20' y='28' text-anchor='middle' font-family='Arial,sans-serif' font-weight='800' font-size='22' fill='%23fff'%3ES%3C/text%3E%3C/svg%3E">
+  <script>
+    // Apply the saved theme before first paint to avoid a flash.
+    try { var t = localStorage.getItem('sansphase-v4-theme'); if (!t) t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="/build/main.css">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="is-loading">
+  <div class="loader" id="loader" aria-hidden="true">
+    <div class="loader-veil"></div>
+    <div class="loader-word"></div>
+    <div class="loader-meta"><span data-i18n="loader.label">Taking shape</span><span data-i18n="demo.badge">Version 4 · demo</span></div>
+    <div class="loader-count" id="loader-count">000</div>
+  </div>
+
+  <div class="progress" aria-hidden="true"><span id="progress"></span></div>
+  <div class="grain" aria-hidden="true"></div>
+
+  <header class="header" id="header">
+    <div class="container">
+      <nav class="bar" data-i18n-aria="aria.primary" aria-label="Primary">
+        <div class="bar-start">
+          <a class="brand" href="/" data-i18n-aria="aria.home" aria-label="SANSPHASE home">
+            <span class="brand-text"><b>SANSPHASE</b><small lang="zh-CN">無相</small></span>
+          </a>
+          <button class="search" id="open-palette" type="button" aria-haspopup="dialog" data-i18n-aria="nav.search" aria-label="Search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+            <span class="search-label"><span data-i18n="nav.search">Search</span></span>
+            <span class="keys" aria-hidden="true"><kbd id="mod-key">Ctrl</kbd><kbd>K</kbd></span>
+          </button>
+        </div>
+        <div class="links" id="links">
+          <span class="pill" id="pill" aria-hidden="true"></span>
+          <span class="current" id="current" aria-hidden="true"></span>
+          <ul id="nav-list"></ul>
+        </div>
+        <div class="bar-end">
+          <button class="lang" id="lang" type="button" data-i18n-aria="aria.lang" aria-label="EN / 中 — switch to Chinese"><span data-l="en">EN</span><span data-l="zh">中</span></button>
+          <button class="round search-icon" id="open-palette-icon" type="button" aria-haspopup="dialog" data-i18n-aria="nav.search" aria-label="Search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
+          </button>
+          <button class="round theme" id="theme" type="button" data-i18n-aria="aria.theme" aria-label="Switch light / dark" aria-pressed="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle class="sun" cx="12" cy="12" r="4.2"/><g class="rays"><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></g><path class="moon" d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+          </button>
+          <a class="cta" href="/contact" data-magnetic><span class="cta-label"><span class="roll" data-i18n="nav.cta">Let’s talk</span></span><i aria-hidden="true">↗</i></a>
+          <button class="round burger" id="burger" type="button" aria-expanded="false" aria-controls="menu" data-i18n-aria="aria.menu" aria-label="Menu"><span></span><span></span></button>
+        </div>
+      </nav>
+    </div>
+  </header>
+
+  <div class="menu" id="menu" aria-hidden="true" data-lenis-prevent>
+    <ol class="menu-links" id="menu-links"></ol>
+    <div class="menu-foot">
+      <button class="lang" id="menu-lang" type="button" data-i18n-aria="aria.lang" aria-label="EN / 中 — switch to Chinese"><span data-l="en">EN</span><span data-l="zh">中</span></button>
+      <span data-i18n="demo.badge">Version 4 · demo</span>
+    </div>
+  </div>
+
+  <main id="main">
+    <div class="view" id="view-home">
+    <!-- Hero -->
+    <section class="hero" id="top">
+      <div class="hero-bg" aria-hidden="true">
+        <div class="hero-dots"></div>
+      </div>
+      <div class="container hero-grid">
+        <div class="hero-copy" id="hero-copy">
+          <p class="eyebrow"><i></i><span data-i18n="hero.eyebrow">Portfolio + Journal — AI · Creative · Web</span></p>
+          <h1 class="hero-title" id="hero-title">
+            <span class="line"><span class="split" data-i18n="hero.title1">Formless ideas,</span></span>
+            <span class="line"><em class="accent"><span class="split" data-i18n="hero.title2">taking shape.</span></em></span>
+          </h1>
+          <p class="hero-lead" id="hero-lead"></p>
+          <div class="hero-actions">
+            <a class="btn primary" href="#work" data-jump="work" data-magnetic><span class="roll" data-i18n="hero.primary">Explore the cases</span><i aria-hidden="true">→</i></a>
+            <a class="btn ghost" href="/blog" data-magnetic><span class="roll" data-i18n="hero.secondary">Read the journal</span><i aria-hidden="true">↗</i></a>
+          </div>
+          <dl class="hero-stats" id="hero-stats"></dl>
+        </div>
+        <div class="hero-stage" id="hero-stage">
+          <div class="scene" id="scene">
+            <figure class="window" id="hero-window" role="group" data-i18n-aria="aria.cover" aria-label="Recent posts">
+              <div class="window-bar">
+                <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+                <span class="url" id="hero-url">sansphase.com/blog</span>
+                <span class="live"><i aria-hidden="true"></i><span data-i18n="hero.live">Recent posts</span></span>
+              </div>
+              <div class="window-media" id="hero-media">
+                <canvas id="hero-canvas" aria-hidden="true"></canvas>
+                <img class="window-fallback" id="hero-fallback" alt="" draggable="false">
+              </div>
+              <figcaption class="window-caption">
+                <span class="window-kicker" id="hero-kicker"></span>
+                <a class="window-title" id="hero-caption" href="#"></a>
+              </figcaption>
+            </figure>
+          </div>
+          <div class="stage-foot">
+            <div class="stage-ticks" id="hero-ticks"></div>
+            <button class="pause" id="hero-pause" type="button" aria-pressed="false" data-i18n-aria="aria.pause" aria-label="Pause the slideshow"><i></i><i></i></button>
+          </div>
+        </div>
+      </div>
+      <a class="hero-cue" href="#fields" data-jump="fields"><i aria-hidden="true"></i><span data-i18n="hero.cue">Scroll to explore</span></a>
+    </section>
+
+    <!-- Marquee -->
+    <section class="marquee" data-i18n-aria="aria.topics" aria-label="Topics">
+      <div class="marquee-row chips" id="marquee-chips"></div>
+      <div class="marquee-row giant" id="marquee-giant" aria-hidden="true"></div>
+    </section>
+
+    <!-- 01 Fields: bento -->
+    <section class="section container" id="fields">
+      <div class="section-head">
+        <div class="heading">
+          <p class="eyebrow"><i></i><span data-i18n="fields.eyebrow">01 / Focus</span></p>
+          <h2 class="title"><span class="split" data-i18n="fields.title">Practice, in</span> <em class="accent"><span class="split" data-i18n="fields.accent">three fields.</span></em></h2>
+        </div>
+        <a class="btn ghost" href="/blog" data-magnetic><span class="roll" data-i18n="fields.cta">Read the journal</span><i aria-hidden="true">↗</i></a>
+      </div>
+      <div class="bento" id="bento"></div>
+    </section>
+
+    <!-- 02 Cases: 3D screens -->
+    <section class="section band" id="work">
+      <div class="container">
+        <div class="section-head">
+          <div class="heading">
+            <p class="eyebrow"><i></i><span data-i18n="work.eyebrow">02 / Case notes</span></p>
+            <h2 class="title"><span class="split" data-i18n="work.title">Four</span> <em class="accent"><span class="split" data-i18n="work.accent">case notes.</span></em></h2>
+            <p class="body" data-i18n="work.body">Retrospectives of real projects: what was built, how it was checked, and what is still open.</p>
+          </div>
+          <div class="carousel-nav">
+            <button class="round" id="work-prev" type="button" data-i18n-aria="aria.prev" aria-label="Previous case">←</button>
+            <span class="count"><b id="work-current">01</b> / <span id="work-total">04</span></span>
+            <button class="round" id="work-next" type="button" data-i18n-aria="aria.next" aria-label="Next case">→</button>
+            <button class="round pause" id="work-pause" type="button" aria-pressed="false" data-i18n-aria="aria.pause" aria-label="Pause the slideshow"><i></i><i></i></button>
+          </div>
+        </div>
+      </div>
+      <div class="stage" id="stage" role="region" aria-roledescription="carousel" data-i18n-aria="aria.cases" aria-label="Case notes">
+        <span class="stage-num" id="stage-num" aria-hidden="true">01</span>
+        <div class="screens" id="screens"></div>
+      </div>
+      <div class="container caption" id="work-caption" aria-live="polite">
+        <div class="caption-main">
+          <p class="caption-meta" id="work-meta"></p>
+          <h3 class="caption-title" id="work-title"></h3>
+          <p class="caption-summary" id="work-summary"></p>
+          <div class="caption-bar"><span id="work-bar"></span></div>
+        </div>
+        <div class="caption-side">
+          <ul class="tags" id="work-tags"></ul>
+          <button class="btn primary" id="work-open" type="button" data-magnetic><span class="roll" data-i18n="work.read">Read the case</span><i aria-hidden="true">→</i></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 03 Numbers -->
+    <section class="container facts" id="facts">
+      <p class="eyebrow"><i></i><span data-i18n="facts.eyebrow">03 / In numbers</span></p>
+      <div class="facts-grid" id="facts-grid"></div>
+    </section>
+
+    <!-- Manifesto -->
+    <section class="manifesto" id="manifesto">
+      <div class="container">
+        <p class="eyebrow"><i></i><span data-i18n="statement.label">Manifesto</span></p>
+        <p class="manifesto-text" id="manifesto-text"></p>
+        <p class="manifesto-alt" id="manifesto-alt"></p>
+      </div>
+    </section>
+
+    <!-- 04 Community -->
+    <section class="section container" id="community">
+      <div class="section-head">
+        <div class="heading">
+          <p class="eyebrow"><i></i><span data-i18n="community.eyebrow">04 / Community</span></p>
+          <h2 class="title"><span class="split" data-i18n="community.title">A place to</span> <em class="accent"><span class="split" data-i18n="community.accent">learn together.</span></em></h2>
+          <p class="body" id="community-desc"></p>
+        </div>
+        <span class="status" id="community-status"></span>
+      </div>
+      <div class="community-grid">
+        <article class="club" id="club">
+          <div class="club-top">
+            <span class="club-mark" aria-hidden="true">無相</span>
+            <div><b data-i18n="community.name">無相 Community</b><small>community.sansphase.com</small></div>
+          </div>
+          <dl class="club-stats" id="club-stats"></dl>
+          <p class="club-note" data-i18n="community.note">Not open yet. Rules follow the community design notes and may change before launch.</p>
+          <span class="club-cta" id="club-cta"></span>
+        </article>
+        <div class="boards" id="boards"></div>
+      </div>
+      <div class="log" id="log">
+        <div class="log-head">
+          <p class="log-label" data-i18n="log.label">Publishing log</p>
+          <p class="log-total" id="log-total"></p>
+          <div class="log-systems" id="log-systems"></div>
+        </div>
+        <div class="log-grid" id="log-grid" tabindex="0" role="region" data-i18n-aria="aria.log" aria-label="Publishing log, newest weeks on the right"></div>
+        <p class="log-foot" data-i18n="log.foot">Each square is a day; lit squares are days a post went live on sansphase.com.</p>
+      </div>
+    </section>
+
+    <!-- 05 Journal -->
+    <section class="section container" id="journal">
+      <div class="section-head">
+        <div class="heading">
+          <p class="eyebrow"><i></i><span data-i18n="journal.eyebrow">05 / Journal</span></p>
+          <h2 class="title"><span class="split" data-i18n="journal.title">Notes, written</span> <em class="accent"><span class="split" data-i18n="journal.accent">while building.</span></em></h2>
+        </div>
+        <a class="btn ghost" href="https://www.sansphase.com/#/notes" target="_blank" rel="noopener" data-magnetic><span class="roll" data-i18n="journal.all">All posts</span><i aria-hidden="true">↗</i></a>
+      </div>
+      <div class="posts" id="posts"></div>
+    </section>
+
+    <!-- 06 Index -->
+    <section class="section container" id="index">
+      <div class="section-head">
+        <div class="heading">
+          <p class="eyebrow"><i></i><span data-i18n="index.eyebrow">06 / Index</span></p>
+          <h2 class="title"><span class="split" data-i18n="index.title">Six sections,</span> <em class="accent"><span class="split" data-i18n="index.accent">one archive.</span></em></h2>
+        </div>
+      </div>
+      <div class="archive">
+        <div class="archive-side">
+          <p class="archive-kicker"><i></i><span data-i18n="index.kicker">The main site</span></p>
+          <h3 data-i18n="index.side">Everything on sansphase.com, mapped.</h3>
+          <p data-i18n="index.sideBody">One section is open today; five are being prepared and will open as their content is ready.</p>
+          <div class="archive-map" id="archive-map" aria-hidden="true"></div>
+          <a class="btn primary" href="https://www.sansphase.com/" target="_blank" rel="noopener" data-magnetic><span class="roll" data-i18n="index.visit">Visit sansphase.com</span><i aria-hidden="true">↗</i></a>
+        </div>
+        <ol class="archive-list" id="archive-list"></ol>
+      </div>
+    </section>
+
+    <!-- Contact banner -->
+    <section class="container banner-wrap" id="contact">
+      <div class="banner" id="banner">
+        <div class="banner-copy" id="banner-copy">
+          <p class="eyebrow light"><i></i><span data-i18n="contact.eyebrow">Start a conversation</span></p>
+          <h2 class="title"><span class="split" data-i18n="contact.title">Have a project</span> <em class="accent"><span class="split" data-i18n="contact.accent">in mind?</span></em></h2>
+          <p class="body" id="contact-summary"></p>
+          <ul class="services" id="services"></ul>
+          <div class="banner-actions" id="banner-actions"></div>
+        </div>
+        <div class="banner-art" aria-hidden="true">
+          <svg class="banner-orbits" viewBox="-50 -50 100 100">
+            <circle class="orbit o1" r="47"/>
+            <circle class="orbit o2" r="36"/>
+            <g class="sat s1"><circle cx="0" cy="-47" r="1.1"/></g>
+            <g class="sat s2"><circle cx="36" cy="0" r="0.9"/></g>
+          </svg>
+          <span class="banner-word">無相</span>
+        </div>
+      </div>
+    </section>
+    </div>
+    <div class="view" id="view-page" hidden></div>
+  </main>
+
+  <footer class="footer" id="footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="brand" href="/" data-i18n-aria="aria.home" aria-label="SANSPHASE home">
+            <span class="brand-text"><b>SANSPHASE</b><small lang="zh-CN">無相</small></span>
+          </a>
+          <p id="footer-tagline"></p>
+          <p class="footer-sign" id="footer-sign" lang="zh-CN"></p>
+        </div>
+        <div class="footer-col">
+          <p class="footer-label"><i></i><span data-i18n="footer.navigate">Navigate</span></p>
+          <ol class="footer-links" id="footer-links"></ol>
+        </div>
+        <div class="footer-col">
+          <p class="footer-label"><i></i><span data-i18n="footer.connect">Connect</span></p>
+          <ul class="footer-connect" id="footer-connect"></ul>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span>© 2026 無相 SANSPHASE · <a id="icp" target="_blank" rel="noopener"></a></span>
+        <span class="clock"><i aria-hidden="true"></i><b id="footer-clock">00:00:00</b> <span data-i18n="footer.time">China time (UTC+8)</span></span>
+        <button class="to-top" type="button" data-jump="top"><span data-i18n="footer.top">Back to top</span><svg viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="16"/><circle class="to-top-ring" id="top-ring" cx="18" cy="18" r="16" pathLength="1"/><path d="M18 24V12M13 17l5-5 5 5"/></svg></button>
+      </div>
+    </div>
+    <div class="wordmark" id="wordmark" aria-hidden="true"><span class="wordmark-base">SANSPHASE</span><span class="wordmark-lit">SANSPHASE</span></div>
+    <p class="footer-fonts container" data-i18n="footer.fonts">Type: Archivo, Inter, Noto Sans SC, JetBrains Mono (OFL) · WebGL: three.js</p>
+  </footer>
+
+  <article class="reader" id="reader" data-lenis-prevent aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="reader-title" tabindex="-1">
+    <div class="reader-progress"><span id="reader-bar"></span></div>
+    <button class="reader-close" id="reader-close" type="button"><i aria-hidden="true">←</i> <span data-i18n="article.back">Back</span> <kbd>Esc</kbd></button>
+    <figure class="reader-hero" id="reader-hero"><img id="reader-img" alt=""></figure>
+    <header class="reader-head">
+      <p class="reader-meta" id="reader-meta"></p>
+      <h1 class="reader-title" id="reader-title"></h1>
+      <p class="reader-subtitle" id="reader-subtitle" lang="zh-CN"></p>
+      <p class="reader-lead" id="reader-lead"></p>
+      <p class="reader-only" id="reader-only"></p>
+      <ul class="reader-tags" id="reader-tags"></ul>
+    </header>
+    <div class="reader-layout">
+      <div class="reader-body" id="reader-body" lang="zh-CN"></div>
+      <aside class="reader-toc"><p data-i18n="article.contents">Contents</p><ol id="reader-toc"></ol></aside>
+    </div>
+    <footer class="reader-foot">
+      <a id="reader-original" target="_blank" rel="noopener"><span data-i18n="article.original">Read on sansphase.com</span> ↗</a>
+      <button class="reader-next" id="reader-next" type="button"><span data-i18n="article.next">Next case</span><strong id="reader-next-title"></strong></button>
+    </footer>
+  </article>
+
+  <div class="palette" id="palette" aria-hidden="true" data-lenis-prevent>
+    <div class="palette-box" role="dialog" aria-modal="true" data-i18n-aria="nav.search" aria-label="Search">
+      <label class="palette-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg><input id="palette-input" type="text" autocomplete="off" spellcheck="false"><kbd aria-hidden="true">Esc</kbd></label>
+      <ul class="palette-list" id="palette-list"></ul>
+    </div>
+  </div>
+
+  <script type="module" src="/build/main.js"></script>
+</body>
+</html>
