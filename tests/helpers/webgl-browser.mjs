@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-export async function evaluateInWebGLBrowser(browserPath, expression, pageUrl = 'about:blank') {
+export async function evaluateInWebGLBrowser(browserPath, expression, pageUrl = 'about:blank', beforeEvaluate) {
   const prefix = join(tmpdir(), 'sansphase-webgl-test-');
   const profile = await mkdtemp(prefix);
   const browser = spawn(browserPath, ['--headless=new', '--no-first-run',
@@ -42,6 +42,13 @@ export async function evaluateInWebGLBrowser(browserPath, expression, pageUrl = 
       socket.addEventListener('message', receive);
       socket.send(JSON.stringify({ id: 90, method: 'Page.enable' }));
     });
+    // Optional real-input setup shares this helper's isolated profile and cleanup.
+    if (beforeEvaluate) {
+      let timer;
+      try {
+        await Promise.race([beforeEvaluate(socket), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Browser input setup timed out')), 30_000); })]);
+      } finally { clearTimeout(timer); }
+    }
     const result = await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('Browser evaluation timed out')), 30000);
       socket.addEventListener('message', event => {

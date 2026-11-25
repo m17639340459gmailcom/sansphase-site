@@ -28,14 +28,14 @@ test("local payment simulations cannot enter the publication source tree or prod
 test('production entry and its source import graph never mount sample-account identity selection', async () => {
   const root = resolve('.');
   const files = new Set(await publicationFiles(root));
-  const pending = ['scripts/start.mjs', 'server.mjs'];
+  const pending = ['scripts/start.mjs', 'scripts/start-community.mjs', 'server.mjs'];
   const visited = new Set();
   while (pending.length) {
     const file = pending.pop();
     if (visited.has(file)) continue;
     visited.add(file);
     assert.ok(files.has(file), `production dependency is not in the source package: ${file}`);
-    assert.ok(!file.startsWith('scripts/fixtures/') && file !== 'scripts/catalog-fixture-preview.mjs', `production imported a sample-account service: ${file}`);
+    assert.ok(!file.startsWith('scripts/fixtures/') && !['scripts/catalog-fixture-preview.mjs', 'scripts/preview-teahouse-local.ts'].includes(file), `production imported a sample-account service: ${file}`);
     const text = await readFile(resolve(root, file), 'utf8');
     assert.doesNotMatch(text, /createCommunityPreviewService|previewIdentityPath|preview_as/, `production source must use real sessions: ${file}`);
     const imports = [];

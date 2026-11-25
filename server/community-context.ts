@@ -10,6 +10,7 @@ import type { CommunityStore, StoredTopic, ShowcaseMeta, ResourceMeta } from './
 import { imageIdFromLine } from '../src/community-body-images.ts';
 import type { OwnerReaderPreview } from './community-owner-reader-preview.ts';
 import type { CommunityProfileAccess } from './community-profile-access.ts';
+import type { IdentityReferralAttribution, IdentityReferralSelf } from './community-identity-protocol.ts';
 import type { CommunityStaffPermission, CommunityStaffState } from '../src/community-staff.ts';
 
 // The signed-in member making a request.
@@ -17,6 +18,7 @@ export type CommunityViewer = { kind: 'reader' | 'owner'; id: string; name: stri
 // What the site knows about a member outside the community: nickname, public UID,
 // approved avatar, VIP, registration time and approved signature.
 export type PersonInfo = { name: string; uid: string | null; avatar: string | null; vip: boolean; joinedAt: string | null; bio: string; ownerReader?: boolean; active?: boolean; vipUntil?: string | null };
+export type CommunityMutationConfirmation = { participants: readonly CommunityAuthor[]; inspect: (map: Map<string, PersonInfo>) => void };
 export type ServiceOptions = {
   store: CommunityStore | null;
   siteOrigin: string;
@@ -39,6 +41,12 @@ export type ServiceOptions = {
   // Approved bytes provided by the account authority on a separate host.
   avatarBytes?: (uid: string) => Promise<Buffer | null>;
   profile?: CommunityProfileAccess;
+  // Registration attribution belongs to the account authority. A remote failure
+  // must reject, never be interpreted as an uninvited reader.
+  referralAttribution?: (readerId: string) => Promise<IdentityReferralAttribution>;
+  referralSelf?: (req: IncomingMessage) => Promise<IdentityReferralSelf | null>;
+  referralOrigin?: string;
+  assertReferralActive?: (readerIds: readonly string[]) => void;
   // Mirror committed database audit events to the existing private audit log.
   audit?: (action: string, details: Record<string, unknown>) => Promise<void>;
   // Drain the host's existing persistent cleanup queue after SQL commits.
@@ -62,7 +70,7 @@ export type Ctx = {
   refreshStaff: (related?: readonly CommunityAuthor[]) => Promise<void>;
   // Confirm the original execution identity and its real membership after a
   // remote/file wait, then validate current staff accounts in the last phase.
-  refreshViewer: () => Promise<void>;
+  refreshViewer: (confirmation?: CommunityMutationConfirmation) => Promise<void>;
   readonly membershipVip: boolean;
   canModerateBoard: (board: string) => boolean;
   actualOwner: boolean; actualMod: boolean; browsingAsReader: boolean; readOnly: boolean;
@@ -78,7 +86,7 @@ export type Ctx = {
   topicsDTO: (topics: StoredTopic[]) => Promise<Record<string, unknown>[]>;
   throttle: (kind: 'topic' | 'reply' | 'image' | 'report' | 'action') => void;
   requireConsent: () => void;
-  auditMutation: <T>(action: string, execute: () => T, details?: CommunityAuditDetails<T>) => Promise<T>;
+  auditMutation: <T>(action: string, execute: () => T, details?: CommunityAuditDetails<T>, confirmation?: CommunityMutationConfirmation) => Promise<T>;
   clean: (value: unknown, limits: readonly [number, number], label: string, multiline: boolean, imageIds?: readonly string[]) => string;
   mentions: (body: string) => Promise<CommunityAuthor[]>;
 };

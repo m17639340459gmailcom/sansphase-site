@@ -1,9 +1,9 @@
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { IncomingMessage, ServerResponse, Server } from 'node:http';
 import { communityApprovedAvatarURL, isApprovedAvatarVersion } from './community-avatar-url.ts';
 import { LRUCache } from 'lru-cache';
 import { removeImageVariants } from './image-variants.ts';
 import { appendFile, lstat, readFile, realpath, unlink } from 'node:fs/promises';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, lstatSync, realpathSync } from 'node:fs';
 import { isAbsolute, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createCommunityStore, communityTablesReady } from './community-store.ts';
@@ -11,7 +11,7 @@ import type { CommunityAuthor } from './community-store.ts';
 import { createCommunityService } from './community-service.ts';
 import type { PersonInfo } from './community-service.ts';
 import { createIdentityClient, IdentityBridgeError } from './community-identity-protocol.ts';
-import type { IdentityOperation } from './community-identity-protocol.ts';
+import type { IdentityOperation, IdentityReferralAttribution, IdentityReferralSelf } from './community-identity-protocol.ts';
 import type { ReaderProfileState, ReaderProfileReview, ReaderProfileDecision } from './reader-profile-commands.ts';
 import { readerProfileAvatarBytes } from './reader-profile-commands.ts';
 import type { CommunityProfileAccess } from './community-profile-access.ts';
@@ -19,9 +19,21 @@ import { createCommunityHostStore } from './community-host-store.ts';
 import { createCommunityHostAccess } from './community-host-access.ts';
 import { createCommunityFrameAuthority, createCommunityFrameBridge } from './community-frame-authority.ts';
 import { createCommunityProfileReviewerAuthority } from './community-profile-reviewer.ts';
+import { createTeahouseService } from './teahouse-service.ts';
+import { teahouseTablesReady } from './teahouse-store.ts';
+import { readerNicknameMax } from '../src/reader-policy.ts';
 
 type BrandProfile = { name: string; signature?: string; bio?: string; avatar?: string; background?: string; socialLinks?: Array<{ label: string; url: string }>; appearance?: Record<string, unknown> };
-export type CommunityHostConfig = { directory: string; siteOrigin: string; mainSiteOrigin: string; bridgeSecret: string; authorId: string; profile?: BrandProfile };
+export type CommunityHostConfig = { directory: string; siteOrigin: string; mainSiteOrigin: string; bridgeSecret: string; authorId: string; profile?: BrandProfile; teahouse?: { enabled: false } | { enabled: true; directory: string } };
+const overlaps = (a: string, b: string) => a === b || a.startsWith(b + sep) || b.startsWith(a + sep);
+function teaDirectory(value: string, communityDirectory: string, publicRoot?: string) {
+  if (!isAbsolute(value)) throw Error('Teahouse directory must be absolute.');
+  const stat = lstatSync(value);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) throw Error('Teahouse directory must be a real private directory.');
+  const path = realpathSync(value);
+  if (overlaps(path, realpathSync(communityDirectory)) || publicRoot && overlaps(path, realpathSync(publicRoot))) throw Error('Teahouse directory must be independent of community data and public files.');
+  return path;
+}
 type BridgeClient = { request<T = unknown>(operation: IdentityOperation, input: unknown): Promise<T> };
 type ServiceError = Error & { status: number };
 const failure = (message: string, status = 503): ServiceError => Object.assign(Error(message), { status });
@@ -66,6 +78,16 @@ export async function readCommunityHostConfig(configPath: string, publicRoot: st
     const stat = await lstat(resolve(directory, filename));
     if (stat.isSymbolicLink() || filename === 'uploads' && !stat.isDirectory() || filename !== 'uploads' && !stat.isFile()) throw Error('Community data must not contain symlinks or unexpected files.');
   }
+  let teahouse: CommunityHostConfig['teahouse'];
+  if ('teahouse' in settings && settings.teahouse !== undefined) {
+    const value = settings.teahouse;
+    if (!value || typeof value !== 'object' || !('enabled' in value) || typeof value.enabled !== 'boolean') throw Error('Teahouse configuration is invalid.');
+    if (!value.enabled) teahouse = { enabled: false };
+    else {
+      if (!('directory' in value) || typeof value.directory !== 'string') throw Error('Teahouse private directory is required.');
+      teahouse = { enabled: true, directory: teaDirectory(value.directory, directory, root) };
+    }
+  }
   let profile: BrandProfile | undefined;
   if ('profile' in settings && settings.profile !== undefined) {
     const value = settings.profile;
@@ -79,7 +101,7 @@ export async function readCommunityHostConfig(configPath: string, publicRoot: st
     if ('socialLinks' in value && Array.isArray(value.socialLinks)) profile.socialLinks = value.socialLinks.filter((link): link is { label: string; url: string } => link && typeof link === 'object' && typeof link.label === 'string' && typeof link.url === 'string');
     if ('appearance' in value && value.appearance && typeof value.appearance === 'object' && !Array.isArray(value.appearance)) profile.appearance = value.appearance as Record<string, unknown>;
   }
-  return { directory, siteOrigin: settings.siteOrigin, mainSiteOrigin: settings.mainSiteOrigin, bridgeSecret: settings.bridgeSecret, authorId: settings.authorId, ...(profile ? { profile } : {}) };
+  return { directory, siteOrigin: settings.siteOrigin, mainSiteOrigin: settings.mainSiteOrigin, bridgeSecret: settings.bridgeSecret, authorId: settings.authorId, ...(profile ? { profile } : {}), ...(teahouse ? { teahouse } : {}) };
 }
 
 // No Payload, reader collection, password service or main-site account cleanup
@@ -87,6 +109,9 @@ export async function readCommunityHostConfig(configPath: string, publicRoot: st
 export function createCommunityHostRuntime(config: CommunityHostConfig, client: BridgeClient = createIdentityClient({ origin: config.mainSiteOrigin, secret: config.bridgeSecret })) {
   const { directory, siteOrigin, mainSiteOrigin, authorId } = config;
   if (!isAbsolute(directory) || siteOrigin !== 'https://community.sansphase.com' || mainSiteOrigin !== 'https://www.sansphase.com' || !authorId) throw Error('Invalid independent community runtime configuration.');
+  const teahouseDirectory = config.teahouse?.enabled ? teaDirectory(config.teahouse.directory, directory) : null;
+  if (teahouseDirectory && !teahouseTablesReady(teahouseDirectory)) throw Error('Explicit teahouse preparation is required before startup.');
+  let teahouse: ReturnType<typeof createTeahouseService> | undefined;
   if (!existsSync(resolve(directory, 'content.db')) || !communityTablesReady(directory)) throw Error('Explicit community migration is required before startup.');
   const contentDb = new DatabaseSync(resolve(directory, 'content.db'), { readOnly: true });
   try {
@@ -131,15 +156,17 @@ export function createCommunityHostRuntime(config: CommunityHostConfig, client: 
     // cross-region UID lookup or treating an older approval as current.
     avatarVisibilityRevision++; avatarCache.clear();
     const result = store.purgeReaderData(readerId, (filename, reason) => hostStore.queueFile(filename, reason));
+    if (teahouseDirectory && !teahouse) throw failure('Teahouse cleanup is not attached.');
+    const teaResult = teahouse ? await teahouse.purgeReaderData(readerId) : undefined;
     const files = await drainFileQueue();
     if (files.retained) throw failure('Community image cleanup is queued for retry.');
-    return { ...result, filesRemoved: files.removed };
+    return { ...result, filesRemoved: files.removed, ...(teaResult ? { teahouse: teaResult } : {}) };
   };
   const frameAuthority = createCommunityFrameAuthority({ store, directory, readerDeleted: id => hostStore.readerDeleted(id),
     frameEligibility: id => client.request('frame-eligibility', { readerId: id }) });
   const profileReviewer = createCommunityProfileReviewerAuthority({ store, ownerId: authorId, readerDeleted: id => hostStore.readerDeleted(id) });
   const frameBridge = createCommunityFrameBridge({ authority: frameAuthority, secret: config.bridgeSecret, consumeNonce: (nonce, expiresAt) => hostStore.consumeNonce(nonce, expiresAt), profileReviewer });
-  const access = createCommunityHostAccess({ store: hostStore, client, siteOrigin, mainSiteOrigin, secret: config.bridgeSecret, purge, decorations: frameBridge.handle });
+  const access = createCommunityHostAccess({ store: hostStore, client, siteOrigin, mainSiteOrigin, secret: config.bridgeSecret, purge, decorations: frameBridge.handle, teahouseEnabled: Boolean(teahouseDirectory), onModeChange: matches => teahouse?.disconnectRequests(matches) });
   const current = (req?: IncomingMessage) => {
     const value = access.current(req);
     if (!value) throw new IdentityBridgeError('请从主站重新进入社区。', 401);
@@ -163,7 +190,7 @@ export function createCommunityHostRuntime(config: CommunityHostConfig, client: 
   });
   const request = async <T>(operation: IdentityOperation, input: Record<string, unknown>): Promise<T> => {
     const sessionRef = current().session.sessionRef;
-    const selfProfile = ['profile', 'profile-signature', 'profile-nickname', 'profile-avatar', 'profile-avatar-remove', 'profile-avatar-pending'].includes(operation);
+    const selfProfile = ['profile', 'profile-signature', 'profile-nickname', 'profile-avatar', 'profile-avatar-remove', 'profile-avatar-pending', 'referral-self'].includes(operation);
     const result = await client.request<T>(operation, { ...input, sessionRef,
       ...(selfProfile && current().identity.viewer.kind === 'owner' && readerMode(current().req) ? { asReader: true } : {}) });
     current();
@@ -212,15 +239,46 @@ export function createCommunityHostRuntime(config: CommunityHostConfig, client: 
     res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'private, no-store' });
     res.end(JSON.stringify({ error: '账号管理请前往主站。' }));
   };
-  const identifiedRequests = new WeakSet<IncomingMessage>();
+  const identifiedContexts = new WeakSet<ReturnType<typeof current>>();
   const communityService = createCommunityService({
     store, directory, siteOrigin, ownerId: authorId, profile, drainFileQueue,
+    referralOrigin: mainSiteOrigin,
+    referralAttribution: async readerId => {
+      current();
+      if (hostStore.readerDeleted(readerId)) return null;
+      const value = await client.request<IdentityReferralAttribution>('referral-attribution', { readerId });
+      current();
+      if (value === null || hostStore.readerDeleted(readerId)) return null;
+      if (!value || value.inviter?.kind !== 'reader' || value.inviter.id === readerId
+        || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value.inviter.id)
+        || typeof value.registeredAt !== 'string' || !Number.isFinite(Date.parse(value.registeredAt))) throw failure('Invalid invitation attribution.');
+      return hostStore.readerDeleted(value.inviter.id) ? null : value;
+    },
+    referralSelf: async req => {
+      const original = current(req).identity.viewer;
+      const readerId = original.kind === 'reader' ? original.id : readerMode(req) ? ownerReader(req)?.id : null;
+      if (!readerId) return null;
+      const result = await request<IdentityReferralSelf>('referral-self', {});
+      const final = current(req).identity.viewer;
+      const finalId = final.kind === 'reader' ? final.id : readerMode(req) ? ownerReader(req)?.id : null;
+      if (readerId !== finalId || hostStore.readerDeleted(readerId)) throw new IdentityBridgeError('请从主站重新进入社区。', 401);
+      if (!result || result.readerId !== readerId || !/^[A-Za-z0-9_-]{24}$/.test(result.code)
+        || !Array.isArray(result.invitees) || result.invitees.length > 100 || result.invitees.some(row =>
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(row.readerId)
+          || row.readerId === readerId || !Number.isFinite(Date.parse(row.registeredAt)))) throw failure('Invalid invitation record projection.');
+      return { ...result, invitees: result.invitees.filter(row => !hostStore.readerDeleted(row.readerId)) };
+    },
+    assertReferralActive: readerIds => {
+      current();
+      if (readerIds.some(id => hostStore.readerDeleted(id))) throw failure('邀请相关账号已失效，请刷新后重试。');
+    },
     identify: async req => {
       // Initial reads reuse the middleware confirmation. Existing final
       // authority checks after an async operation must read the source again.
-      if (identifiedRequests.has(req)) return (await access.revalidate(req)).identity.viewer;
-      identifiedRequests.add(req);
-      return current(req).identity.viewer;
+      const ctx = current(req);
+      if (identifiedContexts.has(ctx)) return (await access.revalidate(req)).identity.viewer;
+      identifiedContexts.add(ctx);
+      return ctx.identity.viewer;
     },
     ownerReaderIdentity: async req => { const personal = ownerReader(req); return personal ? { kind: 'reader', id: personal.id, name: personal.nickname, vip: personal.vip } : null; },
     assertActive: req => { current(req); },
@@ -240,7 +298,15 @@ export function createCommunityHostRuntime(config: CommunityHostConfig, client: 
       const member = await request<CommunityAuthor | null>('member', { uid });
       return member && memberAlive(member) ? member : null;
     },
-    findByNames: async names => new Map((await request<Array<[string, CommunityAuthor]>>('names', { names })).filter(([, member]) => memberAlive(member))),
+    findByNames: async names => {
+      current();
+      // Text can contain long @tokens (including email domains and package
+      // scopes). Only complete possible nicknames belong in identity lookups;
+      // truncating a token could notify an unrelated member with that prefix.
+      const candidates = names.filter(name => name.trim() && [...name].length <= readerNicknameMax);
+      if (!candidates.length) return new Map<string, CommunityAuthor>();
+      return new Map((await request<Array<[string, CommunityAuthor]>>('names', { names: candidates })).filter(([, member]) => memberAlive(member)));
+    },
     avatarBytes: async (uid: string) => {
       const visibilityRevision = avatarVisibilityRevision;
       const cached = avatarCache.find(image => image.uid === uid);
@@ -274,23 +340,55 @@ export function createCommunityHostRuntime(config: CommunityHostConfig, client: 
   const retryTimer = setInterval(() => { void drainFileQueue().catch(() => { process.stderr.write(JSON.stringify({ event: 'community-file-cleanup-retry', at: new Date().toISOString() }) + '\n'); }); }, 60_000);
   retryTimer.unref();
   let closed = false;
+  let closingTeahouse: Promise<void> | undefined;
+  let closingRuntime: Promise<void> | undefined;
+  const closeTeahouse = () => closingTeahouse ??= teahouse?.close() ?? Promise.resolve();
   return {
-    communityService, communityEnabled: true, communityOnly: true, mainSiteOrigin,
+    communityService, communityEnabled: true, communityOnly: true, mainSiteOrigin, siteOrigin, teahouseEnabled: Boolean(teahouseDirectory),
+    async attachTeahouse(server: Server) {
+      if (!teahouseDirectory) return undefined;
+      if (closed || closingTeahouse || teahouse) throw Error('Teahouse runtime is already attached or closed.');
+      teahouse = createTeahouseService({ server, directory: teahouseDirectory, origin: siteOrigin, requirePrepared: true,
+        identify: req => access.runWithSession(req, () => communityService.teahouseIdentity(req)),
+        authors: (req, authors) => access.runWithSession(req, () => communityService.teahouseAuthors(req, authors)),
+        onActivity: access.touchSession,
+      });
+      // The feature can be disabled during account deletion or rollback. Replay
+      // durable host tombstones before listening so re-enabling cannot expose
+      // originals that were never present in that older runtime's cleanup path.
+      let after = '';
+      for (;;) {
+        const batch = hostStore.deletedReaderIds(after);
+        if (!batch.length) break;
+        for (const readerId of batch) await teahouse.purgeReaderData(readerId);
+        after = batch.at(-1)!;
+      }
+      return teahouse;
+    },
+    closeTeahouse,
     contentService: { snapshot: async () => ({ data: snapshot }), preview: async () => { throw failure('Not found', 404); }, media: async () => { throw failure('Not found', 404); } },
     readerService: { identity: readerIdentity, handle: sessionHandler('reader'), registrationEnabled: false },
     authorService: { identity: authorIdentity, handle: sessionHandler('author') },
-    requestMiddleware: access.requestMiddleware,
+    requestMiddleware: (req: IncomingMessage, res: ServerResponse, next: () => Promise<void>) => access.requestMiddleware(req, res, async () => {
+      if (teahouse && await teahouse.handle(req, res)) return;
+      await next();
+    }),
     drainFileQueue,
     healthCheck: async () => {
       hostStore.healthCheck();
       if (contentDb.prepare('PRAGMA quick_check').get()?.quick_check !== 'ok') throw Error('Community database check failed.');
       if (!communityTablesReady(directory)) throw Error('Community schema is incomplete.');
+      if (teahouseDirectory && !teahouseTablesReady(teahouseDirectory)) throw Error('Teahouse schema is incomplete.');
     },
     async close() {
-      if (closed) return;
-      closed = true; clearInterval(retryTimer); avatarCache.clear();
-      if (queueRun) await queueRun;
-      store.close(); hostStore.close(); contentDb.close();
+      return closingRuntime ??= (async () => {
+        closed = true; clearInterval(retryTimer); avatarCache.clear();
+        try { await closeTeahouse(); }
+        finally {
+          try { if (queueRun) await queueRun; }
+          finally { try { store.close(); } finally { try { hostStore.close(); } finally { contentDb.close(); } } }
+        }
+      })();
     },
   };
 }

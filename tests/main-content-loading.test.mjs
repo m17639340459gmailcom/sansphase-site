@@ -6,7 +6,7 @@ import { JSDOM } from 'jsdom';
 import { createContentReader, contentQuery } from '../src/content-reader.ts';
 import { parseRoute } from '../src/core.ts';
 import { publicRoute } from '../src/access-policy.ts';
-import { communityHostRoute, communityEntryDestination } from '../src/community-entry.ts';
+import { communityHostRoute, communityEntryDestination, communityEntryLandingLocation } from '../src/community-entry.ts';
 import { rewriteCommunityMainSiteLinks } from '../src/community-entry.ts';
 import { communityView, communityRoute, inCommunityArea } from '../src/community-routing.ts';
 import { communityLandingHTML } from '../src/community-introduction.ts';
@@ -17,6 +17,7 @@ import { createRouteTransitions } from '../src/route-transition.ts';
 import { createCommunityAppearance } from '../src/community-appearance.ts';
 import { ensureRouteStyle } from '../src/route-styles.ts';
 import { communityHostDocument } from '../server/community-host-document.ts';
+import { adminConsoleHref, adminReturnDestination } from '../src/admin-console-navigation.mjs';
 
 const app = readFileSync(new URL('../src/app.mjs', import.meta.url), 'utf8');
 const renderSource = app.slice(app.indexOf('async function render(options={})'), app.indexOf('function renderView('));
@@ -36,7 +37,7 @@ function setup(t) {
   const siteContent = { delivery: 'paged-v1', reader: { nickname: '读者' }, author: null, notes: [], works: [], resources: [], software: [], 'resource-center': [] };
   let promptOpened = 0;
   const context = { siteContent, contentReader, main, window: dom.window, document: dom.window.document,
-    parseRoute, publicRoute, contentQuery, communityHostRoute, communityEntryDestination,
+    parseRoute, publicRoute, contentQuery, communityHostRoute, communityEntryDestination, adminConsoleHref, adminReturnDestination,
     location: { hash: '#/notes', pathname: '/', search: '', assign() {} }, history: { replaceState() {} },
     communityOnly: () => false, communityEnabled: () => false, communityEntry: { cancel() {} },
     readerAccessEnabled: true, renderGeneration: 0, loadedContentKey: '', remotePage: null,
@@ -291,7 +292,7 @@ test('render replacement and page cancellation restore the exact previous busy/i
 const foundationCSS = readFileSync(new URL('../src/styles-foundation.css', import.meta.url), 'utf8');
 const appFunction = (start, end) => app.slice(app.indexOf(start), app.indexOf(end, app.indexOf(start)));
 const bootViewStart = app.indexOf('function renderView(');
-const bootViewSource = app.slice(bootViewStart, app.indexOf("  cleanReaderAdmin=page==='admin'", bootViewStart)) + '\n}';
+const bootViewSource = app.slice(bootViewStart, app.indexOf("  const bookRoot=", bootViewStart)) + '\n}';
 function setupCommunityBoot(t, { only = true, hash = '#/community/home', reader = { nickname: '读者', uid: '10001' }, destination, reduced = false } = {}) {
   const html = `<html><head><style>${foundationCSS}</style></head><body><header id="site-header"></header><div id="blog-backdrop"></div><main id="main"></main></body></html>`;
   const dom = new JSDOM(only ? communityHostDocument(html) : html, { url: `https://${only ? 'community' : 'www'}.sansphase.com/${hash}`, pretendToBeVisual: true });
@@ -305,7 +306,7 @@ function setupCommunityBoot(t, { only = true, hash = '#/community/home', reader 
   const commits = [];
   const context = {
     siteContent, window: dom.window, document, main, location: dom.window.location, history: dom.window.history,
-    parseRoute, publicRoute, communityHostRoute, communityEntryDestination, rewriteCommunityMainSiteLinks,
+    parseRoute, publicRoute, communityHostRoute, communityEntryDestination, communityEntryLandingLocation, rewriteCommunityMainSiteLinks,
     communityView, communityRoute, inCommunityArea, communityHeaderHTML, communityAccountHTML, communityLandingHTML, readerGate,
     setContentHTML(root, markup) { commits.push(markup); setContentHTML(root, markup); },
     communityOnly: () => siteContent.communityOnly === true, communityEnabled: () => siteContent.communityEnabled === true,
@@ -331,7 +332,7 @@ function setupCommunityBoot(t, { only = true, hash = '#/community/home', reader 
   };
   vm.createContext(context);
   vm.runInContext([
-    appFunction('function header(page)', 'function home()'), appFunction('function communityPage()', 'function sectionsHTML('),
+    appFunction('function header(page)', 'function home()'), appFunction('function communityPage()', 'function articlePage('),
     appFunction('function notFound(', "document.addEventListener('visibilitychange'"), appFunction('function contentMessage(', 'function acceptContent('),
     appFunction('let communityArrived =', 'let cleanCommunity ='), appFunction('let cleanCommunitySky = null;', '// The header reads'),
     bootViewSource, renderSource, 'globalThis.render = render; globalThis.commitView = renderView;',

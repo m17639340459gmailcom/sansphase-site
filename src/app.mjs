@@ -1,16 +1,20 @@
 import {visitorTimezone, validTimezone, locateVisitor, searchWeatherCities,watchVisitorLocation,localizeWeatherPlace} from './visitor-location.mjs';
 import {imageSources, imageSourceSet} from './image-sources.mjs';
+import {renderArticlePage} from './article-page.mjs';
+import {parseSiteRoute, blogPath, mountBlogRouting} from './blog-route.mjs';
+import {updateBlogMetadata} from './blog-metadata.mjs';
 import {enhanceContentImages,setContentHTML} from './content-images.mjs';
 import {siteCopy,createContentProjection} from './site-copy.mjs';
 import {preparePageImages} from './home-preload.mjs';
 import {mountNavigationPrefetch} from './navigation-prefetch.mjs';
 import {createRouteTransitions} from './route-transition.mjs';
-import {communityEntryDestination,createCommunityEntry,communityHostRoute,rewriteCommunityMainSiteLinks,exitCommunity} from './community-entry.mjs';
+import {communityEntryDestination,communityEntryPost,communityEntryLandingLocation,createCommunityEntry,communityHostRoute,rewriteCommunityMainSiteLinks,exitCommunity} from './community-entry.mjs';
 import {mountNavSlider} from './nav-slider.mjs';
 import {DEPART_MS} from './journey.mjs';
 import {createContentReader,contentQuery} from './content-reader.mjs';
 import {readerGate,readerPage,mountReaderUI} from './reader-ui.mjs';
-import {loadAdminReaders, createDeferredModuleLoader} from './admin-route.mjs';
+import {createDeferredModuleLoader} from './admin-route.mjs';
+import {adminConsoleHref,adminReturnDestination} from './admin-console-navigation.mjs';
 import {publicRoute} from './access-policy.mjs';
 import {bookShell} from './book-shell.mjs';
 import {vipBookGate,mountVipBookPrompt} from './vip-book-prompt.mjs';
@@ -34,9 +38,9 @@ function activateCommunityRuntime(module) {
 mountRouteAssets(window);
 import {
   escapeHTML as esc,
-  parseRoute,
   filterItems,
 } from "./core.mjs";
+const parseRoute = (hash, pathname = location.pathname) => parseSiteRoute(hash, pathname);
 import {siteSections} from "./data.mjs";
 import { catalogPage as collectionPage, catalogResults, catalogDetail, catalogViewPresentation } from './catalog.mjs';
 import {
@@ -62,6 +66,15 @@ let siteContent = (() => {
   const payload = document.querySelector('#site-content');
   return payload ? JSON.parse(payload.textContent) : null;
 })();
+// The server explicitly samples this document. Privacy preferences also keep
+// the optional bundle off the startup graph; page rendering always runs first.
+if (siteContent?.diagnostics?.enabled === true && navigator.doNotTrack !== '1' && navigator.globalPrivacyControl !== true) {
+  const startDiagnostics = () => {
+    void import('./site-diagnostics.mjs').then(module => module.startSiteDiagnostics()).catch(() => {});
+  };
+  if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(startDiagnostics, { timeout: 2000 });
+  else window.setTimeout(startDiagnostics, 1000);
+}
 const communityEnabled = () => siteContent?.communityEnabled === true;
 const communityOnly = () => siteContent?.communityOnly === true;
 if (communityOnly()) {
@@ -90,8 +103,6 @@ let cleanArticleReading = () => {};
 let cleanBookReading = () => {};
 let bookRenderGeneration=0;
 let cleanMobileBlogOrder = () => {};
-let cleanReaderAdmin = () => {};
-let adminReadersModule;
 let homeRoot;
 let homeWarmup;
 // Retired preview links now resolve to the one current homepage.
@@ -108,6 +119,11 @@ let catalogPageNumber = Number.isInteger(restoredView.catalogPage) ? Math.max(1,
 const personalPage = (page) => ['notes','note','works','work','resources','software','resource-center','community','post','account','verify','reset','admin'].includes(page);
 const catalogUI = () => ({t, icons, tagTone});
 let remotePage=null, loadedContentKey='', renderGeneration=0, searchTimer;
+const entryRoute = parseRoute(location.hash);
+if (siteContent?.articleEntry?.id === entryRoute.id && entryRoute.page === 'note'
+  && !siteContent.preview && notes.some(item => item.id === entryRoute.id)) {
+  loadedContentKey = contentQuery(entryRoute).toString();
+}
 let readerUI;
 const contentReader=createContentReader();
 const projectContent=createContentProjection();
@@ -150,6 +166,7 @@ const blogNotice = createBlogNotice({
   copy,
 });
 const main = document.querySelector("#main");
+const publicSiteOrigin = new URL(document.querySelector('link[rel="canonical"]')?.href || location.href).origin;
 const blogPhoto = document.querySelector("#blog-backdrop img");
 let blogRevealGeneration = 0;
 const afterLayout = (callback) =>
@@ -270,7 +287,7 @@ function homeChapterDetails(id, english) {
       `${pad(summary.tagCount)} ${tr("个标签", "tags")}`,
       Number.isNaN(latest.getTime()) ? "" : `${tr("最近更新", "updated")} ${pad(latest.getMonth() + 1)}.${pad(latest.getDate())}`,
     ].filter(Boolean).join(" · ");
-    return { facts, items: (homeLatest || []).map((item) => ({ href: `#/note/${item.id}`, title: item.title, meta: noteDate(item) })) };
+    return { facts, items: (homeLatest || []).map((item) => ({ href: blogPath(item.id), title: item.title, meta: noteDate(item) })) };
   }
   if (id === "works")
     return collections.works || collections.resources
@@ -332,8 +349,6 @@ function setupStage() {
   });
 }
 // Authored posts keep their original language. Only their surrounding UI changes.
-const displayTitle = (item) => item.title;
-const displaySummary = (item) => item.summary;
 const categoryLabel = (name, list) => {
   if (name === "all") return t("全部", "All");
   const item = list.find((i) => i.category === name);
@@ -410,8 +425,15 @@ function closedPage(section, title, message) {
 // Every community page after the landing page comes from the community UI.
 const communityEntry = createCommunityEntry({
   config: () => siteContent,
+  post: () => communityEntryPost(location.search),
   request: (url, init) => fetch(url, init),
-  navigate: url => location.assign(url),
+  navigate: url => {
+    // Consume the public destination so a later ordinary visit starts at home.
+    const current = new URL(location.href);
+    current.searchParams.delete('post');
+    history.replaceState(history.state, '', current.pathname + current.search + current.hash);
+    location.assign(url);
+  },
   fadeOut: () => routeTransitions.leave(),
   restore: () => routeTransitions.restore(),
   changed: state => {
@@ -465,6 +487,7 @@ document.addEventListener('focusout', event => {
   if (communityHeaderPending && event.target.closest?.('#site-header')) queueMicrotask(refreshCommunityHeader);
 });
 const communityContext = () => ({t, esc, icons, notify: (message) => toast(message), members: Boolean(siteContent?.reader?.vip || siteContent?.author),
+  teahouseEnabled: siteContent?.teahouseEnabled === true,
   mountSelect: mountCommunitySelect,
   ownerAvatar: siteContent?.profile?.avatar || null, headerChanged: refreshCommunityHeader,
   showPostingTips: !communityFrame?.enabled(),
@@ -512,17 +535,12 @@ function communityPage() {
   if (view === 'unknown') return notFound();
   return communityUI.html(communityContext()) ?? notFound();
 }
-function sectionsHTML(item) {
-  if (typeof item.bodyHTML === 'string') return item.bodyHTML;
-  return item.sections
-    .map(([title, body]) => `<h2>${esc(title)}</h2><p>${esc(body)}</p>`)
-    .join("");
-}
 function articlePage(kind, id) {
-  const isWork = kind === "work";
-  const item = (!isWork && siteContent?.preview?.id === id) ? siteContent.preview : (isWork ? works : notes).find((x) => x.id === id);
+  const isWork = kind === 'work';
+  const item = (!isWork && siteContent?.preview?.id === id) ? siteContent.preview : (isWork ? works : notes).find(x => x.id === id);
   if (!item) return notFound();
-  return `<section class="page fade-in"><article class="article ${isWork ? "" : "reading-article"}"><a class="back-link" href="#/${isWork ? "works" : "notes"}">${icons.left} ${t(isWork ? "返回作品集" : "返回博客", isWork ? "Back to work" : "Back to blog")}</a><div class="eyebrow">${isWork ? "PROJECT ARCHIVE" : "FIELD NOTES"} / ${esc(categoryLabel(item.category, isWork ? works : notes))}</div><h1>${esc(displayTitle(item))}</h1><div class="post-tags"><span>${esc(siteContent?.profile?.name || "無相")}</span>${item.date ? `<time datetime="${esc(item.date)}">${esc(noteDate(item))}</time>` : ""}${(item.tags||[]).map(tag=>`<span class="article-meta-tag">${esc(tag)}</span>`).join("")}</div><p class="article-intro">${esc(displaySummary(item))}</p>${item.coverSrc ? `<div class="cover-frame"><img class="article-cover" src="${esc(item.coverSrc)}" ${imageSources(item.coverSrc, '(max-width: 960px) 100vw, 960px',item.coverWidth)} width="${Number(item.coverWidth)||960}" height="${Number(item.coverHeight)||540}" decoding="async" alt="${esc(t(item.coverAlt || item.title, item.coverAltEn || item.en || item.title))}"></div>` : ""}<div class="article-body">${siteContent?.preview === item ? `<p class="article-preview-label" role="status">${t("作者预览 · 此预览仅登录作者可见","Author preview · Visible only to the signed-in author")}</p>` : ""}${sectionsHTML(item)}${item.attachments?.length ? `<section class="article-attachments"><h2>${t("附件下载","Attachments")}</h2>${item.attachments.map(file=>`<a class="text-link" href="${esc(file.url)}" download>${icons.download}${esc(file.name)}</a>`).join("")}</section>` : ""}</div><div class="article-bottom"><a class="text-link article-more" href="#/${isWork ? "works" : "notes"}">${t("浏览更多", "Browse more")}${arrow}</a></div></article></section>`;
+  return renderArticlePage(item, {siteName: siteContent?.profile?.name || '無相', english: language === 'en',
+    isWork, preview: siteContent?.preview === item, categoryLabel: categoryLabel(item.category, isWork ? works : notes)});
 }
 function postPage() { return communityEnabled() ? communityUI.html(communityContext()) ?? notFound() : communityPage(); }
 function supportPage() {
@@ -532,7 +550,6 @@ function contactPage() {
   return closedPage('contact',t('联系与合作','Contact'),t('合作联系方式正在准备中。','Contact details will be available here.'));
 }
 function accountPage() { return readerPage('account','',siteContent?.reader,language==='en',siteContent?.readerRegistrationEnabled !== false,siteContent?.author); }
-function adminPage() { return adminReadersModule.adminReadersPage(siteContent?.author,language==='en'); }
 function notFound() {
   return `<section class="page"><div class="empty" style="margin-top:50px"><div class="eyebrow" style="justify-content:center;margin-bottom:20px">404 / A LITTLE OFF TRACK</div><h1>${t("这个角落还没有内容。", "Nothing here just yet.")}</h1><p style="margin:20px 0 28px">${t("这条链接可能已变更，或内容尚未公开。", "The link may have changed, or this content is not public yet.")}</p><a class="button" href="#/home">${t("回到首页", "Back home")} ${arrow}</a></div></section>`;
 }
@@ -563,10 +580,12 @@ async function render(options={}) {
  if (hostRoute.kind === 'main') { location.assign(hostRoute.url); return; }
  if (communityOnly() && hostRoute.hash !== location.hash) history.replaceState(history.state, '', location.pathname + location.search + hostRoute.hash);
  const route=parseRoute(location.hash);
+ if(route.page==='admin') { location.replace(adminConsoleHref()); return; }
  const externalCommunity = ['community', 'post'].includes(route.page) && communityEntryDestination(siteContent);
  if (externalCommunity) {
   contentReader.cancel(); loadedContentKey=''; remotePage=null;
-  if (location.hash !== '#/community') history.replaceState(history.state, '', location.pathname + location.search + '#/community');
+  const landingLocation = communityEntryLandingLocation(location.pathname, location.search, location.hash);
+  if (location.pathname + location.search + location.hash !== landingLocation) history.replaceState(history.state, '', landingLocation);
   const authenticated = Boolean(siteContent?.reader || siteContent?.author);
   if (authenticated && communityEntry.state() === 'auth') communityEntry.cancel();
   const landingReady = communityEntry.state() === 'auth' ? null : prepareCommunityLanding().then(() => true, () => false);
@@ -588,6 +607,8 @@ async function render(options={}) {
    return;
   }
  if(route.page==='account' && siteContent?.author) {
+  const consoleReturn=adminReturnDestination(location.search,true);
+  if(consoleReturn) { location.replace(consoleReturn); return; }
   // Owners work in the author panel; the reader account card is not an owner destination.
   history.replaceState(history.state,'',location.pathname+location.search+'#/notes');
   await render(options);
@@ -634,11 +655,6 @@ async function render(options={}) {
   } finally {if(generation!==renderGeneration)finishLoading();}
  } else if(!query) {contentReader.cancel();loadedContentKey='';remotePage=null;}
  if(generation!==renderGeneration) return;
- if(route.page==='admin') {
-  try {adminReadersModule=await loadAdminReaders();}
-  catch {renderView({...options,contentStatus:'error'});return;}
-  if(generation!==renderGeneration) return;
- }
  if(bookStyle) {
   const ready=await bookStyle;
   if(generation!==renderGeneration) return;
@@ -727,7 +743,6 @@ function renderView({preserveScroll=false,contentStatus}={}) {
     account: accountPage,
     verify: () => readerPage('verify',id,siteContent?.reader,language==='en',siteContent?.readerRegistrationEnabled !== false),
     reset: () => readerPage('reset',id,siteContent?.reader,language==='en',siteContent?.readerRegistrationEnabled !== false),
-    admin: adminPage,
     work: () => libraryDetail(works.find(item => item.id === id), 'works'),
     note: () => articlePage("note", id),
     post: () => postPage(id),
@@ -740,15 +755,23 @@ function renderView({preserveScroll=false,contentStatus}={}) {
   cleanBookReading?.();
   cleanContentImages?.();
   cleanMobileBlogOrder();
-  cleanReaderAdmin();
   cleanCommunity();
   const pageMarkup = contentStatus ? contentStatus==='auth' ? readerGate(language==='en') : contentStatus==='vip' ? vipBookGate(language==='en') : contentMessage(contentStatus==='error') : (views[page] || notFound)();
-  if (!communityEnabled() || !communityModule || contentStatus || !(communityFrame.render(main, pageMarkup, communityUI.frameHTML(communityContext()))
-    || communityUI.renderManagement(main, pageMarkup, preserveScroll))) setContentHTML(main, pageMarkup);
+  const keepInitialArticle = !contentStatus && page === 'note' && language === 'zh'
+    && main.dataset.articleEntry === id && siteContent?.articleEntry?.id === id;
+  if (keepInitialArticle) {
+    // The server and visitor can use different timezones. Preserve the current
+    // browser-local date presentation without replacing the verified body.
+    const time = main.querySelector('.reading-article .post-tags time');
+    const item = notes.find(item => item.id === id);
+    if (time && item?.date) time.textContent = noteDate(item);
+  }
+  delete main.dataset.articleEntry;
+  if (!keepInitialArticle && (!communityEnabled() || !communityModule || contentStatus || !(communityFrame.render(main, pageMarkup, communityUI.frameHTML(communityContext()))
+    || communityUI.renderManagement(main, pageMarkup, preserveScroll)))) setContentHTML(main, pageMarkup);
   readerUI?.route(page,id);
   cleanCommunity=communityEnabled() && communityModule && !contentStatus && (page==='community'||page==='post') ? communityUI.mount(main,communityContext()) : ()=>{};
   communityReady({ terminal: contentStatus !== 'loading' && !main.querySelector('[data-community]') });
-  cleanReaderAdmin=page==='admin' && adminReadersModule ? adminReadersModule.mountReaderAdmin(main,{english:language==='en'}) : ()=>{};
   const bookRoot=main.querySelector('.book-reader'),bookGeneration=++bookRenderGeneration;
   cleanBookReading=()=>{};
   if(bookRoot)import('./book-reader.mjs').then(({mountBookReader})=>{
@@ -784,6 +807,9 @@ function renderView({preserveScroll=false,contentStatus}={}) {
     `<div class="footer-identity"><span class="footer-copyright">© 無相</span><a class="site-registration" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">豫ICP备2026037683号-1</a>${siteContent?.reader?.uid && !siteContent.author ? `<span class="footer-reader-uid">UID ${esc(siteContent.reader.uid)}${siteContent.reader.vip ? ' <span class="footer-vip-badge">VIP</span>' : ''}</span>` : ''}</div><div class="footer-links"><a href="#/contact">${t("联系与合作", "Contact")}</a><a href="#/support">${t("赞助与支持", "Support")}</a><span>${t("记录 · 创作 · 分享", "Learn · Create · Share")}</span></div>`;
   document.querySelector('.skip-link').textContent=t('跳到正文','Skip to content');
   document.querySelector('meta[name="description"]').content=t('無相的个人网站，分享博客文章、软件作品、学习资料与工具使用心得。','SANSPHASE: blog posts, software projects, learning resources and practical notes.');
+  updateBlogMetadata(document, {origin: publicSiteOrigin, siteName: siteContent?.profile?.name || '無相', page,
+    item: !contentStatus && page === 'note' ? notes.find(item => item.id === id) : null,
+    preview: Boolean(siteContent?.preview?.id === id || new URL(location.href).searchParams.has('preview'))});
   if(position) {
     main.style.minHeight=previousMinHeight;
     const anchor=anchorIndex<0 ? null : main.querySelectorAll(anchorSelector)[anchorIndex];
@@ -859,7 +885,7 @@ function mountBlogGlassSurfaces(scope = document) {
   const selector = ".blog-page .blog-card, .blog-page .blog-identity, .blog-page .blog-side-card, .blog-page .blog-notice, .blog-page .blog-toolbar";
   for (const host of scope.querySelectorAll(selector)) {
     if (glassSurfaceRecords.has(host)) continue;
-    const html = host.innerHTML;
+    const html = host.querySelector(':scope > [data-reading-static-glass] .blog-third-party-glass-content')?.innerHTML ?? host.innerHTML;
     host.innerHTML = "";
     glassSurfaceRecords.set(host, mountGlassSurface(
         host,
@@ -1123,12 +1149,13 @@ function rememberCommunityManagementSwitch(event) {
   communityManagementSwitch = { from: location.hash, to: href };
 }
 document.addEventListener('click', rememberCommunityManagementSwitch);
-window.addEventListener("hashchange", (event) => {
+mountBlogRouting(window, (event) => {
   // Stop scheduling new warmup images, but let the one already in flight be
   // reused by the destination page instead of cancelling and downloading again.
   clearTimeout(searchTimer);
   loadedContentKey='';
-  const fromRoute = parseRoute(event.oldURL ? new URL(event.oldURL).hash : "");
+  const oldLocation = new URL(event.oldURL);
+  const fromRoute = parseRoute(oldLocation.hash, oldLocation.pathname);
   const toRoute = parseRoute(location.hash);
   const from = fromRoute.page, to = toRoute.page;
   const preserveManagementScroll = communityManagementSwitch?.from === (event.oldURL ? new URL(event.oldURL).hash : '')

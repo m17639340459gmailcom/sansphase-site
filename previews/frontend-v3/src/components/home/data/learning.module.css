@@ -1,0 +1,108 @@
+/* Learning spotlight: a modules × lessons course map that ripples in, staggered lesson rows,
+   and a row ↔ map link (hovering or focusing a lesson lights its cell). */
+
+.mapCell {
+  width: 1rem;
+  aspect-ratio: 1;
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--fg) 8%, transparent);
+  transition:
+    scale 0.35s var(--fx-ease),
+    box-shadow 0.35s var(--fx-ease),
+    opacity 0.35s var(--fx-ease);
+}
+.mapCell[data-pick] {
+  background: var(--accent);
+  box-shadow: 0 0 14px -3px var(--accent-glow);
+}
+
+@keyframes cell-in {
+  from {
+    opacity: 0;
+    scale: 0.2;
+  }
+  to {
+    opacity: 1;
+    scale: 1;
+  }
+}
+.card:is([data-fx-state="ssr"], [data-fx-state="idle"]) .mapCell {
+  opacity: 0;
+  scale: 0.2;
+}
+.card[data-fx-state="play"] .mapCell {
+  animation: cell-in 0.7s var(--fx-ease) calc(0.25s + var(--d, 0) * 45ms) backwards;
+}
+.card[data-fx-state="ssr"] .mapCell {
+  animation: cell-in 0.6s var(--fx-ease) 4s both;
+}
+
+@keyframes row-in {
+  from {
+    opacity: 0;
+    translate: -0.5rem 0;
+  }
+  to {
+    opacity: 1;
+    translate: none;
+  }
+}
+.card:is([data-fx-state="ssr"], [data-fx-state="idle"]) .lesson {
+  opacity: 0;
+  translate: -0.5rem 0;
+}
+.card[data-fx-state="play"] .lesson {
+  animation: row-in 0.8s var(--fx-ease) calc(0.45s + var(--i, 0) * 0.1s) both;
+}
+.card[data-fx-state="ssr"] .lesson {
+  animation: row-in 0.6s var(--fx-ease) 4s both;
+}
+
+.card:has(.lesson:focus-visible) .mapCell:not([data-pick]) {
+  opacity: 0.4;
+}
+.card:has(.lesson[data-x="0"]:focus-visible) .mapCell[data-x="0"],
+.card:has(.lesson[data-x="1"]:focus-visible) .mapCell[data-x="1"],
+.card:has(.lesson[data-x="2"]:focus-visible) .mapCell[data-x="2"],
+.card:has(.lesson[data-x="3"]:focus-visible) .mapCell[data-x="3"] {
+  scale: 1.45;
+  box-shadow:
+    0 0 0 2px var(--bg-elevated),
+    0 0 0 3.5px var(--accent),
+    0 0 18px var(--accent-glow);
+}
+@media (hover: hover) and (pointer: fine) {
+  .card:has(.lesson:hover) .mapCell:not([data-pick]) {
+    opacity: 0.4;
+  }
+  .card:has(.lesson[data-x="0"]:hover) .mapCell[data-x="0"],
+  .card:has(.lesson[data-x="1"]:hover) .mapCell[data-x="1"],
+  .card:has(.lesson[data-x="2"]:hover) .mapCell[data-x="2"],
+  .card:has(.lesson[data-x="3"]:hover) .mapCell[data-x="3"] {
+    scale: 1.45;
+    box-shadow:
+      0 0 0 2px var(--bg-elevated),
+      0 0 0 3.5px var(--accent),
+      0 0 18px var(--accent-glow);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card :is(.mapCell, .lesson) {
+    animation: none !important;
+  }
+  .card:is([data-fx-state="ssr"], [data-fx-state="idle"]) :is(.mapCell, .lesson) {
+    opacity: 1;
+    scale: none;
+    translate: none;
+  }
+}
+
+@media print {
+  .card :is(.mapCell, .lesson) {
+    animation: none !important;
+    opacity: 1 !important;
+    scale: none !important;
+    translate: none !important;
+  }
+}

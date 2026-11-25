@@ -36,6 +36,7 @@ test('queue and reports share one selected content review entry in the managemen
     assert.equal(review[0].getAttribute('aria-current'), 'page');
     assert.equal(review[0].querySelector('b').textContent, '6');
     assert.equal(links.some(link => link.getAttribute('href') === '#/community/manage/reports'), false);
+    assert.equal(links.some(link => link.getAttribute('href') === '#/community/manage/content'), false, 'published posts are managed from their original pages, without a duplicate sidebar entry');
     dom.window.close();
   }
 });

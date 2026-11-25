@@ -18,6 +18,9 @@ import { createLoginLedger } from '../login-ledger.ts';
 import { createReaderUidStore } from '../reader-uids.ts';
 import { createReaderRetention } from '../reader-retention.ts';
 import { createReaderWorkflow } from '../reader-workflow.ts';
+import { createReaderInvitations } from '../reader-invitations.ts';
+import { assertReaderInvitationsReady } from './invitation-migration.ts';
+import { assertReaderAdminRemarksReady } from './reader-migration.ts';
 import { cleanReaderFiles } from '../reader-file-cleanup.ts';
 import { createMediaRetention } from './media-retention.ts';
 import { createCommunityRuntime } from '../community-runtime.ts';
@@ -25,8 +28,9 @@ import { createIdentityAuthority } from '../community-identity-authority.ts';
 import { createIdentityClient } from '../community-identity-protocol.ts';
 import { createIdentityStore } from '../community-identity-store.ts';
 import { readOwnerReaderId } from '../owner-reader.ts';
+import { createLoginVerification, readLoginVerificationSettings } from '../login-verification.ts';
 export type MainCommunityIdentitySettings = { communityOrigin: 'https://community.sansphase.com'; bridgeSecret: string; stateEncryptionKey: string };
-type RuntimeSettings = {directory: string; secret: string; siteOrigin: string; sourceURL: string; authorId: string; ownerReaderId?: string; smtp?: unknown; push?: boolean; communityEnabled?: boolean; communityIdentity?: unknown};
+type RuntimeSettings = {directory: string; secret: string; siteOrigin: string; sourceURL: string; authorId: string; ownerReaderId?: string; smtp?: unknown; push?: boolean; communityEnabled?: boolean; communityIdentity?: unknown; loginVerification?: unknown};
 
 export function readMainCommunityIdentitySettings(settings: Pick<RuntimeSettings, 'secret' | 'communityIdentity'>): MainCommunityIdentitySettings | null {
   const config = settings.communityIdentity;
@@ -46,6 +50,8 @@ export async function createPayloadRuntime(
   settings.siteOrigin = process.env.SITE_ORIGIN || settings.siteOrigin;
   const ownerReaderId = readOwnerReaderId(settings);
   const bridgeSettings = readMainCommunityIdentitySettings(settings);
+  const loginSettings = readLoginVerificationSettings(settings.loginVerification, settings.secret,
+    bridgeSettings ? [bridgeSettings.bridgeSecret, bridgeSettings.stateEncryptionKey] : []);
   if (bridgeSettings) {
     // Fail before opening the account runtime if explicit state preparation is
     // missing. Startup never initializes this server-to-server state database.
@@ -63,24 +69,37 @@ export async function createPayloadRuntime(
   // Existing production databases are upgraded explicitly with a verified
   // backup. Startup only checks readiness; it never enables schema push.
   if (settings.push !== true) assertPayloadAuthSchemaReady(settings.directory);
+  if (settings.push !== true) assertReaderInvitationsReady(settings.directory);
+  if (settings.push !== true) assertReaderAdminRemarksReady(settings.directory);
   const payload = await getPayload({ config: makePayloadConfig(settings) });
   const loginLedger = createLoginLedger(settings.directory);
   const uidStore = createReaderUidStore(settings.directory);
   const workflow = createReaderWorkflow(settings.directory, settings.secret);
+  const invitations = createReaderInvitations({ directory: settings.directory });
+  const loginVerification = createLoginVerification({ directory: settings.directory, siteOrigin: settings.siteOrigin, settings: loginSettings, workflow });
   const profileCommands = createReaderProfileCommands({ payload, directory: settings.directory, workflow, uidStore });
   const mediaRetention = createMediaRetention({ payload, directory: settings.directory });
   const store = createPayloadStore(payload, { ...settings, mediaRetention });
   const publicationRevision=createPublicationRevision(settings.directory);
-  const options = { ...settings, url: settings.sourceURL, store, loginLedger };
+  const options = { ...settings, url: settings.sourceURL, store, loginLedger, loginVerification };
   const authorService=createAuthorService(options);
   const frames = bridgeSettings ? createCommunityFrameClient({ origin: bridgeSettings.communityOrigin, secret: bridgeSettings.bridgeSecret }) : undefined;
-  const readerService=createReaderService({payload,siteOrigin:settings.siteOrigin,directory:settings.directory,emailReady:smtpConfigured(settings.smtp),authorService,loginLedger,uidStore,workflow,profileCommands,frames,ownerReaderId});
+  const readerService=createReaderService({payload,siteOrigin:settings.siteOrigin,directory:settings.directory,emailReady:smtpConfigured(settings.smtp),authorService,loginLedger,uidStore,workflow,profileCommands,frames,ownerReaderId,loginVerification,invitations});
   const community = createCommunityRuntime({
     payload, directory: settings.directory, siteOrigin: settings.siteOrigin, authorId: settings.authorId, uidStore,
     queueFile: workflow.queueFile,
     drainFileQueue: () => cleanReaderFiles({ workflow, payload, directory: settings.directory, limit: 1000 }),
     readerIdentity: readerService.identity,
     ownerReaderIdentity: readerService.ownerReaderIdentity, ownerReaderId,
+    referrals: {
+      referralOrigin: settings.siteOrigin,
+      referralAttribution: async id => invitations.attribution(id),
+      referralSelf: async req => {
+        const reader = await readerService.identityStrict(req) || await readerService.ownerReaderIdentity(req);
+        return reader ? invitations.self(reader.id) : null;
+      },
+      assertReferralActive: ids => invitations.assertActive(ids),
+    },
     profile: createLocalCommunityProfileAccess({ commands: profileCommands, readerIdentity: readerService.identityStrict, ownerReaderIdentity: readerService.ownerReaderIdentity, ownerIdentity: req => authorService.identityStrict(req), ownerId: settings.authorId }),
     ownerIdentity: req => authorService.identity(req),
     ownerName: async () => {
@@ -114,6 +133,7 @@ export async function createPayloadRuntime(
     readerIdentity: readerService.identityStrict, ownerIdentity: req => authorService.identityStrict(req),
     ownerReaderIdentity: readerService.ownerReaderIdentity,
     profiles: profileCommands,
+    invitations,
     profileReviewer: createCommunityProfileReviewerClient({ origin: bridgeSettings.communityOrigin, secret: bridgeSettings.bridgeSecret,
       accountsActive: async members => {
         for (const member of members) {
@@ -135,6 +155,7 @@ export async function createPayloadRuntime(
     },
   }) : undefined;
   const purgeCommunity = async (id: string) => {
+    invitations.purge(id);
     community.purgeReaderData(id, workflow.queueFile);
     if (identityAuthority) await identityAuthority.purgeReaderData(id);
   };
@@ -143,9 +164,11 @@ export async function createPayloadRuntime(
     payload,
     store,
     settings,
+    siteOrigin: settings.siteOrigin,
     contentService: createContentService({...options,revision:publicationRevision.read}),
     authorService,
     readerService,
+    invitationEligible: (code: string) => Boolean(invitations.resolveCode(code)),
     communityService: community.service,
     identityAuthority,
     communityDestination: bridgeSettings?.communityOrigin,
@@ -161,6 +184,7 @@ export async function createPayloadRuntime(
       community.close();
       loginLedger.close();
       uidStore.close();
+      invitations.close();
       await payload.destroy();
       (payload.db as unknown as {client: {close: () => void}}).client.close();
     },

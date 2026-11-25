@@ -10,8 +10,10 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { uuidPattern, safeLink } from "./content-service.ts";
 import { clientAddress } from './client-ip.ts';
+import { accountSessionLifetimeSeconds } from './auth-session-policy.ts';
 import type { IncomingHttpHeaders, IncomingMessage, ServerResponse } from 'node:http';
 import type { createPayloadStore } from './payload/store.ts';
+import type { LoginVerification } from './login-verification.ts';
 
 type ContentKind = 'articles' | 'works' | 'resources' | 'software' | 'resource-center' | 'announcements';
 type ContentRow = {
@@ -23,7 +25,7 @@ type ContentRow = {
 type AuthorInput = Record<string, unknown>;
 type ValidatedContent = { title: string; summary: string; body?: string; attachments?: string[]; [key: string]: unknown };
 type LoginLedger = { record: (entry: { actorType: 'owner'; actorId: string; email: string; address: ReturnType<typeof clientAddress>; userAgent: string | undefined }) => unknown };
-type AuthorOptions = { url: string; authorId: string; siteOrigin?: string; store: ReturnType<typeof createPayloadStore>; loginLedger?: LoginLedger };
+type AuthorOptions = { url: string; authorId: string; siteOrigin?: string; store: ReturnType<typeof createPayloadStore>; loginLedger?: LoginLedger; loginVerification?: LoginVerification };
 const errorStatus = (error: unknown): number | undefined => error && typeof error === 'object' && 'status' in error && typeof error.status === 'number' ? error.status : undefined;
 const errorMessage = (error: unknown): string => error instanceof Error ? error.message : String(error);
 const cookieName = "sansphase_author_session";
@@ -122,6 +124,7 @@ export function createAuthorService({
   siteOrigin = "http://127.0.0.1:4176",
   store,
   loginLedger,
+  loginVerification,
 }: AuthorOptions) {
   const cms = new URL(url).origin;
   const session = (req: IncomingMessage) =>
@@ -131,7 +134,7 @@ export function createAuthorService({
       .find((x) => x.startsWith(cookieName + "="))
       ?.slice(cookieName.length + 1) || "";
   const cookieHeader = (token: string) =>
-    `${cookieName}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${token ? 86400 : 0}${siteOrigin.startsWith("https:") ? "; Secure" : ""}`;
+    `${cookieName}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${token ? accountSessionLifetimeSeconds : 0}${siteOrigin.startsWith("https:") ? "; Secure" : ""}`;
   if (!store) throw new Error('Author storage must be explicitly configured.');
   let orderQueue: Promise<unknown> = Promise.resolve();
   async function orderedRows(kind: string,token: string): Promise<ContentRow[]> {
@@ -159,21 +162,24 @@ export function createAuthorService({
       throw fail("这个账号没有个人网站的作者权限。", 403);
     return { name: user.first_name || "作者" };
   }
-  const readBody = async (req: IncomingMessage, max = 1024 * 1024) => {
-    if (Number(req.headers["content-length"]) > max)
-      throw fail("请求内容太大。", 413);
-    const chunks: Buffer[] = [];
-    let length = 0;
-    for await (const chunk of req) {
-      length += chunk.length;
-      if (length > max) throw fail("请求内容太大。", 413);
-      chunks.push(chunk);
-    }
-    return Buffer.concat(chunks);
-  };
-  const json = async (req: IncomingMessage): Promise<AuthorInput> => {
+  const readBody = async (req: IncomingMessage, max = 1024 * 1024, timeoutMs = 0) => {
+    const timer = timeoutMs ? setTimeout(() => req.destroy(fail('请求读取超时，请重试。', 408)), timeoutMs) : undefined;
     try {
-      return JSON.parse((await readBody(req)).toString("utf8")) as AuthorInput;
+      if (Number(req.headers["content-length"]) > max)
+        throw fail("请求内容太大。", 413);
+      const chunks: Buffer[] = [];
+      let length = 0;
+      for await (const chunk of req) {
+        length += chunk.length;
+        if (length > max) throw fail("请求内容太大。", 413);
+        chunks.push(chunk);
+      }
+      return Buffer.concat(chunks);
+    } finally { if (timer !== undefined) clearTimeout(timer); }
+  };
+  const json = async (req: IncomingMessage, max = 1024 * 1024, timeoutMs = 0): Promise<AuthorInput> => {
+    try {
+      return JSON.parse((await readBody(req, max, timeoutMs)).toString("utf8")) as AuthorInput;
     } catch (error) {
       if (errorStatus(error)) throw error;
       throw fail("请求格式无效。");
@@ -299,13 +305,28 @@ export function createAuthorService({
           throw fail("不支持的操作。", 405);
         if (req.method !== "GET") assertAuthorOrigin(req.headers, siteOrigin);
         let token = session(req);
+        if (parts[0] === 'login-challenge' && parts[1] === 'verify' && parts.length === 2) {
+          if (req.method !== 'POST') throw fail('不存在的操作。', 404);
+          if (!loginVerification) throw fail('登录验证未启用。', 403);
+          const body = await json(req, 40 * 1024, 10_000);
+          res.setHeader('Cache-Control', 'private, no-store');
+          send(await loginVerification.match(req, 'author', body)); return;
+        }
+        if (parts[0] === 'login-challenge' && parts.length === 1) {
+          if (req.method !== 'POST') throw fail('不存在的操作。', 404);
+          const body = await json(req, 4096, 10_000);
+          if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length) throw fail('登录验证请求格式无效。');
+          res.setHeader('Cache-Control', 'private, no-store');
+          send(loginVerification ? await loginVerification.issue(req, res, 'author') : { enabled: false }); return;
+        }
         if (parts[0] === "login" && req.method === "POST") {
           const body = await json(req);
+          await loginVerification?.verify(req, 'author');
           send(await this.loginCredentials(res, body, req));
           return;
         }
         if (parts[0] === "session" && req.method === "GET") {
-          send(await this.identity(req));
+          send(await this.identityStrict(req));
           return;
         }
         await authorize(token);
@@ -432,10 +453,10 @@ export function createAuthorService({
             id = parts[2];
           if (req.method === "GET" && !id) {
             send(
-              (await orderedRows(kind,token)).map(({ pending_content, ...row }) => ({
-                ...row,
-                hasDraft: !!pending_content,
-              })),
+              (await orderedRows(kind,token)).map(({ pending_content, ...row }) => parsed.searchParams.get('view') === 'summary' ? {
+                id: row.id, title: row.title, status: row.status, category: row.category || '', slug: row.slug || '',
+                updatedAt: contentRevision(row) || row.date_created || null, hasDraft: !!pending_content,
+              } : { ...row, hasDraft: !!pending_content }),
             );
             return;
           }

@@ -7,6 +7,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { JSDOM } from 'jsdom';
+import ts from 'typescript';
 import { createCommunityUI } from '../src/community-ui.ts';
 import * as communityRuntime from '../src/community-runtime-client.ts';
 import { setContentHTML } from '../src/content-images.ts';
@@ -38,16 +39,24 @@ async function until(check, reason) {
 // Run the application's real replacement branch, rather than a template-only
 // approximation which could pass while app.mjs still replaces the whole main.
 const app = readFileSync(new URL('../src/app.mjs', import.meta.url), 'utf8');
-const start = app.indexOf('  cleanCommunity();\n  const pageMarkup =');
-// Include the complete readiness call, regardless of its internal arguments.
-const end = app.indexOf("  cleanReaderAdmin=page==='admin'", start);
-assert.ok(start > 0 && end > start, 'find the formal app cleanup/render/mount entry');
+const appSyntax = ts.createSourceFile('app.mjs', app, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+const renderView = appSyntax.statements.find(statement => ts.isFunctionDeclaration(statement) && statement.name?.text === 'renderView');
+assert.ok(renderView?.body, 'find the formal app renderView function');
+const calls = (statement, name) => ts.isExpressionStatement(statement) && ts.isCallExpression(statement.expression)
+  && ts.isIdentifier(statement.expression.expression) && statement.expression.expression.text === name;
+const statements = renderView.body.statements;
+const cleanupIndex = statements.findIndex(statement => calls(statement, 'cleanCommunity'));
+const readinessIndex = statements.findIndex((statement, index) => index > cleanupIndex && calls(statement, 'communityReady'));
+assert.ok(cleanupIndex >= 0 && readinessIndex > cleanupIndex, 'find the formal app cleanup/render/mount entry');
+// Slice the actual statements, including a complete readiness call even when
+// it spans lines. Unrelated author-admin cleanup is not a community boundary.
+const start = statements[cleanupIndex].getStart(appSyntax), end = statements[readinessIndex].end;
 assert.match(app.slice(start, end), /communityReady\(/, 'retain the formal readiness call after mounting');
 const applicationRender = new Function('main', 'views', 'communityFrame', 'communityUI', 'communityModule', 'communityContext', 'setContentHTML',
   'cleanCommunity', 'communityReady', 'communityEnabled', 'preserveScroll', `"use strict"; const page='community', contentStatus=null, readerUI=null, id='';
   ${app.slice(start, end)}
   return cleanCommunity;`);
-const hashStart = app.indexOf('window.addEventListener("hashchange", (event) =>');
+const hashStart = app.indexOf('mountBlogRouting(window, (event) =>');
 const updateStart = app.indexOf('  const update = () => {', hashStart), updateEnd = app.indexOf('  // Community routes swap', updateStart);
 assert.ok(hashStart > 0 && updateStart > hashStart && updateEnd > updateStart, 'find the formal hashchange scroll update');
 const applicationHashUpdate = new Function('render', 'preserveManagementScroll', 'communityEnabled', 'communityFrame', 'window', 'main', 'to',
@@ -357,6 +366,27 @@ test('same moderator losing an assigned board retires the old scope before the n
   content.resolve(response({ ...management('content'), owner: false, moderationBoards: ['tools'], queue: { topics: [], replies: [] }, content: [] }));
   await until(() => main.querySelector('.community-management-nav'), 'new scoped management returns');
   assert.equal(main.textContent.includes(topic.title), false);
+});
+
+for (const failed of [false, true]) test(`late banner candidates preserve the mounted sidebar and keyboard navigation (${failed ? 'failed' : 'ready'})`, async t => {
+  const candidates = deferred(), config = { scope: 'home', version: 1, items: [] };
+  const { w, main, render } = await setup(t, url => {
+    if (url.includes('/manage?tab=banners')) return response({ ...management('banners'), banners: [config] });
+    if (url.includes('/topics?')) return candidates.promise;
+    return null;
+  });
+  const sidebar = main.querySelector('.community-management-nav');
+  const link = sidebar.querySelector('a[href="#/community/manage/banners"]');
+  render('#/community/manage/banners');
+  await until(() => main.querySelector('.community-banner-candidates[aria-busy="true"]'), 'banner form arrives before candidates');
+  assert.equal(main.querySelector('.community-management-nav'), sidebar);
+  link.focus();
+  candidates.resolve(failed ? error(503) : response({ items: [], total: 0, page: 1, pageSize: 20 }));
+  await until(() => main.querySelector('.community-banner-candidates[aria-busy="false"]'), 'candidate result renders');
+  assert.equal(main.querySelector('.community-management-nav'), sidebar, 'supporting responses must not detach navigation');
+  assert.equal(w.document.activeElement, link, 'keyboard focus survives a supporting refresh');
+  assert.equal(link.getAttribute('aria-current'), 'page');
+  await until(() => !main.querySelector('[data-community="manage"]').style.minHeight, 'temporary reading height is released on the retained shell');
 });
 
 test('banner drafts stay account and scope owned through a management handoff and old pending input is ignored', async t => {

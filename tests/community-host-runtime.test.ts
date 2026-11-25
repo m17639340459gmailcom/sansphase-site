@@ -11,11 +11,17 @@ import { prepareIdentityStore } from '../server/community-identity-store.ts';
 import { createIdentityClient, signIdentityRequest } from '../server/community-identity-protocol.ts';
 import { createCommunityFrameClient } from '../server/community-frame-client.ts';
 import { createCommunityHostStore, prepareCommunityHostDirectory } from '../server/community-host-store.ts';
-import { communityHostProductionOptions, createCommunityHostRuntime } from '../server/community-host-runtime.ts';
+import { communityHostProductionOptions, createCommunityHostRuntime, readCommunityHostConfig } from '../server/community-host-runtime.ts';
+import { prepareTeahouseDirectory } from '../server/teahouse-store.ts';
+import { io as socketClient, type Socket } from 'socket.io-client';
+import { randomUUID } from 'node:crypto';
+import type { TeahouseMessage } from '../src/teahouse-types.ts';
 import { createCommunityStore } from '../server/community-store.ts';
 import { acceptCommunityConvention } from './fixtures/community-convention-consent.ts';
 import sharp from 'sharp';
 import { createImageVariants } from '../server/image-variants.ts';
+import { beijingDay } from '../src/community-rules.ts';
+import { bodyImageMarker } from '../src/community-body-images.ts';
 
 const main = 'https://www.sansphase.com';
 const community = 'https://community.sansphase.com';
@@ -25,33 +31,43 @@ const readerId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const avatarId = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
 const reader = { id: readerId, uid: '10001', nickname: '测试读者', signature: '', avatar: `/api/reader/avatar/${avatarId}.webp`, vip: true, vipStartedAt: '2026-10-01T00:00:00.000Z', vipUntil: '2027-10-01T00:00:00.000Z' };
 const observer = { ...reader, id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', uid: '10002', nickname: '旁观读者' };
+const invitationCode = 'AbCdEfGh12345678_abc-123';
 let template: string;
 test.before(async () => { template = await mkdtemp(resolve(tmpdir(), 'host-runtime-template-')); await prepareCommunityHostDirectory(template); });
 test.after(() => rm(template, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
-async function fixture(t: test.TestContext, withOwner = false) {
+async function fixture(t: test.TestContext, withOwner = false, withTeahouse = false, options: { observerNickname?: string } = {}) {
+  const observerAccount = { ...observer, nickname: options.observerNickname ?? observer.nickname };
   const base = await mkdtemp(resolve(tmpdir(), 'host-runtime-'));
   const directory = resolve(base, 'private-community');
   const root = resolve(base, 'public');
   const mainDirectory = resolve(base, 'private-main');
+  const teaDirectory = resolve(base, 'private-teahouse');
   await mkdir(directory); await mkdir(root); await mkdir(resolve(directory, 'uploads')); await mkdir(mainDirectory);
   await copyFile(resolve(template, 'content.db'), resolve(directory, 'content.db'));
   await copyFile(resolve(template, 'community-host.db'), resolve(directory, 'community-host.db'));
   await writeFile(resolve(root, 'index.html'), '<!doctype html><html><head></head><body><main id="app"></main></body></html>');
+  await writeFile(resolve(root, 'teahouse.html'), '<!doctype html><title>Tea room</title><main>Real tea room</main>');
+  if (withTeahouse) prepareTeahouseDirectory(teaDirectory);
   prepareIdentityStore(mainDirectory);
-  const state = { enabled: true, vip: true, vipUntil: reader.vipUntil, unavailable: false, subject: readerId, ownerPersonal: readerId, inactiveReaders: new Set<string>() };
+  const state = { enabled: true, vip: true, vipUntil: reader.vipUntil, unavailable: false, subject: readerId, ownerPersonal: readerId, inactiveReaders: new Set<string>(), bridgeDelayMs: 0, activeBridge: 0, maximumBridge: 0 };
   const calls: string[] = [];
+  const namesInputs: string[][] = [];
   const ownerReaderFlags: boolean[] = [];
   let paused: { operation: string; remaining: number; started: () => void; release: Promise<void> } | null = null;
   const authority = createIdentityAuthority({ directory: mainDirectory, siteOrigin: main, communityOrigin: community, ownerId: authorId, secret, stateEncryptionKey: 'separate-test-encryption-key-at-least-32-chars',
-    readerIdentity: async req => { if (state.unavailable) throw Error('private source failure'); const account = req.headers.cookie === 'sansphase_reader_session=main.token' ? state.subject === readerId ? reader : observer : req.headers.cookie === 'sansphase_reader_session=main.observer' ? observer : null; return state.enabled && account ? { ...account, vip: state.vip } : null; },
+    readerIdentity: async req => { if (state.unavailable) throw Error('private source failure'); const account = req.headers.cookie === 'sansphase_reader_session=main.token' ? state.subject === readerId ? reader : observerAccount : req.headers.cookie === 'sansphase_reader_session=main.observer' ? observerAccount : null; return state.enabled && account ? { ...account, vip: state.vip } : null; },
     ownerIdentity: async req => withOwner && req.headers.cookie === 'sansphase_author_session=main.owner' ? { name: '测试作者' } : null,
-    ownerReaderIdentity: async () => withOwner ? { ...(state.ownerPersonal === readerId ? reader : observer), vip: state.vip } : null,
-    people: async authors => new Map(authors.flatMap(author => { const account = [reader, observer].find(item => item.id === author.id); return account ? [[`${author.kind}:${author.id}`, { name: account.nickname, uid: account.uid, avatar: avatarId, bio: account.signature, vip: state.vip, vipUntil: state.vipUntil, active: state.enabled, joinedAt: '2026-01-01T00:00:00Z',
+    ownerReaderIdentity: async () => withOwner ? { ...(state.ownerPersonal === readerId ? reader : observerAccount), vip: state.vip } : null,
+    people: async authors => new Map(authors.flatMap(author => { const account = author.kind === 'owner' && author.id === authorId ? { ...reader, id: authorId, uid: 'author', nickname: '测试作者' } : [reader, observerAccount].find(item => item.id === author.id); return account ? [[`${author.kind}:${author.id}`, { name: account.nickname, uid: account.uid, avatar: avatarId, bio: account.signature, vip: state.vip, vipUntil: state.vipUntil, active: state.enabled, joinedAt: '2026-01-01T00:00:00Z',
       ...(state.inactiveReaders.has(account.id) ? { active: false } : {}),
       ...(withOwner && account.id === state.ownerPersonal ? { ownerReader: true as const } : {}) }] as const] : []; })),
-    findMember: async uid => { const account = [reader, observer].find(item => item.uid === uid); return account ? { kind: 'reader', id: account.id } : null; },
-    findByNames: async names => new Map(names.filter(name => name === reader.nickname).map(name => [name, { kind: 'reader' as const, id: readerId }])),
+    findMember: async uid => { const account = [reader, observerAccount].find(item => item.uid === uid); return account ? { kind: 'reader', id: account.id } : null; },
+    findByNames: async names => new Map([reader, observerAccount].filter(account => names.includes(account.nickname)).map(account => [account.nickname, { kind: 'reader' as const, id: account.id }])),
     avatar: async () => Buffer.from('approved-avatar'),
+    invitations: {
+      attribution: async id => id === observer.id && state.enabled ? { inviter: { kind: 'reader', id: readerId }, registeredAt: '2026-10-10T00:00:00.000Z' } : null,
+      self: async id => ({ readerId: id, code: invitationCode, invitees: id === readerId ? [{ readerId: observer.id, registeredAt: '2026-10-10T00:00:00.000Z' }] : [] }),
+    },
     frameEligibility: async id => {
       if (state.unavailable) throw Error('private source failure');
       return { active: state.enabled && [readerId, observer.id].includes(id) && !state.inactiveReaders.has(id), vip: state.vip, vipUntil: state.vipUntil };
@@ -61,10 +77,15 @@ async function fixture(t: test.TestContext, withOwner = false) {
   await new Promise<void>(done => mainServer.listen(0, '127.0.0.1', done));
   const localMain = `http://127.0.0.1:${(mainServer.address() as { port: number }).port}`;
   const client = createIdentityClient({ origin: main, secret, fetch: async (input, options) => {
+    state.activeBridge++; state.maximumBridge = Math.max(state.maximumBridge, state.activeBridge);
+    try {
+    if (state.bridgeDelayMs) await new Promise(done => setTimeout(done, state.bridgeDelayMs));
     const url = new URL(String(input));
     assert.equal(url.origin, main);
+    const envelope = JSON.parse(String(options?.body || '{}')) as { operation?: string; input?: { names?: string[] } };
+    const operation = String(envelope.operation);
+    if (operation === 'names' && envelope.input?.names) namesInputs.push([...envelope.input.names]);
     const response = await fetch(localMain + url.pathname, options);
-    const operation = String(JSON.parse(String(options?.body || '{}')).operation);
     calls.push(operation);
     if(operation==='people'&&response.ok) {
       const profiles: Array<[string,{ownerReader:boolean}]> = await response.clone().json();
@@ -72,12 +93,18 @@ async function fixture(t: test.TestContext, withOwner = false) {
     }
     if (paused?.operation === operation && --paused.remaining === 0) { const gate = paused; paused = null; gate.started(); await gate.release; }
     return response;
+    } finally { state.activeBridge--; }
   } });
-  const runtime = createCommunityHostRuntime({ directory, siteOrigin: community, mainSiteOrigin: main, bridgeSecret: secret, authorId }, client);
+  const config = { directory, siteOrigin: community, mainSiteOrigin: main, bridgeSecret: secret, authorId, ...(withTeahouse ? { teahouse: { enabled: true as const, directory: teaDirectory } } : {}) };
+  const runtime = createCommunityHostRuntime(config, client);
   const server = createPreviewServer({ ...runtime, root });
+  const tea = await runtime.attachTeahouse(server);
+  // Model the production reverse proxy's fixed upstream Host; Node fetch does
+  // not preserve a caller-supplied Host when connecting to an ephemeral port.
+  if (withTeahouse) server.prependListener('request', req => { req.headers.host = 'community.sansphase.com'; });
   await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
   const local = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
-  t.after(async () => { await new Promise<void>(done => server.close(() => done())); await new Promise<void>(done => mainServer.close(() => done())); authority.close(); await runtime.close(); await rm(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
+  t.after(async () => { await runtime.closeTeahouse(); if (server.listening) await new Promise<void>(done => server.close(() => done())); await new Promise<void>(done => mainServer.close(() => done())); authority.close(); await runtime.close(); await rm(base, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
   const entry = async (expectedStatus = 200, mainToken = 'main.token') => {
     const issued = await fetch(localMain + '/api/community-entry', { method: 'POST', headers: { Origin: main, 'X-Reader-Request': '1', Cookie: `${mainToken === 'main.owner' ? 'sansphase_author_session' : 'sansphase_reader_session'}=${mainToken}` } });
     assert.equal(issued.status, 200);
@@ -97,13 +124,229 @@ async function fixture(t: test.TestContext, withOwner = false) {
     paused = { operation, remaining: occurrence, started, release: held };
     return { waiting, release };
   };
-  const purge = async () => {
-    const path = '/api/community-identity/purge', body = JSON.stringify({ operation: 'purge', input: { readerId } });
+  const purge = async (targetReaderId = readerId) => {
+    const path = '/api/community-identity/purge', body = JSON.stringify({ operation: 'purge', input: { readerId: targetReaderId } });
     const response = await fetch(local + path, { method: 'POST', headers: signIdentityRequest({ secret, method: 'POST', path, body }), body });
     assert.equal(response.status, 200); return response;
   };
-  return { directory, runtime, local, state, entry, pause, purge, calls, ownerReaderFlags };
+  return { base, root, directory, teaDirectory, config, tea, runtime, local, state, entry, pause, purge, calls, namesInputs, ownerReaderFlags };
 }
+
+const mentionNickname = 'abcdefgh';
+async function publishingFixture(t: test.TestContext, nickname = mentionNickname) {
+  const f = await fixture(t, false, false, { observerNickname: nickname });
+  seedIconConsent(f.directory);
+  // Publishing tests use an ordinary reader whose established trust avoids the
+  // unrelated newcomer review gate. The account still uses the real bridge.
+  const db = new DatabaseSync(resolve(f.directory, 'content.db'));
+  try { db.prepare("UPDATE community_members SET level=1, level_day=? WHERE member_kind='reader' AND member_id=?").run(beijingDay(Date.now()), readerId); }
+  finally { db.close(); }
+  const { cookie } = await f.entry();
+  const get = (path: string) => fetch(f.local + '/api/community/' + path, { headers: { cookie } });
+  const post = (path: string, body: object) => fetch(f.local + '/api/community/' + path, { method: 'POST',
+    headers: { cookie, Origin: community, 'X-Reader-Request': '1', 'Content-Type': 'application/json', 'X-Idempotency-Key': randomUUID() }, body: JSON.stringify(body) });
+  const uploadedTopic = async (text: string) => {
+    const bytes = await sharp({ create: { width: 32, height: 32, channels: 3, background: '#446688' } }).png().toBuffer();
+    const form = new FormData(); form.append('file', new Blob([new Uint8Array(bytes)], { type: 'image/png' }), 'synthetic.png');
+    const upload = await fetch(f.local + '/api/community/images', { method: 'POST', headers: { cookie, Origin: community, 'X-Reader-Request': '1' }, body: form });
+    const imageText = await upload.text(); assert.equal(upload.status, 201, imageText);
+    const image = JSON.parse(imageText) as { id: string };
+    const body = text + '\n\n' + bodyImageMarker(image.id);
+    return { board: 'qa', title: '合成普通读者发帖回归', body, images: [image.id], tags: [] };
+  };
+  const publish = async (text: string) => {
+    const input = await uploadedTopic(text);
+    const response = await post('topics', input);
+    const resultText = await response.text(); assert.equal(response.status, 201, resultText);
+    const topic = JSON.parse(resultText) as { id: string; pending: boolean };
+    assert.equal(topic.pending, false);
+    return { ...topic, body: input.body, imageId: input.images[0] };
+  };
+  const mentionNotices = () => {
+    const store = createCommunityStore(f.directory);
+    try { return store.members.inbox({ kind: 'reader', id: observer.id }).filter(notice => notice.type === 'mention'); }
+    finally { store.close(); }
+  };
+  return { ...f, get, post, uploadedTopic, publish, mentionNotices };
+}
+
+test('hosted publishing mention boundaries: an ordinary reader uploads and publishes without mentions', async t => {
+  const f = await publishingFixture(t), topic = await f.publish('这是没有任何提及的普通读者正文。');
+  const response = await f.get('topics/' + topic.id), raw = await response.text();
+  assert.equal(response.status, 200, raw);
+  const thread = JSON.parse(raw);
+  assert.equal(thread.topic.body, topic.body);
+  assert.deepEqual(thread.topic.images.map((image: { id: string }) => image.id), [topic.imageId]);
+  assert.deepEqual(thread.mentions, {});
+  assert.deepEqual(f.namesInputs, []);
+  assert.equal(f.mentionNotices().length, 0);
+});
+
+test('hosted publishing mention boundaries: a complete eight-character nickname still notifies its member', async t => {
+  const f = await publishingFixture(t), topic = await f.publish(`这是一条正式提及 @${mentionNickname} 的合成正文。`);
+  const response = await f.get('topics/' + topic.id), raw = await response.text();
+  assert.equal(response.status, 200, raw);
+  assert.deepEqual(JSON.parse(raw).mentions, { [mentionNickname]: observer.uid });
+  assert.equal(f.mentionNotices().length, 1);
+  assert.ok(f.namesInputs.length >= 2);
+  assert.ok(f.namesInputs.every(names => names.length === 1 && names[0] === mentionNickname));
+});
+
+test('hosted publishing mention boundaries: eight supplementary Han characters use code-point length', async t => {
+  const nickname = '𠀀'.repeat(8);
+  assert.equal(nickname.length, 16);
+  assert.equal([...nickname].length, 8);
+  const f = await publishingFixture(t, nickname), topic = await f.publish(`请教 @${nickname}，这是扩展汉字昵称的合成正文。`);
+  const response = await f.get('topics/' + topic.id), raw = await response.text();
+  assert.equal(response.status, 200, raw);
+  assert.deepEqual(JSON.parse(raw).mentions, { [nickname]: observer.uid });
+  assert.equal(f.mentionNotices().length, 1);
+  assert.ok(f.namesInputs.length >= 2);
+  assert.ok(f.namesInputs.every(names => names.length === 1 && names[0] === nickname));
+});
+
+const nonMentionTokens = [
+  ['nine-character token', '@' + mentionNickname + 'i'],
+  ['thirty-character token', '@' + mentionNickname + 'i'.repeat(22)],
+  ['over-thirty-character token', '@' + mentionNickname + 'i'.repeat(23)],
+  ['email with a long domain', 'person@' + mentionNickname + 'ijk.example'],
+  ['long npm scope', '@' + mentionNickname + 'ijk/package'],
+] as const;
+
+for (const [label, token] of nonMentionTokens) test(`hosted publishing mention boundaries: ${label} stays literal without a truncated notification`, async t => {
+  const f = await publishingFixture(t), topic = await f.publish(`下面是应当保持原样的正文内容 ${token}，它没有提及任何成员。`);
+  const response = await f.get('topics/' + topic.id), raw = await response.text();
+  assert.equal(response.status, 200, raw);
+  const thread = JSON.parse(raw);
+  assert.equal(thread.topic.body, topic.body);
+  assert.deepEqual(thread.mentions, {});
+  assert.ok(f.namesInputs.every(names => names.length === 0), 'literal tokens never supply an invalid or truncated account name');
+  assert.equal(f.mentionNotices().length, 0, 'a prefix of a longer token must not become a member mention');
+});
+
+test('hosted publishing mention boundaries: a valid nickname survives alongside long tokens, email and npm scope', async t => {
+  const f = await publishingFixture(t);
+  const text = `请教 @${mentionNickname}，其他内容只是原文：${nonMentionTokens.map(([, token]) => token).join(' ')}。`;
+  const topic = await f.publish(text);
+  const response = await f.get('topics/' + topic.id), raw = await response.text();
+  assert.equal(response.status, 200, raw);
+  assert.equal(JSON.parse(raw).topic.body, topic.body);
+  assert.deepEqual(JSON.parse(raw).mentions, { [mentionNickname]: observer.uid });
+  assert.equal(f.mentionNotices().length, 1);
+  assert.ok(f.namesInputs.every(names => names.length === 1 && names[0] === mentionNickname));
+});
+
+test('hosted publishing mention boundaries: replies preserve long tokens while notifying one complete nickname', async t => {
+  const f = await publishingFixture(t), topic = await f.publish('这是用来接收合成回复的普通正文。');
+  const body = `回复中请教 @${mentionNickname}，同时保留 ${nonMentionTokens.map(([, token]) => token).join(' ')}。`;
+  const response = await f.post(`topics/${topic.id}/replies`, { body }), raw = await response.text();
+  assert.equal(response.status, 201, raw);
+  const reply = JSON.parse(raw) as { id: string };
+  const reading = await f.get('topics/' + topic.id), threadText = await reading.text();
+  assert.equal(reading.status, 200, threadText);
+  const thread = JSON.parse(threadText);
+  assert.equal(thread.replies.find((item: { id: string }) => item.id === reply.id)?.body, body);
+  assert.deepEqual(thread.mentions, { [mentionNickname]: observer.uid });
+  assert.equal(f.mentionNotices().length, 1);
+  assert.ok(f.namesInputs.every(names => names.length === 1 && names[0] === mentionNickname));
+});
+
+test('hosted publishing mention boundaries: legacy topics and replies with literal tokens remain readable', async t => {
+  const f = await publishingFixture(t), seed = createCommunityStore(f.directory);
+  const body = `历史内容应继续可读：${nonMentionTokens.map(([, token]) => token).join(' ')}。`;
+  let topicId: string, replyId: string;
+  try {
+    const author = { kind: 'reader' as const, id: readerId };
+    topicId = seed.createTopic({ board: 'qa', author, title: '历史正文读取回归', body }).id;
+    replyId = seed.addReply({ topicId, author, body: '历史回复 ' + body }).id;
+  } finally { seed.close(); }
+  const response = await f.get('topics/' + topicId), raw = await response.text();
+  assert.equal(response.status, 200, raw);
+  const thread = JSON.parse(raw);
+  assert.equal(thread.topic.body, body);
+  assert.equal(thread.replies.find((reply: { id: string }) => reply.id === replyId)?.body, '历史回复 ' + body);
+  assert.deepEqual(thread.mentions, {});
+  assert.ok(f.namesInputs.every(names => names.length === 0));
+  assert.equal(f.mentionNotices().length, 0);
+});
+
+test('hosted publishing mention boundaries: long-only tokens cannot bypass revocation during referral lookup', async t => {
+  const f = await publishingFixture(t);
+  const input = await f.uploadedTopic('这里只有长字符串 @abcdefghi，不能使提交绕过之后的身份复核。');
+  const snapshot = () => {
+    const db = new DatabaseSync(resolve(f.directory, 'content.db'), { readOnly: true });
+    try { return Object.fromEntries(['community_topics', 'community_notifications', 'community_ledger', 'community_experience_ledger', 'community_requests']
+      .map(table => [table, db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()?.count])); }
+    finally { db.close(); }
+  };
+  const before = snapshot(), gate = f.pause('referral-attribution');
+  const posting = f.post('topics', input);
+  const reached = await Promise.race([gate.waiting.then(() => true), posting.then(() => false)]);
+  try {
+    assert.equal(reached, true, 'the write must await its real attribution response');
+    f.state.enabled = false;
+  } finally { gate.release(); }
+  const response = await posting, raw = await response.text();
+  assert.equal(response.status, 401, raw);
+  assert.deepEqual(f.namesInputs, [], 'filtering long tokens skips only name lookup, not final identity validation');
+  assert.deepEqual(snapshot(), before, 'a revoked write must not leave a topic, notification, reward or retry receipt');
+});
+
+test('hosted publishing mention boundaries: a delayed names response cannot revive a purged mention target', async t => {
+  const f = await publishingFixture(t), seed = createCommunityStore(f.directory);
+  let topicId: string;
+  try {
+    const author = { kind: 'reader' as const, id: readerId }, target = { kind: 'reader' as const, id: observer.id };
+    topicId = seed.createTopic({ board: 'qa', author, title: '旧帖提及删除竞态回归', body: `历史正文里提及 @${mentionNickname}，删除后不应复活。` }).id;
+    seed.members.notify(target, { type: 'mention', actor: author, topicId, text: '合成历史提及通知' });
+  } finally { seed.close(); }
+  const targetRows = () => {
+    const db = new DatabaseSync(resolve(f.directory, 'content.db'), { readOnly: true });
+    try { return Object.fromEntries(['community_members', 'community_notifications'].map(table =>
+      [table, db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE member_kind='reader' AND member_id=?`).get(observer.id)?.count])); }
+    finally { db.close(); }
+  };
+  assert.deepEqual(targetRows(), { community_members: 1, community_notifications: 1 });
+  const gate = f.pause('names'), reading = f.get('topics/' + topicId);
+  const reached = await Promise.race([gate.waiting.then(() => true), reading.then(() => false)]);
+  try {
+    assert.equal(reached, true, 'hold a real successful account-name response containing the target');
+    await f.purge(observer.id);
+    assert.deepEqual(targetRows(), { community_members: 0, community_notifications: 0 });
+  } finally { gate.release(); }
+  const response = await reading, raw = await response.text();
+  assert.equal(response.status, 200, raw);
+  assert.deepEqual(JSON.parse(raw).mentions, {});
+  assert.deepEqual(f.namesInputs, [[mentionNickname]]);
+  assert.deepEqual(targetRows(), { community_members: 0, community_notifications: 0 }, 'an old response cannot recreate purged member data');
+});
+
+test('invitation self projection is requested only for its tab and uses the main share origin', async t => {
+  const f = await fixture(t); seedIconConsent(f.directory);
+  const { cookie } = await f.entry(); f.calls.length = 0;
+  const ledger = await fetch(f.local + '/api/community/stardust', { headers: { cookie } });
+  assert.equal(ledger.status, 200);
+  assert.equal(f.calls.includes('referral-self'), false);
+  const response = await fetch(f.local + '/api/community/stardust?tab=invites', { headers: { cookie } });
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.referrals?.shareUrl, main + '/share/invite/' + invitationCode);
+  assert.equal(result.referrals?.records.length, 1);
+  assert.equal(result.referrals?.records[0].status, 'waiting');
+  assert.ok(f.calls.includes('referral-self'));
+});
+
+test('a purged inviter cannot be recreated by an in-flight invitation projection', async t => {
+  const f = await fixture(t); seedIconConsent(f.directory);
+  const { cookie } = await f.entry(), gate = f.pause('referral-self');
+  const pending = fetch(f.local + '/api/community/stardust?tab=invites', { headers: { cookie } });
+  const paused = await Promise.race([gate.waiting.then(() => true), pending.then(() => false)]);
+  try { assert.equal(paused, true); await f.purge(); } finally { gate.release(); }
+  assert.equal((await pending).status, 401);
+  const db = new DatabaseSync(resolve(f.directory, 'content.db'), { readOnly: true });
+  try { assert.equal(Number(db.prepare('SELECT COUNT(*) AS n FROM community_members WHERE member_id=?').get(readerId)?.n), 0); }
+  finally { db.close(); }
+});
 
 test('main frame projection uses a finite signed HK to main qualification lookup without a community session', async t => {
   const f = await fixture(t);
@@ -489,4 +732,210 @@ for (const operation of ['member', 'people']) test(`another reader's delayed ${o
     assert.equal(db.prepare("SELECT COUNT(*) AS count FROM community_members WHERE member_kind='reader' AND member_id=?").get(observer.id)?.count, 1);
   } finally { db.close(); }
   assert.equal(response.status, 404);
+});
+
+type TeaReply<T> = { ok: true; data: T } | { ok: false; status: number; error: string };
+async function teaSocket(t: test.TestContext, local: string, cookie: string, waitForMembers = false) {
+  const socket = socketClient(local, { path: '/api/teahouse/socket.io', transports: ['websocket'], reconnection: false,
+    extraHeaders: { Cookie: cookie, Origin: community, Host: 'community.sansphase.com' } });
+  t.after(() => { socket.disconnect(); });
+  // Register before connect: under load both packets can arrive in one event-loop turn.
+  const membersReady = waitForMembers ? new Promise<void>(done => socket.once('members:changed', () => done())) : Promise.resolve();
+  await new Promise<void>((done, reject) => { socket.once('connect', done); socket.once('connect_error', reject); });
+  await membersReady;
+  return socket;
+}
+const teaEmit = <T>(socket: Socket, event: string, input: unknown) => socket.timeout(8000).emitWithAck(event, input) as Promise<TeaReply<T>>;
+const teaHeaders = (cookie: string) => ({ cookie, Origin: community, Host: 'community.sansphase.com', 'X-Reader-Request': '1' });
+
+test('production tea-room is opt-in, keeps static login boundaries, and refuses overlapping or unprepared private storage', { timeout: 20_000 }, async t => {
+  const f = await fixture(t), { cookie } = await f.entry();
+  assert.equal(f.tea, undefined);
+  for (const path of ['/teahouse', '/teahouse.html', '/api/teahouse/session', '/api/teahouse/socket.io/?EIO=4&transport=polling'])
+    assert.equal((await fetch(f.local + path, { headers: teaHeaders(cookie) })).status, 404);
+  const initial = await (await fetch(f.local + '/api/content', { headers: { cookie } })).json();
+  assert.equal(initial.teahouseEnabled, false);
+  const configPath = resolve(f.base, 'community.json');
+  const config = async (teahouse: unknown) => {
+    await writeFile(configPath, JSON.stringify({ ...f.config, teahouse }), { mode: 0o600 });
+    return readCommunityHostConfig(configPath, f.root);
+  };
+  assert.deepEqual((await config({ enabled: false })).teahouse, { enabled: false });
+  for (const directory of [f.directory, resolve(f.directory, 'uploads'), f.base, f.root])
+    await assert.rejects(config({ enabled: true, directory }), /independent/);
+  await mkdir(f.teaDirectory);
+  const parsed = await config({ enabled: true, directory: f.teaDirectory });
+  assert.throws(() => createCommunityHostRuntime(parsed), /Explicit teahouse preparation/);
+  await assert.rejects(readFile(resolve(f.teaDirectory, 'db/chat.sqlite')), { code: 'ENOENT' });
+});
+
+test('mounted tea-room uses live main-site VIP on sockets and private images, and a successful send alone renews idle', { timeout: 20_000 }, async t => {
+  const f = await fixture(t, false, true), { cookie } = await f.entry();
+  assert.match(await (await fetch(f.local + '/teahouse')).text(), /请从主站进入社区/);
+  assert.match(await (await fetch(f.local + '/teahouse', { headers: { cookie } })).text(), /Real tea room/);
+  const bootstrap = await (await fetch(f.local + '/api/content', { headers: { cookie } })).json();
+  assert.equal(bootstrap.teahouseEnabled, true);
+  const token = cookie.split('=')[1];
+  const host = {
+    session(value: string) { const storage = createCommunityHostStore(f.directory); try { return storage.session(value); } finally { storage.close(); } },
+    touchSession(value: string, now: number) { const storage = createCommunityHostStore(f.directory); try { storage.touchSession(value, now); } finally { storage.close(); } },
+  };
+  // Make a measurable old idle timestamp without changing the signed main clock.
+  host.touchSession(token, Date.now() - 60_000);
+  const before = host.session(token)!.touchedAt;
+  const socket = await teaSocket(t, f.local, cookie);
+  const historyResponse = await fetch(f.local + '/api/teahouse/messages', { headers: teaHeaders(cookie) });
+  assert.equal(historyResponse.status, 200);
+  assert.equal(host.session(token)!.touchedAt, before, 'connection, roster checks and history never count as user activity');
+  const image = await sharp({ create: { width: 3, height: 3, channels: 3, background: 'red' } }).png().toBuffer();
+  const form = new FormData(); form.append('file', new Blob([new Uint8Array(image)], { type: 'image/png' }), 'image.png');
+  const uploaded = await fetch(f.local + '/api/teahouse/attachments', { method: 'POST', headers: teaHeaders(cookie), body: form });
+  assert.equal(uploaded.status, 201); const attachment = await uploaded.json();
+  const sent = await teaEmit<TeahouseMessage>(socket, 'message:send', { id: randomUUID(), text: 'real authority bridge message', attachmentIds: [attachment.id] });
+  assert.equal(sent.ok, true);
+  assert.ok(host.session(token)!.touchedAt > before);
+  assert.equal((await fetch(f.local + attachment.url, { headers: teaHeaders(cookie) })).status, 200);
+  f.state.vip = false;
+  assert.equal((await fetch(f.local + attachment.url, { headers: teaHeaders(cookie) })).status, 403);
+  assert.equal((await fetch(f.local + '/api/teahouse/messages', { headers: teaHeaders(cookie) })).status, 403);
+  const disconnected = new Promise<void>(done => socket.once('disconnect', () => done()));
+  socket.emit('message:send', { id: randomUUID(), text: 'expired vip' }, () => {});
+  await disconnected;
+  assert.ok(host.session(token), 'losing VIP must not log out the community session');
+  f.state.vip = true; f.state.enabled = false;
+  assert.equal((await fetch(f.local + '/api/teahouse/session', { headers: teaHeaders(cookie) })).status, 401);
+  assert.equal(host.session(token), null);
+});
+
+test('mounted tea-room retains real appointment and owner personal-mode boundaries', { timeout: 20_000 }, async t => {
+  const f = await fixture(t, true, true), { cookie } = await f.entry();
+  const seed = createCommunityStore(f.directory);
+  try {
+    seed.staff.bindOwner(authorId); seed.members.visit({ kind: 'reader', id: readerId });
+    seed.staff.appoint({ kind: 'owner', id: authorId }, { kind: 'reader', id: readerId }, { role: 'assistant', boards: ['vip'], permissions: ['content.inspect'], delegable: [] });
+    const assistant = await teaSocket(t, f.local, cookie);
+    const denied = await teaEmit(assistant, 'announcement:save', { title: 'no authority', text: 'assistant must not publish' });
+    assert.equal(denied.ok, false); if (!denied.ok) assert.equal(denied.status, 403);
+    f.state.vip = false;
+    assert.equal((await fetch(f.local + '/api/teahouse/session', { headers: teaHeaders(cookie) })).status, 403);
+    seed.staff.appoint({ kind: 'owner', id: authorId }, { kind: 'reader', id: readerId }, { role: 'moderator', boards: ['vip'], permissions: ['content.inspect'], delegable: [] });
+    assert.equal((await fetch(f.local + '/api/teahouse/session', { headers: teaHeaders(cookie) })).status, 200);
+    assert.equal((await fetch(f.local + '/api/community/browse-mode', { method: 'POST', headers: { ...teaHeaders(cookie), 'Content-Type': 'application/json' }, body: JSON.stringify({ reader: true }) })).status, 200);
+    assert.equal((await fetch(f.local + '/api/teahouse/session', { headers: teaHeaders(cookie + '; community_browse=reader') })).status, 403);
+    const owner = await f.entry(200, 'main.owner');
+    const ownerResponse = await fetch(f.local + '/api/teahouse/session', { headers: teaHeaders(owner.cookie) });
+    assert.equal(ownerResponse.status, 200);
+    assert.equal((await ownerResponse.json()).actor.role, 'owner');
+    // Owner personal projection is the actual reader, without author privileges.
+    assert.equal((await fetch(f.local + '/api/community/browse-mode', { method: 'POST', headers: { ...teaHeaders(owner.cookie), 'Content-Type': 'application/json' }, body: JSON.stringify({ reader: true }) })).status, 200);
+    const personal = await fetch(f.local + '/api/teahouse/session', { headers: teaHeaders(owner.cookie + '; community_browse=reader') });
+    assert.equal(personal.status, 403);
+  } finally { seed.close(); }
+});
+
+test('signed reader purge clears mounted tea-room originals and disconnects the deleted socket', { timeout: 20_000 }, async t => {
+  const f = await fixture(t, false, true), { cookie } = await f.entry();
+  const socket = await teaSocket(t, f.local, cookie);
+  const id = randomUUID(), sent = await teaEmit<TeahouseMessage>(socket, 'message:send', { id, text: 'private message to purge' });
+  assert.equal(sent.ok, true);
+  const gate = f.pause('people');
+  const history = fetch(f.local + '/api/teahouse/messages', { headers: teaHeaders(cookie) });
+  await gate.waiting;
+  try { const receipt = await (await f.purge()).json(); assert.equal(receipt.result.teahouse.messages, 1); }
+  finally { gate.release(); }
+  assert.equal((await history).status, 401);
+  const db = new DatabaseSync(resolve(f.teaDirectory, 'db/chat.sqlite'), { readOnly: true });
+  try {
+    const row = db.prepare('SELECT text,author_json,withdrawn_at FROM teahouse_messages WHERE id=?').get(id)!;
+    assert.equal(row.text, null); assert.ok(row.withdrawn_at); assert.match(String(row.author_json), /已注销用户/);
+  } finally { db.close(); }
+});
+
+test('tea-room owner mode changes invalidate the old socket and in-flight identity without ending the login session', { timeout: 20_000 }, async t => {
+  const f = await fixture(t, true, true), { cookie } = await f.entry(200, 'main.owner');
+  // Connection schedules its own people lookups for the initial member list.
+  // Drain that observed event before pausing the message's authority lookup;
+  // otherwise the presence broadcast can consume the gate while the send proceeds.
+  const socket = await teaSocket(t, f.local, cookie, true);
+  const change = (reader: unknown, currentCookie: string) => fetch(f.local + '/api/community/browse-mode', {
+    method: 'POST', headers: { ...teaHeaders(currentCookie), 'Content-Type': 'application/json' }, body: JSON.stringify({ reader }),
+  });
+  assert.equal((await change('invalid', cookie)).status, 400);
+  assert.equal(socket.connected, true);
+  const gate = f.pause('people'), staleId = randomUUID();
+  socket.emit('message:send', { id: staleId, text: 'must not be sent as previous owner' }, () => {});
+  await gate.waiting;
+  const disconnected = new Promise<void>(done => socket.once('disconnect', () => done()));
+  try {
+    const pausedDb = new DatabaseSync(resolve(f.teaDirectory, 'db/chat.sqlite'), { readOnly: true });
+    try { assert.equal(pausedDb.prepare('SELECT 1 FROM teahouse_messages WHERE id=?').get(staleId), undefined, 'the held send has not committed before its identity is switched'); }
+    finally { pausedDb.close(); }
+    assert.equal((await change(true, cookie)).status, 200); await disconnected;
+  }
+  finally { gate.release(); }
+  // A websocket mode notice can win the race against the Set-Cookie response.
+  // The old cookie must receive a retryable status without revoking the login.
+  assert.equal((await fetch(f.local + '/api/teahouse/session', { headers: teaHeaders(cookie) })).status, 409);
+  const personalCookie = cookie + '; community_browse=reader';
+  const session = await fetch(f.local + '/api/teahouse/session', { headers: teaHeaders(personalCookie) });
+  assert.equal(session.status, 200);
+  const actor = (await session.json()).actor;
+  assert.equal(actor.id, readerId); assert.equal(actor.kind, 'reader'); assert.equal(actor.role, null);
+  const personal = await teaSocket(t, f.local, personalCookie);
+  const personalDisconnected = new Promise<void>(done => personal.once('disconnect', () => done()));
+  assert.equal((await change(false, personalCookie)).status, 200);
+  await personalDisconnected;
+  assert.equal((await fetch(f.local + '/api/teahouse/session', { headers: teaHeaders(personalCookie) })).status, 409);
+  assert.equal((await (await fetch(f.local + '/api/teahouse/session', { headers: teaHeaders(cookie) })).json()).actor.role, 'owner');
+  const owner = await teaSocket(t, f.local, cookie);
+  const sent = await teaEmit<TeahouseMessage>(owner, 'message:send', { id: randomUUID(), text: 'restored author identity' });
+  assert.equal(sent.ok, true); if (sent.ok) assert.equal(sent.data.author.kind, 'owner');
+  const db = new DatabaseSync(resolve(f.teaDirectory, 'db/chat.sqlite'), { readOnly: true });
+  try { assert.equal(db.prepare('SELECT 1 FROM teahouse_messages WHERE id=?').get(staleId), undefined); }
+  finally { db.close(); }
+});
+
+test('tea-room re-enable reconciles durable deletions before opening to readers', { timeout: 20_000 }, async t => {
+  const f = await fixture(t, false, true), { cookie } = await f.entry();
+  const socket = await teaSocket(t, f.local, cookie), id = randomUUID();
+  assert.equal((await teaEmit(socket, 'message:send', { id, text: 'deleted while tea room disabled' })).ok, true);
+  await f.runtime.close();
+  const host = createCommunityHostStore(f.directory);
+  try { host.markReaderDeleted(readerId); } finally { host.close(); }
+  const replacement = createCommunityHostRuntime(f.config);
+  try {
+    await replacement.attachTeahouse(createServer());
+    const db = new DatabaseSync(resolve(f.teaDirectory, 'db/chat.sqlite'), { readOnly: true });
+    try { const row = db.prepare('SELECT text,author_json,withdrawn_at FROM teahouse_messages WHERE id=?').get(id)!; assert.equal(row.text, null); assert.ok(row.withdrawn_at); assert.match(String(row.author_json), /已注销用户/); }
+    finally { db.close(); }
+  } finally { await replacement.close(); }
+});
+
+test('mounted tea-room bounds a delayed real identity bridge across simultaneous same-account tabs', { timeout: 20_000 }, async t => {
+  const f = await fixture(t, false, true), { cookie } = await f.entry();
+  f.state.bridgeDelayMs = 30; f.state.maximumBridge = 0; f.calls.length = 0;
+  const started = performance.now();
+  const responses = await Promise.all(Array.from({ length: 12 }, () => fetch(f.local + '/api/teahouse/session', { headers: teaHeaders(cookie) })));
+  const statuses = responses.map(response => response.status);
+  assert.equal(statuses.filter(status => status === 200).length, 8);
+  assert.equal(statuses.filter(status => status === 429).length, 4);
+  assert.ok(f.state.maximumBridge <= 8);
+  assert.ok(f.calls.filter(call => call === 'session').length >= 8, 'each allowed request must verify its own current session');
+  t.diagnostic(JSON.stringify({ requests: 12, artificialBridgeDelayMs: 30, maximumBridge: f.state.maximumBridge, durationMs: Math.round(performance.now() - started) }));
+  f.state.vip = false;
+  assert.equal((await fetch(f.local + '/api/teahouse/session', { headers: teaHeaders(cookie) })).status, 403);
+});
+
+test('tea-room delayed HTTP identity replies treat a committed mode change as retryable without logging out', { timeout: 20_000 }, async t => {
+  const f = await fixture(t, true, true), { cookie } = await f.entry(200, 'main.owner');
+  const gate = f.pause('people');
+  const pending = fetch(f.local + '/api/teahouse/session', { headers: teaHeaders(cookie) });
+  await gate.waiting;
+  try {
+    const changed = await fetch(f.local + '/api/community/browse-mode', { method: 'POST', headers: { ...teaHeaders(cookie), 'Content-Type': 'application/json' }, body: JSON.stringify({ reader: true }) });
+    assert.equal(changed.status, 200);
+  } finally { gate.release(); }
+  assert.equal((await pending).status, 409);
+  const next = await fetch(f.local + '/api/teahouse/session', { headers: teaHeaders(cookie + '; community_browse=reader') });
+  assert.equal(next.status, 200); assert.equal((await next.json()).actor.kind, 'reader');
 });

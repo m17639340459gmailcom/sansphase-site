@@ -32,6 +32,7 @@ import { communityLevelExplorerHTML } from './community-level-explorer.mjs';
 import type { CommunityLevelSelection } from './community-level-explorer.ts';
 import type { CommunityGrowthState, CommunityVIPGrowthState, CommunityExperienceCatalogueItem, CommunityVIPCatalogueItem } from './community-growth.ts';
 import { vipContactURL as authorContactURL } from './vip-book-prompt.mjs';
+import { communityDeliveryQQLink, communityQQIcon } from './community-delivery-contact.mjs';
 import { communityConventionText } from './community-convention.mjs';
 import type { CommunityConvention } from './community-convention.ts';
 import { communityBadgeExplorerHTML, communityBadgeFamilyState, communityBadgeLegacyHTML, communityBadgeTierName } from './community-badge-explorer.mjs';
@@ -43,6 +44,8 @@ import type { CommunityIconSelection } from './community-icon-display.ts';
 import { communityProfileFramesHTML } from './community-profile.mjs';
 import type { CommunityProfile } from './community-profile.ts';
 import { communityBadgeFamilies, communityBadgeTiers, communityBadgeCommonRules, communityBadgeCommonRulesEn } from './community-badge-policy.mjs';
+import { communityInvitationsHTML } from './community-invitations.mjs';
+import type { CommunityInvitations } from './community-invitations.ts';
 
 /* ---------- 接口返回的数据 ---------- */
 export type CommunityEarlyBird = { person: CommunityPerson; at: string };
@@ -61,6 +64,7 @@ export type CommunityLedgerRow = {
 export type CommunityLevelProgress = { next: number; rows: Array<{ key: string; label: string; labelEn: string; need: number; have: number }>; clean: boolean };
 export type CommunityFlow = "all" | "in" | "out";
 export type CommunityStardust = {
+  referrals?: CommunityInvitations | null;
   staffRole?: CommunityStaffRole | null;
   balance: number; gainedToday: number; behaviourToday: number; dailyCap: number; checkedIn: boolean;
   month: { gained: number; spent: number }; flow: CommunityFlow; ledger: CommunityLedgerRow[];
@@ -76,7 +80,7 @@ export type CommunityShopMine = {
   balance: number; inventory: CommunityInventory; decorations: CommunityDecorations; looks: ShopItem[];
   digital: Array<{ id: string; name: string; desc: string }>; orders: CommunityOrder[];
 };
-export type CommunityDelivery = { id: string; name: string; delivery: string };
+export type CommunityDelivery = { id: string; name: string; delivery: string; contact?: 'author-qq' };
 export type CommunityRank = {
   contributions: Array<{ person: CommunityPerson; score: number; likes: number; accepted: number; featured: number }>;
   streaks: Array<{ person: CommunityPerson; streak: number }>; early: CommunityEarlyBird[];
@@ -216,6 +220,7 @@ export function communityCheckinHTML({ checkin, me = null, ...common }: Common &
 const reasonLabels: Record<string, [string, string]> = {
   initial: ["初始星尘", "Initial stardust"], checkin: ["签到", "Check-in"], "checkin-month": ["自然月满勤奖励", "Full-month attendance"], topic: ["发主题", "New topic"], reply: ["有效回复", "Reply"], like: ["收到赞", "Like received"],
   accepted: ["回答被采纳", "Accepted answer"], featured: ["被评为精华", "Featured"], report: ["举报成立", "Report upheld"],
+  referral: ["成功邀请", "Successful invitation"],
   "thank-in": ["收到感谢", "Thanks received"], "thank-out": ["感谢他人", "Thanks given"], revert: ["内容删除，收回", "Taken back"],
   penalty: ["违规扣除", "Penalty"], makeup: ["补签", "Make-up"], shop: ["兑换", "Exchange"], refund: ["兑换取消，退回", "Refund"],
   unlock: ["解锁提示词", "Prompt unlocked"], "unlock-in": ["提示词被解锁", "Prompt sold"], "bounty-freeze": ["悬赏冻结", "Bounty set aside"],
@@ -277,9 +282,9 @@ export function communityStardustHTML({ stardust, tab, levelSelection, ...common
   const { t, esc, icons = {} } = common;
   const data = readyData(stardust);
   if (!data) return pageOf("stardust", common, stardust);
-  const tabs: Array<[string, string]> = [[stardustHref(), t("明细", "Ledger")], [stardustHref("levels"), t("等级", "Levels")], [stardustHref("rules"), t("规则", "Rules")]];
-  const index = String(["ledger", "levels", "rules"].indexOf(tab));
-  const body = tab === "levels" ? communityLevelExplorerHTML(data, common, levelSelection) : tab === "rules" ? stardustRulesHTML(common) : ledgerHTML(data, common);
+  const tabs: Array<[string, string]> = [[stardustHref(), t("明细", "Ledger")], [stardustHref("levels"), t("等级", "Levels")], [stardustHref("rules"), t("规则", "Rules")], [stardustHref("invites"), t("邀请", "Invitations")]];
+  const index = String(["ledger", "levels", "rules", "invites"].indexOf(tab));
+  const body = tab === "invites" ? communityInvitationsHTML(data.referrals, common) : tab === "levels" ? communityLevelExplorerHTML(data, common, levelSelection) : tab === "rules" ? stardustRulesHTML(common) : ledgerHTML(data, common);
   const showCheckin = !data.owner && !(data.readOnly ?? data.browsingAsReader) && !data.checkedIn;
   const text = t(`今天获得 <b>${data.gainedToday}</b> 星尘，行为星尘 <b>${data.behaviourToday} / ${data.dailyCap}</b>。${showCheckin ? "今天还没签到。" : ""}`, `+<b>${data.gainedToday}</b> today; <b>${data.behaviourToday} / ${data.dailyCap}</b> from activity.${showCheckin ? " Not checked in yet." : ""}`);
   return `<section class="page community-page" data-community="stardust" data-tab="${esc(tab)}">`
@@ -292,16 +297,22 @@ export function communityStardustHTML({ stardust, tab, levelSelection, ...common
 const limitText = (item: ShopItem, t: Translate) => !item.limit ? "" : item.limit.per === "once" ? t("限兑 1 次", "Once only")
   : item.limit.per === "year" ? t(`每年限 ${item.limit.n} 次`, `${item.limit.n} a year`) : t(`每月限 ${item.limit.n} 次`, `${item.limit.n} a month`);
 const cardIcons: Record<string, string> = { makeup: "calendar", pin: "pin", highlight: "sparkles" };
+// Artwork presentation never grants a tool-card entitlement or changes the
+// item's category. Uploaded merchandise shares the existing masked material.
+const uploadedArtwork = (item: ShopItem) => item.kind !== 'frame' && typeof item.image === 'string' && /^[0-9a-f-]{36}$/.test(item.image);
+const cardArtwork = (item: ShopItem) => item.kind === 'card' || item.cat === 'digital' && item.kind === 'digital'
+  && item.artStyle === 'holo-card' && uploadedArtwork(item);
+const shopCardArtwork = (item: ShopItem) => item.kind === 'card' || uploadedArtwork(item);
 // 共用物品预览：头像框以「無」展示，昵称用示例名字，道具卡、资源和实物各自使用原有绘制。
-function itemArtHTML(item: ShopItem, inventory: CommunityInventory | null, common: Common) {
+function itemArtHTML(item: ShopItem, inventory: CommunityInventory | null, common: Common, merchandise = false) {
   const { t, esc, icons = {} } = common;
   if (item.kind === 'frame' && item.image) return `<span class="community-sart">${avatarHTML({ name: '無', role: 'reader', uid: null, frame: item.ref || `image:${item.image}` }, common, 'xl', false)}</span>`;
   const image = item.image && /^[0-9a-f-]{36}$/.test(item.image) ? `/api/community/images/${esc(item.image)}.webp` : '';
   const uploaded = image ? `<img class="community-product-image" src="${image}" alt="${esc(item.name)}" loading="lazy" decoding="async">` : '';
   const sample: CommunityPerson = { name: t("林间", "Lin"), role: "reader", uid: null, avatar: null };
   const ref = item.ref && /^[a-z]+$/.test(item.ref) ? item.ref : "";
-  if (item.kind === "card") {
-    const have = inventory && ref in inventory ? inventory[ref as keyof CommunityInventory] : 0;
+  if (merchandise ? shopCardArtwork(item) : cardArtwork(item)) {
+    const have = item.kind === 'card' && inventory && ref in inventory ? inventory[ref as keyof CommunityInventory] : 0;
     const art = uploaded ? `<span class="community-holo is-uploaded" data-community-card-art style="--card-image:url('${image}');">${uploaded}</span>` : `<span class="community-holo" data-community-card-art><span class="community-holo-ic">${icons[cardIcons[ref] || "star"] || ""}</span><b>${esc(item.name)}</b><small>CARD</small></span>`;
     return `<span class="community-sart${uploaded ? ' is-uploaded-card' : ''}">${art}${have ? `<span class="community-have">${t(`背包里有 ${have} 张`, `${have} in your bag`)}</span>` : ""}</span>`;
   }
@@ -311,6 +322,13 @@ function itemArtHTML(item: ShopItem, inventory: CommunityInventory | null, commo
   if (item.kind === "cover") return `<span class="community-sart"><span class="community-cover-sample is-cover-${ref}"><i></i><i></i></span></span>`;
   if (item.kind === "digital") return `<span class="community-sart"><span class="community-file"><i class="community-file-fold"></i><span class="community-file-lines"><i></i><i></i><i></i></span><b>${esc(item.name)}</b></span></span>`;
   return `<span class="community-sart"><span class="community-goods">${icons.package || ""}</span></span>`;
+}
+
+function shopArtHTML(item: ShopItem, inventory: CommunityInventory | null, common: Common) {
+  const art = itemArtHTML(item, inventory, common, true);
+  // Frames, name colours and image-free products retain their real previews,
+  // with the same bounded pointer material as uploaded merchandise.
+  return shopCardArtwork(item) ? art : `<span class="community-holo is-preview" data-community-card-art>${art}</span>`;
 }
 
 function redeemButtonHTML(item: CommunityShopItem, decorations: CommunityDecorations, { t, esc, icons = {} }: Common) {
@@ -339,8 +357,8 @@ function shopCardHTML(item: CommunityShopItem, shop: CommunityShop, common: Comm
   const wearingFrame = item.state.owned && item.kind === 'frame' && shop.decorations.frame === item.ref;
   const usingCover = item.state.owned && item.kind === 'cover' && shop.decorations.cover === item.ref;
   const off = item.state.code === "soldout" || item.state.code === "closed";
-  return `<article class="community-sitem community-spot community-rv${off ? " is-off" : ""}${item.state.owned ? " is-owned" : ""}" style="--i:${i + 2}">`
-    + `<button type="button" class="community-sitem-art${item.kind === 'card' ? ' is-tool-card' : ''}" data-action="community-shop-detail" data-id="${esc(item.id)}" aria-haspopup="dialog" aria-label="${esc(t(`查看${item.name}详情`, `View details for ${item.name}`))}">${itemArtHTML(item, shop.inventory, common)}${item.state.owned ? `<span class="community-owned-tag">${icons.check || ""}${t(wearingFrame ? '已佩戴' : usingCover ? '使用中' : '已拥有', wearingFrame ? 'Wearing' : usingCover ? 'In use' : 'Owned')}</span>` : ""}</button>`
+  return `<article class="community-sitem community-spot community-rv${showPrice ? ' is-merchandise' : ''}${off ? " is-off" : ""}${item.state.owned ? " is-owned" : ""}" style="--i:${i + 2}">`
+    + `<button type="button" class="community-sitem-art${(showPrice ? shopCardArtwork(item) : cardArtwork(item)) ? ' is-tool-card' : ''}" data-action="community-shop-detail" data-id="${esc(item.id)}" aria-haspopup="dialog" aria-label="${esc(t(`查看${item.name}详情`, `View details for ${item.name}`))}">${showPrice ? shopArtHTML(item, shop.inventory, common) : itemArtHTML(item, shop.inventory, common)}${item.state.owned ? `<span class="community-owned-tag">${icons.check || ""}${t(wearingFrame ? '已佩戴' : usingCover ? '使用中' : '已拥有', wearingFrame ? 'Wearing' : usingCover ? 'In use' : 'Owned')}</span>` : ""}</button>`
     + `<div class="community-sitem-body"><h3><button type="button" class="community-sitem-title" data-action="community-shop-detail" data-id="${esc(item.id)}" aria-haspopup="dialog">${esc(item.name)}${icons['chevron-right'] || ''}</button></h3>`
     + shopItemMetaHTML(item, common)
     + `<div class="community-sitem-foot">${showPrice ? `<span class="community-price">${icons.star || ""}<b>${item.price}</b></span>` : ""}${redeemButtonHTML(item, shop.decorations, common)}</div></div></article>`;
@@ -360,7 +378,7 @@ export function communityShopDetailHTML({ item, shop, showPrice, common }: Commu
   const { t, esc, icons = {} } = common;
   return `<div class="community-shop-detail-backdrop" data-a11y-dialog-hide aria-hidden="true"></div>`
     + `<section class="community-shop-detail-window" role="document"><header class="community-shop-detail-head"><h2 id="community-shop-detail-title">${esc(item.name)}</h2><button type="button" class="community-profile-close" data-a11y-dialog-hide data-shop-detail-close autofocus aria-label="${t('关闭商品详情', 'Close item details')}">${icons.close || '×'}</button></header>`
-    + `<div class="community-shop-detail-content"><div class="community-shop-detail-art"${item.kind === 'card' ? ` tabindex="0" aria-label="${esc(t(`${item.name}卡片展示`, `${item.name} card artwork`))}"` : ''}>${itemArtHTML(item, shop.inventory, common)}</div><div class="community-shop-detail-info"><p class="community-shop-detail-description">${esc(item.desc)}</p>${shopItemMetaHTML(item, common)}<div class="community-shop-detail-foot">${showPrice ? `<span class="community-price">${icons.star || ''}<b>${item.price}</b><span>${t('星尘', 'stardust')}</span></span>` : ''}${redeemButtonHTML(item, shop.decorations, common)}</div></div></div></section>`;
+    + `<div class="community-shop-detail-content"><div class="community-shop-detail-art${showPrice ? ' is-merchandise' : ''}"${showPrice || cardArtwork(item) ? ` tabindex="0" aria-label="${esc(t(`${item.name}商品展示`, `${item.name} artwork`))}"` : ''}>${showPrice ? shopArtHTML(item, shop.inventory, common) : itemArtHTML(item, shop.inventory, common)}</div><div class="community-shop-detail-info"><p class="community-shop-detail-description">${esc(item.desc)}</p>${shopItemMetaHTML(item, common)}<div class="community-shop-detail-foot">${showPrice ? `<span class="community-price">${icons.star || ''}<b>${item.price}</b><span>${t('星尘', 'stardust')}</span></span>` : ''}${redeemButtonHTML(item, shop.decorations, common)}</div></div></div></section>`;
 }
 
 // 兑换确认：写清花多少、剩多少；实物要填收货信息（只给站长看，发货或取消后删除）。
@@ -382,9 +400,10 @@ function redeemPanelHTML(item: CommunityShopItem, balance: number, inventory: Co
 }
 
 function deliveryPanelHTML(delivery: CommunityDelivery, { t, esc, icons = {} }: Common) {
+  const qq = delivery.contact === 'author-qq' ? communityDeliveryQQLink(delivery.delivery) : null;
   return `<section class="community-panel community-delivery" aria-labelledby="community-delivery-title"><p class="community-panel-title" id="community-delivery-title">${esc(delivery.name)}</p>`
     + `<pre class="community-delivery-text" data-delivery>${esc(delivery.delivery)}</pre>`
-    + `<div class="community-form-actions"><button type="button" class="community-button" data-action="community-delivery-close">${t("关闭", "Close")}</button><button type="button" class="community-button is-gold" data-action="community-copy-delivery">${icons.copy || ""}${t("复制", "Copy")}</button></div></section>`;
+    + `<div class="community-form-actions">${qq ? `<a class="community-button is-gold" href="${esc(qq)}" target="_blank" rel="noopener noreferrer" data-community-author-qq>${communityQQIcon}${t('QQ 联系作者领取', 'Contact the author on QQ')}</a>` : ''}<button type="button" class="community-button" data-action="community-delivery-close">${t("关闭", "Close")}</button><button type="button" class="community-button is-gold" data-action="community-copy-delivery">${icons.copy || ""}${t("复制", "Copy")}</button></div></section>`;
 }
 
 type ShopOptions = Common & { shop: CommunityLoad<CommunityShop>; tab: string; me?: CommunityMe | null; redeeming?: string | null; delivery?: CommunityDelivery | null };
@@ -720,7 +739,6 @@ export function communityManageHTML({ manage, tab, itemEditing = null, shippingO
   const all: Array<[string, string, string, number?]> = (!mayManage ? [] : [
     ...(permitted('content.inspect') || permitted('report.review') ? [["review", manageHref(permitted('content.inspect') ? 'queue' : 'reports'), t("内容审核", "Content review"), data && data.tab !== 'boards' ? data.counts.queue + data.counts.reports : undefined]] as Array<[string, string, string, number?]> : []),
     ...(staff === undefined || staff?.permissions.some(cap => cap.startsWith('profile.')) ? [["profiles", manageHref("profiles"), t("资料审核", "Profile review")]] as Array<[string, string, string, number?]> : []),
-    ...(permitted('content.inspect') ? [["content", manageHref("content"), t("帖子管理", "Posts")]] as Array<[string, string, string, number?]> : []),
     ...(staff !== undefined && permitted('feature.decide') ? [["features", manageHref("features"), t("精选推荐", "Featured recommendations")]] as Array<[string, string, string, number?]> : []),
     ...(permitted('banner.manage') ? [["banners", manageHref("banners"), t("横幅设置", "Banners")]] as Array<[string, string, string, number?]> : []),
     ...(owner ? [["boards", manageHref("boards"), t("板块管理", "Boards")], ["orders", manageHref("orders"), t("兑换发货", "Orders"), data?.counts.orders]] as Array<[string, string, string, number?]> : []),

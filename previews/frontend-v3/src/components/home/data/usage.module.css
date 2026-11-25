@@ -1,0 +1,205 @@
+/* Topic breakdown: one conic sweep draws the ring, bars fill with a travelling hotspot and a sheen,
+   rows stagger in, and hovering a row isolates its arc and swaps the ring's centre readout. */
+
+.arcs {
+  /* --fx-angle is registered in globals.css (<angle>), so it can animate. */
+  --fx-angle: 360deg;
+  mask-image: conic-gradient(#000 var(--fx-angle), transparent 0);
+}
+.panel:is([data-fx-state="ssr"], [data-fx-state="idle"]) .arcs {
+  --fx-angle: 0deg;
+}
+.panel[data-fx-state="play"] .arcs {
+  animation: sweep 1.8s var(--fx-ease-in-out) 0.2s both;
+}
+.panel[data-fx-state="ssr"] .arcs {
+  animation: sweep 1s var(--fx-ease) 4s both;
+}
+@keyframes sweep {
+  from {
+    --fx-angle: 0deg;
+  }
+  to {
+    --fx-angle: 360deg;
+  }
+}
+
+/* Rows */
+.panel:is([data-fx-state="ssr"], [data-fx-state="idle"]) .row {
+  opacity: 0;
+  translate: -0.75rem 0;
+}
+.panel[data-fx-state="play"] .row {
+  animation: row-in 0.9s var(--fx-ease) calc(0.3s + var(--i, 0) * 0.12s) both;
+}
+.panel[data-fx-state="ssr"] .row {
+  animation: row-in 0.6s var(--fx-ease) 4s both;
+}
+@keyframes row-in {
+  from {
+    opacity: 0;
+    translate: -0.75rem 0;
+  }
+  to {
+    opacity: 1;
+    translate: none;
+  }
+}
+
+/* Bars: quarter ticks in the track, a sliding fill with a hot leading edge, then a sheen. */
+.track {
+  background-image: repeating-linear-gradient(
+    to right,
+    transparent 0 calc(25% - 1px),
+    color-mix(in oklab, var(--fg) 12%, transparent) calc(25% - 1px) 25%
+  );
+}
+.fill {
+  --sheen: color-mix(in oklab, var(--bg) 50%, transparent);
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  border-radius: 999px;
+}
+.fill[data-lead] {
+  --sheen: color-mix(in oklab, var(--amber) 70%, transparent);
+}
+.bar {
+  position: relative;
+  height: 100%;
+  border-radius: inherit;
+}
+.bar::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 50%;
+  width: 1.5rem;
+  height: 1.5rem;
+  translate: 35% -50%;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in oklab, var(--amber) 85%, transparent), transparent);
+  opacity: 0;
+}
+.panel:is([data-fx-state="ssr"], [data-fx-state="idle"]) .bar {
+  translate: -101% 0;
+}
+.panel[data-fx-state="play"] .bar {
+  animation: bar-in 1.5s var(--fx-ease) calc(0.5s + var(--i, 0) * 0.12s) both;
+}
+.panel[data-fx-state="play"] .bar::after {
+  animation: hotspot 1.5s linear calc(0.5s + var(--i, 0) * 0.12s) both;
+}
+.panel[data-fx-state="ssr"] .bar {
+  animation: bar-in 1s var(--fx-ease) 4s both;
+}
+@keyframes bar-in {
+  from {
+    translate: -101% 0;
+  }
+  to {
+    translate: none;
+  }
+}
+@keyframes hotspot {
+  0%,
+  100% {
+    opacity: 0;
+  }
+  10%,
+  55% {
+    opacity: 1;
+  }
+}
+
+.sheen,
+.gleam {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  translate: -100% 0;
+  background: linear-gradient(100deg, transparent 25%, var(--sheen) 50%, transparent 75%);
+}
+.panel[data-fx-state="play"] .sheen {
+  animation: sheen-pass 1.2s var(--fx-ease-in-out) calc(1.4s + var(--i, 0) * 0.12s) both;
+}
+@keyframes sheen-pass {
+  from {
+    translate: -100% 0;
+  }
+  to {
+    translate: 100% 0;
+  }
+}
+
+/* Ring centre: the total, or the hovered row's share. */
+.readout {
+  transition:
+    opacity 0.35s var(--fx-ease),
+    translate 0.45s var(--fx-ease);
+}
+.entry {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  translate: 0 0.5rem;
+}
+.arc {
+  transition:
+    opacity 0.4s var(--fx-ease),
+    stroke-width 0.4s var(--fx-ease);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .panel[data-fx-state="play"] .row:hover .gleam {
+    animation: sheen-pass 1s var(--fx-ease-in-out) both;
+  }
+  .panel:has(.row:hover) .arc {
+    opacity: 0.18;
+  }
+  .panel:has(.row:hover) .total {
+    opacity: 0;
+    translate: 0 -0.5rem;
+  }
+  .panel:has(.row[data-i="0"]:hover) :is(.arc, .entry)[data-i="0"],
+  .panel:has(.row[data-i="1"]:hover) :is(.arc, .entry)[data-i="1"],
+  .panel:has(.row[data-i="2"]:hover) :is(.arc, .entry)[data-i="2"],
+  .panel:has(.row[data-i="3"]:hover) :is(.arc, .entry)[data-i="3"],
+  .panel:has(.row[data-i="4"]:hover) :is(.arc, .entry)[data-i="4"] {
+    opacity: 1;
+    translate: none;
+  }
+  .panel:has(.row[data-i="0"]:hover) .arc[data-i="0"],
+  .panel:has(.row[data-i="1"]:hover) .arc[data-i="1"],
+  .panel:has(.row[data-i="2"]:hover) .arc[data-i="2"],
+  .panel:has(.row[data-i="3"]:hover) .arc[data-i="3"],
+  .panel:has(.row[data-i="4"]:hover) .arc[data-i="4"] {
+    stroke-width: 17;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel :is(.arcs, .row, .bar, .sheen, .gleam),
+  .panel .bar::after {
+    animation: none !important;
+  }
+  .panel:is([data-fx-state="ssr"], [data-fx-state="idle"]) .arcs {
+    --fx-angle: 360deg;
+  }
+  .panel:is([data-fx-state="ssr"], [data-fx-state="idle"]) :is(.row, .bar) {
+    opacity: 1;
+    translate: none;
+  }
+}
+
+@media print {
+  .panel .arcs {
+    --fx-angle: 360deg !important;
+    animation: none !important;
+  }
+  .panel :is(.row, .bar) {
+    animation: none !important;
+    opacity: 1 !important;
+    translate: none !important;
+  }
+}

@@ -1,0 +1,281 @@
+/* ---------------------------------------------------------------- */
+/* Explorer: sphere viewport HUD                                     */
+/* ---------------------------------------------------------------- */
+.radar {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  height: 86%;
+  aspect-ratio: 1;
+  translate: -50% -50%;
+  border-radius: 50%;
+  pointer-events: none;
+  background: conic-gradient(
+    from var(--fx-angle),
+    transparent 0deg,
+    transparent 290deg,
+    color-mix(in oklab, var(--accent) 6%, transparent) 345deg,
+    color-mix(in oklab, var(--accent) 16%, transparent) 360deg
+  );
+  mask-image: radial-gradient(closest-side, #000 97%, transparent);
+  animation: sweep 7s linear infinite;
+}
+.radar[data-paused] {
+  animation-play-state: paused;
+}
+.corner {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 0 solid color-mix(in oklab, var(--accent) 60%, transparent);
+  pointer-events: none;
+}
+.corner[data-c="tl"] {
+  top: 0;
+  left: 0;
+  border-width: 1.5px 0 0 1.5px;
+}
+.corner[data-c="tr"] {
+  top: 0;
+  right: 0;
+  border-width: 1.5px 1.5px 0 0;
+}
+.corner[data-c="bl"] {
+  bottom: 0;
+  left: 0;
+  border-width: 0 0 1.5px 1.5px;
+}
+.corner[data-c="br"] {
+  bottom: 0;
+  right: 0;
+  border-width: 0 1.5px 1.5px 0;
+}
+
+/* ---------------------------------------------------------------- */
+/* Directory cards: share meter + staggered rows                     */
+/* ---------------------------------------------------------------- */
+.meter {
+  display: grid;
+  grid-template-columns: repeat(var(--n, 1), minmax(0, 1fr));
+  gap: 2px;
+  height: 6px;
+}
+.meter > span {
+  border-radius: 1px;
+  background: var(--line);
+}
+.meter > span[data-lit] {
+  background: var(--accent);
+  transform-origin: bottom;
+}
+.dir:is([data-fx-state="ssr"], [data-fx-state="idle"]) .meter > span[data-lit] {
+  scale: 1 0.25;
+  opacity: 0.35;
+}
+.dir:is([data-fx-state="ssr"], [data-fx-state="idle"]) .row {
+  opacity: 0;
+  translate: 0 8px;
+}
+.dir[data-fx-state="play"] .meter > span[data-lit] {
+  animation: segment 0.55s var(--fx-ease) calc(0.25s + var(--k, 0) * 45ms) both;
+}
+.dir[data-fx-state="play"] .row {
+  animation: rise 0.7s var(--fx-ease) calc(0.15s + var(--i, 0) * 50ms) both;
+}
+.dir[data-fx-state="ssr"] .meter > span[data-lit] {
+  animation: segment 0.6s var(--fx-ease) 4s both;
+}
+.dir[data-fx-state="ssr"] .row {
+  animation: rise 0.6s var(--fx-ease) 4s both;
+}
+
+/* ---------------------------------------------------------------- */
+/* Workflow: process rail + staggered step cards                     */
+/* ---------------------------------------------------------------- */
+.rail {
+  position: relative;
+  gap: 1.25rem;
+  align-items: center;
+  height: 1.75rem;
+}
+.railTrack,
+.railFill,
+.packetTrack {
+  position: absolute;
+  inset-inline: 0;
+  top: 50%;
+  height: 1px;
+}
+.railTrack {
+  background: var(--line);
+}
+.railFill {
+  background: linear-gradient(90deg, var(--accent), var(--amber), color-mix(in oklab, var(--accent) 30%, transparent));
+  --fx-line-delay: 0.15s;
+}
+.packetTrack {
+  overflow: hidden;
+  height: 9px;
+  translate: 0 -50%;
+}
+.packet {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  translate: -100% 0;
+}
+.packet::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 50%;
+  width: 34px;
+  height: 3px;
+  translate: 0 -50%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, transparent, var(--amber), var(--accent));
+  box-shadow: 0 0 12px 1px var(--accent-glow);
+}
+.railNode {
+  position: relative;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.55rem 0.2rem 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+}
+.railNode::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+.flow[data-fx-state="play"] .railNode {
+  animation: nodeOn 0.5s var(--fx-ease) calc(0.35s + var(--i, 0) * 0.28s) both;
+}
+.flow[data-fx-state="play"] .railNode::before {
+  animation: dotOn 0.5s var(--fx-ease) calc(0.35s + var(--i, 0) * 0.28s) both;
+}
+.flow[data-fx-state="play"] .packet {
+  animation: packet 3.4s var(--fx-ease-in-out) 1.6s infinite;
+}
+.rail[data-paused] .packet {
+  animation-play-state: paused;
+}
+.step {
+  --rise: 28px;
+}
+.flow:is([data-fx-state="ssr"], [data-fx-state="idle"]) .step {
+  opacity: 0;
+  translate: 0 28px;
+}
+.flow[data-fx-state="play"] .step {
+  animation: rise 0.9s var(--fx-ease) calc(0.1s + var(--i, 0) * 0.1s) both;
+}
+.flow[data-fx-state="ssr"] .step {
+  animation: rise 0.6s var(--fx-ease) 4s both;
+}
+
+/* ---------------------------------------------------------------- */
+@keyframes sweep {
+  to {
+    --fx-angle: 360deg;
+  }
+}
+@keyframes segment {
+  from {
+    scale: 1 0.25;
+    opacity: 0.35;
+    background: var(--line-strong);
+  }
+  55% {
+    background: var(--amber);
+  }
+  to {
+    scale: 1 1;
+    opacity: 1;
+    background: var(--accent);
+  }
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    translate: 0 var(--rise, 8px);
+  }
+  to {
+    opacity: 1;
+    translate: none;
+  }
+}
+@keyframes nodeOn {
+  to {
+    border-color: color-mix(in oklab, var(--accent) 45%, transparent);
+    color: var(--accent);
+  }
+}
+@keyframes dotOn {
+  to {
+    background: var(--accent);
+    box-shadow: 0 0 10px var(--accent-glow);
+  }
+}
+@keyframes packet {
+  0% {
+    translate: -100% 0;
+    opacity: 0;
+  }
+  8%,
+  88% {
+    opacity: 1;
+  }
+  100% {
+    translate: 0 0;
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .radar,
+  .packetTrack {
+    display: none !important;
+  }
+  .meter > span[data-lit],
+  .row,
+  .step,
+  .railNode,
+  .railNode::before {
+    animation: none !important;
+    opacity: 1 !important;
+    scale: none !important;
+    translate: none !important;
+  }
+  .railNode {
+    color: var(--accent);
+  }
+  .railNode::before {
+    background: var(--accent);
+  }
+}
+
+@media print {
+  .radar,
+  .packetTrack {
+    display: none !important;
+  }
+  .meter > span[data-lit],
+  .row,
+  .step {
+    animation: none !important;
+    opacity: 1 !important;
+    scale: none !important;
+    translate: none !important;
+  }
+}

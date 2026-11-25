@@ -3,9 +3,11 @@ import { resolve, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { publicationFiles, scanPublication } from './publication-files.mjs';
 import { prunePublications } from './publication-retention.mjs';
+import { frontendArgument } from './frontend-selection.mjs';
 
 const root=resolve('.');
-const files=await publicationFiles(root);
+const frontend=frontendArgument();
+const files=await publicationFiles(root,{frontend});
 const privateValues=[];
 for(const file of ['.local/payload-env.json','.local/site-env.json']) {
   try {
@@ -37,8 +39,8 @@ if(issues.length) {
     manifest.push({file,bytes:(await stat(destination)).size,sha256:createHash('sha256').update(await readFile(destination)).digest('hex')});
   }
   const createdAt=new Date().toISOString();
-  await writeFile(resolve(target,'.publication-complete.json'),JSON.stringify({kind:'sansphase-publication',createdAt}));
-  await writeFile(resolve(base,'latest.json'),JSON.stringify({directory:target,files:manifest,createdAt},null,2));
+  await writeFile(resolve(target,'.publication-complete.json'),JSON.stringify({kind:'sansphase-publication',createdAt,frontend}));
+  await writeFile(resolve(base,'latest.json'),JSON.stringify({directory:target,files:manifest,createdAt,frontend},null,2));
   await prunePublications(base,target);
-  console.log(JSON.stringify({status:'prepared-not-published',directory:target,files:files.length,privateValueMatches:0},null,2));
+  console.log(JSON.stringify({status:'prepared-not-published',directory:target,files:files.length,privateValueMatches:0,frontend},null,2));
 }

@@ -118,7 +118,7 @@ test('self profile edit opens a dialog instead of navigating to another page', (
 });
 
 const settle = async () => { for (let n = 0; n < 7; n++) await new Promise(resolve => setTimeout(resolve, 0)); };
-async function controller(t, { delayed = false, rejected = false, preview = false, interactive = false, moderator = false, manage = false, advice = false, member = false, updatedConvention = false, unagreed = false } = {}) {
+async function controller(t, { delayed = false, rejected = false, preview = false, interactive = false, moderator = false, manage = false, advice = false, backgroundReview = false, reviewFailure = false, member = false, updatedConvention = false, unagreed = false } = {}) {
   const dom = new JSDOM('<header id="site-header"><button>导航</button></header><main id="main"></main>', { url: `http://localhost/#/community/${manage ? 'manage/profiles' : member ? 'u/10001' : 'profile'}`, pretendToBeVisual: true });
   const w = dom.window;
   const names = ['window', 'document', 'location', 'HTMLElement', 'Element', 'Node', 'HTMLInputElement', 'HTMLTextAreaElement', 'HTMLSelectElement', 'HTMLButtonElement', 'HTMLFormElement', 'HTMLAnchorElement', 'FormData', 'File', 'Event', 'CustomEvent', 'getComputedStyle'];
@@ -133,8 +133,8 @@ async function controller(t, { delayed = false, rejected = false, preview = fals
     if (url.endsWith('/me')) return response({ ...person, agreed: !needsConvention, owner: false, mod: moderator || manage, unread: { all: 0 }, ...(updatedConvention || unagreed ? { convention: { version: 'new', agreed: !needsConvention } } : {}), management: preview ? { role: 'owner', browsingAsReader: true, ...(interactive ? { interactive: true } : {}) } : moderator || manage ? { role: 'steward', browsingAsReader: false } : undefined });
     if (url.endsWith('/convention')) return response({ version: 'new', body: '请阅读新的公约' });
     if (url.endsWith('/convention/read')) return response({ version: 'new', eligibleAt: new Date(Date.now() + 10000).toISOString() });
-    if (url.endsWith('/manage?tab=profiles')) return response({ owner: false, tab: 'profiles', counts: { queue: 0, reports: 0, orders: 0, sanctions: 0 }, kpis: { topics24h: 0, replies24h: 0 }, profiles: [{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', kind: advice ? 'nickname' : 'avatar', nickname: '读者', uid: '10001', proposedValue: advice ? '新名字' : null, avatarUrl: null, createdAt: '2026-10-07T00:00:00Z', ...(advice ? { canAdvise: true, canDecide: false, advice: [] } : {}) }], backgrounds: [] });
-    if (/\/manage\/profiles\/[^/]+\/(approve|reject|advise)$/.test(url)) { if (delayed) await new Promise(resolve => { release = resolve; }); return response({ ok: true }); }
+    if (url.endsWith('/manage?tab=profiles')) return response({ owner: false, tab: 'profiles', counts: { queue: 0, reports: 0, orders: 0, sanctions: 0 }, kpis: { topics24h: 0, replies24h: 0 }, profiles: backgroundReview ? [] : [{ id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', kind: advice ? 'nickname' : 'avatar', nickname: '读者', uid: '10001', proposedValue: advice ? '新名字' : null, avatarUrl: null, createdAt: '2026-10-07T00:00:00Z', ...(advice ? { canAdvise: true, canDecide: false, advice: [] } : {}) }], backgrounds: backgroundReview ? [{ memberUid: '10001', nickname: '读者', imageId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', imageUrl: null, createdAt: '2026-10-07T00:00:00Z', width: 800, height: 200, canAdvise: advice, canDecide: !advice }] : [] });
+    if (/\/manage\/profiles\/[^/]+\/(approve|reject|advise)$/.test(url) || url.endsWith('/manage/profile-background')) { if (delayed) await new Promise(resolve => { release = resolve; }); return reviewFailure ? response({ error: '审核通道暂不可用。' }, 503) : response({ ok: true }); }
     if (url.endsWith('/profile') && !init.method) return response(value);
     if (url.includes('/members/10001?')) return response({ person, bio: value.signature, joinedAt: null, cover: null, streak: 0, stats: { topics: 0, replies: 0, likes: 0, accepted: 0, featured: 0 }, follows: { followers: 0, following: 0 }, following: false, self: true, badges: [], muted: null, canMute: false, canAppoint: false, steward: false, tab: 'topics', topics: [], replies: [], bookmarks: [], counts: { topics: 0, replies: 0, bookmarks: 0 }, quick: null });
     if (url.endsWith('/profile') && init.method === 'POST') {
@@ -176,7 +176,7 @@ async function controller(t, { delayed = false, rejected = false, preview = fals
     cleanup = ui.mount(main, { ...common, members: false });
     await settle();
   };
-  return { w, main: manage ? main : w.document.body, page: main, ui, calls, crops, submit, remount, release: () => release?.(), resolveConvention: () => { needsConvention = false; } };
+  return { w, main: manage ? main : w.document.body, page: main, ui, calls, crops, submit, remount, release: () => release?.(), resolveConvention: () => { needsConvention = false; }, allowReview: () => { reviewFailure = false; } };
 }
 
 test('community signature submission stays on the page and sends only the signature with the write guard', async t => {
@@ -294,6 +294,32 @@ test('profile advice uses the existing advisory route, and a rejection requires 
   assert.deepEqual(JSON.parse(write.init.body), { decision: 'reject', reason: '请换成可识别的名字' });
   assert.equal(main.querySelector('[data-review-action="decide"]'), null);
 });
+
+for (const backgroundReview of [false, true]) for (const advice of [false, true]) {
+  test(`failed ${backgroundReview ? 'background' : 'profile'} ${advice ? 'advice' : 'decision'} keeps the rejection draft and permits an explicit retry`, async t => {
+    const { main, calls, w, allowReview } = await controller(t, { manage: true, backgroundReview, advice, reviewFailure: true });
+    const form = main.querySelector('form[data-community-form]');
+    const input = form.elements.namedItem('reason');
+    const reject = form.querySelector(backgroundReview ? '[value="reject"]' : '[data-decision="reject"]');
+    const submit = () => backgroundReview
+      ? form.dispatchEvent(new w.SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: reject }))
+      : reject.click();
+    const readsBefore = calls.filter(call => call.url.endsWith('/manage?tab=profiles')).length;
+    input.value = '请替换不适合公开展示的内容';
+    input.focus(); submit(); await settle();
+    assert.equal(main.querySelector('form[data-community-form]'), form, 'a failed operation must not replace the form');
+    assert.equal(input.value, '请替换不适合公开展示的内容');
+    assert.equal(input.disabled, false); assert.equal(reject.disabled, false);
+    assert.match(form.querySelector('.community-form-status').textContent, /审核通道暂不可用/);
+    assert.equal(calls.filter(call => call.url.endsWith('/manage?tab=profiles')).length, readsBefore);
+    assert.equal(calls.filter(call => call.init.method === 'POST').length, 1, 'failure must not trigger automatic resubmission');
+    allowReview(); submit(); await settle();
+    const writes = calls.filter(call => call.init.method === 'POST');
+    assert.equal(writes.length, 2);
+    assert.equal(JSON.parse(writes[1].init.body).reason, '请替换不适合公开展示的内容');
+    assert.equal(calls.filter(call => call.url.endsWith('/manage?tab=profiles')).length, readsBefore + 1, 'success refreshes the authoritative review queue');
+  });
+}
 
 test('late profile responses cannot restore data after the identity is cleared', async t => {
   const { main, ui, submit, release } = await controller(t, { delayed: true });

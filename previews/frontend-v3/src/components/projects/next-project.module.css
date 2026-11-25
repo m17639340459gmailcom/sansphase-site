@@ -1,0 +1,207 @@
+.next {
+  --fx-roll-to: var(--accent);
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+  margin-top: 1.5rem;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 1.75rem;
+  padding: 1.75rem 1.5rem;
+  background: var(--bg-elevated);
+  transition: border-color 0.4s;
+}
+.next::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(60% 90% at 100% 100%, var(--accent-soft), transparent 70%),
+    linear-gradient(to right, var(--grid) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid) 1px, transparent 1px);
+  background-size:
+    auto,
+    64px 64px,
+    64px 64px;
+  mask-image: linear-gradient(to top, #000 30%, transparent);
+}
+.next:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 5px;
+}
+.meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.title {
+  position: relative;
+  font-family: var(--font-display);
+  font-size: clamp(2.6rem, 10.5vw, 9rem);
+  font-weight: 600;
+  line-height: 0.95;
+  letter-spacing: -0.05em;
+  overflow-wrap: anywhere;
+}
+.outline {
+  display: block;
+  color: transparent;
+  -webkit-text-stroke: 1px var(--fg);
+}
+.fill {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, var(--accent) 0%, var(--amber) 55%, var(--accent-strong) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.preview {
+  width: min(100%, 22rem);
+}
+.previewCard {
+  position: relative;
+}
+.clone {
+  position: absolute;
+  inset: 0;
+}
+.foot {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.tagline {
+  max-width: 34rem;
+  color: var(--muted);
+  font-size: 0.9375rem;
+  line-height: 1.8;
+}
+.cta {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 0.875rem;
+  font-size: 0.9375rem;
+  font-weight: 500;
+}
+.arrow {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  width: 3rem;
+  height: 3rem;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+}
+.arrow::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--accent);
+  scale: 0;
+}
+.arrow svg {
+  grid-area: 1 / 1;
+}
+.arrow svg:last-child {
+  translate: -130% 130%;
+  color: var(--fx-on-accent);
+}
+
+@media (min-width: 768px) {
+  .next {
+    gap: 2.25rem;
+    padding: 2.5rem 2.75rem;
+  }
+  .foot {
+    flex-direction: row;
+    align-items: flex-end;
+    justify-content: space-between;
+  }
+}
+
+/* Hover-capable pointers: outlined until engaged, then an angled accent fill sweeps across. */
+@media (hover: hover) and (pointer: fine) {
+  .fill {
+    clip-path: polygon(0 0, 0 0, -15% 100%, -15% 100%);
+  }
+  .preview {
+    position: absolute;
+    right: clamp(1.5rem, 5vw, 4rem);
+    top: 50%;
+    width: clamp(15rem, 27vw, 25rem);
+    pointer-events: none;
+    opacity: 0;
+    translate: 0 calc(-50% + 3rem);
+    rotate: 6deg;
+    scale: 0.92;
+  }
+  .next:hover {
+    border-color: var(--line-strong);
+  }
+  .next:is(:hover, :focus-visible) .fill {
+    clip-path: polygon(0 0, 115% 0, 100% 100%, -15% 100%);
+  }
+  .next:is(:hover, :focus-visible) .preview {
+    opacity: 1;
+    translate: 0 -50%;
+    rotate: -3deg;
+    scale: 1;
+  }
+}
+.next:focus-visible .arrow {
+  border-color: var(--accent);
+}
+.next:focus-visible .arrow::before {
+  scale: 1;
+}
+.next:focus-visible .arrow svg:first-child {
+  translate: 130% -130%;
+}
+.next:focus-visible .arrow svg:last-child {
+  translate: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .next:hover .arrow {
+    border-color: var(--accent);
+  }
+  .next:hover .arrow::before {
+    scale: 1;
+  }
+  .next:hover .arrow svg:first-child {
+    translate: 130% -130%;
+  }
+  .next:hover .arrow svg:last-child {
+    translate: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fill {
+    transition: clip-path 1s var(--fx-ease);
+  }
+  .preview {
+    transition:
+      opacity 0.5s var(--fx-ease),
+      translate 0.8s var(--fx-ease),
+      rotate 0.8s var(--fx-ease),
+      scale 0.8s var(--fx-ease);
+  }
+  .arrow {
+    transition: border-color 0.3s;
+  }
+  .arrow::before {
+    transition: scale 0.5s var(--fx-ease);
+  }
+  .arrow svg {
+    transition: translate 0.5s var(--fx-ease);
+  }
+}

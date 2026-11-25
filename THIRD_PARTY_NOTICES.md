@@ -3,6 +3,10 @@
 本仓库公开可见，不代表所有代码、字体和图像采用同一开源许可证。第三方代码和素材遵循各自目录中的 LICENSE、来源记录和权利声明。未另行声明的项目代码和品牌素材保留权利。
 
 - npm 依赖锁定于 pnpm-lock.yaml；浏览器实际打包依赖的许可证由构建收集至 dist/assets/licenses/。
+- 本地性能诊断复用 GoogleChrome/web-vitals 6.2.3（Apache-2.0，https://github.com/GoogleChrome/web-vitals），使用普通入口测量 CLS、INP、LCP、FCP 和 TTFB；不引入 DOM 归因、第三方上报或会话回放。仅本地预览显式启用，完整许可随浏览器构建输出保留。
+- 本地独立管理面板采用 React-admin 5.15.4、MUI 7.3.11、Emotion 11 和 query-string 9.5.1（均为 MIT）。保留上游许可及 esbuild 生成的许可证声明；React-admin 免费核心不涉及企业付费模块。query-string 的两行导出兼容补丁、来源和验证见 docs/ADMIN-CONSOLE-LOCAL.md。本地管理入口不并入现有网站浏览器构建。
+- 会员茶室本地功能版使用 Socket.IO / socket.io-client 4.8.4（MIT，https://github.com/socketio/socket.io）提供实时通信；保留库的许可声明。账号、VIP、管理规则与内容持久化接入本站已有模块。本地版本尚未启用生产聊天服务。
+- 登录滑块的拼图生成与基础轨迹匹配复用 Tianai 1.5.5，运行在只监听本机的 Java 服务。根 LICENSE 为 Apache-2.0，Maven POM 声明 MulanPSL-2.0，服务目录如实保留来源与两种声明；未使用其 Web SDK、默认演示背景或字体。缓存、JSON 解析复用 Caffeine 与 Jackson，实际固定版本和完整许可见 server/login-captcha-service。浏览器仅按需加载本站定制的交互界面，不加载第三方运行地址；有效期、浏览器绑定、限速与持久单次消费继续在 Node 主站核验。旧 ALTCHA 依赖与 Worker 已移除。
 - 个人资料头像与背景裁剪使用 Cropper.js 2.2.0，Copyright 2015-present Chen Fengyuan，MIT 许可证。库按需加载，沿用其裁剪、拖动、缩放和图片导出能力；完整许可证随构建输出保留。
 - 社区近期页面的内存缓存使用 lru-cache 11.5.2，ISC 许可证；缓存数量有上限，账号与权限校验继续由原有服务执行。完整许可证随浏览器构建输出保留。
 - Three.js、Drei、React、React Bits 等保留原许可证及来源。字体和图标使用各自许可证。

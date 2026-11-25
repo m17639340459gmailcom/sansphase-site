@@ -5,13 +5,15 @@ import { existsSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { migrateCommunity } from './payload/community-migration.ts';
 import type { CommunityAuthor } from './community-db.ts';
+import { createTransaction } from './community-db.ts';
+import { accountSessionLifetimeMs } from './auth-session-policy.ts';
 
-export const hostSessionIdleMs = 30 * 60_000;
-export const hostSessionMaximumMs = 12 * 60 * 60_000;
+export const hostSessionIdleMs = accountSessionLifetimeMs;
+export const hostSessionMaximumMs = accountSessionLifetimeMs;
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const imageFilename = /^community-(?:image|thumb)-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.webp$/;
-export type HostSession = { tokenHash: string; sessionRef: string; kind: 'reader' | 'owner'; id: string; createdAt: number; touchedAt: number };
-type SessionRow = { token_hash: string; session_ref: string; subject_kind: 'reader' | 'owner'; subject_id: string; created_at: number; touched_at: number };
+export type HostSession = { tokenHash: string; sessionRef: string; kind: 'reader' | 'owner'; id: string; createdAt: number; touchedAt: number; expiresAt: number };
+type SessionRow = { token_hash: string; session_ref: string; subject_kind: 'reader' | 'owner'; subject_id: string; created_at: number; touched_at: number; expires_at: number };
 type FileRow = { filename: string; reason: string; attempts: number };
 const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
 const schema = `
@@ -20,6 +22,9 @@ CREATE TABLE IF NOT EXISTS community_host_sessions (
   subject_kind TEXT NOT NULL CHECK(subject_kind IN ('reader','owner')), subject_id TEXT NOT NULL,
   created_at INTEGER NOT NULL, touched_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS community_host_subject ON community_host_sessions(subject_kind,subject_id);
+CREATE TABLE IF NOT EXISTS community_host_session_lifetimes(token_hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);
+CREATE TRIGGER IF NOT EXISTS community_host_session_delete_lifetime AFTER DELETE ON community_host_sessions
+  BEGIN DELETE FROM community_host_session_lifetimes WHERE token_hash=OLD.token_hash; END;
 CREATE TABLE IF NOT EXISTS community_host_nonces (nonce TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS community_host_file_queue (
   filename TEXT PRIMARY KEY, reason TEXT NOT NULL, created_at INTEGER NOT NULL,
@@ -47,7 +52,22 @@ export async function prepareCommunityHostDirectory(directory: string) {
   } finally { content.close(); }
   const migration = await migrateCommunity(directory);
   const host = new DatabaseSync(resolve(directory, 'community-host.db'));
-  try { host.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;'); host.exec(schema); }
+  try {
+    host.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; BEGIN IMMEDIATE;');
+    try {
+      host.exec(schema);
+      const now = Date.now();
+      // Keep the original six-column session table compatible with rollback.
+      // Only explicit preparation adopts legacy rows missing lifetime metadata.
+      host.prepare(`INSERT INTO community_host_session_lifetimes(token_hash,expires_at)
+        SELECT s.token_hash,CASE WHEN s.created_at<=? AND s.touched_at<=? AND s.created_at>? AND s.touched_at>?
+          THEN s.created_at+? ELSE 0 END FROM community_host_sessions s
+        WHERE NOT EXISTS(SELECT 1 FROM community_host_session_lifetimes l WHERE l.token_hash=s.token_hash)`)
+        .run(now, now, now - 12 * 60 * 60_000, now - 30 * 60_000, hostSessionMaximumMs);
+      host.exec('DELETE FROM community_host_session_lifetimes WHERE NOT EXISTS(SELECT 1 FROM community_host_sessions s WHERE s.token_hash=community_host_session_lifetimes.token_hash)');
+      host.exec('COMMIT');
+    } catch (error) { host.exec('ROLLBACK'); throw error; }
+  }
   finally { host.close(); }
   if (process.platform !== 'win32') for (const filename of ['content.db', 'community-host.db']) await chmod(resolve(directory, filename), 0o600);
   return { prepared: true, migration };
@@ -59,10 +79,12 @@ export function createCommunityHostStore(directory: string) {
   const db = new DatabaseSync(path);
   db.exec('PRAGMA busy_timeout=5000');
   if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='community_host_entry_rates'").get()
-    || !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='community_host_deleted_readers'").get()) {
+    || !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='community_host_deleted_readers'").get()
+    || !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='community_host_session_lifetimes'").get()) {
     db.close(); throw Error('Community host preparation is required.');
   }
-  const oneSession = db.prepare('SELECT * FROM community_host_sessions WHERE token_hash=?');
+  const tx = createTransaction(db);
+  const oneSession = db.prepare('SELECT s.*,l.expires_at FROM community_host_sessions s JOIN community_host_session_lifetimes l ON l.token_hash=s.token_hash WHERE s.token_hash=?');
   const revoke = db.prepare('DELETE FROM community_host_sessions WHERE token_hash=?');
   const deleted = db.prepare('SELECT 1 FROM community_host_deleted_readers WHERE reader_id=?');
   return {
@@ -70,19 +92,24 @@ export function createCommunityHostStore(directory: string) {
     createSession(sessionRef: string, subject: CommunityAuthor, now = Date.now()) {
       if (!sessionRef || sessionRef.length > 256 || !['reader', 'owner'].includes(subject.kind) || !subject.id) throw Error('Invalid community host session.');
       if (subject.kind === 'reader' && deleted.get(subject.id)) throw Object.assign(Error('请从主站重新进入社区。'), { status: 401 });
-      db.prepare('DELETE FROM community_host_sessions WHERE created_at<=? OR touched_at<=?').run(now - hostSessionMaximumMs, now - hostSessionIdleMs);
       const token = randomBytes(32).toString('base64url');
-      db.prepare('INSERT INTO community_host_sessions VALUES(?,?,?,?,?,?)').run(hashToken(token), sessionRef, subject.kind, subject.id, now, now);
+      tx(() => {
+        db.prepare(`DELETE FROM community_host_sessions WHERE created_at<=? OR touched_at<=?
+          OR token_hash IN(SELECT token_hash FROM community_host_session_lifetimes WHERE expires_at<=?)`)
+          .run(now - hostSessionMaximumMs, now - hostSessionIdleMs, now);
+        db.prepare('INSERT INTO community_host_sessions VALUES(?,?,?,?,?,?)').run(hashToken(token), sessionRef, subject.kind, subject.id, now, now);
+        db.prepare('INSERT INTO community_host_session_lifetimes VALUES(?,?)').run(hashToken(token), now + hostSessionMaximumMs);
+      });
       return token;
     },
     session(token: string, now = Date.now()): HostSession | null {
       if (!tokenPattern.test(token)) return null;
       const row = oneSession.get(hashToken(token)) as SessionRow | undefined;
       if (!row) return null;
-      if (row.subject_kind === 'reader' && deleted.get(row.subject_id) || row.created_at > now || row.touched_at > now || now - row.created_at >= hostSessionMaximumMs || now - row.touched_at >= hostSessionIdleMs) {
+      if (row.subject_kind === 'reader' && deleted.get(row.subject_id) || row.created_at > now || row.touched_at > now || row.expires_at <= now || now - row.created_at >= hostSessionMaximumMs || now - row.touched_at >= hostSessionIdleMs) {
         revoke.run(row.token_hash); return null;
       }
-      return { tokenHash: row.token_hash, sessionRef: row.session_ref, kind: row.subject_kind, id: row.subject_id, createdAt: row.created_at, touchedAt: row.touched_at };
+      return { tokenHash: row.token_hash, sessionRef: row.session_ref, kind: row.subject_kind, id: row.subject_id, createdAt: row.created_at, touchedAt: row.touched_at, expiresAt: row.expires_at };
     },
     touchSession(token: string, now = Date.now()) {
       if (tokenPattern.test(token)) db.prepare('UPDATE community_host_sessions SET touched_at=? WHERE token_hash=?').run(now, hashToken(token));
@@ -90,6 +117,10 @@ export function createCommunityHostStore(directory: string) {
     revokeSession(token: string) { if (tokenPattern.test(token)) revoke.run(hashToken(token)); },
     revokeReader(id: string) { db.prepare("DELETE FROM community_host_sessions WHERE subject_kind='reader' AND subject_id=?").run(id); },
     readerDeleted(id: string) { return Boolean(deleted.get(id)); },
+    deletedReaderIds(after = '', limit = 100): string[] {
+      if (!Number.isInteger(limit) || limit < 1 || limit > 1000) throw Error('Invalid deleted-reader batch size.');
+      return db.prepare('SELECT reader_id FROM community_host_deleted_readers WHERE reader_id>? ORDER BY reader_id LIMIT ?').all(after, limit).map(row => String(row.reader_id));
+    },
     markReaderDeleted(id: string, now = Date.now()) {
       db.exec('BEGIN IMMEDIATE');
       try {

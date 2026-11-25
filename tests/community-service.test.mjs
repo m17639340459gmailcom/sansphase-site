@@ -40,7 +40,7 @@ test.before(async () => {
 test.after(() => cleanup(template));
 
 // r1, r2, v1 and s1 have agreed to the guidelines and reached 巡天 (L1); r3 is brand new.
-async function setup(t, { store: withStore = true, simplePosting = false, useDefault = false, identifyOverride, ownerReaderIdentityOverride, peopleOverride, vipOverride, avatarBytes, profile } = {}) {
+async function setup(t, { store: withStore = true, simplePosting = false, useDefault = false, identifyOverride, ownerReaderIdentityOverride, peopleOverride, vipOverride, avatarBytes, profile, referralAttribution, referralSelf, assertReferralActive } = {}) {
   const reservation = createServer();
   await new Promise((done) => reservation.listen(0, "127.0.0.1", done));
   const port = reservation.address().port;
@@ -84,6 +84,7 @@ async function setup(t, { store: withStore = true, simplePosting = false, useDef
     findByNames: async (names) => new Map([...Object.entries(members).map(([id, m]) => [m.name, { kind: "reader", id }]), ["無相", { kind: "owner", id: "owner" }]].filter(([name]) => names.includes(name))),
     ...(avatarBytes ? { avatarBytes } : { avatarFile: async (uid) => uid === "u1" ? resolve(directory, "uploads", `reader-avatar-${avatarId}.webp`) : null }),
     ...(profile ? { profile } : {}),
+    referralAttribution, referralSelf, assertReferralActive, referralOrigin: 'https://www.sansphase.com',
     audit: async (action, details) => { audits.push({ action, ...details }); },
   });
   const server = createPreviewServer({ contentService: { snapshot: async () => ({ data: { notes: [] } }) }, communityService, communityEnabled: true });
@@ -1854,4 +1855,120 @@ test("make-up check-ins, the 星尘 center, rankings and avatars", async (t) => 
   assert.deepEqual([avatar.status, avatar.headers.get("content-type"), await avatar.text()], [200, "image/webp", "avatar-bytes"]);
   assert.equal((await get("avatar/u2.webp", "reader=r2")).status, 404, "no approved avatar");
   assert.equal((await fetch(`${siteOrigin}/api/community/avatar/u1.webp`)).status, 401, "members only");
+});
+
+test('referral API forces invited plain-text posts to review, ignores browser attribution and rewards through single approval', async t => {
+  const attribution = { inviter: { kind: 'reader', id: 'r2' }, registeredAt: '2026-01-01T00:00:00.000Z' };
+  const { post, get, store } = await setup(t, { referralAttribution: async id => id === 'r3' ? attribution : null });
+  const created = await json(post('topics', { ...topicBody, referral: { inviter: { kind: 'reader', id: 'r1' } }, inviterId: 'r1' }, 'reader=r3'));
+  assert.equal(created.pending, true);
+  assert.equal(store.ledger.balance({ kind: 'reader', id: 'r2' }), 0);
+  assert.equal((await post(`topics/${created.id}/approve`, {}, 'reader=r3')).status, 403);
+  assert.equal((await post(`topics/${created.id}/approve`, {}, 'owner=yes')).status, 200);
+  assert.equal(store.ledger.balance({ kind: 'reader', id: 'r2' }), 15);
+  assert.equal(store.ledger.balance({ kind: 'reader', id: 'r1' }), 0);
+  assert.equal((await post(`topics/${created.id}/approve`, {}, 'owner=yes')).status, 409);
+  const ledger = await json(get('stardust', 'reader=r2'));
+  assert.equal(ledger.ledger.filter(row => row.reason === 'referral').length, 1);
+});
+
+test('referral API keeps submission and approval retryable when the account bridge fails', async t => {
+  let unavailable = true;
+  const { post, store } = await setup(t, { referralAttribution: async id => {
+    if (unavailable) throw Object.assign(new Error('Temporary authority failure'), { status: 503 });
+    return id === 'r3' ? { inviter: { kind: 'reader', id: 'r2' }, registeredAt: '2026-01-01T00:00:00.000Z' } : null;
+  } });
+  assert.equal((await post('topics', topicBody, 'reader=r3')).status, 503);
+  assert.equal(store.listTopics({ sort: 'active', page: 1, pageSize: 20 }).total, 0);
+  unavailable = false;
+  const created = await json(post('topics', topicBody, 'reader=r3'));
+  unavailable = true;
+  assert.equal((await post(`topics/${created.id}/approve`, {}, 'owner=yes')).status, 503);
+  assert.equal(store.topic(created.id).pending, true);
+  assert.equal(store.ledger.balance({ kind: 'reader', id: 'r2' }), 0);
+  unavailable = false;
+  assert.equal((await post(`topics/${created.id}/approve`, {}, 'owner=yes')).status, 200);
+  assert.equal(store.ledger.balance({ kind: 'reader', id: 'r2' }), 15);
+});
+
+test('referral bulk approval remains atomic and a final deleted-account guard prevents stale authority rewards', async t => {
+  const attribution = { inviter: { kind: 'reader', id: 'r2' }, registeredAt: '2026-01-01T00:00:00.000Z' };
+  let failingReader = 'r3', deleted = false;
+  const { post, store } = await setup(t, {
+    referralAttribution: async id => { if (id === failingReader) throw Object.assign(new Error('Authority unavailable'), { status: 503 }); return attribution; },
+    assertReferralActive: ids => { assert.ok(ids.length <= 2); if (deleted && ids.includes('r2')) throw Object.assign(new Error('Account removed'), { status: 409 }); },
+  });
+  const rows = ['r1', 'r3'].map(id => store.createTopic({ board: 'qa', author: { kind: 'reader', id }, title: '受邀成员的待审主题', body: '这是有效正文，奖励需要一次真实人工审核通过。', referral: attribution }));
+  const body = { ids: rows.map(row => row.id), action: 'approve' };
+  assert.equal((await post('manage/review', body, 'owner=yes')).status, 503);
+  assert.ok(rows.every(row => store.topic(row.id).pending));
+  failingReader = ''; deleted = true;
+  assert.equal((await post('manage/review', body, 'owner=yes')).status, 409);
+  assert.ok(rows.every(row => store.topic(row.id).pending));
+  assert.equal(store.ledger.balance({ kind: 'reader', id: 'r2' }), 0);
+  deleted = false;
+  assert.equal((await post('manage/review', body, 'owner=yes')).status, 200);
+  assert.equal(store.ledger.balance({ kind: 'reader', id: 'r2' }), 30);
+});
+
+test('referral records are fetched only for the private invitation tab and stale self results cannot recreate purged members', async t => {
+  let selfCalls = 0, wrongReader = false, deleted = false;
+  const { get, store } = await setup(t, {
+    referralSelf: async () => { selfCalls++; return { readerId: wrongReader ? 'r1' : 'r2', code: 'A'.repeat(24), invitees: [{ readerId: 'r3', registeredAt: '2026-01-01T00:00:00.000Z' }] }; },
+    assertReferralActive: ids => { assert.ok(ids.length <= 2); if (deleted && ids.includes('r3')) throw Object.assign(new Error('Account removed'), { status: 409 }); },
+  });
+  assert.equal((await json(get('stardust', 'reader=r2'))).referrals, null);
+  assert.equal(selfCalls, 0);
+  wrongReader = true;
+  assert.equal((await json(get('stardust?tab=invites', 'reader=r2'))).referrals, null);
+  assert.equal(store.referrals.needsReview('r3'), false);
+  wrongReader = false;
+  const response = await json(get('stardust?tab=invites', 'reader=r2'));
+  assert.equal(response.referrals.shareUrl, 'https://www.sansphase.com/share/invite/' + 'A'.repeat(24));
+  assert.equal(response.referrals.records[0].status, 'waiting');
+  assert.equal(response.referrals.records[0].inviteeId, 'r3');
+  store.purgeReaderData('r3', () => {}); deleted = true;
+  assert.equal((await get('stardust?tab=invites', 'reader=r2')).status, 409);
+  assert.equal(store.referrals.needsReview('r3'), false);
+});
+
+for (const bulk of [false, true]) test(`referral ${bulk ? 'bulk' : 'single'} approval confirms participant activity in the final reviewer profile batch`, async t => {
+  const attribution = { inviter: { kind: 'reader', id: 'r2' }, registeredAt: '2026-01-01T00:00:00.000Z' };
+  let attributed = false, paused = false, disabled = false, finalProfileBatches = 0;
+  let release, entered;
+  const holding = new Promise(resolve => { release = resolve; });
+  const waiting = new Promise(resolve => { entered = resolve; });
+  const guarded = [];
+  const { post, store } = await setup(t, {
+    referralAttribution: async () => { attributed = true; return attribution; },
+    identifyOverride: async () => {
+      if (attributed && !paused) { paused = true; entered(); await holding; }
+      return { kind: 'reader', id: 's1', name: members.s1.name, vip: false };
+    },
+    peopleOverride: (authors, map) => {
+      if (attributed) {
+        finalProfileBatches++;
+        assert.ok(authors.some(author => author.id === 's1'), 'the actor and referral participants use the same last batch');
+      }
+      if (disabled && map.has('reader:r2')) map.set('reader:r2', { ...map.get('reader:r2'), active: false });
+      return map;
+    },
+    // The separated community host has deletion tombstones, not a synchronized
+    // disabled flag. Its immediate local check alone cannot detect this change.
+    assertReferralActive: ids => guarded.push([...ids]),
+  });
+  store.members.setSteward({ kind: 'reader', id: 's1' }, true, ['qa']);
+  const invitees = bulk ? ['r1', 'r3'] : ['r3'];
+  const topics = invitees.map(id => store.createTopic({ ...topicBody, author: { kind: 'reader', id }, referral: attribution }));
+  const response = bulk ? post('manage/review', { ids: topics.map(topic => topic.id), action: 'approve' }, 'reader=s1')
+    : post(`topics/${topics[0].id}/approve`, {}, 'reader=s1');
+  await waiting;
+  disabled = true;
+  release();
+  assert.equal((await response).status, 200, 'an inactive invitee participant must not invalidate the active reviewer');
+  assert.equal(finalProfileBatches, 1, 'confirmation reuses the final profile batch without another round trip');
+  assert.equal(store.ledger.balance({ kind: 'reader', id: 'r2' }), 0);
+  assert.ok(topics.every(topic => !store.topic(topic.id).pending));
+  assert.ok(store.referrals.summary({ kind: 'reader', id: 'r2' }).records.every(record => record.status === 'ineligible'));
+  assert.ok(guarded.every(ids => !ids.includes('r2')), 'the final source has already excluded the disabled inviter');
 });

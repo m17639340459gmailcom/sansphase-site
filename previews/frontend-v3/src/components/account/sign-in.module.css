@@ -1,0 +1,206 @@
+.form {
+  display: grid;
+  gap: 0.625rem;
+  --field-edge: color-mix(in srgb, var(--fg) 48%, var(--bg-elevated));
+}
+
+.field { display: grid; gap: 0.25rem; font-size: 0.875rem; font-weight: 500; }
+.input, .password, .verification :global(.login-verification-control) {
+  min-width: 0;
+  min-height: 2.75rem;
+  border: 1px solid var(--field-edge);
+  border-radius: 0.625rem;
+  background: var(--account-field-fill, var(--bg-elevated));
+  color: var(--fg);
+}
+
+.input, .password input {
+  width: 100%;
+  padding-inline: 0.75rem;
+  font-size: 1rem;
+  font-weight: 400;
+}
+
+.input:focus, .password:focus-within, .verification :global(.login-verification-control):focus-visible {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: none;
+}
+
+.password { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+.password input { min-width: 0; background: transparent; outline: none; box-shadow: none; }
+.visibility { display: grid; width: 2.75rem; place-items: center; color: var(--muted); cursor: pointer; }
+.visibility:hover, .visibility:focus-visible { color: var(--fg); }
+.visibility:focus-visible { outline: none; background: var(--accent-soft); border-radius: 0.55rem; }
+
+.verification :global(.login-verification-control) {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 0.625rem;
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--line-strong));
+  padding: 0.625rem 0.75rem;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 0.875rem;
+  text-align: start;
+  cursor: pointer;
+}
+
+.verification :global(.login-verification-control)[hidden] { display: none; }
+.verification :global(.login-verification-control):disabled { color: var(--muted); cursor: wait; }
+.verification :global(.login-verification-control):not(:disabled):hover { border-color: var(--accent); }
+.verification :global(.login-verification-control)[data-state="verified"] { border-color: var(--accent); color: var(--accent-strong); }
+.verification :global(.login-verification-control-icon) {
+  width: 1.125rem;
+  height: 1.125rem;
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.65;
+}
+
+.verification :global([data-login-verification-check]) { visibility: hidden; }
+.verification :global([data-state="verified"] [data-login-verification-check]) { visibility: visible; }
+
+.verificationPopover {
+  --text: var(--fg);
+  --manage-edge: var(--line-strong);
+  --manage-inset: var(--bg-elevated);
+  --manage-panel: var(--bg-elevated);
+  --signal: var(--accent-strong);
+  --focus-edge: var(--accent);
+  position: fixed;
+  z-index: 60;
+  inset: 0 auto auto 0;
+  width: min(20rem, calc(100vw - 1.5rem));
+  max-width: min(21rem, calc(100vw - 1.5rem));
+  margin: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  visibility: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 0.75rem;
+  background: var(--bg-elevated);
+  color: var(--fg);
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--bg) 45%, #000 18%, transparent);
+}
+
+/* Position and focus must take effect together, including with reduced motion. */
+.verificationPopover, .verificationPopover * { transition-property: none; }
+
+.verificationPopover:global(.reader-card--auth) :global(.login-slider) {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+}
+
+.verificationScrollSpace {
+  position: absolute;
+  inset-inline-start: 0;
+  width: 1px;
+  height: 1px;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.feedback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--account-error, #a62c3b) 25%, var(--line));
+  border-radius: 0.625rem;
+  padding: 0.625rem 0.75rem;
+}
+
+.error { color: var(--account-error, #a62c3b); font-size: 0.875rem; line-height: 1.5; }
+:global(.dark) :is(.form, .signedIn) { --account-error: #ffadb7; }
+:global(.dark) .submit { --action-fg: var(--bg); }
+
+.submit, .signOut {
+  min-height: 2.75rem;
+  border: 1px solid transparent;
+  border-radius: 0.625rem;
+  padding-inline: 1rem;
+  font-size: 0.9375rem;
+  font-weight: 650;
+  cursor: pointer;
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.submit { width: 100%; background: var(--accent); color: var(--action-fg, white); }
+.submit:enabled:hover, a.submit:hover { background: color-mix(in srgb, var(--accent) 88%, var(--fg)); }
+.submit:disabled, .signOut:disabled {
+  border-color: var(--line-strong);
+  background: var(--bg);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.submit[aria-busy="true"] { cursor: wait; }
+.signOut { width: fit-content; border-color: var(--line-strong); }
+.signOut:enabled:hover { border-color: var(--accent); background: var(--accent-soft); }
+.signedIn { display: grid; gap: 0.375rem; }
+.signedInActions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-block-start: 0.5rem; }
+.signedInActions .submit { display: inline-flex; align-items: center; width: fit-content; }
+
+.flowLinks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.375rem 1rem;
+  margin-block-start: 0.25rem;
+  font-size: 0.875rem;
+}
+
+.flowLinks a, .textAction {
+  width: fit-content;
+  color: var(--accent-strong);
+  font-weight: 550;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+.textAction { font-size: 0.875rem; cursor: pointer; }
+.textAction:disabled { color: var(--muted); cursor: wait; }
+.message { font-size: 0.875rem; line-height: 1.55; color: var(--muted); }
+
+.profile {
+  display: grid;
+  gap: 0.75rem;
+  border-block: 1px solid var(--line);
+  margin-block: 0.375rem;
+  padding-block: 0.75rem;
+}
+.profileHeader, .avatarActions, .membership div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.375rem 0.75rem;
+}
+.avatar {
+  display: grid;
+  width: 3.25rem;
+  height: 3.25rem;
+  align-items: center;
+  justify-items: center;
+  overflow: hidden;
+  flex: 0 0 auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 1.125rem;
+  font-weight: 650;
+}
+.avatar img { width: 100%; height: 100%; object-fit: cover; }
+.profileDetails { min-width: 0; overflow-wrap: anywhere; }
+.profileDetails h2 { font-weight: 650; }
+.profileEditor summary { cursor: pointer; font-size: 0.875rem; font-weight: 600; }
+.profileEditor > * + * { margin-block-start: 0.625rem; }
+.membership { display: grid; gap: 0.25rem; font-size: 0.875rem; }
+.membership div { justify-content: space-between; }
+.membership dt { color: var(--muted); }
+.membership dd { overflow-wrap: anywhere; }

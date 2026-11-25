@@ -2,7 +2,7 @@ import {byteRange} from '../http-range.ts';
 import {withStreamUpload,uploadLimits} from '../stream-upload.ts';
 import { createLocalReq, logoutOperation } from "payload";
 import { randomUUID, createHash } from "node:crypto";
-import { createImageVariants } from '../image-variants.ts';
+import { createImageVariants, homeCoverWidth } from '../image-variants.ts';
 import { createAudioVariants } from '../audio-variants.ts';
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
@@ -10,7 +10,7 @@ import { Readable } from "node:stream";
 import { basename, resolve } from "node:path";
 import { isPublished, uuidPattern } from "../content-service.ts";
 import { createMediaRetention } from './media-retention.ts';
-import type { Payload } from 'payload';
+import type { Payload, SelectType } from 'payload';
 import type { IncomingMessage } from 'node:http';
 import { strictPayloadIdentity } from './strict-identity.ts';
 
@@ -23,6 +23,16 @@ type StreamFile = {name: string; mimetype: string; size: number; tempFilePath: s
 const fail = (message: string, status = 400) =>
   Object.assign(new Error(message), { status });
 const collections = new Set(["articles", "announcements", "library_entries"]);
+// Select only fields consumed by the public projection. Author reads and
+// previews keep their complete records, including pending editor changes.
+const publicContentFields = {
+  slug: true, status: true, title: true, summary: true, category: true,
+  tags: true, body: true, cover: true, published_at: true, date_created: true,
+} as const satisfies SelectType;
+const publicMediaFields = {
+  title: true, originalName: true, filename: true, mimeType: true,
+  filesize: true, width: true, height: true,
+} as const satisfies SelectType;
 export function createPayloadStore(payload: Payload, { directory, authorId, mediaRetention = createMediaRetention({ payload, directory }) }: {directory: string; authorId: string; mediaRetention?: ReturnType<typeof createMediaRetention>}) {
   const imageVariant = createImageVariants(directory);
   const audioVariant = createAudioVariants(directory);
@@ -50,17 +60,18 @@ export function createPayloadStore(payload: Payload, { directory, authorId, medi
     user: await identity(token),
     overrideAccess: false,
   });
-  async function mediaRecord(id: string) {
+  async function mediaRecord(id: string, select?: SelectType) {
     if (!uuidPattern.test(id || "")) throw fail("文件不存在。", 404);
-    return payload.findByID({ collection: "media", id });
+    return payload.findByID({ collection: "media", id, ...(select ? {select} : {}) });
   }
-  async function readMedia(id: string,rangeHeader: string | undefined, imageWidth: string | number | null | undefined,{streaming=false,presentation=false}: {streaming?: boolean; presentation?: boolean}={}) {
+  async function readMedia(id: string,rangeHeader: string | undefined, imageWidth: string | number | null | undefined,{streaming=false,presentation=false,homeCover=false}: {streaming?: boolean; presentation?: boolean; homeCover?: boolean}={}) {
     // Internal only: callers must authorize the owner or check published references first.
     const row = await mediaRecord(id);
     if (!row.filename || basename(row.filename) !== row.filename)
       throw fail("文件不存在。", 404);
     const original = resolve(directory, "uploads", row.filename);
-    const variant = await imageVariant(original, imageWidth, row.mimeType || '',presentation);
+    const variant = await imageVariant(original, homeCover ? homeCoverWidth : imageWidth, row.mimeType || '',homeCover ? 'home-cover' : presentation);
+    if (homeCover && !variant) throw fail('封面不存在。', 404);
     const audio = streaming ? await audioVariant(original,row.mimeType || '') : null;
     const path = variant || audio || original;
     const info = await stat(path);
@@ -74,9 +85,9 @@ export function createPayloadStore(payload: Payload, { directory, authorId, medi
         "Content-Type": variant ? 'image/webp' : audio ? 'audio/mpeg' : row.mimeType || "application/octet-stream",
         "ETag": etag,
         "Content-Length": String(range?range.end-range.start+1:size),
-        'Accept-Ranges':'bytes',
+        ...(homeCover ? {} : {'Accept-Ranges':'bytes'}),
         ...(range?{'Content-Range':`bytes ${range.start}-${range.end}/${size}`}:{ }),
-        "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(row.originalName || row.filename)}`,
+        ...(homeCover ? {} : { "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(row.originalName || row.filename)}` }),
       },
     });
   }
@@ -88,12 +99,12 @@ export function createPayloadStore(payload: Payload, { directory, authorId, medi
       type: row.mimeType,
       filesize: row.filesize,
     };
-  async function hydrate(row: CmsRecord) {
+  async function hydrate(row: CmsRecord, readRecord = mediaRecord) {
     const ids = new Set([row.cover, row.showcase_cover, ...String(row.body || '').matchAll(/\/(?:assets|api\/media)\/([0-9a-f-]{36})/gi)].map(value=>Array.isArray(value)?value[1]:value).filter(id=>uuidPattern.test(id || '')));
     const imageDimensions: Record<string, {width: number; height: number}> = {};
     await Promise.all([...ids].map(async id=>{
       try {
-        const file = await mediaRecord(id);
+        const file = await readRecord(id);
         if(file.width > 0 && file.height > 0) imageDimensions[id] = {width:file.width,height:file.height};
       } catch(error) {if((error as {status?: number}).status !== 404) throw error;}
     }));
@@ -104,13 +115,13 @@ export function createPayloadStore(payload: Payload, { directory, authorId, medi
         (row.attachments || []).map(async (item: CmsRecord) => ({
           id: item.id,
           directus_files_id: fileDTO(
-            await mediaRecord(
+            await readRecord(
               item.directus_files_id?.id || item.directus_files_id,
             ),
           ),
         })),
       ),
-      ...(row.file ? { file: fileDTO(await mediaRecord(row.file)) } : {}),
+      ...(row.file ? { file: fileDTO(await readRecord(row.file)) } : {}),
     };
   }
   async function profile(token: string | undefined) {
@@ -296,6 +307,18 @@ export function createPayloadStore(payload: Payload, { directory, authorId, medi
     readMedia,
     async publicData() {
       const snapshotStartedAt=Date.now();
+      // Share in-flight metadata reads only within this rebuild. Keep rejected
+      // reads as rejected promises: an optional missing image must not turn a
+      // required attachment with the same ID into a successful empty result.
+      const media = new Map<string, ReturnType<typeof mediaRecord>>();
+      const readPublicMedia = (id: string) => {
+        let record = media.get(id);
+        if (!record) {
+          record = mediaRecord(id, publicMediaFields);
+          media.set(id, record);
+        }
+        return record;
+      };
       // Fixed server-side queries. Never expose arbitrary Local API access to visitors.
       const [articles, profile, announcements, library] = await Promise.all([
         payload.find({
@@ -303,33 +326,40 @@ export function createPayloadStore(payload: Payload, { directory, authorId, medi
           where: { status: { equals: "published" } },
           sort: ["-published_at", "-date_created"],
           pagination: false,
+          select: {...publicContentFields, attachments: true},
         }),
-        payload.find({ collection: "site_profile", limit: 1 }),
+        payload.find({ collection: "site_profile", limit: 1, select: {
+          name: true, signature: true, bio: true, avatar: true, background: true,
+          social_links: true, music_settings: true, appearance: true, content_order: true,
+        } }),
         payload.find({
           collection: "announcements",
           where: { status: { equals: "published" } },
           sort: "sort",
           pagination: false,
+          select: {status: true, title: true, summary: true, image: true, link: true},
         }),
         payload.find({
           collection: "library_entries",
           where: { status: { equals: "published" } },
           sort: ["-published_at", "date_created"],
           pagination: false,
+          select: {...publicContentFields, kind: true, showcase_cover: true,
+            vip_only: true, file: true, external_url: true},
         }),
       ]);
       return [
         await Promise.all(
-          articles.docs.filter((row) => isPublished(row as unknown as {status: string; published_at?: string})).map(hydrate),
+          articles.docs.filter((row) => isPublished(row as unknown as {status: string; published_at?: string})).map(row => hydrate(row, readPublicMedia)),
         ),
         profile.docs[0],
         announcements.docs,
         await Promise.all(
-          library.docs.filter((row) => isPublished(row as unknown as {status: string; published_at?: string})).map(hydrate),
+          library.docs.filter((row) => isPublished(row as unknown as {status: string; published_at?: string})).map(row => hydrate(row, readPublicMedia)),
         ),
         Math.min(Infinity,...[...articles.docs,...library.docs]
           .filter(row=>row.status==='published')
-          .map(row=>Date.parse(row.published_at)).filter(time=>time>snapshotStartedAt)),
+          .map(row=>Date.parse(String(row.published_at))).filter(time=>time>snapshotStartedAt)),
       ];
     },
     async preview(id: string, cookie: string, kind='articles') {

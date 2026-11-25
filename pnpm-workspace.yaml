@@ -7,5 +7,10 @@ overrides:
   '@esbuild-kit/core-utils>esbuild': 0.25.4
   # Payload 3.89 still requests vulnerable SMTP/HTTP/URI dependencies; pin the reviewed security fixes.
   '@payloadcms/email-nodemailer>nodemailer': 10.0.9
-  'payload>undici': 7.29.1
+  'payload>undici': 7.30.2
   'ajv>fast-uri': 3.1.8
+  # Use the maintained URI decoder; preserve RA's named imports via a tiny export adapter.
+  'ra-core@5.15.4>query-string': 9.5.1
+  'ra-ui-materialui@5.15.4>query-string': 9.5.1
+patchedDependencies:
+  query-string@9.5.1: patches/query-string@9.5.1.patch

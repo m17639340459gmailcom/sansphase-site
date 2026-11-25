@@ -1,0 +1,430 @@
+.root {
+  position: relative;
+  isolation: isolate;
+}
+
+.stage {
+  --card-width: 66%;
+  --step: 67%;
+  --depth: -180px;
+  --turn: -22deg;
+  --shrink: 0.06;
+  --dof: 3px;
+  position: relative;
+  display: grid;
+  place-items: center;
+  padding-block: 3.5rem 6rem;
+  perspective: 1500px;
+  isolation: isolate;
+  touch-action: pan-y pinch-zoom;
+  user-select: none;
+}
+
+/* The spacer tracks the real card size, keeping the section stable on resize. */
+.stage::before {
+  content: "";
+  width: var(--card-width);
+  max-width: 780px;
+  aspect-ratio: 16 / 10;
+}
+
+.glow {
+  position: absolute;
+  inset: 0 -10%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 30% 14% at 50% 90%, color-mix(in oklab, var(--accent) 12%, transparent), transparent 70%),
+    radial-gradient(ellipse at 50% 60%, var(--accent-soft), transparent 65%);
+}
+
+/*
+ * Every card is placed from one continuous offset: --offset from the carousel plus --shift while
+ * a drag scrubs it, so position, depth, turn, blur and fog all follow the finger.
+ */
+.card {
+  --o: calc(var(--offset) + var(--shift, 0));
+  --d: max(var(--o), -1 * var(--o));
+  position: absolute;
+  /* Wide range: z-index rounds to integers, and mid-drag distances differ by fractions. */
+  z-index: calc(1000 - var(--d) * 200);
+  width: var(--card-width);
+  max-width: 780px;
+  transform-style: preserve-3d;
+  transform: translateX(calc(var(--o) * var(--step)))
+    translateZ(calc(var(--d) * var(--depth)))
+    rotateY(calc(clamp(-1, var(--o), 1) * var(--turn)))
+    scale(calc(1 - var(--d) * var(--shrink)));
+  opacity: clamp(0, 2 - var(--d), 1);
+  transition:
+    transform 800ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 600ms ease,
+    filter 700ms var(--fx-ease);
+}
+
+/*
+ * Depth of field. The front card keeps `filter: none` (a filter would flatten its 3D tilt),
+ * except mid-scrub, where tilt is off and focus should pull across continuously.
+ */
+.card:not([data-active="true"]),
+.stage[data-scrub] .card {
+  filter: blur(calc(min(var(--d), 1) * var(--dof)));
+}
+
+.card[data-distant="true"] {
+  pointer-events: none;
+}
+
+.stage[data-scrub] .card,
+.stage[data-scrub] .fog {
+  transition-duration: 0s;
+}
+
+.frame {
+  position: relative;
+  transform-style: preserve-3d;
+  border: 1px solid var(--line-strong);
+  border-radius: 13px;
+  background: var(--bg-elevated);
+  box-shadow: 0 22px 45px -28px rgba(0, 0, 0, 0.45), 0 6px 12px -8px rgba(0, 0, 0, 0.2);
+  -webkit-box-reflect: below 12px linear-gradient(transparent 80%, rgb(0 0 0 / 0.16));
+  transition:
+    border-color 600ms var(--fx-ease),
+    box-shadow 600ms var(--fx-ease);
+}
+
+/* Thickness behind the glass; z-index keeps it under the chrome when the reflection flattens 3D. */
+.frame::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: -1px;
+  border: 1px solid var(--line-strong);
+  border-radius: inherit;
+  background: var(--bg-elevated);
+  transform: translateZ(-5px);
+}
+
+/* Light screens on a dark floor reflect brighter; keep it a sheen. */
+:global(.dark) .frame {
+  -webkit-box-reflect: below 12px linear-gradient(transparent 82%, rgb(0 0 0 / 0.09));
+}
+
+.card[data-active="true"] .frame {
+  border-color: color-mix(in oklab, var(--accent) 32%, var(--line-strong));
+  box-shadow:
+    0 22px 45px -28px rgba(0, 0, 0, 0.45),
+    0 6px 12px -8px rgba(0, 0, 0, 0.2),
+    0 44px 80px -48px var(--accent-glow);
+}
+
+.chrome {
+  display: flex;
+  height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-inline: 12px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+
+.chrome i {
+  display: block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--line-strong);
+  transition: background-color 500ms var(--fx-ease);
+}
+
+/* The front window powers on. */
+.card[data-active="true"] .chrome i:nth-child(1) {
+  background: var(--accent);
+}
+
+.card[data-active="true"] .chrome i:nth-child(2) {
+  background: var(--amber);
+  transition-delay: 90ms;
+}
+
+.card[data-active="true"] .chrome i:nth-child(3) {
+  background: var(--cool);
+  transition-delay: 180ms;
+}
+
+.screen {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  margin: 5px;
+  border-radius: 5px 5px 8px 8px;
+  background: var(--bg);
+}
+
+.shot {
+  position: relative;
+}
+
+/* The front card's named copy for the route morph, stacked exactly over the real shot. */
+.clone {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  pointer-events: none;
+}
+
+/* A specular band crosses the glass each time a project comes to the front. */
+.gloss {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  translate: -110% 0;
+  background: linear-gradient(
+    105deg,
+    transparent 32%,
+    var(--fx-glare) 47%,
+    color-mix(in oklab, var(--amber) 16%, transparent) 51%,
+    transparent 66%
+  );
+}
+
+.stage[data-live] .card[data-active="true"] .gloss {
+  animation: gloss 1.4s var(--fx-ease) 0.3s both;
+}
+
+/* Pointer-tracked highlight on the front screen. */
+.glare {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    radial-gradient(26rem circle at var(--mx, 50%) var(--my, -40rem), var(--fx-glare), transparent 42%),
+    radial-gradient(20rem circle at var(--mx, 50%) var(--my, -40rem), color-mix(in oklab, var(--accent) 10%, transparent), transparent 62%);
+  transition: opacity 0.5s var(--fx-ease);
+}
+
+.root[data-fx-spot-active] .card[data-active="true"] .glare {
+  opacity: 0.6;
+}
+
+/* Atmospheric fade toward the page colour for cards out of focus. */
+.fog {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: var(--bg);
+  opacity: calc(min(var(--d), 1) * 0.42);
+  transition: opacity 700ms var(--fx-ease);
+}
+
+.hitArea {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  cursor: pointer;
+  background: transparent;
+}
+
+.hitArea:focus-visible {
+  outline-offset: 4px;
+  border-radius: inherit;
+}
+
+/* Giant project index, sunk behind the section's bottom edge. */
+.backdrop {
+  position: absolute;
+  right: 0;
+  bottom: -4rem;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.numeral {
+  --roll-height: 1em;
+  position: relative;
+  font-family: var(--font-display);
+  font-size: clamp(9rem, 26vw, 22rem);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.05em;
+  translate: 0 30%;
+  user-select: none;
+}
+
+.numeralLit {
+  position: absolute;
+  inset: 0;
+}
+
+.control {
+  position: relative;
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: color 160ms, border-color 160ms, background-color 160ms;
+}
+
+.control:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.control > svg:not(.ring) {
+  transition: translate 300ms var(--fx-ease);
+}
+
+.prev:hover > svg {
+  translate: -2px 0;
+}
+
+.next:hover > svg {
+  translate: 2px 0;
+}
+
+/* Countdown to the next project, synced with the active tab's bar. */
+.ring {
+  position: absolute;
+  inset: -1px;
+  width: calc(100% + 2px);
+  height: calc(100% + 2px);
+  rotate: -90deg;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.ringFill {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 1;
+}
+
+.ringFill:is([data-mode="run"], [data-mode="hold"]) {
+  animation: ring var(--cycle) linear both;
+}
+
+.ringFill[data-mode="hold"] {
+  animation-play-state: paused;
+}
+
+.tab {
+  position: relative;
+}
+
+.track {
+  position: absolute;
+  inset: auto 0 0;
+  height: 2px;
+  overflow: hidden;
+  transition: background-color 300ms ease;
+}
+
+.tab[aria-pressed="true"] .track {
+  background: var(--line-strong);
+}
+
+.fill {
+  position: absolute;
+  inset: 0;
+  background: var(--accent);
+  transform-origin: left center;
+}
+
+.fill:is([data-mode="run"], [data-mode="hold"]) {
+  animation: progress var(--cycle) linear both;
+}
+
+.fill[data-mode="hold"] {
+  animation-play-state: paused;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .tab[aria-pressed="false"]:hover .track {
+    background: var(--line);
+  }
+}
+
+@media (min-width: 768px) {
+  .backdrop {
+    bottom: -6rem;
+  }
+}
+
+@media (max-width: 639px) {
+  .stage {
+    --card-width: 86%;
+    --step: 94%;
+    --depth: -75px;
+    --turn: -12deg;
+    --shrink: 0;
+    --dof: 2px;
+    padding-block: 1.75rem 3rem;
+    perspective: 900px;
+  }
+
+  .chrome {
+    height: 25px;
+    padding-inline: 9px;
+  }
+
+  .frame {
+    border-radius: 9px;
+  }
+
+  .screen {
+    margin: 3px;
+    border-radius: 3px 3px 6px 6px;
+  }
+}
+
+@keyframes gloss {
+  from {
+    translate: -110% 0;
+  }
+  to {
+    translate: 110% 0;
+  }
+}
+
+@keyframes progress {
+  from {
+    scale: 0 1;
+  }
+  to {
+    scale: 1 1;
+  }
+}
+
+@keyframes ring {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .fog,
+  .frame,
+  .chrome i,
+  .control,
+  .control > svg,
+  .track {
+    transition: none;
+  }
+
+  .gloss {
+    display: none;
+  }
+}

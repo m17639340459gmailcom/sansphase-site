@@ -47,6 +47,62 @@ async function fixture(t, { hash = '#/community/shop', viewer = person, data = s
   return { w, main, ui, requests, data, viewer: currentViewer, remount, retry };
 }
 
+test('the actual shop response renders digital and tool artwork identically and supports pointer interaction without changing purchase data', async t => {
+  const data = structuredClone(merchandise);
+  data.items = [
+    { ...product, id: 'month-card', name: 'GPT Plus月卡', price: 1500, stock: 18, limit: null, state: { ...product.state, left: 18 } },
+    { ...product, id: 'makeup-card', cat: 'card', kind: 'card', ref: 'makeup' },
+    { ...product, id: 'goods-photo', cat: 'goods', kind: 'goods' },
+  ];
+  const { w, main, requests } = await fixture(t, { data });
+  const before = requests.length;
+  for (const entry of main.querySelectorAll('.community-sitem-art')) {
+    assert.ok(entry.classList.contains('is-tool-card'));
+    const art = entry.querySelector('.community-holo.is-uploaded[data-community-card-art]');
+    assert.ok(art, 'the loaded API response must reach the shared renderer, even without artStyle');
+    entry.getBoundingClientRect = () => ({ left: 0, top: 0, width: 208, height: 208 });
+    entry.dispatchEvent(new w.MouseEvent('pointermove', { bubbles: true, clientX: 187.2, clientY: 20.8 }));
+    assert.equal(art.style.getPropertyValue('--holo-ry'), '3.2deg');
+    entry.click();
+    const detail = w.document.querySelector('.community-shop-detail-art');
+    assert.ok(detail.querySelector('.community-holo.is-uploaded[data-community-card-art]'));
+    w.document.querySelector('[data-shop-detail-close]').click();
+  }
+  assert.equal(requests.length, before, 'interactions do not fetch, redeem or mutate stock');
+  assert.deepEqual(data.items.map(item => [item.cat, item.kind, item.price, item.state.left]), [['digital', 'digital', 1500, 18], ['card', 'card', 8, 98], ['goods', 'goods', 8, 98]]);
+});
+
+test('actual decoration previews reuse bounded pointer feedback and keep touch, reduced motion and dialog cleanup intact', async t => {
+  const data = structuredClone(merchandise);
+  data.items = ['frame', 'color', 'cover', 'digital', 'goods'].map(kind => ({ ...product, id: `preview-${kind}`, cat: ['frame', 'color', 'cover'].includes(kind) ? 'look' : kind, kind, image: null, ref: kind === 'color' ? 'gold' : 'orbit' }));
+  const { w, main, requests } = await fixture(t, { data });
+  const before = requests.length;
+  for (const entry of main.querySelectorAll('.community-sitem-art')) {
+    const art = entry.querySelector('.community-holo.is-preview[data-community-card-art]');
+    assert.ok(art);
+    assert.ok(art.querySelector('.community-sart'), 'the original object remains inside the interactive material');
+    entry.getBoundingClientRect = () => ({ left: 0, top: 0, width: 208, height: 208 });
+    entry.dispatchEvent(new w.MouseEvent('pointermove', { bubbles: true, clientX: 187.2, clientY: 20.8 }));
+    assert.equal(art.style.getPropertyValue('--holo-ry'), '3.2deg');
+    entry.dispatchEvent(new w.MouseEvent('pointerout', { bubbles: true, relatedTarget: w.document.body }));
+    assert.equal(art.style.length, 0);
+    const touch = new w.MouseEvent('pointermove', { bubbles: true, clientX: 187.2, clientY: 20.8 });
+    Object.defineProperty(touch, 'pointerType', { value: 'touch' }); entry.dispatchEvent(touch);
+    assert.equal(art.style.length, 0);
+    w.matchMedia = () => ({ matches: true });
+    entry.dispatchEvent(new w.MouseEvent('pointermove', { bubbles: true, clientX: 187.2, clientY: 20.8 }));
+    assert.equal(art.style.length, 0);
+    w.matchMedia = () => ({ matches: false });
+    entry.click();
+    assert.ok(w.document.querySelector('.community-shop-detail-art .community-holo.is-preview'));
+    w.document.querySelector('[data-shop-detail-close]').click();
+    await turn();
+    assert.equal(w.document.querySelector('.community-shop-dialog'), null);
+    assert.equal(w.document.body.style.overflow, '');
+  }
+  assert.equal(requests.length, before);
+});
+
 for (const entry of ['.community-sitem-art', '.community-sitem-title']) test(`product ${entry} opens a complete left-art/right-description dialog without reading or redeeming again`, async t => {
   const { w, main, requests } = await fixture(t);
   const page = main.querySelector('[data-community="shop"]');

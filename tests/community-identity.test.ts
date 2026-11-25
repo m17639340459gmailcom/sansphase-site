@@ -1,11 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { createHash } from 'node:crypto';
 import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createIdentityAuthority } from '../server/community-identity-authority.ts';
+import type { IdentityAuthorityOptions } from '../server/community-identity-authority.ts';
 import { prepareIdentityStore, createIdentityStore } from '../server/community-identity-store.ts';
 import { createIdentityClient, signIdentityRequest, verifyIdentityRequest } from '../server/community-identity-protocol.ts';
 
@@ -18,7 +20,7 @@ const path = '/api/community-identity/bridge';
 const reader = { id: 'reader-a', uid: '10001', nickname: '测试读者', role: 'reader' as const, signature: '已审核签名', avatar: null, vip: true, vipStartedAt: '2026-10-01T00:00:00Z', vipUntil: '2026-12-01T00:00:00Z', email: 'private@example.invalid', phone: '13800138000', pendingSignature: '未审核签名' };
 const person = { name: reader.nickname, uid: reader.uid, avatar: null, vip: true, joinedAt: '2026-01-01T00:00:00Z', bio: reader.signature };
 
-async function fixture(t: test.TestContext, avatar?: () => Promise<Buffer | null>, frameEligibility?: (id: string) => Promise<{ active: boolean; vip: boolean; vipUntil: string | null }>) {
+async function fixture(t: test.TestContext, avatar?: () => Promise<Buffer | null>, frameEligibility?: (id: string) => Promise<{ active: boolean; vip: boolean; vipUntil: string | null }>, extra: Pick<IdentityAuthorityOptions, 'invitations' | 'ownerReaderIdentity'> = {}) {
   const directory = await mkdtemp(resolve(tmpdir(), 'community-identity-'));
   prepareIdentityStore(directory);
   const state = { at: Date.now(), enabled: true, vip: true, unavailable: false, purges: [] as string[] };
@@ -31,6 +33,7 @@ async function fixture(t: test.TestContext, avatar?: () => Promise<Buffer | null
     avatar: avatar || (async () => Buffer.from('approved avatar')),
     frameEligibility,
     purgeRemote: async id => { state.purges.push(id); },
+    ...extra,
   });
   const server = http.createServer((req, res) => { void (req.url === '/api/community-entry' ? authority.handleEntry(req, res) : authority.handleBridge(req, res)); });
   await new Promise<void>(done => server.listen(0, '127.0.0.1', done));
@@ -51,6 +54,55 @@ async function fixture(t: test.TestContext, avatar?: () => Promise<Buffer | null
   const exchange = async () => { const issued = await entry(); const response = await bridge('exchange', { ticket: issued.ticket, binding: issued.binding }); assert.equal(response.status, 200); return await response.json() as { sessionRef: string; identity: typeof reader }; };
   return { authority, directory, state, local, entry, bridge, exchange };
 }
+
+test('referral attribution is a signed finite projection and never includes private account data', async t => {
+  const invited = '22222222-2222-4222-8222-222222222222', inviter = '11111111-1111-4111-8111-111111111111';
+  const calls: string[] = [];
+  const f = await fixture(t, undefined, undefined, { invitations: {
+    attribution: id => { calls.push(id); return { inviter: { kind: 'reader', id: inviter }, registeredAt: '2026-10-11T00:00:00Z', email: 'private@example.test' }; },
+    self: () => { throw Error('unexpected'); },
+  } });
+  const response = await f.bridge('referral-attribution', { readerId: invited });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { inviter: { kind: 'reader', id: inviter }, registeredAt: '2026-10-11T00:00:00Z' });
+  for (const input of [{ readerId: invited, inviter }, { readerId: [invited] }, { readerId: '../private' }, {}]) assert.equal((await f.bridge('referral-attribution', input)).status, 400);
+  assert.deepEqual(calls, [invited]);
+  const body = JSON.stringify({ operation: 'referral-attribution', input: { readerId: invited } });
+  assert.equal((await fetch(f.local + path, { method: 'POST', body })).status, 401);
+});
+
+test('invitation summaries bind to the current reader, strip private fields and recheck revoked sessions', async t => {
+  let revoke = false;
+  const f = await fixture(t, undefined, undefined, { invitations: {
+    attribution: () => null,
+    self: async readerId => { if (revoke) f.state.enabled = false; return { readerId, code: 'a'.repeat(24), email: 'private@example.test', invitees: [{ readerId: '22222222-2222-4222-8222-222222222222', registeredAt: '2026-10-11T00:00:00Z', phone: '13800138000' }] }; },
+  } });
+  const entered = await f.exchange();
+  const response = await f.bridge('referral-self', { sessionRef: entered.sessionRef });
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { readerId: reader.id, code: 'a'.repeat(24), invitees: [{ readerId: '22222222-2222-4222-8222-222222222222', registeredAt: '2026-10-11T00:00:00Z' }] });
+  assert.equal((await f.bridge('referral-self', { sessionRef: entered.sessionRef, readerId: 'other' })).status, 400);
+  assert.equal((await f.bridge('referral-self', { sessionRef: entered.sessionRef, asReader: true })).status, 400);
+  assert.equal((await f.bridge('referral-self', {})).status, 401);
+  revoke = true; assert.equal((await f.bridge('referral-self', { sessionRef: entered.sessionRef })).status, 401);
+});
+
+test('authors must explicitly use the active linked reader for invitations', async t => {
+  let linked = '11111111-1111-4111-8111-111111111111', changed = false;
+  const f = await fixture(t, undefined, undefined, {
+    ownerReaderIdentity: async () => ({ ...reader, id: linked }),
+    invitations: { attribution: () => null, self: async readerId => {
+      if (changed) linked = '22222222-2222-4222-8222-222222222222';
+      return { readerId, code: 'a'.repeat(24), invitees: [] };
+    } },
+  });
+  const issued = await f.entry('sansphase_author_session=owner.session.token');
+  const entered = await (await f.bridge('exchange', { ticket: issued.ticket, binding: issued.binding })).json() as { sessionRef: string };
+  assert.equal((await f.bridge('referral-self', { sessionRef: entered.sessionRef })).status, 403);
+  const response = await f.bridge('referral-self', { sessionRef: entered.sessionRef, asReader: true });
+  assert.equal(response.status, 200); assert.equal((await response.json()).readerId, linked);
+  changed = true; assert.equal((await f.bridge('referral-self', { sessionRef: entered.sessionRef, asReader: true })).status, 401);
+});
 
 test('frame eligibility is an exact signed singleton projection without a browser session or public profile lookup', async t => {
   const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', ids: string[] = [];
@@ -200,6 +252,72 @@ test('tickets expire after sixty seconds and a revoked original login cannot be 
   assert.equal((await f.bridge('exchange', { ticket: second.ticket, binding: second.binding })).status, 401);
 });
 
+test('community authority preserves a week-long idle login while checking the source account on each return', async t => {
+  const f = await fixture(t), createdAt = f.state.at;
+  const { sessionRef } = await f.exchange();
+  f.state.at = createdAt + 6 * 24 * 60 * 60_000;
+  f.state.vip = false;
+  const returning = await f.bridge('session', { sessionRef });
+  assert.equal(returning.status, 200, 'neither the old 30-minute idle nor 12-hour absolute limit should require a new login');
+  assert.equal((await returning.json()).viewer.vip, false, 'VIP is still fresh after an extended absence');
+  f.state.unavailable = true;
+  assert.equal((await f.bridge('session', { sessionRef })).status, 503);
+  f.state.unavailable = false;
+  assert.equal((await f.bridge('session', { sessionRef })).status, 200, 'a temporary account-service outage must not revoke the retained source reference');
+  f.state.enabled = false;
+  assert.equal((await f.bridge('session', { sessionRef })).status, 401, 'source logout or disabling is never bypassed by the longer lifetime');
+});
+
+test('community authority expires at seven days even with regular activity', async t => {
+  const f = await fixture(t), createdAt = f.state.at;
+  const { sessionRef } = await f.exchange();
+  for (let day = 1; day < 7; day++) {
+    f.state.at = createdAt + day * 24 * 60 * 60_000;
+    assert.equal((await f.bridge('session', { sessionRef })).status, 200);
+  }
+  f.state.at = createdAt + 7 * 24 * 60 * 60_000;
+  assert.equal((await f.bridge('session', { sessionRef })).status, 401, 'activity does not extend the absolute login deadline');
+});
+
+test('identity preparation upgrades still-valid legacy references once without reviving expired references', async t => {
+  const directory = await mkdtemp(resolve(tmpdir(), 'identity-session-upgrade-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  let now = Date.now(); t.mock.method(Date, 'now', () => now);
+  prepareIdentityStore(directory);
+  let store = createIdentityStore({ directory, stateEncryptionKey: encryptionKey });
+  const createdAt = now - 60 * 60_000, week = 7 * 24 * 60 * 60_000;
+  const refs = Array.from({ length: 3 }, () => {
+    const issued = store.issue({ kind: 'reader', id: 'test-reader', cookie: `sansphase_reader_session=${token}` }, createdAt);
+    return store.exchange(issued.ticket, issued.binding, createdAt)!;
+  });
+  store.close();
+  const db = new DatabaseSync(resolve(directory, 'community-identity.db'));
+  try {
+    db.exec('PRAGMA user_version=1');
+    db.prepare('UPDATE identity_sessions SET expires_at=created_at+?,last_seen=?').run(12 * 60 * 60_000, now - 10 * 60_000);
+    db.prepare('UPDATE identity_sessions SET last_seen=? WHERE session_hash=?').run(now - 30 * 60_000, createHash('sha256').update(refs[1]).digest('hex'));
+    db.prepare('UPDATE identity_sessions SET expires_at=? WHERE session_hash=?').run(now, createHash('sha256').update(refs[2]).digest('hex'));
+  } finally { db.close(); }
+  store = createIdentityStore({ directory, stateEncryptionKey: encryptionKey });
+  try { assert.equal(store.session(refs[1], now), null, 'normal startup cannot reinterpret old idle-expired rows as new valid logins'); }
+  finally { store.close(); }
+  prepareIdentityStore(directory);
+  store = createIdentityStore({ directory, stateEncryptionKey: encryptionKey });
+  try {
+    assert.equal(store.session(refs[1], now), null, 'the old idle-expired reference is unusable immediately after upgrade');
+    assert.equal(store.session(refs[2], now), null, 'the old absolute-expired reference is unusable immediately after upgrade');
+  } finally { store.close(); }
+  now += 24 * 60 * 60_000;
+  prepareIdentityStore(directory);
+  store = createIdentityStore({ directory, stateEncryptionKey: encryptionKey });
+  try {
+    assert.ok(store.session(refs[0], createdAt + week - 1), 'a legacy reference that was valid at explicit upgrade stays usable for the new lifetime');
+    assert.equal(store.session(refs[0], createdAt + week), null, 'preparing again must not extend the original deadline');
+    assert.equal(store.session(refs[1], now), null, 'an old idle-expired reference is not restored');
+    assert.equal(store.session(refs[2], now), null, 'an old absolute-expired reference is not restored');
+  } finally { store.close(); }
+});
+
 test('every bridge operation revalidates original identity and current VIP; faults are 503', async t => {
   const f = await fixture(t), { sessionRef } = await f.exchange();
   f.state.vip = false;
@@ -214,12 +332,8 @@ test('every bridge operation revalidates original identity and current VIP; faul
 
 test('sessions enforce idle and absolute expiry and bridge replay survives database reopening', async t => {
   const f = await fixture(t), { sessionRef } = await f.exchange();
-  f.state.at += 30 * 60_000 + 1;
+  f.state.at += 7 * 24 * 60 * 60_000 + 1;
   assert.equal((await f.bridge('session', { sessionRef })).status, 401);
-  const second = await f.exchange();
-  for (let i = 0; i < 24; i++) { f.state.at += 29 * 60_000; assert.equal((await f.bridge('session', { sessionRef: second.sessionRef })).status, 200); }
-  f.state.at += 25 * 60_000;
-  assert.equal((await f.bridge('session', { sessionRef: second.sessionRef })).status, 401);
   const nonce = 'persistent-replay-nonce-with-32-characters';
   const store = createIdentityStore({ directory: f.directory, stateEncryptionKey: encryptionKey });
   assert.equal(store.consumeNonce(nonce, f.state.at + 120_000), true); store.close();
@@ -252,6 +366,20 @@ test('approved profiles, UID lookup, mentions and avatars require a session and 
   const owner = await (await f.bridge('exchange', { ticket: issued.ticket, binding: issued.binding, ownerId: 'forged' })).json();
   assert.deepEqual(owner.identity.viewer, { kind: 'owner', id: 'owner-a', name: '作者', vip: true });
   await f.authority.purgeReaderData(reader.id); assert.deepEqual(f.state.purges, [reader.id]);
+});
+
+test('signed names lookup preserves nickname and list-size boundaries', async t => {
+  const f = await fixture(t), { sessionRef } = await f.exchange();
+  const accepted = await f.bridge('names', { sessionRef, names: ['abcdefgh'] });
+  assert.equal(accepted.status, 200, 'a complete eight-character nickname is a valid lookup');
+  assert.deepEqual(await accepted.json(), []);
+  const maximumNames = Array.from({ length: 50 }, (_, index) => `name${index}`);
+  assert.equal((await f.bridge('names', { sessionRef, names: maximumNames })).status, 200);
+  for (const names of [['abcdefghi'], [...maximumNames, 'extra'], [reader.nickname, 'abcdefghi']]) {
+    const response = await f.bridge('names', { sessionRef, names });
+    assert.equal(response.status, 400, 'overlong names or lists remain invalid even alongside a real member');
+    assert.deepEqual(await response.json(), { error: '身份请求内容无效。' });
+  }
 });
 
 test('identity client only accepts a fixed HTTPS peer, forbids redirects, limits response size and maps transport failures to 503', async () => {

@@ -33,6 +33,25 @@ async function fixture(t: test.TestContext) {
   return { root, directory, publicRoot, configPath, target: resolve(root, 'backup') };
 }
 
+test('community backups exclude private chat content and restoration cannot reconnect the live chat directory', async t => {
+  const env = await fixture(t);
+  const chatDirectory = resolve(env.root, 'private-teahouse');
+  await mkdir(resolve(chatDirectory, 'db'), { recursive: true });
+  await mkdir(resolve(chatDirectory, 'images'));
+  await writeFile(resolve(chatDirectory, 'db', 'chat.sqlite'), 'private chat content must not be backed up');
+  await writeFile(resolve(chatDirectory, 'images', 'private.webp'), 'private chat image');
+  const settings = JSON.parse(await readFile(env.configPath, 'utf8'));
+  await writeFile(env.configPath, JSON.stringify({ ...settings, teahouse: { enabled: true, directory: chatDirectory } }));
+  await backupCommunity(env);
+  const verified = await verifyCommunityBackup(env.target);
+  assert.equal(verified.manifest.files.some(file => /teahouse|chat\.sqlite|private\.webp/.test(file.path)), false);
+  const restoredConfig = resolve(env.root, 'restored-chat-disabled.json');
+  await restoreCommunity({ backupPath: env.target, target: resolve(env.root, 'restored-chat-disabled'), configPath: restoredConfig, publicRoot: env.publicRoot });
+  const restored = JSON.parse(await readFile(restoredConfig, 'utf8'));
+  assert.deepEqual(restored.teahouse, { enabled: false });
+  assert.equal(await readFile(resolve(chatDirectory, 'db', 'chat.sqlite'), 'utf8'), 'private chat content must not be backed up');
+});
+
 test('independent backup verifies both files of approved and pending personal backgrounds', async t => {
   const env = await fixture(t), store = createCommunityStore(env.directory);
   const reader = { kind: 'reader' as const, id: 'reader-background' }, owner = { kind: 'owner' as const, id: 'owner' };

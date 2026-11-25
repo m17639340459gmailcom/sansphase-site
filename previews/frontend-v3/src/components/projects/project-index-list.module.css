@@ -1,0 +1,42 @@
+.thumb {
+  display: block;
+  width: 6.5rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  padding: 0.25rem;
+  background: var(--bg-elevated);
+}
+/* Only where the cursor preview takes over. */
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .thumb {
+    display: none;
+  }
+}
+@media (min-width: 640px) {
+  .thumb {
+    width: 8.5rem;
+  }
+}
+
+/* A zero-size anchor riding the cursor; the preview hangs beside it. */
+.follower {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 45;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+.preview {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: clamp(16rem, 25vw, 23rem);
+  translate: 2rem -50%;
+  transition: translate 0.55s var(--fx-ease);
+  filter: drop-shadow(0 28px 36px color-mix(in oklab, var(--fg) 18%, transparent));
+}
+.follower[data-side="left"] .preview {
+  translate: calc(-100% - 2rem) -50%;
+}

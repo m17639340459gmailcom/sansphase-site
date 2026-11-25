@@ -1,0 +1,44 @@
+.digits {
+  --clock-h: 1.3em;
+  display: inline-flex;
+  height: var(--clock-h);
+  line-height: var(--clock-h);
+}
+.cell {
+  display: block;
+  height: var(--clock-h);
+  overflow: hidden;
+}
+/* Resting position shows the current digit (second row); a change rolls the previous one out. */
+.roll {
+  display: flex;
+  flex-direction: column;
+  translate: 0 calc(var(--clock-h) * -1);
+}
+.roll > span {
+  height: var(--clock-h);
+}
+.roll[data-roll] {
+  animation: clock-roll 0.55s var(--fx-ease) both;
+}
+.sep {
+  animation: clock-tick 1s steps(1, end) infinite;
+}
+
+@keyframes clock-roll {
+  from {
+    translate: 0 0;
+  }
+}
+@keyframes clock-tick {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .roll[data-roll],
+  .sep {
+    animation: none;
+  }
+}

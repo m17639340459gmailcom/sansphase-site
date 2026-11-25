@@ -51,6 +51,16 @@ function itemInput(ctx: Ctx, body: Body, id?: string): CustomItemInput {
   const kind = card || (cat === 'look' && (body.kind === 'frame' || body.kind === 'color' || body.kind === 'cover') ? body.kind : undefined);
   if (cat === 'look' && !kind) throw fail('请选择头像框、昵称特效或主页背景。');
   if (cat !== 'look' && cat !== 'card' && body.kind !== undefined && body.kind !== cat) throw fail('物品类型与用途不匹配。');
+  const artStyle = body.artStyle === undefined ? undefined : body.artStyle === null ? null : body.artStyle === 'holo-card' ? 'holo-card' : false;
+  const deliveryContact = body.deliveryContact === undefined ? undefined : body.deliveryContact === null ? null : body.deliveryContact === 'author-qq' ? 'author-qq' : false;
+  if (artStyle === false) throw fail('请选择有效的商品展示样式。');
+  if (deliveryContact === false) throw fail('请选择有效的领取联系方式。');
+  if ((artStyle || deliveryContact) && (cat !== 'digital' || kind)) throw fail('卡片展示与领取联系方式仅适用于数字资源。');
+  const retainHolo = artStyle === undefined && previous?.artStyle === 'holo-card' && cat === 'digital' && !kind && image !== null;
+  if (artStyle === 'holo-card' || retainHolo) {
+    const assetId = image === undefined ? previous?.image : image;
+    if (!assetId || !usableImage(assetId)) throw fail('卡片展示需要有效的商品图片，请重新上传。');
+  }
   if (kind === 'frame') {
     const assetId = image === undefined ? previous?.image : image;
     const upload = assetId ? ctx.live.image(assetId) : null;
@@ -78,7 +88,7 @@ function itemInput(ctx: Ctx, body: Body, id?: string): CustomItemInput {
     cat, name: ctx.clean(body.name, [2, 30], '名称', false), description: ctx.clean(body.description, [4, 200], '说明', true),
     price: whole(body.price, '价格', 1, 100000), stock, limitPer, limitN: limitPer ? whole(body.limitN || 1, '限兑次数', 1, 100) : null,
     minLevel: whole(body.minLevel || 0, '最低等级', 0, 3), minDays: whole(body.minDays || 0, '注册天数', 0, 3650),
-    delivery: cat === 'digital' ? delivery : '', image, category, kind, effect: kind === 'color' ? effect : null,
+    delivery: cat === 'digital' ? delivery : '', image, category, kind, effect: kind === 'color' ? effect : null, artStyle, deliveryContact,
     note: typeof body.note === 'string' ? ctx.clean(body.note || ' ', [0, 60], '备注', false) : '', active: body.active !== false,
   };
 }

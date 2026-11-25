@@ -163,9 +163,10 @@ export async function restoreCommunity({ backupPath, target, configPath, publicR
   await sqliteIntegrity(resolve(destination, 'content.db'), 'content');
   await sqliteIntegrity(resolve(destination, 'community-host.db'), 'host');
   await referencedImagesPresent(destination);
-  // The only adjusted setting is the data directory. The new configuration is
-  // exclusive and does not activate/switch the running production service.
-  await writeFile(config, JSON.stringify({ ...original, directory: destination }, null, 2), { mode: 0o600, flag: 'wx' });
+  // Chat content deliberately stays outside community backups. A restored
+  // configuration must never reconnect the live chat directory by accident.
+  const restored = { ...original, directory: destination, ...('teahouse' in original ? { teahouse: { enabled: false } } : {}) };
+  await writeFile(config, JSON.stringify(restored, null, 2), { mode: 0o600, flag: 'wx' });
   await readCommunityHostConfig(config, publicRoot);
   return { directory: destination, configPath: config, files: checked.files };
 }

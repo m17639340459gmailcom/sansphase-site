@@ -28,6 +28,8 @@ archive/
 coverage/
 playwright-report/
 test-results/
+# Java verification service build output is never formal source.
+server/login-captcha-service/target/
 *.zip
 *.7z
 *.tar

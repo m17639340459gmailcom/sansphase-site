@@ -7,10 +7,14 @@ import { validateSceneCdnOrigin } from '../src/scene-delivery.mjs';
 import { buildCompactCommunityArt } from './community-compact-art.ts';
 import { buildCompactCommunityStaffArt } from './community-staff-compact-art.ts';
 import { buildCommunityVipFrameArt } from './community-vip-frame-art.ts';
+import { buildAdminConsole } from './build-admin-console.ts';
 import { resolve, sep } from "node:path";
+import { frontendArgument, verifyFrontendBuild } from './frontend-selection.mjs';
+import { frontendV3AppPath } from './frontend-v3-release.mjs';
 
 const run = promisify(execFile);
 const workspace = resolve(".");
+const frontend = frontendArgument();
 const buildRoot = resolve(".build");
 const target = resolve("dist");
 for (const path of [buildRoot, target]) {
@@ -30,14 +34,24 @@ let preserveJob = false;
 try {
   // Every build starts empty. A failed compilation leaves the running site intact.
   await run(process.execPath, ["scripts/build-cosmos.mjs", next]);
+  await buildAdminConsole(next, frontend === 'v3' ? { redesign: true, v3Integrated: true } : undefined);
   await buildCompactCommunityArt(next);
   await buildCompactCommunityStaffArt(next);
   await buildCommunityVipFrameArt(next);
-  await packageStaticFiles(next,validateSceneCdnOrigin(process.env.SANSPHASE_SCENE_CDN_ORIGIN));
+  if(frontend==='v2')
+    await run(process.execPath,['scripts/build-frontend-v2.mjs',resolve(next,'frontend-v2')],{cwd:workspace,windowsHide:true,maxBuffer:4*1024*1024});
+  let frontendV3;
+  if (frontend === 'v3') {
+    const { buildFrontendV3 } = await import('./build-frontend-v3.mjs');
+    const receipt = await buildFrontendV3(next, workspace);
+    frontendV3 = { appDirectory:resolve(workspace, frontendV3AppPath), buildDirectory:receipt.buildDirectory, buildId:receipt.buildId };
+  }
+  await packageStaticFiles(next,validateSceneCdnOrigin(process.env.SANSPHASE_SCENE_CDN_ORIGIN),frontendV3);
   const { verifySite } = await import("./verify-site.mjs");
   await verifySite(next);
   const {version}=JSON.parse(await readFile('package.json','utf8'));
-  await createBuildManifest(next,version);
+  const manifest=await createBuildManifest(next,version);
+  await verifyFrontendBuild(next,manifest,frontend,workspace);
   let hadPrevious = false;
   try {
     await rename(target, previous);

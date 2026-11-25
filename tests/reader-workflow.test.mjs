@@ -6,6 +6,24 @@ import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createReaderWorkflow, registrationLifetimeMs } from '../server/reader-workflow.ts';
 
+test('registration freezes the trusted inviter across resend and replacement until the pending request expires', async () => {
+  const directory = await mkdtemp(resolve(tmpdir(), 'sansphase-workflow-invite-'));
+  try {
+    const workflow = createReaderWorkflow(directory, 'i'.repeat(64));
+    const inviterId = '11111111-1111-4111-8111-111111111111';
+    const input = { email: 'invite@example.test', nickname: '受邀', phone: '13800138000', password: 'pass-123456', inviterId, invitationBound: true };
+    const first = workflow.putRegistration(input, 100000);
+    const pending = workflow.registrationByCode(input.email, first.id, first.code, 100000);
+    assert.equal(pending.inviterId, inviterId); assert.equal(pending.invitationBound, true);
+    const resent = workflow.putRegistration(pending, 100001);
+    assert.equal(workflow.registrationByCode(input.email, resent.id, resent.code, 100001).inviterId, inviterId);
+    const changed = workflow.putRegistration({ ...input, inviterId: '22222222-2222-4222-8222-222222222222' }, 100002);
+    assert.equal(workflow.registrationByCode(input.email, changed.id, changed.code, 100002).inviterId, inviterId);
+    const expired = workflow.putRegistration({ ...input, inviterId: null, invitationBound: false }, 100002 + registrationLifetimeMs);
+    assert.equal(workflow.registrationByCode(input.email, expired.id, expired.code, 100002 + registrationLifetimeMs).inviterId, null);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
 test('pending registration is separate, expires after five minutes, and does not retain plaintext password', async () => {
   const directory = await mkdtemp(resolve(tmpdir(), 'sansphase-workflow-'));
   try {

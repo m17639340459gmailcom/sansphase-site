@@ -1,6 +1,15 @@
 import { readFile, realpath, lstat } from 'node:fs/promises';
 import { resolve, sep, isAbsolute } from 'node:path';
 import { createHash } from 'node:crypto';
+import { adminConsoleRequiredFiles } from './admin-console-assets.ts';
+
+/** This technical collection is opt-in independently of the business runtime. */
+export function productionDiagnosticsEnabled(env: Record<string, string | undefined>): boolean {
+  const value = env.SITE_DIAGNOSTICS;
+  if (value === undefined || value === '0') return false;
+  if (value === '1') return true;
+  throw Error('SITE_DIAGNOSTICS must be omitted, 0 or 1.');
+}
 
 export function productionOptions(env:Record<string,string|undefined>, nodeVersion=process.versions.node) {
   if (env.NODE_ENV !== 'production') throw Error('NODE_ENV must be production');
@@ -26,6 +35,9 @@ export async function verifyBuild(root:string) {
   const base=await realpath(root);
   const manifest=JSON.parse(await readFile(resolve(base,'build-info.json'),'utf8'));
   if(!manifest.release||!Array.isArray(manifest.files)||!manifest.files.length) throw Error('Build manifest is missing or invalid');
+  const paths = new Set(manifest.files.map((entry: { path: string }) => entry.path));
+  for (const required of adminConsoleRequiredFiles)
+    if (!paths.has(required)) throw Error(`Required build asset is missing from the release: ${required}`);
   for(const entry of manifest.files) {
     const path=await realpath(resolve(base,entry.path));
     if(!path.startsWith(base+sep)||!(await lstat(path)).isFile()) throw Error('Unsafe build file');
@@ -40,6 +52,8 @@ export async function verifyPrivateConfig(configPath:string, root:string) {
   const path=await realpath(configPath), publicRoot=await realpath(root);
   if(path===publicRoot||path.startsWith(publicRoot+sep)) throw Error('Private configuration cannot be in the public directory');
   const settings=JSON.parse(await readFile(path,'utf8'));
+  if (settings.push !== undefined && settings.push !== false)
+    throw Error('Automatic schema push is forbidden in production; use the explicit backed-up migration.');
   if(!isAbsolute(settings.directory||'')) throw Error('Production data directory must be absolute');
   const directory=await realpath(settings.directory);
   if(directory===publicRoot||directory.startsWith(publicRoot+sep)) throw Error('Database and uploads cannot be in the public directory');

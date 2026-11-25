@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import sharp from 'sharp';
 import { migrateCommunity } from '../../server/payload/community-migration.ts';
@@ -19,7 +19,7 @@ import { communityBoards } from '../../src/community.mjs';
 import { communityStaffCapabilities, communityStaffDefaultPermissions } from '../../src/community-staff.ts';
 
 // Sample members: nickname, public UID, VIP, days since joining, signature and level (null: computed).
-const people = {
+const basePeople = {
   demo: { name: '预览读者', uid: '10001', vip: false, days: 90, bio: '在学 ComfyUI，也在做自己的作品集。', level: 2 },
   linjian: { name: '林间', uid: '10002', vip: false, days: 200, bio: '喜欢画画，也喜欢折腾工作流。', level: 3 },
   yuanshan: { name: '远山', uid: '10003', vip: false, days: 60, bio: '', level: 1 },
@@ -49,7 +49,10 @@ async function demoImage(directory, uploader, index, store, sourceFile = null) {
   return id;
 }
 
-export async function createCommunityDemo({ simplePosting = true, visualDemo = false, newsDemo = false } = {}) {
+export async function createCommunityDemo({ simplePosting = true, visualDemo = false, newsDemo = false, invitationsDemo = false, teahouseDemo = false, managementDemo = false } = {}) {
+  const people = { ...basePeople, ...(teahouseDemo ? {
+    assistantvip: { name: '协助会员', uid: '10011', vip: true, days: 120, bio: '本地有效 VIP 协管，只以普通会员身份进入茶室。', level: 2 },
+  } : {}) };
   const directory = mkdtempSync(resolve(tmpdir(), 'sansphase-community-preview-'));
   new DatabaseSync(resolve(directory, 'content.db')).close();
   await migrateCommunity(directory);
@@ -80,8 +83,9 @@ export async function createCommunityDemo({ simplePosting = true, visualDemo = f
     return ids;
   };
   const reply = (topicId, author, body, minutesAgo, quoteId = null) => store.addReply({ topicId, author: member(author), body, quoteId, now: at(minutesAgo) }).id;
-  // Sample accounts intentionally have no convention consent. Opening the
-  // preview exercises the same mandatory reading flow as a first visit.
+  // By default, sample accounts have no convention consent: preview exercises
+  // the first-visit reading flow. Explicit managementDemo later seeds consent
+  // for synthetic managers only, so the console's review workflow is testable.
   // Give most members some 星尘 to spend first. The preview reader's opening
   // balance is explicitly initial credit, so the ledger does not pretend it
   // came from a check-in.
@@ -207,6 +211,22 @@ export async function createCommunityDemo({ simplePosting = true, visualDemo = f
   store.staff.appoint(member('owner'), member('general'), { role: 'general', boards: communityBoards.map(board => board.id), permissions: capabilities, delegable: capabilities });
   store.staff.appoint(member('general'), member('steward'), { role: 'moderator', boards: ['qa', 'tools'], permissions: capabilities, delegable: capabilities });
   store.staff.appoint(member('steward'), member('assistant'), { role: 'assistant', boards: ['qa'], permissions: [...communityStaffDefaultPermissions.assistant], delegable: [] });
+  if (managementDemo) {
+    // Only the separate console demonstration opts in. These synthetic staff
+    // accounts completed the ordinary reading interval; no real user consents
+    // and no defaults in the other previews are changed.
+    const version = store.convention.current().version;
+    for (const id of ['owner', 'general', 'steward', 'assistant']) {
+      store.convention.read(member(id), version, now - 10000);
+      store.convention.agree(member(id), version, now);
+    }
+    store.createTopic({ board: 'qa', author: member('newbie'), title: '本地审核示例：模型安装后无法启动',
+      body: '这是社区后台的合成待审样例。安装模型后启动失败，想请教如何定位问题。', pending: '本地管理审核示例', now: at(8) });
+  }
+  if (teahouseDemo) {
+    store.members.ensure(member('assistantvip'));
+    store.staff.appoint(member('steward'), member('assistantvip'), { role: 'assistant', boards: ['qa'], permissions: [...communityStaffDefaultPermissions.assistant], delegable: [] });
+  }
   // A few notifications for 预览读者 beyond the actual shipped order above.
   store.members.notify(member('demo'), { type: 'system', text: '你兑换的物品已经发货', data: { order: 'shipped', item: '無相帆布袋', company: '顺丰', tracking: 'SF-PREVIEW-10001' } }, at(12));
   store.members.notify(member('demo'), { type: 'mention', actor: member('linjian'), topicId: open, text: '在回复里提到了你', data: { where: 'reply' } }, at(24));
@@ -235,8 +255,37 @@ export async function createCommunityDemo({ simplePosting = true, visualDemo = f
   // come from the same owner-reader marker used by the production service.
   const byUid = new Map(Object.entries(profilePeople).map(([id, info]) => [info.uid, member(id)]));
   const frames = createCommunityFrameAuthority({ store, directory });
+  // Synthetic invitation records use the actual settlement module. They are
+  // opt-in preview data and never create accounts or send registration mail.
+  const invitationCodes = new Map(Object.keys(profilePeople).map(id => [id, randomBytes(18).toString('base64url')]));
+  const invitationRows = invitationsDemo ? new Map([
+    ['newbie', { inviter: member('demo'), registeredAt: at(2 * 24 * 60) }],
+    ['linjian', { inviter: member('demo'), registeredAt: at(200 * 24 * 60) }],
+  ]) : new Map();
+  if (invitationsDemo) {
+    const version = store.convention.current().version;
+    // This isolated preview starts with consent already completed so its first
+    // screenshot shows the invitation panel. Production consent is untouched.
+    for (const id of Object.keys(profilePeople)) {
+      store.convention.read(member(id), version, now - 10000);
+      store.convention.agree(member(id), version, now);
+    }
+    const topic = store.createTopic({ board: 'chat', author: member('linjian'), title: '本地邀请审核示例', body: '这是一条用于演示邀请审核奖励的模拟帖子。',
+      referral: invitationRows.get('linjian'), now: at(20) });
+    store.approveTopic(topic.id, at(10), invitationRows.get('linjian'));
+  }
   const serviceFor = (siteOrigin) => createCommunityService({
     store, siteOrigin, directory, ownerId: 'owner', simplePosting, profile: profiles.access, drainFileQueue: profiles.drainFileQueue,
+    ...(invitationsDemo ? {
+      referralOrigin: siteOrigin,
+      referralAttribution: async id => invitationRows.get(id) || null,
+      referralSelf: async req => {
+        const as = /(?:^|;\s*)preview_as=([a-z]+)/.exec(String(req.headers.cookie || ''))?.[1] || 'demo';
+        const id = as === 'owner' ? previewOwnerReaderId : people[as] ? as : 'demo';
+        return { readerId: id, code: invitationCodes.get(id), invitees: [...invitationRows].filter(([, value]) => value.inviter.id === id)
+          .map(([readerId, value]) => ({ readerId, registeredAt: value.registeredAt })) };
+      },
+    } : {}),
     ownerReaderIdentity: async req => {
       const reader = await profiles.ownerReaderIdentity(req);
       return reader ? { kind: 'reader', id: reader.id, name: reader.nickname, vip: reader.vip } : null;
@@ -260,11 +309,16 @@ export async function createCommunityDemo({ simplePosting = true, visualDemo = f
     words: ['赌博'],
   });
   return {
+    invitationEligible: code => invitationsDemo && [...invitationCodes.values()].includes(code),
     // The preview may be opened as 127.0.0.1 or localhost; writes still
     // require the page's own origin, as in production.
     service(port) {
       const services = new Map([`127.0.0.1:${port}`, `localhost:${port}`].map((host) => [host, serviceFor(`http://${host}`)]));
-      return { handle: (req, res) => (services.get(req.headers.host) || services.get(`127.0.0.1:${port}`)).handle(req, res) };
+      const primary = services.get(`127.0.0.1:${port}`);
+      return { handle: (req, res) => (services.get(req.headers.host) || primary).handle(req, res),
+        teahouseIdentity: req => (services.get(req.headers.host) || primary).teahouseIdentity(req),
+        teahouseAuthors: (req, authors) => (services.get(req.headers.host) || primary).teahouseAuthors(req, authors),
+        shareTopic: primary.shareTopic, shareImage: primary.shareImage };
     },
     readerService(port) {
       const services = new Map([`127.0.0.1:${port}`, `localhost:${port}`].map(host => [host, profiles.readerService(`http://${host}`, frames)]));

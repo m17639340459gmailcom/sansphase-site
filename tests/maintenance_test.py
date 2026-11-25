@@ -310,6 +310,23 @@ class MaintenanceTests(unittest.TestCase):
         self.assertEqual(receipt.read_text(),previous);self.assertEqual(list(root.iterdir()),[receipt])
 
     @unittest.skipIf(os.name == 'nt', 'Linux production symlink and process layout')
+    def test_main_keeps_current_and_newest_other_release(self):
+        parent = self.root / 'opt/sansphase/releases'
+        parent.mkdir(parents=True)
+        for name, stamp in [('newest', 40), ('second-newest', 30), ('retired', 20), ('current', 10)]:
+            path = parent / name
+            path.mkdir()
+            os.utime(path, (stamp, stamp))
+        (parent.parent / 'current').symlink_to(parent / 'current', target_is_directory=True)
+
+        plan = m.plan(self.root, categories=('releases',))
+
+        self.assertEqual({Path(path).name for path in plan['protectedReleases']},
+                         {'current', 'newest'})
+        self.assertEqual([Path(item['path']).name for item in plan['candidates']],
+                         ['second-newest', 'retired'])
+
+    @unittest.skipIf(os.name == 'nt', 'Linux production symlink and process layout')
     def test_planner_protects_current_rollback_live_data_and_linked_release(self):
         parent=self.root/'opt/sansphase/releases';parent.mkdir(parents=True)
         for name,stamp in [('current',30),('rollback',20),('linked-old',10),('unused-old',5)]:

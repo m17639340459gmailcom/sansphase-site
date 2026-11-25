@@ -7,8 +7,9 @@ import { randomBytes } from 'node:crypto';
 import { getPayload } from 'payload';
 import { DatabaseSync } from 'node:sqlite';
 import { makePayloadConfig } from '../server/payload/config.ts';
-import { migrateReaderAccounts } from '../server/payload/reader-migration.ts';
+import { migrateReaderAccounts, assertReaderAdminRemarksReady } from '../server/payload/reader-migration.ts';
 import { migratePayloadAuthSecurity } from '../server/payload/auth-security-migration.ts';
+import { assertReaderInvitationsReady, migrateReaderInvitations } from '../server/payload/invitation-migration.ts';
 
 test('reader migration preserves the existing author database and is idempotent', { timeout: 60000 }, async () => {
   const directory = await mkdtemp(resolve(tmpdir(), 'sansphase-reader-migration-'));
@@ -22,6 +23,7 @@ test('reader migration preserves the existing author database and is idempotent'
     await writeFile(resolve(directory, 'migration-complete.json'), JSON.stringify({ provider: 'payload' }));
     const result = await migrateReaderAccounts(directory);
     assert.equal(result.migrated, true);
+    assertReaderAdminRemarksReady(directory);
     const auditCheck = new DatabaseSync(resolve(directory, 'content.db'));
     assert.equal(auditCheck.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='login_events'").get().name, 'login_events');
     assert.equal(auditCheck.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='reader_uids'").get().name, 'reader_uids');
@@ -31,10 +33,21 @@ test('reader migration preserves the existing author database and is idempotent'
     auditCheck.close();
     assert.equal((await migrateReaderAccounts(directory)).migrated, false);
     await migratePayloadAuthSecurity(directory);
+    assert.throws(() => assertReaderInvitationsReady(directory), /explicit reader invitation migration/,
+      'the historical account migration does not silently run the separately backed-up invitation upgrade');
+    const invitations = await migrateReaderInvitations(directory);
+    assert.equal(invitations.migrated, true); assert.ok(invitations.backupPath);
+    assertReaderInvitationsReady(directory);
+    assert.equal((await migrateReaderInvitations(directory)).migrated, false);
     payload = await getPayload({ config: makePayloadConfig({ directory, secret, push: false }), key: `migrated-${directory}` });
     assert.equal((await payload.find({ collection: 'authors' })).docs.length, 1);
     await payload.create({ collection: 'readers', data: { email: 'reader@example.test', password: 'reader-secret-long', nickname: 'Reader', phone: '13800138000' }, disableVerificationEmail: true });
     await payload.create({ collection: 'readers', data: { email: 'later@example.test', password: 'reader-secret-long', nickname: 'Later', phone: '13900139000' }, disableVerificationEmail: true });
+    const invitationState = new DatabaseSync(resolve(directory, 'content.db'), { readOnly: true });
+    try {
+      assert.deepEqual(invitationState.prepare('SELECT invitation_code,invited_by,invitation_bound FROM readers').all().map(row => ({ ...row })),
+        [{ invitation_code: null, invited_by: null, invitation_bound: 0 }, { invitation_code: null, invited_by: null, invitation_bound: 0 }]);
+    } finally { invitationState.close(); }
     assert.equal((await payload.find({ collection: 'readers' })).docs.length, 2);
     assert.ok((await payload.find({ collection: 'readers' })).docs.some(row => row.phone === '13800138000'));
     await payload.destroy(); await payload.db.client.close(); payload = undefined;
@@ -42,16 +55,23 @@ test('reader migration preserves the existing author database and is idempotent'
     try {
       db.exec("UPDATE readers SET created_at='2026-01-01T00:00:00.000Z' WHERE email='reader@example.test'");
       db.exec("UPDATE readers SET created_at='2026-01-02T00:00:00.000Z' WHERE email='later@example.test'");
-      db.exec('DROP TRIGGER reader_uids_on_insert; DROP TABLE reader_uids; ALTER TABLE readers DROP COLUMN phone; ALTER TABLE readers DROP COLUMN signature; ALTER TABLE readers DROP COLUMN avatar; ALTER TABLE readers DROP COLUMN reset_password_requested_at');
+      db.exec('DROP TRIGGER reader_uids_on_insert; DROP TABLE reader_uids; ALTER TABLE readers DROP COLUMN phone; ALTER TABLE readers DROP COLUMN signature; ALTER TABLE readers DROP COLUMN avatar; ALTER TABLE readers DROP COLUMN reset_password_requested_at; ALTER TABLE readers DROP COLUMN admin_remark');
     } finally { db.close(); }
+    assert.throws(() => assertReaderAdminRemarksReady(directory), /reader account migration/);
     assert.equal((await migrateReaderAccounts(directory)).reason, 'reader-schema-upgrade');
+    assertReaderAdminRemarksReady(directory);
     assert.equal((await migrateReaderAccounts(directory)).migrated, false);
     const upgradedDb = new DatabaseSync(resolve(directory, 'content.db'));
     assert.deepEqual(upgradedDb.prepare('SELECT r.email, u.uid FROM reader_uids u JOIN readers r ON r.id=u.reader_id ORDER BY u.uid').all().map(row => [row.email, row.uid]), [['reader@example.test', 1], ['later@example.test', 2]]);
     assert.ok(upgradedDb.prepare('PRAGMA table_info(readers)').all().some(row => row.name === 'signature'));
     assert.ok(upgradedDb.prepare('PRAGMA table_info(readers)').all().some(row => row.name === 'avatar'));
     assert.ok(upgradedDb.prepare('PRAGMA table_info(readers)').all().some(row => row.name === 'reset_password_requested_at'));
+    upgradedDb.exec("UPDATE readers SET admin_remark='迁移后保留的私有备注' WHERE email='reader@example.test'");
     upgradedDb.close();
+    assert.equal((await migrateReaderAccounts(directory)).migrated, false);
+    const noteCheck = new DatabaseSync(resolve(directory, 'content.db'), { readOnly: true });
+    assert.equal(noteCheck.prepare("SELECT admin_remark FROM readers WHERE email='reader@example.test'").get().admin_remark, '迁移后保留的私有备注');
+    noteCheck.close();
     payload = await getPayload({ config: makePayloadConfig({ directory, secret, push: false }), key: `upgraded-${directory}` });
     assert.equal((await payload.find({ collection: 'authors' })).docs.length, 1);
     await payload.create({ collection: 'readers', data: { email: 'third@example.test', password: 'reader-secret-long', nickname: 'Third', phone: '13700137000' }, disableVerificationEmail: true });

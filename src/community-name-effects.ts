@@ -9,6 +9,19 @@ const luminance = (rgb: RGB) => {
   const linear = rgb.map(channel => channel <= .04045 ? channel / 12.92 : ((channel + .055) / 1.055) ** 2.4);
   return linear[0] * .2126 + linear[1] * .7152 + linear[2] * .0722;
 };
+
+/** Cover UI uses the same WCAG luminance as nickname effects. A median keeps
+ * isolated stars/highlights from changing the ink across the entire name. */
+export function profileNameInk(pixels: Uint8ClampedArray): '#000000' | '#ffffff' {
+  const values: number[] = [];
+  for (let offset = 0; offset + 3 < pixels.length; offset += 4) {
+    values.push(luminance([pixels[offset] / 255, pixels[offset + 1] / 255, pixels[offset + 2] / 255]));
+  }
+  if (!values.length) return '#ffffff';
+  values.sort((a, b) => a - b);
+  const surface = values[Math.floor(values.length / 2)];
+  return (surface + .05) / .05 >= 1.05 / (surface + .05) ? '#000000' : '#ffffff';
+}
 const surfaces: Record<Theme, readonly number[]> = {
   light: ['#E8E2D5', '#F4EFE5'].map(colour => luminance(parseRGB(colour))),
   dark: ['#1B293E', '#23354D'].map(colour => luminance(parseRGB(colour))),

@@ -1,4 +1,5 @@
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import { ServerResponse } from 'node:http';
+import type { IncomingMessage } from 'node:http';
 import { createHash } from 'node:crypto';
 import { readFile, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -7,7 +8,7 @@ import type { CommunityAuthor } from './community-db.ts';
 import type { CommunityAuditEvent, CommunityAuditDetails } from './community-audit.ts';
 import type { StoredTopic } from './community-store.ts';
 import { cleanText } from './community-context.ts';
-import type { Body, Ctx, CommunityViewer, PersonInfo, ServiceOptions } from './community-context.ts';
+import type { Body, Ctx, CommunityViewer, PersonInfo, ServiceOptions, CommunityMutationConfirmation } from './community-context.ts';
 import { contentRoutes } from './community-routes-content.ts';
 import { memberRoutes } from './community-routes-member.ts';
 import { manageRoutes } from './community-routes-manage.ts';
@@ -21,10 +22,13 @@ import type { CommunityStaffRole } from '../src/community-staff.ts';
 import { canManageCommunityShop } from './community-shop-access.ts';
 import { communityIconDefinition, communityIconState } from '../src/community-icon-policy.ts';
 import type { CommunityIconEligibility } from '../src/community-icon-policy.ts';
+import type { TeahouseActor, TeahouseAuthor } from '../src/teahouse-types.ts';
 import { createImageVariants, removeImageVariants } from './image-variants.ts';
+import { createCommunityShare } from './community-share.ts';
 
 export { communityContactReason } from './community-context.ts';
 export type { CommunityViewer, PersonInfo } from './community-context.ts';
+export type CommunityTeahouseIdentity = TeahouseActor & { vipUntil: number | null };
 
 const statusOf = (error: unknown) => (error && typeof error === 'object' && 'status' in error && typeof error.status === 'number' ? error.status : 500);
 const membersBoard = 'vip';
@@ -91,12 +95,29 @@ export function createCommunityService(options: ServiceOptions) {
     }
   }
 
-  function context(req: IncomingMessage, res: ServerResponse, path: string, viewer: CommunityViewer): Ctx {
+  async function executionViewer(req: IncomingMessage, path: string): Promise<CommunityViewer | null> {
+    const identified = await identify(req);
+    options.assertActive?.(req);
+    if (!identified) return null;
+    if (identified.kind === 'owner' && identified.id !== ownerMember.id) throw fail('作者身份无效。', 401);
+    // The management principal stays in its host session. Only this verified
+    // resolver chooses a personal execution identity; a cookie is not authority.
+    let viewer: CommunityViewer = { kind: identified.kind, id: identified.id, name: identified.name, vip: identified.vip };
+    if (path !== 'browse-mode' && viewer.kind === 'owner' && /(?:^|;\s*)community_browse=reader(?:;|$)/.test(String(req.headers.cookie || ''))) {
+      const personal = await options.ownerReaderIdentity?.(req);
+      options.assertActive?.(req);
+      if (!personal || personal.kind !== 'reader' || !personal.id || personal.id === viewer.id) throw fail('站长的个人读者身份尚未配置或已停用，请返回站长身份。', 503);
+      viewer = { kind: 'reader', id: personal.id, name: personal.name, vip: personal.vip, ownerAccountId: viewer.id };
+    }
+    return viewer;
+  }
+
+  function context(req: IncomingMessage, res: ServerResponse, path: string, viewer: CommunityViewer, recordVisit = true): Ctx {
     const live = store!;
     options.assertActive?.(req);
     const me: CommunityAuthor = { kind: viewer.kind, id: viewer.id };
     const actualOwner = viewer.kind === 'owner' && viewer.id === ownerMember.id || viewer.ownerAccountId === ownerMember.id;
-    if (!isCommunityPassiveRead(req)) live.members.visit(me);
+    if (recordVisit && !isCommunityPassiveRead(req)) live.members.visit(me);
     const actualModerationBoards = live.members.moderationBoards(me);
     const actualMod = actualOwner || live.members.steward(me) && actualModerationBoards.length > 0;
     const browsingAsReader = actualMod && /(?:^|;\s*)community_browse=reader(?:;|$)/.test(String(req.headers.cookie || ''));
@@ -122,13 +143,13 @@ export function createCommunityService(options: ServiceOptions) {
     const trustLevel = () => ownerReaderPreview?.trustLevel ?? (browsingAsReader ? 1
       : ordinaryTrust(me, staffAccountsValid ? live.staff.state(me)?.role ?? null : null));
     const relatedStaffReaders:CommunityAuthor[]=[];
-    const refreshStaff = async (related:readonly CommunityAuthor[]=[], confirmSelf = false) => {
+    const refreshStaff = async (related:readonly CommunityAuthor[]=[], confirmSelf = false, confirmation?: CommunityMutationConfirmation) => {
       for(const member of related)if(member.kind==='reader'&&!relatedStaffReaders.some(previous=>same(previous,member)))relatedStaffReaders.push(member);
       const currentStaff = live.staff.state(me);
       const ancestors = live.staff.ancestors(me).filter(member => member.kind === 'reader');
       const staffReaders=[...(currentStaff&&me.kind==='reader'?[me,...ancestors]:[]),...relatedStaffReaders];
-      const readers=[...new Map([...staffReaders, ...(confirmSelf && me.kind==='reader' ? [me] : [])].map(member=>[memberKey(member),member])).values()];
-      if(!readers.length){staffAccountsValid=true;return;}
+      const readers=[...new Map([...staffReaders, ...(confirmSelf && me.kind==='reader' ? [me] : []), ...(confirmation?.participants ?? [])].map(member=>[memberKey(member),member])).values()];
+      if(!readers.length){staffAccountsValid=true;confirmation?.inspect(new Map());return;}
       const map = await people(readers);
       options.assertActive?.(req);
       if(confirmSelf&&me.kind==='reader') {
@@ -140,8 +161,9 @@ export function createCommunityService(options: ServiceOptions) {
       const current = live.staff.ancestors(me).filter(member => member.kind === 'reader');
       staffAccountsValid = staffReaders.every(member=>map.get(memberKey(member))?.active===true) && current.length === ancestors.length
         && current.every(member => ancestors.some(previous => same(member, previous)) && map.get(memberKey(member))?.active === true);
+      confirmation?.inspect(map);
     };
-    const refreshViewer = async () => {
+    const refreshViewer = async (confirmation?: CommunityMutationConfirmation) => {
       let current = await identify(req);
       options.assertActive?.(req);
       if(viewer.ownerAccountId) {
@@ -153,7 +175,7 @@ export function createCommunityService(options: ServiceOptions) {
       setMembership(current.vip===true);
       // The source lookup itself yields. Resolve the actor and active staff
       // chain afterward, in one batch, before any synchronous authorization.
-      await refreshStaff([],true);
+      await refreshStaff([],true,confirmation);
       options.assertActive?.(req);
     };
     // A request body may arrive after an appointment changes; check live authorization at use.
@@ -285,8 +307,8 @@ export function createCommunityService(options: ServiceOptions) {
         requireConsent();
         live.rateLimits.consume(me, kind, trustLevel());
       },
-      auditMutation: async <T>(action: string, execute: () => T, details: CommunityAuditDetails<T> = {}) => {
-        await refreshViewer();
+      auditMutation: async <T>(action: string, execute: () => T, details: CommunityAuditDetails<T> = {}, confirmation?: CommunityMutationConfirmation) => {
+        await refreshViewer(confirmation);
         const result = live.audit.run(me, `community-${action}`, () => { requireConsent(); return execute(); }, details);
         await drainFiles();
         await live.audit.flush(auditMirror);
@@ -378,25 +400,54 @@ export function createCommunityService(options: ServiceOptions) {
   }
 
   return {
+    async teahouseAuthors(req: IncomingMessage, authors: readonly TeahouseAuthor[]): Promise<TeahouseAuthor[]> {
+      if (!store) throw fail('社区尚未开放。', 503);
+      const viewer = await executionViewer(req, 'teahouse');
+      if (!viewer) throw fail('请先登录。', 401);
+      const ctx = context(req, new ServerResponse(req), 'teahouse', viewer, false);
+      if (ctx.readOnly) throw fail('当前是读者浏览视角，请先返回管理身份再操作。', 403);
+      const unique = [...new Map(authors.map(author => [memberKey(author), { kind: author.kind, id: author.id }])).values()];
+      const profiles = await ctx.people(unique);
+      const current = new Map(unique.map(author => {
+        const person = ctx.person(author, profiles);
+        const value: TeahouseAuthor = {
+          ...author, name: person.name, ...(person.avatar ? { avatarUrl: person.avatar } : {}),
+          icon: communityIconDefinition(person.icon)?.ref ?? null,
+        };
+        return [memberKey(author), value] as const;
+      }));
+      return authors.map(author => ({ ...current.get(memberKey(author))! }));
+    },
+    async teahouseIdentity(req: IncomingMessage): Promise<CommunityTeahouseIdentity | null> {
+      if (!store) throw fail('社区尚未开放。', 503);
+      const viewer = await executionViewer(req, 'teahouse');
+      if (!viewer) return null;
+      // This response is never sent: context shares the exact HTTP identity,
+      // appointment and approved-profile rules without recording a passive visit.
+      // Host callers must establish their own live request/session context first.
+      const ctx = context(req, new ServerResponse(req), 'teahouse', viewer, false);
+      if (ctx.readOnly) throw fail('当前是读者浏览视角，请先返回管理身份再操作。', 403);
+      let profiles = new Map<string, PersonInfo>();
+      await ctx.refreshViewer({ participants: [ctx.me], inspect: current => { profiles = current; } });
+      const info = profiles.get(memberKey(ctx.me));
+      if (!info || info.active === false) throw fail('请重新登录后进入社区。', 401);
+      const person = ctx.person(ctx.me, profiles);
+      const icon = communityIconDefinition(person.icon)?.ref ?? null;
+      const until = info.vipUntil ? Date.parse(info.vipUntil) : NaN;
+      return {
+        kind: ctx.me.kind, id: ctx.me.id, uid: person.uid, name: person.name, vip: ctx.membershipVip,
+        muted: Boolean(store.members.muted(ctx.me)),
+        role: ctx.staff?.role ?? null, ...(person.avatar ? { avatarUrl: person.avatar } : {}),
+        icon, vipUntil: Number.isFinite(until) ? until : null,
+      };
+    },
     async handle(req: IncomingMessage, res: ServerResponse) {
       const path = new URL(req.url || '', siteOrigin).pathname.slice('/api/community/'.length);
       try {
         if (!['GET', 'POST'].includes(req.method || '')) throw fail('不支持这个请求。', 405);
         if (!store) throw fail('社区尚未开放。', 503);
-        const identified = await identify(req);
-        options.assertActive?.(req);
-        if (!identified) throw fail('请先登录。', 401);
-        if (identified.kind === 'owner' && identified.id !== ownerMember.id) throw fail('作者身份无效。', 401);
-        // The management principal stays in its host session. Only this verified
-        // resolver chooses a personal execution identity; a cookie is not authority.
-        let viewer: CommunityViewer = { kind: identified.kind, id: identified.id, name: identified.name, vip: identified.vip };
-        if (path !== 'browse-mode' && viewer.kind === 'owner' && /(?:^|;\s*)community_browse=reader(?:;|$)/.test(String(req.headers.cookie || ''))) {
-          if (viewer.id !== ownerMember.id) throw fail('作者身份无效。', 401);
-          const personal = await options.ownerReaderIdentity?.(req);
-          options.assertActive?.(req);
-          if (!personal || personal.kind !== 'reader' || !personal.id || personal.id === viewer.id) throw fail('站长的个人读者身份尚未配置或已停用，请返回站长身份。', 503);
-          viewer = { kind: 'reader', id: personal.id, name: personal.name, vip: personal.vip, ownerAccountId: viewer.id };
-        }
+        const viewer = await executionViewer(req, path);
+        if (!viewer) throw fail('请先登录。', 401);
         if (req.method === 'GET' && path === 'moderation-contacts') {
           const url = new URL(req.url || '', siteOrigin);
           sendTo(res, await publicModerationContacts(store, ownerMember, people, url.searchParams.get('board') || ''));
@@ -422,6 +473,7 @@ export function createCommunityService(options: ServiceOptions) {
         if (!res.headersSent) sendTo(res, { error: status >= 500 && status !== 503 ? '社区暂时不可用，请稍后再试。' : error instanceof Error ? error.message : String(error) }, status);
       }
     },
+    ...createCommunityShare(store, directory),
   };
 }
 export type CommunityService = ReturnType<typeof createCommunityService>;

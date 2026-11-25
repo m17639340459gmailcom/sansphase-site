@@ -1,0 +1,189 @@
+.menu {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  isolation: isolate;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6rem 1.5rem max(1.5rem, env(safe-area-inset-bottom));
+  background: var(--bg);
+}
+@media (min-width: 640px) {
+  .menu {
+    padding-inline: 2rem;
+  }
+}
+@media (min-width: 1024px) {
+  .menu {
+    display: none;
+  }
+}
+
+/* Warm light pooled where the circle grew from (the toggle). */
+.glow {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(36rem circle at var(--ox) var(--oy), var(--accent-soft), transparent 62%);
+}
+
+/* A rim of accent light riding the edge of the circle (--r is the live clip radius). At full size
+   the radius exceeds the viewport diagonal, so the rim has already left the screen. */
+.rim {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(
+    circle at var(--ox) var(--oy),
+    transparent calc(var(--r, 0px) - 7rem),
+    color-mix(in oklab, var(--accent) 10%, transparent) calc(var(--r, 0px) - 4px),
+    var(--accent) calc(var(--r, 0px) - 1.5px),
+    transparent var(--r, 0px)
+  );
+}
+
+.hud {
+  animation: menu-up 0.6s var(--fx-ease) 0.3s both;
+}
+
+.list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: center;
+  padding-block: 1.25rem;
+}
+
+.item {
+  position: relative;
+}
+/* Row rules draw in one after another. */
+.item::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 1px;
+  background: var(--line);
+  transform-origin: left center;
+  animation: menu-rule 0.9s var(--fx-ease) calc(0.15s + var(--row, 0) * 0.05s) both;
+}
+
+.link {
+  display: flex;
+  min-height: 3.5rem;
+  align-items: baseline;
+  gap: 1rem;
+  padding-block: 0.625rem;
+}
+.index {
+  min-width: 1.5rem;
+  animation: menu-in 0.6s var(--fx-ease) calc(0.2s + var(--row, 0) * 0.05s) both;
+}
+.label {
+  min-width: 0;
+  flex: 1;
+  transition: translate 0.45s var(--fx-ease);
+}
+.link:active .label {
+  translate: 0.5rem 0;
+}
+@media (hover: hover) and (pointer: fine) {
+  .link:hover .label {
+    translate: 0.5rem 0;
+  }
+}
+
+.marker {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  gap: 0.5rem;
+  animation: menu-in 0.6s var(--fx-ease) calc(0.35s + var(--row, 0) * 0.05s) both;
+}
+.marker::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: menu-pulse 2.2s ease-in-out infinite;
+}
+
+.foot {
+  animation: menu-up 0.6s var(--fx-ease) 0.5s both;
+}
+
+/* Closing plays the entrance backwards: words drop (last row first), then the circle shrinks. */
+.menu[data-closing] :global(.fx-u) {
+  animation: menu-drop 0.3s var(--fx-ease-in) calc((var(--rows, 7) - 1 - var(--row, 0)) * 0.03s) both;
+}
+.menu[data-closing] .index,
+.menu[data-closing] .marker,
+.menu[data-closing] .hud,
+.menu[data-closing] .foot {
+  animation: menu-out 0.25s ease both;
+}
+.menu[data-closing] .item::after {
+  transform-origin: right center;
+  animation: menu-rule-out 0.35s var(--fx-ease-in) both;
+}
+
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    translate: -0.75rem 0;
+  }
+}
+@keyframes menu-up {
+  from {
+    opacity: 0;
+    translate: 0 0.75rem;
+  }
+}
+@keyframes menu-rule {
+  from {
+    scale: 0 1;
+  }
+}
+@keyframes menu-rule-out {
+  to {
+    scale: 0 1;
+  }
+}
+@keyframes menu-drop {
+  to {
+    opacity: 0;
+    translate: 0 70%;
+  }
+}
+@keyframes menu-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes menu-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--accent-glow);
+  }
+  50% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+
+/* SplitText already renders its final state here (globals.css). */
+@media (prefers-reduced-motion: reduce) {
+  .hud,
+  .item::after,
+  .index,
+  .marker,
+  .marker::before,
+  .foot {
+    animation: none !important;
+  }
+}

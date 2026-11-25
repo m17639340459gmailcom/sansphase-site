@@ -9,6 +9,11 @@ test('HK HTML startup never preloads main homepage textures or WebGL even before
     entryPoints: ['src/startup-assets.mjs'], bundle: true, format: 'iife', write: false,
     define: {__SANSPHASE_SCENE_CDN_ORIGIN__: JSON.stringify('https://static.sansphase.com'),__SANSPHASE_SCENE_IMAGES__: JSON.stringify(['./assets/scene/panorama.jpg'])},
   });
+  const article = new JSDOM('', {url: 'https://www.sansphase.com/blog/reading-preview', runScripts: 'outside-only'});
+  try {
+    article.window.eval(result.outputFiles[0].text);
+    assert.equal(article.window.document.querySelector('link[rel=preload],link[rel=modulepreload]'), null);
+  } finally { article.window.close(); }
   for (const suffix of ['', '#/home', '#/community/home', 'community-enter#community-entry=' + 'a'.repeat(43)]) {
     const dom = new JSDOM('', {url: 'https://community.sansphase.com/' + suffix, runScripts: 'outside-only'});
     try {

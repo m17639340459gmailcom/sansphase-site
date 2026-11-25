@@ -4,7 +4,7 @@ import { sceneAssetUrl, staticAssetUrl } from "./scene-delivery.mjs";
 // is parsed, before the renderer's larger module graph has finished loading.
 // The dedicated community host has no main-site homepage, including its empty
 // initial hash. This runs before the later bootstrap JSON has been parsed.
-if (location.origin !== 'https://community.sansphase.com' && (!location.hash || /^#\/?(?:home)?\/?$/.test(location.hash))) {
+if (location.origin !== 'https://community.sansphase.com' && !location.pathname.startsWith('/blog/') && (!location.hash || /^#\/?(?:home)?\/?$/.test(location.hash))) {
   const urls = __SANSPHASE_SCENE_IMAGES__.map((path) => sceneAssetUrl(path));
   for (const [index, href] of urls.entries()) {
     const link = document.createElement("link");

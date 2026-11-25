@@ -56,6 +56,108 @@ function location(entries, path) {
 const limitFor = (entries, path) => bodyBytes((directive(location(entries, path)?.children || [], 'client_max_body_size')
   || directive(entries, 'client_max_body_size'))?.[0]);
 
+test('tea-room realtime upgrade and image envelope are isolated from existing community routes', async () => {
+  const entries = await host('nginx-community.conf', 'community.sansphase.com');
+  const socket = location(entries, '/api/teahouse/socket.io/');
+  assert.deepEqual(socket.args, ['location', '^~', '/api/teahouse/socket.io/']);
+  assert.ok(socket.children.some(entry => entry.args.join(' ') === 'proxy_set_header Upgrade $http_upgrade'));
+  assert.ok(socket.children.some(entry => entry.args.join(' ') === 'proxy_set_header Connection "upgrade"'));
+  for (const header of ['Host', 'X-Forwarded-Proto', 'X-Real-IP', 'X-Forwarded-For']) {
+    assert.ok(socket.children.some(entry => entry.args[0] === 'proxy_set_header' && entry.args[1] === header));
+  }
+  assert.deepEqual(directive(socket.children, 'proxy_read_timeout'), ['75s']);
+  assert.deepEqual(directive(socket.children, 'proxy_buffering'), ['off']);
+  assert.equal(limitFor(entries, '/api/teahouse/socket.io/'), 64 * 1024);
+  const upload = location(entries, '/api/teahouse/attachments');
+  assert.deepEqual(upload.args, ['location', '=', '/api/teahouse/attachments']);
+  assert.ok(limitFor(entries, '/api/teahouse/attachments') > 25 * 1024 ** 2);
+  assert.deepEqual(directive(upload.children, 'limit_conn'), ['community_upload', '2']);
+  assert.deepEqual(directive(upload.children, 'proxy_request_buffering'), ['off']);
+  assert.deepEqual(location(entries, '/api/community/session').args, ['location', '/']);
+});
+
+test('login puzzle actions have their own bounded request envelopes and never consume the password bucket', async () => {
+  const source = await readFile(new URL('../deploy/nginx.conf', import.meta.url), 'utf8');
+  const parsed = parseConfig(source), main = await host('nginx.conf', 'www.sansphase.com');
+  for (const zone of ['sansphase_login_challenge', 'sansphase_login_match']) {
+    assert.ok(parsed.some(entry => entry.args[0] === 'limit_req_zone'
+      && entry.args.includes(`zone=${zone}:10m`) && entry.args.includes('rate=30r/m')), zone);
+  }
+  for (const namespace of ['reader', 'author']) {
+    for (const [suffix, size, zone] of [
+      ['', 4 * 1024, 'sansphase_login_challenge'],
+      ['/verify', 40 * 1024, 'sansphase_login_match'],
+    ]) {
+      const path = `/api/${namespace}/login-challenge${suffix}`, selected = location(main, path);
+      assert.equal(limitFor(main, path), size, path);
+      assert.deepEqual(directive(selected.children, 'limit_req'), [`zone=${zone}`, 'burst=10', 'nodelay'], path);
+      assert.deepEqual(directive(selected.children, 'limit_req_status'), ['429']);
+      assert.deepEqual(directive(selected.children, 'client_body_timeout'), ['10s']);
+      assert.deepEqual(directive(selected.children, 'proxy_read_timeout'), ['10s']);
+      assert.deepEqual(directive(selected.children, 'proxy_pass'), ['http://127.0.0.1:4176']);
+      assert.ok(!selected.children.some(entry => entry.args.includes('Access-Control-Allow-Origin')));
+    }
+    assert.deepEqual(directive(location(main, `/api/${namespace}/login`).children, 'limit_req'), ['zone=sansphase_login', 'burst=5', 'nodelay']);
+    for (const suffix of ['/extra', '/verify/extra', 'x']) {
+      const selected = location(main, `/api/${namespace}/login-challenge${suffix}`);
+      assert.deepEqual(selected.args, ['location', '/'], 'puzzle overrides must not capture other API paths');
+    }
+  }
+});
+
+test('main proxy preserves upstream referrer policies for canonical and normalized routes without changing public defaults', async () => {
+  const parsed = parseConfig(await readFile(new URL('../deploy/nginx.conf', import.meta.url), 'utf8'));
+  const policyMaps = parsed.filter(entry => entry.args[0] === 'map' && entry.args[2] === '$sansphase_referrer_policy');
+  assert.equal(policyMaps.length, 1, 'one HTTP-level policy map');
+  assert.deepEqual(policyMaps[0].args, ['map', '$upstream_http_referrer_policy', '$sansphase_referrer_policy']);
+  assert.deepEqual(policyMaps[0].children.map(entry => entry.args), [
+    ['default', '$upstream_http_referrer_policy'],
+    ["''", 'strict-origin-when-cross-origin'],
+  ], 'an existing upstream policy, including no-referrer, passes through; only an absent policy uses the public default');
+  const main = await host('nginx.conf', 'www.sansphase.com');
+  const added = main.filter(entry => entry.args[0] === 'add_header').map(entry => entry.args.slice(1));
+  assert.deepEqual(added.filter(args => args[0] === 'Referrer-Policy'), [['Referrer-Policy', '$sansphase_referrer_policy', 'always']]);
+  assert.deepEqual(added.filter(args => args[0] === 'X-Frame-Options'), [['X-Frame-Options', 'SAMEORIGIN', 'always']]);
+  assert.deepEqual(added.filter(args => args[0] === 'Strict-Transport-Security'), [['Strict-Transport-Security', '"max-age=86400"', 'always']]);
+  assert.deepEqual(main.filter(entry => entry.args[0] === 'proxy_hide_header').map(entry => entry.args[1]).sort(), ['Referrer-Policy', 'X-Preview-App'], 'replace the upstream policy once and retain preview-header suppression');
+  assert.ok(!added.some(args => ['content-security-policy', 'cache-control', 'x-robots-tag'].includes(args[0].toLowerCase())), 'application CSP, private cache and noindex headers stay authoritative');
+  for (const path of ['/admin-console/', '/admin-console/index.html', '/admin-console/assets/admin.js', '/admin-console/missing.js',
+    '/%5cadmin-console/index.html', '/\\admin-console/index.html', '/admin-console', '/admin-console-other/', '/manage', '/manage/', '/', '/api/manage/readers']) {
+    const selected = location(main, path);
+    assert.deepEqual(selected.args, ['location', '/'], path);
+    assert.deepEqual(directive(selected.children, 'proxy_pass'), ['http://127.0.0.1:4176']);
+    assert.equal(directive(selected.children, 'add_header'), undefined, 'inherit the single mapped policy and security headers');
+    assert.equal(directive(selected.children, 'proxy_hide_header'), undefined, 'inherit both hidden headers');
+    assert.equal(directive(selected.children, 'proxy_ignore_headers'), undefined);
+    assert.deepEqual(directive(selected.children, 'proxy_cache') || directive(main, 'proxy_cache'), ['off']);
+  }
+  for (const path of ['/assets/scene/example.webp', '/assets/site/release/app.js']) {
+    const selected = location(main, path);
+    assert.equal(directive(selected.children, 'proxy_pass'), undefined, 'public static files still bypass the application');
+    assert.deepEqual(selected.children.filter(entry => entry.args[0] === 'add_header' && entry.args[1] === 'Referrer-Policy').map(entry => entry.args.slice(1)), [['Referrer-Policy', 'strict-origin-when-cross-origin', 'always']], path);
+  }
+});
+
+test('anonymous share pages and covers use their own burst bucket without capturing protected API paths', async () => {
+  for (const [file, name, zone] of [['nginx.conf', 'www.sansphase.com', 'sansphase_share'], ['nginx-community.conf', 'community.sansphase.com', 'community_share']]) {
+    const source = parseConfig(await readFile(new URL(`../deploy/${file}`, import.meta.url), 'utf8'));
+    const entries = await host(file, name);
+    assert.ok(source.some(entry => entry.args[0] === 'limit_req_zone' && entry.args.includes('$binary_remote_addr')
+      && entry.args.includes(`zone=${zone}:10m`) && entry.args.includes('rate=10r/s')));
+    for (const path of ['/share/site', '/share/invite/AbCdEfGh12345678_abc-123', '/share/post/example/cover.jpg']) {
+      const selected = location(entries, path);
+      assert.deepEqual(selected.args, ['location', '^~', '/share/']);
+      assert.deepEqual(directive(selected.children, 'limit_req'), [`zone=${zone}`, 'burst=30', 'nodelay']);
+      assert.deepEqual(directive(selected.children, 'limit_req_status'), ['429']);
+      assert.deepEqual(directive(selected.children, 'proxy_pass'), ['http://127.0.0.1:4176']);
+      assert.deepEqual(directive(selected.children, 'proxy_cache') || directive(entries, 'proxy_cache'), ['off']);
+      assert.equal(directive(selected.children, 'proxy_ignore_headers'), undefined, 'upstream withdrawal/cache headers stay authoritative');
+    }
+    for (const path of ['/share-other', '/api/community/summary', '/api/reader/login', '/api/community-entry'])
+      assert.ok(!directive(location(entries, path).children, 'limit_req')?.includes(`zone=${zone}`), path);
+  }
+});
+
 test('exact profile upload locations accept a 2MiB file and its multipart envelope with existing streaming controls', async () => {
   const main = await host('nginx.conf', 'www.sansphase.com');
   const community = await host('nginx-community.conf', 'community.sansphase.com');

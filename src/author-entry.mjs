@@ -12,7 +12,10 @@ import {rememberedAccount,rememberSuccessfulLogin} from './login-preferences.mjs
 import {uploadAuthorFile} from './author-upload.mjs';
 import {uploadLimits,uploadSizeLabel} from './upload-policy.mjs';
 import {prepareUploadImage} from './upload-image.mjs';
+import {loginVerificationControlHTML,mountLoginVerificationControl} from './login-verification-control.mjs';
 import {imageSources,imageSourceSet} from './image-sources.mjs';
+import {adminConsoleHref,adminLoginHref,adminReturnDestination} from './admin-console-navigation.mjs';
+import {communityHostRoute} from './community-entry.mjs';
 import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
@@ -22,8 +25,10 @@ import { socialIcon, socialPlatform } from "./blog-details.mjs";
 import { normalizeSocialLink } from "./social-links.mjs";
 import {mountCardColorPicker} from "./author-colors.jsx";
 import {articleTemplates, catalogTemplates} from './article-templates.mjs';
-import { createDialog, icons } from "./library-ui.tsx";
+import { createDialog } from "./site-dialog.ts";
+import { icons } from "./site-icons.ts";
 import { escapeHTML as esc } from "./core.mjs";
+const inline = typeof __SANSPHASE_ADMIN_REDESIGN__ !== "undefined" && __SANSPHASE_ADMIN_REDESIGN__;
 const names = () => ({
   articles: uiText("博客文章", "Blog posts"),
   resources: uiText("资料", "Materials"),
@@ -35,6 +40,10 @@ const names = () => ({
 const payload = document.querySelector("#site-content");
 let author = payload ? JSON.parse(payload.textContent).author : null;
 let authorIdentityEpoch = 0;
+let authorSessionRequest = 0;
+let pendingSessionRetry;
+let loginPreparation;
+let loginControl;
 const authorUploads = new Set();
 let editor, cardColorPicker,
   dirty = false,
@@ -49,22 +58,66 @@ let disposeEditorToolbar;
 let bookEditor,imagePosition;
 let discardReturnFocus;
 let disposeDiscardSurface;
+let cancelNavigation;
+let workspace;
+let workspacePreviewOrigin;
 const shell = document.createElement("div");
 shell.id = "author-dialog";
-shell.className = "dialog-shell author-dialog";
+shell.className = inline ? "author-workspace" : "dialog-shell author-dialog";
+if (inline) shell.setAttribute("role", "region");
 shell.setAttribute("aria-hidden", "true");
 shell.setAttribute("aria-labelledby", "author-dialog-title");
 shell.innerHTML =
-  `<div class="author-dialog-backdrop" aria-hidden="true"></div><div class="author-frame"><section class="author-panel" role="document"><button class="author-close" type="button" data-author-close aria-label="${uiText("关闭作者窗口", "Close author panel")}">` +
-  icons.close +
-  '</button><button class="author-back" type="button" data-author-back hidden>' +
+  (inline ? '<div class="author-frame"><section class="author-panel">' :
+    `<div class="author-dialog-backdrop" aria-hidden="true"></div><div class="author-frame"><section class="author-panel" role="document"><button class="author-close" type="button" data-author-close aria-label="${uiText("关闭作者窗口", "Close author panel")}">${icons.close}</button>`) +
+  '<button class="author-back" type="button" data-author-back hidden>' +
   icons.left +
   `${uiText(" 返回作者模式", " Back to author mode")}</button><div id="author-dialog-content"></div><div class="author-discard" hidden role="alertdialog" aria-modal="true" aria-labelledby="author-discard-message"><p id="author-discard-message">${uiText("还有未保存的修改。继续编辑，或放弃修改后离开。", "You have unsaved changes. Keep editing, or discard them before leaving.")}</p><button type="button" data-keep-editing>${uiText("继续编辑", "Keep editing")}</button><button type="button" data-discard>${uiText("放弃修改", "Discard changes")}</button></div></section></div>`;
-document.body.append(shell);
-const dialog = createDialog(shell),
-  host = shell.querySelector("#author-dialog-content");
+if (!inline) document.body.append(shell);
+const modal = inline ? null : createDialog(shell);
+const dialog = modal ?? {
+  get shown() { return shell.isConnected && !shell.hasAttribute("aria-hidden"); },
+  show() { if (workspace) shell.removeAttribute("aria-hidden"); },
+  hide() { shell.setAttribute("aria-hidden", "true"); },
+};
+const host = shell.querySelector("#author-dialog-content");
 const discardPrompt=shell.querySelector('.author-discard');
-const discardBackground=[host,shell.querySelector('.author-back'),shell.querySelector('.author-close')];
+const discardBackground=[host,shell.querySelector('.author-back'),shell.querySelector('.author-close')].filter(Boolean);
+
+/** @param {HTMLElement} container @param {string | undefined} [section] @param {string | undefined} [previewOrigin] */
+export function mountEmbeddedAuthorWorkspace(container, section, previewOrigin) {
+  if (!inline || workspace) throw Error("Author workspace mount is unavailable.");
+  const active = new AbortController();
+  workspace = active;
+  workspacePreviewOrigin = previewOrigin;
+  container.append(shell);
+  void open({ kind: section });
+  return {
+    hasPendingWork: () => dirty || busy || !discardPrompt.hidden,
+    /** @param {() => void} proceed @param {() => void} reset */
+    confirmNavigation(proceed, reset) {
+      if (!discardPrompt.hidden && cancelNavigation) {
+        pendingNavigation = proceed;
+        cancelNavigation = reset;
+      } else {
+        requestLeave(proceed, reset);
+      }
+    },
+    dispose() {
+      if (workspace !== active) return;
+      active.abort();
+      for (const controller of authorUploads) controller.abort();
+      authorUploads.clear();
+      workspace = undefined;
+      workspacePreviewOrigin = undefined;
+      author = null;
+      busy = false;
+      close();
+      shell.remove();
+      host.replaceChildren();
+    },
+  };
+}
 const field = (name, label, value = "", extra = "") =>
   `<label class="author-field">${label}<input name="${name}" value="${esc(value ?? "")}" ${extra}></label>`;
 const area = (name, label, value = "", extra = "") =>
@@ -90,7 +143,7 @@ const feedback = (message, error = false) => {
     el.classList.toggle("is-error", error);
   }
 };
-async function api(path, method = "GET", body) {
+async function api(path, method = "GET", body, loginVerification) {
   const response = await fetch("/api/author/" + path, {
     method,
     credentials: "same-origin",
@@ -99,6 +152,7 @@ async function api(path, method = "GET", body) {
         ? {}
         : {
             "X-Author-Request": "1",
+            ...(loginVerification?.proof ? { "X-Login-Verification": loginVerification.proof } : {}),
             ...(body instanceof FormData
               ? {}
               : { "Content-Type": "application/json" }),
@@ -109,12 +163,17 @@ async function api(path, method = "GET", body) {
         : body instanceof FormData
           ? body
           : JSON.stringify(body),
+    signal: loginVerification?.signal ?? workspace?.signal,
   });
-  const data = await response.json();
-  if (!response.ok) throw new Error(authorError(data.error) || uiText("操作失败，请稍后再试。", "The operation failed. Please try again later."));
+  let data;
+  try { data = await response.json(); }
+  catch (error) { if (response.ok) throw error; }
+  if (!response.ok) throw Object.assign(new Error(authorError(data?.error) || uiText("操作失败，请稍后再试。", "The operation failed. Please try again later.")), { status: response.status });
   return data;
 }
 function show(html, { size = "compact", back = "hub" } = {}) {
+  loginPreparation?.abort();
+  loginControl?.dispose();loginControl=undefined;
   bookEditor=undefined;imagePosition=undefined;
   hideDiscard(false);
   disposeEditorToolbar?.(); disposeEditorToolbar=undefined;
@@ -126,14 +185,14 @@ function show(html, { size = "compact", back = "hub" } = {}) {
   pendingNavigation = undefined;
   shell.dataset.size = size;
   shell.dataset.back = back;
-  shell.querySelector('.author-close').setAttribute('aria-label',uiText('关闭作者窗口','Close author panel'));
+  shell.querySelector('.author-close')?.setAttribute('aria-label',uiText('关闭作者窗口','Close author panel'));
   shell.querySelector('.author-discard p').textContent=uiText('还有未保存的修改。继续编辑，或放弃修改后离开。','You have unsaved changes. Keep editing, or discard them before leaving.');
   shell.querySelector('[data-keep-editing]').textContent=uiText('继续编辑','Keep editing');
   shell.querySelector('[data-discard]').textContent=uiText('放弃修改','Discard changes');
   const backButton = shell.querySelector("[data-author-back]");
   backButton.hidden = !back;
   backButton.innerHTML =
-    icons.left + (back === "list" ? uiText(" 返回内容列表", " Back to content list") : uiText(" 返回作者模式", " Back to author mode"));
+    icons.left + (back === "list" ? uiText(" 返回内容列表", " Back to content list") : inline ? " 返回作者面板" : uiText(" 返回作者模式", " Back to author mode"));
   host.innerHTML = html;
   shell.querySelector(".author-discard").hidden = true;
   dialog.show();
@@ -143,6 +202,10 @@ function show(html, { size = "compact", back = "hub" } = {}) {
   heading?.focus({ preventScroll: true });
 }
 function close() {
+  authorSessionRequest++;
+  pendingSessionRetry = undefined;
+  loginPreparation?.abort();
+  loginControl?.dispose();loginControl=undefined;
   hideDiscard(false);
   disposeEditorToolbar?.(); disposeEditorToolbar=undefined;
   ordering?.dispose();ordering=undefined;
@@ -152,14 +215,15 @@ function close() {
   dirty = false;
   dialog.hide();
 }
-function requestLeave(next) {
-  if (busy || !discardPrompt.hidden) return;
+function requestLeave(next, cancel) {
+  if (busy || !discardPrompt.hidden) { cancel?.(); return; }
   if (dirty) {
-    openConfirmation(uiText('还有未保存的修改。继续编辑，或放弃修改后离开。','You have unsaved changes. Keep editing, or discard them before leaving.'),uiText('放弃修改','Discard changes'),next);
+    openConfirmation(uiText('还有未保存的修改。继续编辑，或放弃修改后离开。','You have unsaved changes. Keep editing, or discard them before leaving.'),uiText('放弃修改','Discard changes'),next,'discard',cancel);
   } else next();
 }
-function openConfirmation(message,label,next,mode='discard') {
+function openConfirmation(message,label,next,mode='discard',cancel) {
     pendingNavigation = next;
+    cancelNavigation = cancel;
     discardPrompt.dataset.action=mode;
     discardPrompt.querySelector('p').textContent=message;
     discardPrompt.querySelector('[data-discard]').textContent=label;
@@ -176,16 +240,19 @@ function hideDiscard(restoreFocus=true) {
   delete discardPrompt.dataset.action;
   discardBackground.forEach(node=>node.removeAttribute('inert'));
   pendingNavigation=undefined;
+  const cancel = cancelNavigation; cancelNavigation = undefined;
+  if (restoreFocus) cancel?.();
   const previous=discardReturnFocus;discardReturnFocus=undefined;
   if(restoreFocus && previous?.isConnected) previous.focus({preventScroll:true});
 }
-const requestClose = () => requestLeave(close);
+const requestClose = () => { if (loginPreparation) close(); else requestLeave(close); };
 function requestBack() {
   const back=shell.dataset.back,selected=kind;
   if(back)requestLeave(()=>task(()=>back==='list'?library(selected):hub()));
 }
 async function task(action) {
   if (busy) return;
+  const active = workspace;
   busy = true;
   host
     .querySelectorAll('[data-save],[data-publish],[data-unpublish],[data-delete-content],[data-save-order],[type="submit"]')
@@ -193,16 +260,20 @@ async function task(action) {
   try {
     await action();
   } catch (error) {
-    feedback(error.message, true);
+    if (active === workspace && error.name !== 'AbortError') feedback(error.message, true);
   } finally {
-    busy = false;
-    host
-      .querySelectorAll('[data-save],[data-publish],[data-unpublish],[data-delete-content],[data-save-order],[type="submit"]')
-      .forEach((b) => (b.disabled = false));
-    if(ordering)host.querySelector('[data-save-order]').disabled=!dirty;
+    if (active === workspace) {
+      busy = false;
+      host
+        .querySelectorAll('[data-save],[data-publish],[data-unpublish],[data-delete-content],[data-save-order],[type="submit"]')
+        .forEach((b) => (b.disabled = false));
+      if(ordering)host.querySelector('[data-save-order]').disabled=!dirty;
+      loginControl?.release();
+    }
   }
 }
 async function updateSite() {
+  if (inline) return;
   const response = await fetch("/api/content?view=bootstrap", { credentials: "same-origin" });
   if (!response.ok)
     throw new Error(uiText("已保存，但页面内容暂时无法更新，请稍后刷新。", "Saved, but the page could not be refreshed. Please reload it later."));
@@ -212,17 +283,43 @@ async function updateSite() {
 }
 function login() {
   show(
-    `<h2 id="author-dialog-title">${uiText("登录", "Sign in")}</h2><p class="author-description">${uiText("管理文章、资料和个人设置。", "Manage posts, resources and personal settings.")}</p><form data-author-form="login" method="post" action="/api/author/login" autocomplete="on">${field("email", uiText("账号邮箱", "Account email"), rememberedAccount(), 'id="author-email" type="email" autocomplete="username" required')}${field("password", uiText("密码", "Password"), "", 'id="author-password" type="password" autocomplete="current-password" required')}<p class="author-description">${uiText("账号会在本机记住；密码可由浏览器安全保存和自动填充。", "This device remembers your email. Your browser can securely save and fill your password.")}</p>${status()}<button class="author-primary" type="submit">${uiText("登录 ", "Sign in ")}${icons.right}</button></form>`,
+    `<h2 id="author-dialog-title">${uiText("登录", "Sign in")}</h2><p class="author-description">${uiText("管理文章、资料和个人设置。", "Manage posts, resources and personal settings.")}</p><form data-author-form="login" method="post" action="/api/author/login" autocomplete="on">${field("email", uiText("账号邮箱", "Account email"), rememberedAccount(), 'id="author-email" type="email" autocomplete="username" required')}${field("password", uiText("密码", "Password"), "", 'id="author-password" type="password" autocomplete="current-password" required')}${loginVerificationControlHTML(uiText('zh','en')==='en')}<p class="author-description">${uiText("账号会在本机记住；密码可由浏览器安全保存和自动填充。", "This device remembers your email. Your browser can securely save and fill your password.")}</p>${status()}<button class="author-primary" type="submit">${uiText("登录 ", "Sign in ")}${icons.right}</button></form>`,
     { size: "login", back: "" },
   );
+  loginControl=mountLoginVerificationControl(host.querySelector('[data-author-form="login"]'),'author',{english:()=>uiText('zh','en')==='en',onError:value=>feedback(value,true)});
 }
 function hub() {
   const entry = (key, label, glyph, description) =>
     `<button type="button" data-author-open="${key}">${icons[glyph]}<span><strong>${label}</strong><small>${description}</small></span>${icons.right}</button>`;
-  show(
-    `<header class="author-hub-heading"><span class="author-hub-kicker">SANSPHASE / STUDIO</span><h2 id="author-dialog-title">${uiText("作者模式", "Author mode")}</h2><p>${uiText("管理内容，继续创作。", "Manage your content. Keep creating.")}</p></header><section class="author-menu-group" aria-label="${uiText("内容管理", "Content management")}"><h3>${uiText("内容管理", "Content management")}</h3><div class="author-menu-grid">${entry("announcements", uiText("公告", "Announcements"), "bell", uiText("文字 · 海报 · 轮换", "Text · Posters · Rotation"))}${entry("articles", uiText("博客文章", "Blog posts"), "document", uiText("写作 · 草稿 · 发布", "Write · Draft · Publish"))}${entry("works", uiText("作品", "Work"), "grid", uiText("我的软件 · 介绍 · 下载", "My software · Details · Downloads"))}${entry("resources", uiText("资料", "Materials"), "download", uiText("介绍 · 文件 · 链接", "Details · Files · Links"))}${entry("software", uiText("软件推荐", "Software"), "grid", uiText("软件介绍与下载", "Software details and downloads"))}${entry("resource-center", uiText("资源中心", "Resource center"), "download", uiText("书籍 · 章节 · 续写", "Books · Chapters · Writing"))}</div></section><section class="author-menu-group" aria-label="${uiText("个人设置", "Personal settings")}"><h3>${uiText("个人设置", "Personal settings")}</h3><div class="author-menu-grid">${entry("profile", uiText("个人信息", "Profile"), "user", uiText("头像 · 签名 · 主页", "Avatar · Bio · Links"))}${entry("background", uiText("博客背景", "Blog background"), "image", uiText("上传与更换背景", "Upload and change backgrounds"))}${entry("music", uiText("音乐", "Music"), "music", uiText("歌单链接 · 播放设置", "Playlist · Playback settings"))}${entry("appearance", uiText("点缀颜色", "Accent colors"), "tags", uiText("图标 · 文字 · 卡片", "Icons · Text · Cards"))}</div></section><section class="author-menu-group author-menu-admin" aria-label="${uiText("站点管理", "Site management")}"><h3>${uiText("站点管理", "Site management")}</h3><div class="author-menu-grid">${entry("admin", uiText("后台管理", "Account management"), "user", uiText("注册账号 · 停用 · 撤销登录", "Readers · Disable · Revoke"))}</div></section>${status()}<div class="author-menu-footer"><button type="button" data-author-logout>${uiText("退出作者模式", "Sign out")}</button></div>`,
-    { back: "" },
-  );
+  const announcement = entry("announcements", uiText("公告", "Announcements"), "bell", uiText("文字 · 海报 · 轮换", "Text · Posters · Rotation"));
+  const title = inline ? "博客作者面板" : uiText("作者模式", "Author mode");
+  const settings = inline ? "网站设置" : uiText("个人设置", "Personal settings");
+  const description = inline ? "编辑博客、作品、资料和网站设置。" : uiText("管理内容，继续创作。", "Manage your content. Keep creating.");
+  const standaloneSections = inline ? "" : `<section class="author-menu-group author-menu-admin" aria-label="${uiText("站点管理", "Site management")}"><h3>${uiText("站点管理", "Site management")}</h3><div class="author-menu-grid">${entry("admin", uiText("后台管理", "Account management"), "user", uiText("注册账号 · 停用 · 撤销登录", "Readers · Disable · Revoke"))}</div></section>`;
+  const logout = inline ? "" : `<div class="author-menu-footer"><button type="button" data-author-logout>${uiText("退出作者模式", "Sign out")}</button></div>`;
+  show(`<header class="author-hub-heading">
+    ${inline ? "" : '<span class="author-hub-kicker">SANSPHASE / STUDIO</span>'}
+    <h2 id="author-dialog-title">${title}</h2><p>${description}</p>
+  </header>
+  <section class="author-menu-group" aria-label="${uiText("内容管理", "Content management")}">
+    <h3>${uiText("内容管理", "Content management")}</h3><div class="author-menu-grid">
+    ${inline ? "" : announcement}
+    ${entry("articles", uiText("博客文章", "Blog posts"), "document", uiText("写作 · 草稿 · 发布", "Write · Draft · Publish"))}
+    ${entry("works", uiText("作品", "Work"), "grid", uiText("我的软件 · 介绍 · 下载", "My software · Details · Downloads"))}
+    ${entry("resources", uiText("资料", "Materials"), "download", uiText("介绍 · 文件 · 链接", "Details · Files · Links"))}
+    ${entry("software", uiText("软件推荐", "Software"), "grid", uiText("软件介绍与下载", "Software details and downloads"))}
+    ${entry("resource-center", uiText("资源中心", "Resource center"), "download", uiText("书籍 · 章节 · 续写", "Books · Chapters · Writing"))}
+    ${inline ? announcement : ""}
+    </div>
+  </section>
+  <section class="author-menu-group" aria-label="${settings}">
+    <h3>${settings}</h3><div class="author-menu-grid">
+    ${entry("profile", uiText("个人信息", "Profile"), "user", uiText("头像 · 签名 · 主页", "Avatar · Bio · Links"))}
+    ${entry("background", uiText("博客背景", "Blog background"), "image", uiText("上传与更换背景", "Upload and change backgrounds"))}
+    ${entry("music", uiText("音乐", "Music"), "music", uiText("歌单链接 · 播放设置", "Playlist · Playback settings"))}
+    ${entry("appearance", uiText("点缀颜色", "Accent colors"), "tags", uiText("图标 · 文字 · 卡片", "Icons · Text · Cards"))}
+    </div>
+  </section>${standaloneSections}${status()}${logout}`, { back: "" });
 }
 async function library(selected = "articles") {
   kind = selected;
@@ -438,11 +535,32 @@ async function profile(section = "profile") {
 const socialRow = (link = {}) =>
   `<div class="author-social-row"><span class="author-platform-preview" aria-hidden="true">${socialIcon(link.url, icons.link)}</span>${field("social_label", uiText("平台名称", "Platform name"), link.label, uiText("maxlength=\"40\" placeholder=\"例如 GitHub\"", "maxlength=\"40\" placeholder=\"e.g. GitHub\""))}${field("social_url", uiText("主页链接", "Profile URL"), normalizeSocialLink(link.url) || link.url, 'type="url" placeholder="https://"')}<button type="button" data-remove-social aria-label="${uiText("移除此主页链接", "Remove this profile link")}">${icons.close}</button></div>`;
 async function open(detail = {}) {
+  const request = ++authorSessionRequest, identityEpoch = authorIdentityEpoch;
+  pendingSessionRetry = undefined;
   if (!author) {
     // The shared account form may have signed in before this lazy module loaded.
     // Reuse the existing session endpoint instead of showing a second login.
-    try { author = await api("session"); } catch { author = null; }
+    try {
+      const session = await api("session");
+      if (request !== authorSessionRequest || identityEpoch !== authorIdentityEpoch) return;
+      author = session;
+    } catch (error) {
+      if (request !== authorSessionRequest || identityEpoch !== authorIdentityEpoch) return;
+      if (error.status === 401) author = null;
+      else {
+        pendingSessionRetry = detail;
+        show(`<h2 id="author-dialog-title">${uiText("暂时无法打开", "Unable to open")}</h2><p class="author-description">${uiText("暂时无法确认登录状态，请稍后重试。", "Your sign-in status could not be checked. Please try again.")}</p><button class="author-primary" type="button" data-author-session-retry>${uiText("重试", "Retry")}</button>`, { back: "" });
+        return;
+      }
+    }
     if (!author) {
+      if (inline) {
+        const v3Console = typeof __SANSPHASE_ADMIN_V3__ !== "undefined" && __SANSPHASE_ADMIN_V3__;
+        const loginHref = v3Console ? adminLoginHref(window.location.hash, "v3") : "/preview-login";
+        const linkText = v3Console ? uiText("打开账号登录", "Open account sign-in") : "打开演示登录";
+        show(`<h2 id="author-dialog-title">作者登录已失效</h2><p class="author-description">重新登录后可继续管理内容。</p><a href="${esc(loginHref)}">${linkText}</a>`, { back: "" });
+        return;
+      }
       pendingAfterLogin = detail;
       login();
       return;
@@ -457,16 +575,23 @@ async function open(detail = {}) {
       await edit(detail.kind || "articles", detail.id);
     else await library(detail.kind || "articles");
   } catch (error) {
+    if (request !== authorSessionRequest || error.name === 'AbortError') return;
     if (!dialog.shown)
       show(`<h2 id="author-dialog-title">${uiText("暂时无法打开", "Unable to open")}</h2>${status()}`);
     feedback(error.message, true);
   }
 }
 window.addEventListener("author:identity", event => {
+  authorSessionRequest++;
+  pendingSessionRetry = undefined;
+  loginPreparation?.abort();
+  loginControl?.dispose();loginControl=undefined;
   authorIdentityEpoch++; for(const controller of authorUploads)controller.abort();
   authorUploads.clear(); author = event.detail;
+  if (inline && workspace && !author) close();
 });
-document.addEventListener("click", (event) => {
+const authorEvents = inline ? shell : document;
+authorEvents.addEventListener("click", (event) => {
   const loginButton = event.target.closest("[data-author-login]");
   const entry = event.target.closest("[data-author-open]");
   if (loginButton) {
@@ -477,14 +602,17 @@ document.addEventListener("click", (event) => {
     event.preventDefault();
     if (entry.dataset.authorOpen === 'admin') {
       close();
-      location.hash = '#/admin';
+      const hostRoute = communityHostRoute(payload ? JSON.parse(payload.textContent) : null, '#/admin');
+      location.assign(hostRoute.kind === 'main' ? hostRoute.url : adminConsoleHref());
       return;
     }
-    open({
+    const detail = {
       kind: entry.dataset.authorOpen,
       id: entry.dataset.authorId,
       new: entry.hasAttribute("data-author-new"),
-    });
+    };
+    if (inline) requestLeave(() => void task(() => open(detail)));
+    else open(detail);
   }
   if (event.target.closest("[data-author-logout]"))
     task(async () => {
@@ -528,6 +656,13 @@ shell.addEventListener("focusout", (event) => {
 shell.addEventListener("click", (event) => {
   const target = event.target.closest("button,[data-author-close]");
   if (!target) return;
+  if (target.hasAttribute('data-author-session-retry')) {
+    if (target.disabled) return;
+    const detail = pendingSessionRetry || {};
+    target.disabled = true;
+    open(detail);
+    return;
+  }
   if (target.hasAttribute('data-move-track')) {
     const rows=[...host.querySelectorAll('[data-track-source]')];
     const index=rows.indexOf(target.closest('[data-track-source]')),next=index+Number(target.dataset.moveTrack);
@@ -625,7 +760,9 @@ shell.addEventListener("click", (event) => {
       try {
         const saved=await saveContent('draft');
         if(!saved){previewWindow?.close();return;}
-        const url=`/?preview=${encodeURIComponent(saved.id)}&previewKind=resource-center#/resource-center/${encodeURIComponent(saved.slug)}`;
+        const url=workspacePreviewOrigin
+          ? new URL(`/book-preview/${encodeURIComponent(saved.id)}`, workspacePreviewOrigin).href
+          : `/?preview=${encodeURIComponent(saved.id)}&previewKind=resource-center#/resource-center/${encodeURIComponent(saved.slug)}`;
         if(previewWindow)previewWindow.location.href=url;
         const link=document.createElement('a');link.href=url;link.target='_blank';link.rel='noopener';link.textContent=uiText('打开整本草稿预览','Open book draft preview');
         host.querySelector('.author-feedback').append(' ',link);
@@ -670,18 +807,38 @@ shell.addEventListener("submit", (event) => {
   task(async () => {
     if (form.dataset.authorForm === "login") {
       const credentials=Object.fromEntries(new FormData(form));
-      author = await api(
-        "login",
-        "POST",
-        credentials,
-      );
-      void rememberSuccessfulLogin(window,credentials,author.name);
-      window.dispatchEvent(
-        new CustomEvent("author:identity", { detail: author }),
-      );
-      const next = pendingAfterLogin || {};
-      pendingAfterLogin = null;
-      await open(next);
+      const identity=authorIdentityEpoch, controller=new AbortController();
+      let loginTimer;
+      loginPreparation?.abort();loginPreparation=controller;
+      const originalHash=location.hash;
+      const cancel=()=>{if(location.hash!==originalHash)controller.abort();};
+      window.addEventListener('hashchange',cancel);
+      try {
+        if(!loginControl)throw new Error(uiText('请先点击验证。','Please click to verify first.'));
+        const proof=loginControl.consume();
+        feedback(uiText('正在登录…','Signing in…'));
+        if(controller.signal.aborted)throw controller.signal.reason;
+        if(!form.isConnected)return;
+        loginTimer=setTimeout(()=>controller.abort(new Error(uiText('登录请求超时，请重试。','Sign-in timed out. Please try again.'))),30_000);
+        const signedIn=await api("login","POST",credentials,{proof,signal:controller.signal});
+        clearTimeout(loginTimer);
+        if(controller.signal.aborted)throw controller.signal.reason;
+        if(!form.isConnected||identity!==authorIdentityEpoch)return;
+        author=signedIn;
+        void rememberSuccessfulLogin(window,credentials,author.name);
+        window.dispatchEvent(new CustomEvent("author:identity", { detail: author }));
+        const consoleReturn = adminReturnDestination(location.search, true);
+        if (consoleReturn) { location.assign(consoleReturn); return; }
+        const next = pendingAfterLogin || {};
+        pendingAfterLogin = null;
+        await open(next);
+      } catch(error) {
+        throw controller.signal.aborted ? controller.signal.reason : error;
+      } finally {
+        clearTimeout(loginTimer);
+        window.removeEventListener('hashchange',cancel);
+        if(loginPreparation===controller)loginPreparation=undefined;
+      }
     }
     if (form.dataset.authorForm === "content") await saveContent("draft");
     if (form.dataset.authorForm === "profile") {
@@ -796,7 +953,7 @@ shell.addEventListener("change", (event) => {
     feedback(uiText("上传完成，保存后生效。", "Upload complete. Save to apply."));
   });
 });
-document.addEventListener(
+authorEvents.addEventListener(
   "keydown",
   (event) => {
     if(dialog.shown && !discardPrompt.hidden && event.key==='Tab') {
@@ -810,6 +967,7 @@ document.addEventListener(
     if (dialog.shown && event.key === "Escape") {
       event.preventDefault();
       event.stopImmediatePropagation();
+      if ((loginPreparation || loginControl) && !event.repeat && !event.isComposing) { requestClose(); return; }
       if(event.repeat || event.isComposing || busy) return;
       if(!discardPrompt.hidden) hideDiscard();
       else requestBack();

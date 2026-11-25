@@ -3,8 +3,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { resolve } from 'node:path';
 import { readerProfileAdviceSchema, readerProfileRequestSchema, readerProfileWorkflowReady } from './reader-profile-workflow-migration.ts';
 
-type RegistrationInput = { email: string; nickname: string; phone: string; password: string };
-type RegistrationRow = { id: string; email: string; nickname: string; phone: string; password_cipher: string; token_hash: string; failed_attempts: number; created_at: string; expires_at: string };
+type RegistrationInput = { email: string; nickname: string; phone: string; password: string; inviterId?: string | null; invitationBound?: boolean };
+type RegistrationRow = { id: string; email: string; nickname: string; phone: string; password_cipher: string; token_hash: string; failed_attempts: number; created_at: string; expires_at: string; inviter_id: string | null; invitation_bound: number };
 type ExpiredRegistrationRow = { id: string; email: string; createdAt: string; expiresAt: string };
 export type ProfileKind = 'avatar' | 'signature' | 'nickname';
 export type ProfileAdviceRow = { id: string; profile_id: string; reader_id: string; kind: ProfileKind; decision: 'approve'|'reject'; reason: string; by_kind: 'reader'|'owner'; by_id: string; created_at: string };
@@ -58,6 +58,11 @@ export function createReaderWorkflow(directory: string, secret: string) {
     if (!hadProfiles) db.exec(readerProfileRequestSchema + readerProfileAdviceSchema);
     if (!db.prepare('PRAGMA table_info(reader_registration_requests)').all().some(row => row.name === 'failed_attempts'))
       db.exec('ALTER TABLE reader_registration_requests ADD COLUMN failed_attempts INTEGER NOT NULL DEFAULT 0');
+    // These are transient pending requests, not a migration of authoritative readers.
+    if (!db.prepare('PRAGMA table_info(reader_registration_requests)').all().some(row => row.name === 'inviter_id'))
+      db.exec('ALTER TABLE reader_registration_requests ADD COLUMN inviter_id TEXT');
+    if (!db.prepare('PRAGMA table_info(reader_registration_requests)').all().some(row => row.name === 'invitation_bound'))
+      db.exec('ALTER TABLE reader_registration_requests ADD COLUMN invitation_bound INTEGER NOT NULL DEFAULT 0');
   });
   // Keep the existing column for a compatible workflow upgrade. It now stores
   // an email/request-scoped HMAC, never a six-digit code or an old link token.
@@ -75,21 +80,23 @@ export function createReaderWorkflow(directory: string, secret: string) {
     return Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
   };
   const registration = (row: RegistrationRow | undefined) => row ? ({ id: row.id, email: row.email, nickname: row.nickname, phone: row.phone,
-    password: decrypt(row.password_cipher), createdAt: row.created_at, expiresAt: row.expires_at }) : null;
+    password: decrypt(row.password_cipher), createdAt: row.created_at, expiresAt: row.expires_at, inviterId: row.inviter_id, invitationBound: row.invitation_bound === 1 }) : null;
   return {
-    putRegistration({ email, nickname, phone, password }: RegistrationInput, now = Date.now()) {
+    putRegistration({ email, nickname, phone, password, inviterId = null, invitationBound = false }: RegistrationInput, now = Date.now()) {
+      if (inviterId !== null && !avatarIdPattern.test(inviterId)) throw Error('Invalid registration inviter.');
       let code = randomInt(1000000).toString().padStart(6, '0');
       const value = { id: randomUUID(), email, nickname, phone, cipher: encrypt(password),
         createdAt: new Date(now).toISOString(), expiresAt: new Date(now + registrationLifetimeMs).toISOString() };
       withDb(db => {
         db.exec('BEGIN IMMEDIATE');
         try {
-          const previous = db.prepare('SELECT id,token_hash FROM reader_registration_requests WHERE email=?').get(email) as Pick<RegistrationRow, 'id' | 'token_hash'> | undefined;
+          const previous = db.prepare('SELECT id,token_hash,inviter_id,invitation_bound,expires_at FROM reader_registration_requests WHERE email=?').get(email) as Pick<RegistrationRow, 'id' | 'token_hash' | 'inviter_id' | 'invitation_bound' | 'expires_at'> | undefined;
+          if (previous && Date.parse(previous.expires_at) > now) { inviterId = previous.inviter_id; invitationBound = previous.invitation_bound === 1; }
           while (previous && previous.token_hash === codeDigest(email, previous.id, code)) code = randomInt(1000000).toString().padStart(6, '0');
           db.prepare('DELETE FROM reader_registration_requests WHERE email=?').run(email);
           db.prepare(`INSERT INTO reader_registration_requests
-            (id,email,nickname,phone,password_cipher,token_hash,created_at,expires_at)
-            VALUES (?,?,?,?,?,?,?,?)`).run(value.id, email, nickname, phone, value.cipher, codeDigest(email, value.id, code), value.createdAt, value.expiresAt);
+            (id,email,nickname,phone,password_cipher,token_hash,created_at,expires_at,inviter_id,invitation_bound)
+            VALUES (?,?,?,?,?,?,?,?,?,?)`).run(value.id, email, nickname, phone, value.cipher, codeDigest(email, value.id, code), value.createdAt, value.expiresAt, inviterId, invitationBound ? 1 : 0);
           db.exec('COMMIT');
         } catch (error) { db.exec('ROLLBACK'); throw error; }
       });

@@ -2,8 +2,10 @@ import { escapeHTML as esc } from './core.mjs';
 import { renderMembership, mountMembershipClock, membershipSummary } from './reader-membership.mjs';
 import { readerImageBytes, uploadSizeLabel } from './upload-policy.mjs';
 import { prepareUploadImage } from './upload-image.mjs';
+import { loginVerificationControlHTML, mountLoginVerificationControl } from './login-verification-control.mjs';
 import { validReaderNickname } from './reader-policy.mjs';
 import { readerFrameDecoration, readerFrameOwner, readerFrameSettingsHTML, retainReaderFrame, mountReaderFrames } from './reader-frames.mjs';
+import { adminReturnDestination, readerAdminReturnLocation } from './admin-console-navigation.mjs';
 
 const avatarSizeLabel = uploadSizeLabel(readerImageBytes);
 
@@ -19,6 +21,11 @@ type ReaderRender = (options: { silent: boolean }) => void | Promise<void>;
 type ApiResult = ReaderIdentity & { error?: string; token?: string; requestId?: string };
 
 let mode: ReaderMode = 'login';
+let invitationViewKey = '';
+export function readerInvitation(search: string): { present: boolean; code: string | null } {
+  const values = new URLSearchParams(search).getAll('invite');
+  return { present: values.length > 0, code: values.length === 1 && /^[A-Za-z0-9_-]{24}$/.test(values[0]) ? values[0] : null };
+}
 let registrationEmail = '';
 let registrationRequestId = '';
 let resendAfter = 0;
@@ -45,6 +52,12 @@ export function readerGate(english = false) {
 
 export function readerPage(page: string, id: string, reader: ReaderIdentity | null, english = false, registrationEnabled = true, owner: OwnerIdentity | null = null) {
   const tr = (zh: string, en: string) => english ? en : zh;
+  const search = typeof window === 'undefined' ? '' : window.location.search;
+  const invitation = readerInvitation(search), invitationKey = invitation.present ? search : '';
+  if (invitationKey !== invitationViewKey) {
+    invitationViewKey = invitationKey;
+    if (invitation.present && page === 'account' && !reader && !owner && mode !== 'verify') mode = 'register';
+  }
   if (!registrationRequestId && typeof window !== 'undefined') {
     try {
       const saved = JSON.parse(window.sessionStorage.getItem(challengeStorage) || 'null') as { email?: unknown; requestId?: unknown } | null;
@@ -73,11 +86,15 @@ export function readerPage(page: string, id: string, reader: ReaderIdentity | nu
   }
   if (!registrationEnabled && ['forgot', 'verify'].includes(mode)) mode = 'login';
   const heading = { login: tr('账号登录', 'Sign in'), register: registrationEnabled ? tr('加入阅读', 'Join the journey') : tr('注册暂未开放', 'Registration is coming soon'), forgot: tr('找回密码', 'Reset password'), verify: tr('验证注册邮箱', 'Verify registration email') }[mode];
+  const invitationNotice = mode === 'register' && invitation.present
+    ? `<p class="reader-mail-note" data-reader-invitation>${invitation.code
+      ? tr('通过邀请注册。完成注册并发帖经人工审核通过后，邀请人可获得 15 星尘。', 'Register through an invitation. Your inviter can earn 15 Stardust after your registration and a manually approved post.')
+      : tr('邀请链接格式无效，请重新获取链接，或选择普通注册。', 'This invitation link is invalid. Request a new link or register without it.')}</p><button type="button" class="reader-quiet-link" data-reader-invite-clear>${tr('改为普通注册', 'Register without invitation')}</button>` : '';
   const form = mode === 'verify'
     ? `${field('email', tr('注册邮箱', 'Registration email'), 'email', 'email', `value="${esc(registrationEmail)}"`)}${field('code', tr('邮箱验证码', 'Email verification code'), 'text', 'one-time-code', 'inputmode="numeric" pattern="[0-9]{6}" minlength="6" maxlength="6"')}${submit(tr('验证并创建账号', 'Verify and create account'))}`
     : mode === 'forgot'
     ? `${field('email', tr('邮箱', 'Email'), 'email', 'email')}${submit(tr('发送重置邮件', 'Send reset email'))}`
-    : `${mode === 'register' ? field('nickname', tr('昵称（2–8 个字符）', 'Nickname (2–8 characters)'), 'text', 'nickname', 'data-reader-nickname minlength="2" maxlength="128"') : ''}${field('email', tr('邮箱', 'Email'), 'email', 'username')}${mode === 'register' ? field('phone', tr('中国大陆手机号（11 位，仅作联系资料）', 'Mainland China mobile number (11 digits; contact only)'), 'tel', 'tel', 'data-reader-phone inputmode="numeric" pattern="1[3-9][0-9]{9}" minlength="11" maxlength="11"') : ''}${field('password', mode === 'register' ? tr('密码（至少 8 个字符）', 'Password (at least 8 characters)') : tr('密码', 'Password'), 'password', mode === 'register' ? 'new-password' : 'current-password', mode === 'register' ? 'minlength="8" maxlength="128"' : '', english)}${submit(mode === 'register' ? tr('获取邮箱验证码', 'Get email code') : tr('登录', 'Sign in'))}${mode === 'register' ? `<p class="reader-retention-note">${tr('邮箱验证后，连续六个月未登录的非 VIP 账号及其帖子、图片、星尘和兑换数据会自动清理；有效期内的 VIP 账号暂不清理。', 'After email verification, non-VIP accounts inactive for six calendar months are removed along with their posts, images, Stardust and redemption data. Active VIP accounts are exempt.')}</p>` : ''}`;
+    : `${invitationNotice}${mode === 'register' ? field('nickname', tr('昵称（2–8 个字符）', 'Nickname (2–8 characters)'), 'text', 'nickname', 'data-reader-nickname minlength="2" maxlength="128"') : ''}${field('email', tr('邮箱', 'Email'), 'email', 'username')}${mode === 'register' ? field('phone', tr('中国大陆手机号（11 位，仅作联系资料）', 'Mainland China mobile number (11 digits; contact only)'), 'tel', 'tel', 'data-reader-phone inputmode="numeric" pattern="1[3-9][0-9]{9}" minlength="11" maxlength="11"') : ''}${field('password', mode === 'register' ? tr('密码（至少 8 个字符）', 'Password (at least 8 characters)') : tr('密码', 'Password'), 'password', mode === 'register' ? 'new-password' : 'current-password', mode === 'register' ? 'minlength="8" maxlength="128"' : '', english)}${mode === 'login' ? loginVerificationControlHTML(english) : ''}${submit(mode === 'register' ? tr('获取邮箱验证码', 'Get email code') : tr('登录', 'Sign in'))}${mode === 'register' ? `<p class="reader-retention-note">${tr('邮箱验证后，连续六个月未登录的非 VIP 账号及其帖子、图片、星尘和兑换数据会自动清理；有效期内的 VIP 账号暂不清理。', 'After email verification, non-VIP accounts inactive for six calendar months are removed along with their posts, images, Stardust and redemption data. Active VIP accounts are exempt.')}</p>` : ''}`;
   const description = mode === 'register'
     ? registrationEnabled
       ? tr('填写资料后获取邮箱验证码，验证通过才会创建账号。支持 QQ、Gmail、网易等常用邮箱。', 'Enter your details to get an email code. Your account is created after verification. QQ, Gmail, NetEase and other email providers are supported.')
@@ -86,31 +103,47 @@ export function readerPage(page: string, id: string, reader: ReaderIdentity | nu
       ? tr('使用邮箱和密码登录，系统会自动识别账号身份。', 'Sign in with your email and password. Your account access is recognized automatically.')
       : tr('通过已验证的邮箱管理账号访问。', 'Manage account access with your verified email.');
   const help = registrationEnabled ? `<div class="reader-help">${mode !== 'forgot' ? `<button type="button" data-reader-mode="forgot">${tr('忘记密码？', 'Forgot password?')}</button>` : ''}${mode === 'verify'
-    ? `<button type="button" data-reader-resend-code${Date.now() < resendAfter ? ' disabled' : ''}>${tr('重发验证码', 'Resend code')}</button>`
+    ? `<button type="button" data-reader-resend-code${performance.now() < resendAfter ? ' disabled' : ''}>${tr('重发验证码', 'Resend code')}</button>`
     : `<button type="button" data-reader-mode="verify">${tr('已有邮箱验证码？', 'Already have an email code?')}</button>`}</div>`
     : mode !== 'register' ? `<p class="reader-mail-note">${tr('当前仅已有账号可登录；注册与找回密码将在邮件服务接通后开放。', 'Only existing accounts can sign in. Registration and password recovery will open when email delivery is ready.')}</p>` : '';
   return shell(`<div class="reader-heading"><span class="reader-kicker">${mode === 'register' || mode === 'verify' ? 'CREATE ACCOUNT' : 'ACCOUNT ACCESS'}</span><h1>${heading}</h1><p>${description}</p></div><div class="reader-tabs"><button type="button" data-reader-mode="login" ${mode === 'login' ? 'aria-current="page"' : ''}>${tr('登录', 'Sign in')}</button><button type="button" data-reader-mode="register" ${mode === 'register' || mode === 'verify' ? 'aria-current="page"' : ''}>${tr('注册', 'Register')}</button></div>${mode === 'register' && !registrationEnabled ? `<div class="reader-unavailable" role="status"><span aria-hidden="true">✦</span><p>${tr('目前可以继续阅读首页与博客。注册开放后，再来探索作品、资料和书籍。', 'You can keep reading the homepage and blog. Return when registration opens to explore works and the library.')}</p><a href="#/notes">${tr('继续看博客', 'Continue to the blog')} →</a></div>` : `<form data-reader-form="${mode}" autocomplete="on">${form}</form>`}<p data-reader-message role="status"></p><p class="reader-mail-note">${tr('为保护账号及配合依法调查，登录时会记录账号、时间、来源 IP 和浏览器信息，并仅向有权限的管理者提供。', 'For account security and lawful investigations, sign-ins record the account, time, source IP and browser information. Only authorized administrators can access these records.')}</p>${help}`, english);
 }
 
 export function mountReaderUI({ render, onIdentity, english = () => false, onLogout, readIdentity = () => null }: { render: ReaderRender; onIdentity: (reader: ReaderIdentity | null) => void; english?: () => boolean; onLogout?: () => Promise<void>; readIdentity?: () => ReaderIdentity | null }) {
+  const document = globalThis.document;
   const tr = (zh: string, en: string) => english() ? en : zh;
-  const membershipClock = mountMembershipClock(document, english);
   let identityEpoch = 0;
   let avatarPreparation: AbortController | null = null;
-  const invalidateIdentity = () => { avatarPreparation?.abort(); avatarPreparation = null; identityEpoch++; };
-  document.defaultView?.addEventListener('reader:identity', invalidateIdentity);
-  document.defaultView?.addEventListener('author:identity', invalidateIdentity);
+  let loginPreparation: AbortController | null = null;
+  let loginLocation: string | null = null;
+  let loginControl: ReturnType<typeof mountLoginVerificationControl> | null = null;
+  let loginForm: HTMLFormElement | null = null;
+  const cancelLoginPreparation = () => {
+    loginPreparation?.abort(); loginPreparation = null; loginLocation = null;
+    loginControl?.dispose(); loginControl = null; loginForm = null;
+  };
+  const syncLoginControl = () => {
+    const form = document.querySelector<HTMLFormElement>('[data-reader-form="login"]');
+    if (form !== loginForm) { loginControl?.dispose(); loginControl = null; loginForm = form; }
+    if (form) loginControl = mountLoginVerificationControl(form, 'reader', { english, onError: value => message(value) });
+    return loginControl;
+  };
+  const invalidateIdentity = () => { avatarPreparation?.abort(); avatarPreparation = null; cancelLoginPreparation(); identityEpoch++; };
+  // Invalidate the previous identity before the app's render listeners replace
+  // its form, so cleanup cannot destroy the new form mounted by that render.
+  document.defaultView?.addEventListener('reader:identity', invalidateIdentity, true);
+  document.defaultView?.addEventListener('author:identity', invalidateIdentity, true);
   const identityStamp = () => ({ epoch: identityEpoch, owner: readerFrameOwner(readIdentity()) });
   const currentIdentity = (stamp: ReturnType<typeof identityStamp>) => stamp.epoch === identityEpoch && stamp.owner === readerFrameOwner(readIdentity());
   const checkPhone = (input: HTMLInputElement) => input.setCustomValidity(input.value && !/^1[3-9]\d{9}$/.test(input.value) ? tr('请输入正确的手机号', 'Enter a valid mainland China mobile number') : '');
   const checkNickname = (input: HTMLInputElement) => input.setCustomValidity(input.value && !validReaderNickname(input.value.trim().normalize('NFC')) ? tr('昵称需为 2 至 8 个可见字符', 'Nickname must contain 2–8 visible characters') : '');
   const syncResend = () => {
     const button = document.querySelector<HTMLButtonElement>('[data-reader-resend-code]');
-    if (button) button.disabled = Date.now() < resendAfter;
+    if (button) button.disabled = performance.now() < resendAfter;
   };
-  const startResendCooldown = () => { resendAfter = Date.now() + 60000; syncResend(); window.setTimeout(syncResend, 60000); };
-  async function api<T = ApiResult>(path: string, body: Record<string, unknown>, namespace: 'reader' | 'author' = 'reader'): Promise<T> {
-    const response = await fetch('/api/' + namespace + '/' + path, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', [namespace === 'author' ? 'X-Author-Request' : 'X-Reader-Request']: '1' }, body: JSON.stringify(body) });
+  const startResendCooldown = () => { resendAfter = performance.now() + 60000; syncResend(); window.setTimeout(syncResend, 60000); };
+  async function api<T = ApiResult>(path: string, body: Record<string, unknown>, namespace: 'reader' | 'author' = 'reader', login?: { proof: string | null; signal: AbortSignal }): Promise<T> {
+    const response = await fetch('/api/' + namespace + '/' + path, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', [namespace === 'author' ? 'X-Author-Request' : 'X-Reader-Request']: '1', ...(login?.proof ? { 'X-Login-Verification': login.proof } : {}) }, body: JSON.stringify(body), ...(login ? { signal: login.signal } : {}) });
     const value = await response.json() as T & { error?: string };
     if (!response.ok) throw new Error(value.error || tr('操作失败，请稍后重试。', 'Please try again later.'));
     return value;
@@ -118,6 +151,29 @@ export function mountReaderUI({ render, onIdentity, english = () => false, onLog
   const frames = mountReaderFrames({ readIdentity, english, post: ref => api<unknown>('frame', { ref }), equipped(state) {
     const reader = readIdentity();
     if (reader) { reader.frame = state.frame; reader.frameImage = state.frameImage; }
+  } });
+  const membershipClock = mountMembershipClock(document, english, { async refresh() {
+    const stamp = identityStamp(), section = document.querySelector('[data-reader-membership]'), route = location.hash;
+    if (!stamp.owner || !section) return null;
+    const response = await fetch('/api/reader/session', { method: 'GET', credentials: 'same-origin', cache: 'no-store', headers: { 'X-Reader-Request': '1' }, signal: AbortSignal.timeout(8000) });
+    const serverNow = Date.parse(response.headers.get('Date') || ''), received = performance.now();
+    if (!response.ok) return null;
+    const value: unknown = await response.json();
+    if (!currentIdentity(stamp) || location.hash !== route || document.querySelector('[data-reader-membership]') !== section) return null;
+    if (value === null) { onIdentity(null); return null; }
+    if (typeof value !== 'object' || Array.isArray(value) || !('email' in value) || typeof value.email !== 'string'
+      || !('vip' in value) || typeof value.vip !== 'boolean' || !('vipUntil' in value)
+      || !(value.vipUntil === null || typeof value.vipUntil === 'string' && Number.isFinite(Date.parse(value.vipUntil)))) return null;
+    const next = value as ReaderIdentity, reader = readIdentity();
+    if (!reader || readerFrameOwner(next) !== stamp.owner) return null;
+    const changed = reader.vip !== next.vip || reader.vipUntil !== next.vipUntil;
+    reader.vip = next.vip; reader.vipUntil = next.vipUntil;
+    if (changed) {
+      const retained = retainReaderFrame(next, reader);
+      reader.frame = retained.frame; reader.frameImage = retained.frameImage;
+      frames.reconcileIdentity();
+    }
+    return { reader, ...(Number.isFinite(serverNow) ? { serverNow: serverNow + Math.max(0, performance.now() - received) } : {}) };
   } });
   const profileIdentity = (value: ReaderIdentity, stamp: ReturnType<typeof identityStamp>) => {
     if (!currentIdentity(stamp)) return false;
@@ -167,8 +223,13 @@ export function mountReaderUI({ render, onIdentity, english = () => false, onLog
     }
     const back = target.closest('[data-reader-return]');
     if (back) returnTo = location.hash || '#/notes';
+    if (target.closest('[data-reader-invite-clear]')) {
+      const url = new URL(location.href); url.searchParams.delete('invite');
+      history.replaceState(history.state, '', url.pathname + url.search + url.hash);
+      mode = 'register'; await render({ silent: true }); return;
+    }
     const switcher = target.closest<HTMLElement>('[data-reader-mode]');
-    if (switcher && isReaderMode(switcher.dataset.readerMode)) { mode = switcher.dataset.readerMode; render({ silent: true }); return; }
+    if (switcher && isReaderMode(switcher.dataset.readerMode)) { cancelLoginPreparation(); mode = switcher.dataset.readerMode; await render({ silent: true }); syncLoginControl(); return; }
     if (target.closest('[data-reader-avatar-pick]')) {
       if (profileDirty()) { avatarMessage(tr('请先保存其他资料，再更换头像。', 'Save your other profile changes before changing the avatar.')); return; }
       document.querySelector<HTMLInputElement>('[data-reader-avatar-file]')?.click(); return;
@@ -256,8 +317,16 @@ export function mountReaderUI({ render, onIdentity, english = () => false, onLog
     if (!form) return;
     event.preventDefault();
     const action = form.dataset.readerForm, button = form.querySelector<HTMLButtonElement>('[type="submit"]');
-    if (!action || !button) return;
+    if (action === 'login' && loginPreparation) return;
+    if (action === 'login') syncLoginControl();
+    if (!action || !button || button.disabled) return;
     const values: Record<string, unknown> = Object.fromEntries(new FormData(form));
+    delete values.inviteCode;
+    if (action === 'register') {
+      const invitation = readerInvitation(location.search);
+      if (invitation.present && !invitation.code) { message(tr('邀请链接无效，请重新获取，或点击“改为普通注册”。', 'Invalid invitation. Request a new link or choose registration without an invitation.')); return; }
+      if (invitation.code) values.inviteCode = invitation.code;
+    }
     const name = form.querySelector<HTMLInputElement>('[data-reader-nickname]');
     if (name) { checkNickname(name); if (!name.reportValidity()) return; }
     if (action === 'profile') {
@@ -272,17 +341,43 @@ export function mountReaderUI({ render, onIdentity, english = () => false, onLog
     if (action === 'reset') values.token = form.dataset.token;
     if (action === 'verify') values.requestId = registrationRequestId;
     const identity = identityStamp();
+    const controller = action === 'login' ? new AbortController() : null;
+    let loginTimer: ReturnType<typeof setTimeout> | undefined;
+    const originalLocation = location.href;
+    const cancelLogin = () => { if (location.href !== originalLocation) controller?.abort(); };
+    if (controller) { loginPreparation?.abort(); loginPreparation = controller; loginLocation = originalLocation; document.defaultView?.addEventListener('hashchange', cancelLogin); }
     button.disabled = true;
     try {
-      const value = await api(action, values);
+      const proof = controller ? loginControl?.consume() : null;
+      if (controller && proof === undefined) throw new Error(tr('请先点击验证。', 'Please click to verify first.'));
+      if (controller) message(tr('正在登录…', 'Signing in…'));
+      if (controller?.signal.aborted) throw controller.signal.reason;
+      if (controller && !form.isConnected) return;
+      if (controller) loginTimer = setTimeout(() => controller.abort(new Error(tr('登录请求超时，请重试。', 'Sign-in timed out. Please try again.'))), 30_000);
+      const value = await api(action, values, 'reader', controller ? { proof: proof ?? null, signal: controller.signal } : undefined);
+      clearTimeout(loginTimer);
+      // A path router can change history before replacing the outgoing form,
+      // without dispatching hashchange. A late login must not own that route.
+      if (controller) cancelLogin();
+      if (controller?.signal.aborted) throw controller.signal.reason;
+      if (controller && !form.isConnected) return;
       if (action === 'login') {
         if (value.role === 'owner') {
+          const consoleReturn = adminReturnDestination(location.search, true);
+          if (consoleReturn) { window.location.assign(consoleReturn); return; }
           const destination = returnTo && returnTo !== '#/account' ? returnTo : '#/notes';
           window.history.replaceState(window.history.state, '', location.pathname + location.search + destination);
           window.dispatchEvent(new CustomEvent('author:identity', { detail: value }));
           await render({ silent: true });
           if (!/^#\/community(?:\/|$)|^#\/post\//.test(destination)) document.querySelector<HTMLButtonElement>('[data-author-login]')?.click();
         } else {
+          const accountReturn = readerAdminReturnLocation(location.search);
+          if (accountReturn) {
+            window.history.replaceState(window.history.state, '', accountReturn);
+            onIdentity(value);
+            await render({ silent: true });
+            return;
+          }
           onIdentity(value);
           const alreadyThere = location.hash === returnTo;
           location.hash = returnTo;
@@ -302,14 +397,32 @@ export function mountReaderUI({ render, onIdentity, english = () => false, onLog
       }
       else if (action === 'profile') { if (profileIdentity(value, identity)) message(value.reviewPending ? tr('资料已保存，昵称或个签待审核。', 'Profile saved; nickname or signature pending review.') : tr('资料已保存。', 'Profile saved.')); }
       else message(value.message || '');
-    } catch (error) { if (action !== 'profile' || currentIdentity(identity)) message(errorMessage(error)); }
-    finally { button.disabled = false; }
+    } catch (error) {
+      const failure: unknown = controller?.signal.aborted ? controller.signal.reason : error;
+      const cancelled = failure instanceof Error && failure.name === 'AbortError';
+      if (!cancelled && form.isConnected && (action !== 'profile' || currentIdentity(identity))) message(errorMessage(failure));
+    }
+    finally {
+      clearTimeout(loginTimer);
+      document.defaultView?.removeEventListener('hashchange', cancelLogin);
+      // A canceled route can retain this same form for a newer login. Only
+      // the request still owning its lock may release its button and proof.
+      if (!controller || loginPreparation === controller) {
+        if (controller) { loginPreparation = null; loginLocation = null; }
+        button.disabled = false;
+        if (action === 'login' && form === loginForm) loginControl?.release();
+      }
+    }
   });
+  syncLoginControl();
   return {
     route(_page: string, _id: string) {
+      const loginPage = _page === 'account';
+      if (!loginPage || loginPreparation && location.href !== loginLocation) cancelLoginPreparation();
       frames.route(_page);
-      membershipClock.update();
+      if (_page === 'account') membershipClock.update(); else membershipClock.pause();
       syncResend();
+      if (loginPage) syncLoginControl();
     },
   };
 }

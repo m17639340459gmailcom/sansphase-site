@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer } from 'node:http';
+import { createServer, IncomingMessage } from 'node:http';
+import { Socket } from 'node:net';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
@@ -9,6 +10,7 @@ import { createCommunityHostAccess } from '../server/community-host-access.ts';
 import { signIdentityRequest } from '../server/community-identity-protocol.ts';
 import { JSDOM } from 'jsdom';
 import { createHash } from 'node:crypto';
+import vm from 'node:vm';
 
 const origin = 'https://community.sansphase.com';
 const main = 'https://www.sansphase.com';
@@ -89,6 +91,62 @@ test('direct HTML access gets only entry prompt while API and private files rema
   assert.equal(env.calls.length, 0);
 });
 
+test('guest shared posts retain only a validated UUID when returning to the main-site login entrance', async t => {
+  const env = await setup(t);
+  const html = await (await fetch(env.url + '/')).text();
+  const script = await (await fetch(env.url + '/community-entry-exchange.mjs')).text();
+  const post = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  for (const hash of [`#/post/${post}`, '#/post/https://evil.example', '#/post/../admin', '#/community']) {
+    const dom = new JSDOM(html, { url: origin + '/' + hash });
+    try {
+      await vm.runInNewContext(`(async () => {${script}\n})()`, { document: dom.window.document, location: { hash }, URL, URLSearchParams,
+        fetch: () => assert.fail('a public share never creates a session without a main-site ticket') });
+      assert.equal(dom.window.document.querySelector('a')!.href, hash === `#/post/${post}` ? `${main}/?post=${post}#/community` : main + '/#/community');
+    } finally { dom.window.close(); }
+  }
+});
+
+test('the handoff consumes its secret before exchange then returns to the shared post, with a safe home fallback', async t => {
+  const env = await setup(t);
+  const html = await (await fetch(env.url + '/community-enter')).text();
+  const script = await (await fetch(env.url + '/community-entry-exchange.mjs')).text();
+  const post = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', ticket = 'a'.repeat(43);
+  for (const suffix of [`&post=${post}`, '&post=https%3A%2F%2Fevil.example', `&post=${post}&post=${post}`, '']) {
+    const hash = `#community-entry=${ticket}${suffix}`;
+    const dom = new JSDOM(html, { url: origin + '/community-enter' + hash });
+    const events: string[] = [];
+    try {
+      await vm.runInNewContext(`(async () => {${script}\n})()`, { document: dom.window.document, URL, URLSearchParams,
+        location: { hash, pathname: '/community-enter', replace: (value: string) => events.push(value) },
+        history: { replaceState: (_value: unknown, _title: string, value: string) => events.push('clear:' + value) },
+        localStorage: { setItem: () => assert.fail('entry secrets must never enter storage') },
+        sessionStorage: { setItem: () => assert.fail('entry secrets must never enter storage') },
+        fetch: async (path: string, init: RequestInit) => {
+          assert.deepEqual(events, ['clear:/community-enter']);
+          assert.equal(path, '/api/community-entry'); assert.equal(init.credentials, 'same-origin');
+          assert.deepEqual(JSON.parse(String(init.body)), { ticket });
+          events.push('exchange'); return { ok: true };
+        } });
+      assert.deepEqual(events, ['clear:/community-enter', 'exchange', suffix === `&post=${post}` ? `/#/post/${post}` : '/#/community/home']);
+    } finally { dom.window.close(); }
+  }
+});
+
+test('a failed handoff keeps the shared destination on its retry link without redirecting or persisting the ticket', async t => {
+  const env = await setup(t);
+  const html = await (await fetch(env.url + '/community-enter')).text();
+  const script = await (await fetch(env.url + '/community-entry-exchange.mjs')).text();
+  const post = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', hash = '#community-entry=' + 'a'.repeat(43) + `&post=${post}`;
+  const dom = new JSDOM(html, { url: origin + '/community-enter' + hash });
+  try {
+    await vm.runInNewContext(`(async () => {${script}\n})()`, { document: dom.window.document, URL, URLSearchParams,
+      location: { hash, pathname: '/community-enter', replace: () => assert.fail('failed handoff must stay on recovery page') },
+      history: { replaceState: () => {} }, fetch: async () => ({ ok: false, status: 403 }) });
+    assert.equal(dom.window.document.querySelector('a')!.href, `${main}/?post=${post}#/community`);
+    assert.match(dom.window.document.querySelector('[data-entry-status]')!.textContent!, /凭证已失效/);
+  } finally { dom.window.close(); }
+});
+
 test('entry requires own Origin, custom header, binding and one-use ticket before setting host-only session cookie', async t => {
   const env = await setup(t);
   assert.equal((await env.exchange('r1', { Origin: main })).status, 403);
@@ -101,11 +159,32 @@ test('entry requires own Origin, custom header, binding and one-use ticket befor
   assert.match(session, /Secure/);
   assert.match(session, /SameSite=Strict/);
   assert.ok(!session.includes('Domain='));
-  assert.ok(!session.includes('Max-Age='));
+  const maxAge = Number(/(?:^|; )Max-Age=(\d+)(?:;|$)/.exec(session)?.[1]);
+  assert.ok(maxAge >= 604798 && maxAge <= 604800, 'closing the browser must not discard a valid community login');
   assert.match(response.headers.getSetCookie().join(' '), /sansphase_community_handoff=.*Max-Age=0/);
   const cookie = session.split(';')[0];
   assert.equal((await fetch(env.url + '/', { headers: { cookie } })).status, 200);
   assert.equal((await fetch(env.url + '/api/manage/readers', { headers: { cookie } })).status, 404);
+});
+
+test('community login survives several idle days but revocation still clears its persistent cookie', async t => {
+  const env = await setup(t);
+  let now = Date.now(); t.mock.method(Date, 'now', () => now);
+  const entered = await env.exchange('r1');
+  const cookie = entered.headers.getSetCookie().find(value => value.startsWith('sansphase_community_session='))!.split(';')[0];
+  now += 6 * 24 * 60 * 60_000;
+  const restored = await fetch(env.url + '/api/community/me', { headers: { cookie } });
+  assert.equal(restored.status, 200);
+  const persisted = restored.headers.getSetCookie().find(value => value.startsWith('sansphase_community_session=')) || '';
+  assert.match(persisted, /(?:^|; )Max-Age=86400(?:;|$)/, 'a restored cookie expires at the original login deadline, rather than another seven days');
+  env.setUnavailable(true);
+  const unavailable = await fetch(env.url + '/api/community/me', { headers: { cookie } });
+  assert.equal(unavailable.status, 503);
+  assert.equal(unavailable.headers.get('set-cookie'), null, 'temporary bridge errors must not log the user out');
+  env.setUnavailable(false); env.setInvalid(true);
+  const revoked = await fetch(env.url + '/api/community/me', { headers: { cookie } });
+  assert.equal(revoked.status, 401);
+  assert.match(revoked.headers.get('set-cookie') || '', /sansphase_community_session=;.*Max-Age=0/);
 });
 
 test('every protected request rechecks VIP and session revocation, bridge failure rejects with 503', async t => {
@@ -313,4 +392,66 @@ test('purge is signed, persists nonce replay defense and never accepts browser s
   assert.equal((await fetch(env.url + path, { method: 'POST', headers, body })).status, 200);
   assert.equal(env.purged(), 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
   assert.equal((await fetch(env.url + path, { method: 'POST', headers, body })).status, 403);
+});
+
+test('long-lived tea-room requests establish a fresh context on every operation and never renew idle time by checking', async t => {
+  const env = await setup(t);
+  let now = Date.now(); t.mock.method(Date, 'now', () => now);
+  const entered = await env.exchange('reader');
+  const cookie = entered.headers.getSetCookie().find(value => value.startsWith('sansphase_community_session='))!.split(';')[0];
+  const token = cookie.slice(cookie.indexOf('=') + 1), createdAt = now;
+  const req = new IncomingMessage(new Socket()); req.method = 'GET'; req.url = '/api/teahouse/socket.io/'; req.headers.cookie = cookie;
+  now += 20 * 60_000; env.setVip(true);
+  assert.equal(await env.access.runWithSession(req, async () => env.access.current(req)!.identity.viewer.vip), true);
+  assert.equal(env.access.current(req), null, 'the operation must not leave request context on a long-lived socket');
+  env.setVip(false);
+  assert.equal(await env.access.runWithSession(req, async () => env.access.current(req)!.identity.viewer.vip), false);
+  assert.equal(env.store.session(token)?.touchedAt, createdAt);
+  now += 5 * 60_000; env.access.touchSession(req);
+  assert.equal(env.store.session(token)?.touchedAt, now, 'only the explicit successful-action callback renews idle time');
+  now += hostSessionIdleMs;
+  await assert.rejects(env.access.runWithSession(req, async () => true), { status: 401 });
+  assert.throws(() => env.access.touchSession(req), { status: 401 }, 'an expired connection cannot renew itself');
+});
+
+test('concurrent tea-room checks on the same request isolate pending identity and reject revocation during an awaited callback', async t => {
+  const env = await setup(t), entered = await env.exchange('reader');
+  const cookie = entered.headers.getSetCookie().find(value => value.startsWith('sansphase_community_session='))!.split(';')[0];
+  const req = new IncomingMessage(new Socket()); req.method = 'GET'; req.url = '/api/teahouse/socket.io/'; req.headers.cookie = cookie;
+  const gate = env.holdNextSessionResponse(); env.setVip(true);
+  const first = env.access.runWithSession(req, async () => env.access.current(req)!.identity.viewer.vip); await gate.waiting;
+  env.setVip(false);
+  assert.equal(await env.access.runWithSession(req, async () => env.access.current(req)!.identity.viewer.vip), false);
+  gate.release(); assert.equal(await first, true);
+  await assert.rejects(env.access.runWithSession(req, async () => {
+    env.store.revokeSession(cookie.slice(cookie.indexOf('=') + 1)); await Promise.resolve(); return 'old-result';
+  }), { status: 401 });
+});
+
+test('tea-room authority outages fail closed without treating an unavailable session as logged out', async t => {
+  const env = await setup(t), entered = await env.exchange('reader');
+  const cookie = entered.headers.getSetCookie().find(value => value.startsWith('sansphase_community_session='))!.split(';')[0];
+  const req = new IncomingMessage(new Socket()); req.method = 'GET'; req.url = '/api/teahouse/socket.io/'; req.headers.cookie = cookie;
+  env.setUnavailable(true); await assert.rejects(env.access.runWithSession(req, async () => true), { status: 503 });
+  assert.ok(env.store.session(cookie.slice(cookie.indexOf('=') + 1)));
+  env.setUnavailable(false); env.setInvalid(true);
+  await assert.rejects(env.access.runWithSession(req, async () => true), { status: 401 });
+  env.setInvalid(false);
+  await assert.rejects(env.access.runWithSession(req, async () => true), { status: 401 });
+});
+
+test('tea-room checks cap concurrent same-session work and release their slots without reusing identity', { timeout: 20_000 }, async t => {
+  const f = await setup(t), entered = await f.exchange('reader');
+  const cookie = entered.headers.getSetCookie().find(value => value.startsWith('sansphase_community_session='))!.split(';')[0];
+  const request = () => { const req = new IncomingMessage(new Socket()); req.headers.cookie = cookie; return req; };
+  let release!: () => void;
+  const gate = new Promise<void>(done => { release = done; });
+  const pending = Array.from({ length: 8 }, () => f.access.runWithSession(request(), async () => { await gate; return true; }));
+  try { await assert.rejects(f.access.runWithSession(request(), async () => true), { status: 429 }); }
+  finally { release(); }
+  assert.deepEqual(await Promise.all(pending), Array(8).fill(true));
+  f.setVip(true);
+  assert.equal(await f.access.runWithSession(request(), async () => f.access.current()!.identity.viewer.vip), true);
+  f.setVip(false);
+  assert.equal(await f.access.runWithSession(request(), async () => f.access.current()!.identity.viewer.vip), false);
 });

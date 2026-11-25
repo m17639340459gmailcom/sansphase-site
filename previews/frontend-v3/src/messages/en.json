@@ -1,0 +1,820 @@
+{
+  "Metadata": {
+    "title": "SANSPHASE · Creative practice and notes",
+    "titleTemplate": "%s · SANSPHASE",
+    "description": "AI video, personal knowledge systems and creative practice. Browse projects, field notes, templates and the library.",
+    "projects": "Work",
+    "projectsDescription": "Selected SANSPHASE work across web development, AI video production, and personal knowledge management.",
+    "skills": "Tech & tools",
+    "skillsDescription": "Technologies explored in my studies and projects, covering AI applications, full-stack development, data analysis, and deployment. Project pages identify those used in each implementation.",
+    "blog": "Blog",
+    "blogDescription": "Practical notes on AI-assisted coding, project configuration, and engineering methods, with examples and guidance on when to use them.",
+    "about": "About",
+    "aboutDescription": "Dingxin Tao, AI Native developer. Learn about my education, projects, academic work, and approach to development and collaboration.",
+    "contact": "Contact",
+    "contactDescription": "Contact Dingxin Tao about roles in AI applications, full-stack development, and forward deployed engineering, or project collaboration."
+  },
+  "Nav": {
+    "home": "Home",
+    "projects": "Projects",
+    "skills": "Tech & tools",
+    "blog": "Blog",
+    "learn": "Learn",
+    "about": "About me",
+    "contact": "Contact",
+    "signIn": "Sign in",
+    "cta": "Get in touch",
+    "menu": "Menu",
+    "close": "Close",
+    "openMenu": "Open menu",
+    "closeMenu": "Close menu",
+    "toggleTheme": "Toggle theme",
+    "light": "Light",
+    "dark": "Dark",
+    "switchLocale": "Switch language",
+    "available": "Open to opportunities",
+    "work": "Work",
+    "learning": "Learning",
+    "resources": "Resources",
+    "software": "Software",
+    "community": "Community"
+  },
+  "Common": {
+    "viewAll": "View all",
+    "readMore": "Read more",
+    "learnMore": "Learn more",
+    "viewProject": "View work",
+    "caseStudy": "Project details",
+    "back": "Back",
+    "backToProjects": "Back to all work",
+    "backToBlog": "All posts",
+    "minRead": "{minutes} min read",
+    "published": "Published",
+    "updated": "Updated",
+    "stack": "Stack",
+    "role": "Role",
+    "year": "Year",
+    "links": "Links",
+    "source": "Source",
+    "sourcePrivate": "GitHub (private repository)",
+    "liveDemo": "Live demo",
+    "download": "Download installer (Windows, unsigned)",
+    "tableOfContents": "On this page",
+    "scroll": "Scroll",
+    "localTime": "Beijing time",
+    "copied": "Copied",
+    "copyEmail": "Copy email",
+    "loading": "Loading",
+    "next": "Next",
+    "previous": "Previous",
+    "index": "Index"
+  },
+  "Home": {
+    "eyebrow": "SANSPHASE",
+    "headline1": "Learning &",
+    "headline2": "Creative Community",
+    "intro": "Find learning resources, useful software, and original projects. Join the community to discuss and redeem rewards.",
+    "ctaPrimary": "Explore my work",
+    "ctaSecondary": "Read the blog",
+    "ctaResume": "Download resume",
+    "scrollHint": "Explore work and writing",
+    "particles": {
+      "description": "Particles automatically cycle through a layered neural-network architecture, a three-layer database, and six sheets. You can also click or tap to change shape, or hover over a network layer to follow the signals between stages.",
+      "previewDescription": "Neural-network particle preview",
+      "next": "Next particle shape. Currently: {shape}. Autoplay will continue.",
+      "monogram": "Monogram",
+      "database": "Database",
+      "network": "Neural net",
+      "lattice": "Layers"
+    },
+    "marquee": [
+      "AI video",
+      "Knowledge base",
+      "Obsidian",
+      "Codex",
+      "Creative workflows",
+      "Web development"
+    ],
+    "whatIDo": {
+      "eyebrow": "Creative focus",
+      "title": "Learning",
+      "titleAccent": "by building.",
+      "cta": "View work",
+      "categories": {
+        "works": "Work",
+        "resources": "Learning materials",
+        "resource-center": "Resource center",
+        "software": "Software recommendations"
+      },
+      "viewEntry": "View details",
+      "browseCategory": "Browse {category}",
+      "empty": "Nothing published yet",
+      "unavailable": "Latest content is temporarily unavailable",
+      "items": [
+        {
+          "title": "AI video",
+          "body": "Building a short-video workflow from scripts and voice-over to storyboards and final review.",
+          "label": "Creative workflows",
+          "cta": "Read the retrospective"
+        },
+        {
+          "title": "Personal knowledge",
+          "body": "Connecting project context, methods and tasks in Obsidian so people and AI can pick up the work.",
+          "label": "Knowledge & collaboration",
+          "cta": "Read about the knowledge base"
+        },
+        {
+          "title": "Web development",
+          "body": "Websites, features and automation, from working out the requirements to delivery.",
+          "label": "Development & collaboration",
+          "cta": "Get in touch"
+        },
+        {
+          "title": "Creative notes",
+          "body": "Notes on tools, practical decisions and problems encountered in real projects.",
+          "label": "Writing & reflection",
+          "cta": "Read the blog"
+        }
+      ]
+    },
+    "featured": {
+      "eyebrow": "Selected work",
+      "title": "From ideas",
+      "titleAccent": "to practice.",
+      "body": "Four case notes on building an AI short-video workflow and a personal knowledge base.",
+      "cta": "View work",
+      "carousel": {
+        "label": "Selected case notes",
+        "role": "carousel",
+        "slide": "Article",
+        "previous": "Previous article",
+        "next": "Next article",
+        "pause": "Pause automatic rotation",
+        "play": "Start automatic rotation",
+        "choose": "Choose an article",
+        "select": "Show {name}",
+        "open": "Read {name}",
+        "position": "Article {index} of {count}: {name}",
+        "read": "Read the article"
+      }
+    },
+    "facts": {
+      "eyebrow": "About the site",
+      "selected": "Selected articles",
+      "topics": "Practice topics",
+      "languages": "Reading languages",
+      "time": "Site time zone"
+    },
+    "sitePublishing": {
+      "eyebrow": "SITE PUBLICATIONS",
+      "title": "Recent posts and",
+      "titleAccent": "publication calendar.",
+      "body": "Read the latest posts and browse what was published by date.",
+      "notes": "Public posts",
+      "resourceCenter": "Library",
+      "materials": "Materials",
+      "lastNote": "Latest post · {date}",
+      "viewSite": "Open the journal",
+      "preview": "Local V3 demo",
+      "readNote": "Read the post",
+      "unavailable": "The site's publishing list is unavailable right now.",
+      "details": "Post tags",
+      "noNotes": "No public posts yet.",
+      "noDescription": "No description yet",
+      "calendar": {
+        "eyebrow": "Publication calendar",
+        "summary": "{period}: {count, plural, one {# item published} other {# items published}}",
+        "period": "Past year",
+        "chooseYear": "Choose publication year",
+        "unavailable": "Publication data is unavailable right now.",
+        "hint": "Hover over or select a day to see its releases.",
+        "keyboardHint": "Use left and right arrows to move a week, up and down to move a day, Home for the first day and End for the last day.",
+        "scrollHint": "Swipe sideways to see the full year.",
+        "source": "Local preview data · {scope}",
+        "scope": "First publication dates for projects, learning materials, the resource center, and software recommendations, in Beijing time.",
+        "view": "Open the resource center",
+        "less": "Less",
+        "more": "More",
+        "monday": "Mon",
+        "wednesday": "Wed",
+        "friday": "Fri",
+        "day": "{date} · {count, plural, one {# release} other {# releases}}"
+      }
+    },
+    "aiUsage": {
+      "title": "AI usage log",
+      "total": "Recorded cumulative usage",
+      "ranking": "Highest usage first",
+      "share": "Share of recorded total",
+      "value": "{amount} tokens, {share} of the recorded total",
+      "source": "Self-reported and manually updated, grouped by tool / model family. No start or end date is specified; these are not live usage figures."
+    },
+    "writing": {
+      "eyebrow": "Blog",
+      "title": "Notes from",
+      "titleAccent": "the work.",
+      "cta": "All articles"
+    },
+    "cta": {
+      "eyebrow": "06 / Contact",
+      "title": "Opportunities &",
+      "titleAccent": "collaboration.",
+      "body": "I'm exploring roles in AI applications, full-stack development, and forward deployed engineering, and welcome project inquiries. Reach me by email or through the contact form.",
+      "button": "Contact me",
+      "secondary": "Read about me"
+    },
+    "brandTitle": "SANSPHASE · Learning & Creative Community",
+    "topics": {
+      "eyebrow": "Reading index",
+      "title": "Browse by topic",
+      "total": "Selected articles",
+      "grouping": "Topics in this selection",
+      "share": "Share of selection",
+      "value": "{count, plural, one {# article} other {# articles}}, {share} of the selection",
+      "source": "Counts cover the selected articles on this page."
+    }
+  },
+  "Projects": {
+    "featuredCase": "Featured work",
+    "eyebrow": "SANSPHASE",
+    "title": "Selected",
+    "titleAccent": "work.",
+    "intro": "Explore three fictional case studies in website design, AI film production, and knowledge management.",
+    "filters": {
+      "all": "All",
+      "ai": "AI video",
+      "fullstack": "Web development",
+      "data": "Knowledge management",
+      "fde": "Forward deployed"
+    },
+    "count": "{count, plural, =1 {1 case study} other {# case studies}}",
+    "empty": "No work matches this filter yet.",
+    "gallery": {
+      "label": "Project screenshots",
+      "carousel": "Image carousel",
+      "slide": "Screenshot",
+      "previous": "Previous screenshot",
+      "next": "Next screenshot",
+      "open": "View full size",
+      "openLabel": "Open the current full-size image in a new tab",
+      "hint": "Project screenshots. Swipe or use the left and right arrow keys to navigate.",
+      "thumbnails": "Choose a project screenshot",
+      "show": "View image {index}: {caption}"
+    },
+    "detail": {
+      "overview": "Overview",
+      "problem": "Context",
+      "approach": "Implementation",
+      "impact": "Current results",
+      "notice": "Maintenance status",
+      "learning": "Lessons learned",
+      "highlights": "Key decisions",
+      "more": "More work",
+      "nextProject": "Next case study",
+      "relatedMaterials": "Explore related materials"
+    }
+  },
+  "Skills": {
+    "eyebrow": "Tech & tools",
+    "title": "Technologies",
+    "titleAccent": "and tools.",
+    "intro": "Technologies explored in my studies and projects, spanning AI applications, frontend and backend development, and deployment. Project pages explain which technologies were used and how.",
+    "sphereHint": "Drag to rotate, click a category to view",
+    "categories": "Categories",
+    "all": "All",
+    "proficiency": "By category",
+    "levels": {
+      "expert": "Expert",
+      "advanced": "Advanced",
+      "proficient": "Proficient",
+      "familiar": "Familiar"
+    },
+    "principles": {
+      "eyebrow": "How I work",
+      "title": "AI-assisted",
+      "titleAccent": "development.",
+      "items": [
+        {
+          "title": "Clarify the task and context",
+          "body": "Review the requirements and relevant code, then confirm the scope, constraints, and expected result before implementation.",
+          "link": "Read about task structure"
+        },
+        {
+          "title": "Check the basis of a review",
+          "body": "Check review comments against the code and use case, considering the impact, reproduction conditions, and priority of each issue.",
+          "link": "Explore the As-a case"
+        },
+        {
+          "title": "Keep changes scoped",
+          "body": "Organize changes around the current requirement. Handle extra refactoring and new features separately to keep review and verification manageable.",
+          "link": "Explore Omnigate customization"
+        },
+        {
+          "title": "Document project conventions",
+          "body": "Record recurring issues, necessary constraints, and verification steps in project documentation, updating it as the implementation changes.",
+          "link": "Read development notes"
+        }
+      ]
+    },
+    "toolbelt": {
+      "eyebrow": "Toolbox",
+      "title": "Tools I use",
+      "titleAccent": "for development."
+    }
+  },
+  "SiteContact": {
+    "navTitle": "Contact",
+    "title": "Get in touch with",
+    "accent": "SANSPHASE.",
+    "intro": "Expand a channel to see a sample project brief or a preview of the creator's video profile.",
+    "channels": "Contact channels",
+    "channel": {
+      "qq": { "name": "QQ contact example", "description": "Project inquiries, site feedback and account-related questions.", "example": "Sample brief: I have a set of edited course videos and would like a searchable materials page with a chapter index within two weeks." },
+      "douyin": { "name": "Douyin profile example", "description": "Preview publicly released videos and creative work.", "example": "Sample video: Rain Against the Window, a 45-second editing exercise comparing the pacing of two cuts." }
+    },
+    "collaboration": "Project inquiries",
+    "collaborationHint": "A short note about the problem, the materials you have, and your ideal delivery date is enough to get started.",
+    "services": { "websites": "Websites", "features": "Feature development", "automation": "Automation scripts" },
+    "viewWork": "Browse demo projects",
+    "published": {
+      "intro": "Find the creator's public contact channels and video profile.",
+      "empty": "The creator has not published any contact channels yet.",
+      "unavailable": "Contact details are temporarily unavailable. Please try again later.",
+      "viewWork": "Browse projects",
+      "channel": {
+        "qq": { "name": "QQ", "action": "Open QQ link" },
+        "douyin": { "name": "Douyin profile", "action": "Open Douyin profile" }
+      }
+    }
+  },
+  "SiteSupport": {
+    "navTitle": "Support",
+    "title": "Thank you for visiting.",
+    "body": "Support channels are currently closed.",
+    "home": "Back to home"
+  },
+  "CommunityLanding": {
+    "navTitle": "Community",
+    "title": "Share your practice.",
+    "accent": "Compare notes.",
+    "intro": "Discuss learning AI, making things and choosing tools. Enter through the main site to keep using your existing account.",
+    "enter": "Enter via the main site",
+    "boards": "What to discuss",
+    "board": {
+      "questions": { "name": "Q&A", "description": "Explain what you want to achieve, what you have tried, and where you got stuck." },
+      "showcase": { "name": "Showcase", "description": "Share work made with AI and the tools and models you used." },
+      "tools": { "name": "Tools", "description": "Compare software, websites and tutorials, and explain when each one is useful." }
+    }
+  },
+  "Library": {
+    "navTitle": "Resource center",
+    "title": "On the shelf,",
+    "accent": "chapter by chapter.",
+    "intro": "Find sample guides to creative practice, AI video, and knowledge systems. Read by chapter or download individual chapters.",
+    "publishedIntro": "Browse the library and read published books chapter by chapter.",
+    "sample": "Demo library",
+    "draftPreview": "Author draft preview",
+    "booksCount": "{count, plural, one {# book} other {# books}}",
+    "chaptersCount": "{count, plural, one {# chapter} other {# chapters}}",
+    "vipDemo": "VIP demo",
+    "vip": "VIP",
+    "vipLocked": "VIP required",
+    "vipRequired": "An active VIP membership is required to read this book.",
+    "signInRequired": "Sign in to open the resource center.",
+    "signIn": "Sign in",
+    "editionChanged": "This chapter has been updated. Reopen it to keep reading.",
+    "reloadChapter": "Reopen this chapter",
+    "downloadBook": "Download book",
+    "resumeReading": "Continue reading",
+    "bookmarks": "Bookmarks",
+    "toggleBookmark": "Toggle bookmark at this position",
+    "removeBookmark": "Remove bookmark · {title}",
+    "localBookmarks": "Reading positions and bookmarks are saved in this browser.",
+    "noBookmarks": "No bookmarks yet.",
+    "bookmarksUnavailable": "This browser could not save the bookmark.",
+    "positionMoved": "The saved passage changed. Showing nearby content.",
+    "back": "Back to the resource center",
+    "chapters": "Book contents",
+    "subsections": "Sections in this chapter",
+    "overview": "Overview",
+    "chapterNavigation": "Chapter navigation",
+    "downloadChapter": "Download chapter as Markdown",
+    "start": "Start reading",
+    "previous": "Previous chapter",
+    "next": "Next chapter",
+    "catalog": {
+      "latest": "Latest release",
+      "allPosts": "All books",
+      "empty": "There are no books on the shelf yet.",
+      "searchLabel": "Search books",
+      "searchPlaceholder": "Search titles, descriptions, categories, or tags",
+      "sortLabel": "Sort by",
+      "sortNewest": "Newest first",
+      "sortOldest": "Oldest first",
+      "sortTitle": "Book title",
+      "resultsRange": "{start}–{end} of {count, plural, one {# book} other {# books}}",
+      "resultsCount": "{count, plural, one {# book} other {# books}}",
+      "reset": "Reset filters",
+      "noResults": "No matching books",
+      "noResultsHint": "Try another keyword, or reset the filters to see all books.",
+      "paginationLabel": "Bookshelf pagination",
+      "previousPage": "Previous page",
+      "nextPage": "Next page",
+      "goToPage": "Go to page {page}",
+      "pageOf": "Page {page} of {pages}",
+      "perPage": "{count, plural, one {# book per page} other {# books per page}}",
+      "openBook": "Read book"
+    }
+  },
+  "Learning": {
+    "navTitle": "Learning materials",
+    "title": "Notes for",
+    "accent": "hands-on practice.",
+    "intro": "Three Markdown templates with fictional examples for documenting a practice session, handing off a project, or indexing sources. Preview any template before downloading it.",
+    "filterLabel": "Filter materials by purpose",
+    "filter": {
+      "all": "All",
+      "learning-journal": "Learning",
+      "project-checklist": "Projects",
+      "source-index": "Sources"
+    },
+    "count": "{count, plural, one {# template} other {# templates}}",
+    "download": "Download template",
+    "downloadNamed": "Download {title}",
+    "preview": "View details",
+    "previewNamed": "View details for {title}",
+    "back": "Back to materials"
+  },
+  "Blog": {
+    "eyebrow": "Blog",
+    "title": "Development",
+    "titleAccent": "notes.",
+    "intro": "Four fictional case notes on AI film production and personal knowledge bases, with practical steps, trial results, and open questions.",
+    "latest": "Latest",
+    "allPosts": "All posts",
+    "empty": "I haven't published any posts yet.",
+    "searchLabel": "Search posts",
+    "searchPlaceholder": "Search titles, descriptions, or tags",
+    "sortLabel": "Sort by",
+    "sortTopic": "By topic",
+    "sortNewest": "Newest first",
+    "sortOldest": "Oldest first",
+    "sortTitle": "Title",
+    "resultsRange": "{start}–{end} of {count, plural, one {# post} other {# posts}}",
+    "resultsCount": "{count, plural, one {# post} other {# posts}}",
+    "reset": "Reset filters",
+    "noResults": "No matching posts",
+    "noResultsHint": "Try another keyword, or reset the filters to see all posts.",
+    "paginationLabel": "Blog pagination",
+    "previousPage": "Previous page",
+    "nextPage": "Next page",
+    "goToPage": "Go to page {page}",
+    "pageOf": "Page {page} of {pages}",
+    "perPage": "{count} per page",
+    "share": "Share",
+    "writtenBy": "Written by",
+    "demoAuthor": "Demo author",
+    "relatedPosts": "Keep reading"
+  },
+  "About": {
+    "eyebrow": "About me",
+    "title": "I'm",
+    "titleAccent": "SANSPHASE",
+    "intro": "I write about AI filmmaking and personal knowledge systems, from a single shot or source note through handoff and review.",
+    "clock": "Beijing time",
+    "story": {
+      "eyebrow": "Writing and practice",
+      "paragraphs": [
+        "This blog starts with two questions: how do you cut an idea into a short film people can follow, and how do you find the evidence behind a decision when you need it again?",
+        "The filmmaking notes put scripts, narration, and storyboards through the same preview to see where shots, sound, and captions lose their connection.",
+        "The knowledge base notes begin with a small set of records. Source cards and an index connect clues to evidence, then specific questions test what can be recovered.",
+        "The timeline below collects the local demo articles by date. Open any article for the test steps, illustrations, and retrospective."
+      ]
+    },
+    "timeline": {
+      "eyebrow": "Publication history",
+      "title": "Writing",
+      "titleAccent": "timeline"
+    },
+    "publications": {
+      "eyebrow": "Blog",
+      "title": "Blog articles",
+      "intro": "Two collections cover AI filmmaking and personal knowledge systems through examples of production, search, and handoff.",
+      "format": "Practice notes",
+      "read": "Read article",
+      "readArticle": "Read article: {title}",
+      "related": "Related article",
+      "relatedArticle": "Related article: {title}"
+    },
+    "now": {
+      "eyebrow": "Article index",
+      "title": "Recent writing"
+    },
+    "values": {
+      "eyebrow": "Writing topics",
+      "items": [
+        {
+          "title": "Film experiments",
+          "body": "Compare scripts, narration, and storyboards with what viewers pick up from the finished shots."
+        },
+        {
+          "title": "Production reviews",
+          "body": "Trace preview feedback back to a handoff and save the checks worth repeating next time."
+        },
+        {
+          "title": "Organizing sources",
+          "body": "Connect records, source cards, and decisions through an index that leads back to the evidence."
+        },
+        {
+          "title": "Search and handoff",
+          "body": "Test the archive against concrete questions and record which answers can be recovered and what evidence is still missing."
+        }
+      ]
+    },
+    "cta": "Contact me"
+  },
+  "Contact": {
+    "eyebrow": "Contact",
+    "title": "Opportunities &",
+    "titleAccent": "collaboration.",
+    "intro": "Get in touch about roles in AI applications, full-stack development, or forward deployed engineering, or about a project. A role description or project overview is a helpful starting point.",
+    "responseTime": "You can include relevant links or some background on your project.",
+    "directEmail": "Email me directly",
+    "elsewhere": "Elsewhere",
+    "resume": "Resume",
+    "resumeFormat": "PDF",
+    "wechat": {
+      "title": "Connect on WeChat",
+      "trigger": "Add me on WeChat",
+      "shortNote": "Please include your reason for reaching out and how you found me.",
+      "close": "Close WeChat QR code",
+      "scan": "Scan with WeChat to add me",
+      "alt": "Dingxin Tao's WeChat contact QR code",
+      "note": "When adding me, please mention why you're reaching out and where you found me.",
+      "example": "For example: project collaboration · portfolio / GitHub",
+      "save": "Save QR code",
+      "open": "View original",
+      "mobileHint": "On your phone, save the image, then select it from your album in WeChat’s Scan feature."
+    },
+    "form": {
+      "name": "Name",
+      "namePlaceholder": "Your name",
+      "email": "Email",
+      "emailPlaceholder": "you@example.com",
+      "company": "Company (optional)",
+      "companyPlaceholder": "Where you work",
+      "topic": "Subject",
+      "topics": {
+        "fde": "Forward deployed engineering (FDE) role",
+        "ai": "AI engineering role",
+        "contract": "Contract / freelance project",
+        "collab": "Collaboration",
+        "other": "Something else"
+      },
+      "message": "Message",
+      "messagePlaceholder": "Please share a brief overview of the role or project and what you would like to discuss.",
+      "submit": "Send message",
+      "sending": "Sending…",
+      "successTitle": "Message received.",
+      "successBody": "Thanks for writing, {name}.",
+      "successBodyNoDelivery": "Email delivery isn't configured on this site, {name}, so I may not receive this message. Please email me directly.",
+      "errorTitle": "Something went wrong.",
+      "errorBody": "Please try again or email me directly.",
+      "rateLimited": "Too many messages from this network. Please try again later.",
+      "sendAnother": "Send another",
+      "validation": {
+        "name": "Please enter your name.",
+        "email": "Please enter a valid email.",
+        "message": "Please write at least 20 characters."
+      }
+    }
+  },
+  "Footer": {
+    "bannerEyebrow": "Collaboration",
+    "bannerBody": "Get in touch about websites, feature development and creative workflows.",
+    "tagline": "Have an idea?",
+    "taglineAccent": "Let’s talk.",
+    "cta": "Contact me",
+    "navigate": "Navigate",
+    "connect": "Connect",
+    "wechat": "WeChat · Add me",
+    "colophon": "About this site",
+    "colophonBody": "Notes on AI video, personal knowledge and creative workflows.",
+    "source": "Source on GitHub",
+    "rights": "© {year} 無相 SANSPHASE",
+    "backToTop": "Back to top"
+  },
+  "NotFound": {
+    "code": "404",
+    "title": "Page",
+    "titleAccent": "not found.",
+    "body": "The link may be wrong, or the page may have moved. You can try the home page.",
+    "cta": "Back home"
+  },
+  "Error": {
+    "title": "Something",
+    "titleAccent": "went wrong.",
+    "body": "The page couldn't load. Please try again. If it still won't open, you can return home.",
+    "retry": "Try again",
+    "home": "Back home"
+  },
+  "FX": {
+    "common": {
+      "preloader": {
+        "label": "Creative practice",
+        "loading": "Loading",
+        "ready": "Ready"
+      },
+      "cursor": {
+        "open": "Open",
+        "view": "View",
+        "read": "Read",
+        "visit": "Visit",
+        "drag": "Drag",
+        "play": "Play",
+        "copy": "Copy",
+        "close": "Close"
+      }
+    },
+    "nav": {
+      "search": "Search",
+      "command": "Search and quick actions",
+      "clock": "Beijing",
+      "current": "Current"
+    },
+    "command": {
+      "title": "Command palette",
+      "hud": "Command",
+      "inputLabel": "Search pages, articles and actions",
+      "placeholder": "Search or jump to…",
+      "close": "Close command palette",
+      "results": "Results",
+      "count": "{count, plural, one {# item} other {# items}}",
+      "announce": "{count, plural, =0 {No results} one {# result} other {# results}}",
+      "current": "Here",
+      "groups": {
+        "pages": "Pages",
+        "projects": "Projects",
+        "posts": "Posts",
+        "actions": "Actions",
+        "shortcuts": "Keyboard shortcuts"
+      },
+      "empty": {
+        "eyebrow": "No signal",
+        "title": "Nothing matches <q>“{query}”</q>",
+        "hint": "Try a page or article name, or type ? for keyboard shortcuts."
+      },
+      "footer": {
+        "navigate": "Navigate",
+        "open": "Open",
+        "newTab": "New tab",
+        "shortcuts": "Shortcuts"
+      },
+      "actions": {
+        "themeDark": "Switch to dark theme",
+        "themeLight": "Switch to light theme",
+        "language": "Switch language to 中文",
+        "copyEmail": "Copy email address",
+        "github": "Open GitHub profile",
+        "source": "View this site’s source code",
+        "resume": "Download resume",
+        "top": "Back to top",
+        "intro": "Replay the intro animation",
+        "fireworks": "Launch fireworks"
+      },
+      "shortcuts": {
+        "palette": "Open the command palette",
+        "search": "Search the site",
+        "help": "Show keyboard shortcuts",
+        "goto": "Go to {page}",
+        "then": "then",
+        "secret": "A classic cheat code"
+      },
+      "leader": {
+        "title": "Go to",
+        "hint": "Press a key"
+      },
+      "toast": {
+        "copied": "Email address copied",
+        "copyFailed": "Couldn’t copy. The address is:",
+        "resume": "Resume download started",
+        "konami": "Cheat code accepted",
+        "konamiBody": "+30 lives. Thanks for exploring the details."
+      },
+      "console": {
+        "source": "This site’s source code: {url}",
+        "hint": "Tip: ⌘K / Ctrl K opens the command palette anywhere. Classic cheat codes work too."
+      }
+    },
+    "hero": {
+      "marquee": "Technologies",
+      "hud": {
+        "shape": "Shape",
+        "engine": "WebGL · GLSL",
+        "loading": "Loading animation",
+        "gathering": "Assembling particles",
+        "morphing": "Morphing",
+        "stable": "Stable",
+        "static": "Static preview",
+        "hint": "Click to morph · drag to orbit",
+        "hintTouch": "Tap to morph"
+      }
+    },
+    "home": {
+      "showcaseCursorPrev": "Prev",
+      "showcaseCursorNext": "Next",
+      "publicationViewLabel": "Release calendar view",
+      "publicationViewGrid": "Grid",
+      "publicationViewCity": "Skyline",
+      "publicationOrbitHint": "Move the pointer to orbit",
+      "publicationUnit": "{count, plural, one {release} other {releases}}",
+      "publicationActiveDays": "Publication days",
+      "publicationLongestStreak": "Longest streak",
+      "publicationCurrentStreak": "Current streak",
+      "publicationBusiestDay": "Busiest day",
+      "publicationDayUnit": "{count, plural, one {day} other {days}}",
+      "publicationPeak": "Peak",
+      "learningMap": "Course map"
+    },
+    "projects": {
+      "filterLabel": "Filter work by category",
+      "unit": "{count, plural, =1 {case study} other {case studies}}",
+      "layout": "Layout",
+      "grid": "Grid",
+      "list": "Index",
+      "screens": "{count, plural, =1 {# screen} other {# screens}}",
+      "columns": {
+        "project": "Project",
+        "category": "Category"
+      },
+      "caseIndex": "Case {index} / {total}",
+      "expandLabel": "Open screenshot {index} in the full-screen viewer",
+      "lightbox": {
+        "label": "Screenshot viewer",
+        "close": "Close viewer",
+        "zoomIn": "Zoom in",
+        "zoomOut": "Zoom out",
+        "reset": "Fit to screen",
+        "zoom": "Zoom level",
+        "hint": "Scroll or pinch to zoom, drag to pan, use the arrow keys to switch screenshots, and press Esc to close."
+      },
+      "nextLabel": "Next project: {title}"
+    },
+    "blog": {
+      "entries": "{count, plural, one {# entry} other {# entries}}",
+      "tags": "Filter by tag",
+      "allTags": "All",
+      "moreTags": "{count} more",
+      "fewerTags": "Fewer",
+      "clearSearch": "Clear search",
+      "readArticle": "Read article",
+      "copyCode": "Copy code",
+      "codeLines": "{count, plural, one {# line} other {# lines}}",
+      "readingProgress": "Progress",
+      "sections": "{count, plural, one {# section} other {# sections}}",
+      "backToTop": "Back to top",
+      "zoomImage": "Enlarge image",
+      "closeImage": "Close image",
+      "openOriginal": "Open original",
+      "zoomHint": "Esc, click or scroll to close",
+      "upNext": "Up next",
+      "endOfArticle": "End of article",
+      "learn": {
+        "modules": "Modules",
+        "modulesBody": "Each module builds one part of the course project. Open a card to start with its first lesson.",
+        "output": "Output",
+        "minutes": "{minutes} min",
+        "readCount": "{read}/{total} read",
+        "lessonOf": "Lesson {current} of {total}",
+        "track": "Module track"
+      }
+    },
+    "about": {
+      "portrait": {
+        "label": "Profile"
+      },
+      "skills": {
+        "nodes": "{count} nodes",
+        "share": "Share of directory"
+      }
+    },
+    "contact": {
+      "form": {
+        "ready": "Ready",
+        "sending": "Sending",
+        "sent": "Received",
+        "failed": "Failed",
+        "shortcut": "⌘ / Ctrl + Enter to send"
+      },
+      "notFound": {
+        "status": "Route not found",
+        "jump": "Or jump to",
+        "search": "Search the site"
+      },
+      "error": {
+        "status": "Runtime error"
+      }
+    },
+    "footer": {}
+  }
+}

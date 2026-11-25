@@ -9,11 +9,15 @@
 | [架构边界](../ARCHITECTURE.md) | 修改业务、权限、存储之前阅读 |
 | [作者指南](AUTHOR-GUIDE.md) | 日常编辑发布 |
 | [读者访问](READER-ACCESS.md) | 账号与阅读权限 |
+| [登录人机验证](LOGIN-VERIFICATION.md) | 本地 Tianai 滑块接入、范围与启用要求 |
+| [分享与邀请接入](SHARING-AND-INVITATIONS.md) | 已确认规则、本地分享卡片、权限与平台限制 |
+| [公开博客阅读与搜索入口](PUBLIC-READING.md) | 本地新增真实正文地址、共享模板、旧链接兼容与验证边界 |
 | [部署指南](DEPLOYMENT.md) | 环境、进程和 Nginx |
 | [发布流程](RELEASE-PROCESS.md) | 构建、验收、切换和回滚 |
 | [维护与数据保护](MAINTENANCE.md) | 备份、保留和清理 |
 | [社区集成](COMMUNITY-INTEGRATION-20261002.md) | 已合并功能、规则确认与未上线边界 |
 | [社区当前界面](COMMUNITY-APPEARANCE.md) | 已采纳的深浅模式、交互和模块位置 |
+| [会员茶室本地功能版](TEAHOUSE.md) | 本地运行、VIP 与管理准入、实时消息、撤回和上线边界 |
 | [社区本地版本](COMMUNITY-LOCAL-INTEGRATION.md) | 当前正式源码、预览与旧方案归档 |
 | [社区上线前讨论](COMMUNITY-PRELAUNCH.md) | 身份预览、已验证的防护、已复现缺口与待确认规则 |
 | [社区横幅设置](COMMUNITY-BANNERS.md) | 首页与板块的独立配置、管理权限、封面、轮播和数据迁移 |
@@ -23,6 +27,7 @@
 | [香港社区部署](COMMUNITY-HOSTING.md) | 主站账号与独立社区的身份、数据、备份和运行边界 |
 | [认证安全升级](PAYLOAD-AUTH-UPGRADE.md) | 当前 Payload 版本、迁移与兼容回滚 |
 | [静态交付](STATIC-DELIVERY.md) | 版本资源与 CDN |
+| [稳定性与性能诊断](LOCAL-DIAGNOSTICS.md) | 轻量测量、匿名采样、仅维护通道可读的短期报告及本机预览 |
 | [TypeScript 迁移](TYPESCRIPT-MIGRATION.md) | TS 源码和兼容入口 |
 | [大文件上传](UPLOAD-15GB.md) | 容量与限制 |
 

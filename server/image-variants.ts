@@ -5,6 +5,8 @@ import {resolve} from 'node:path';
 import {imageWidths} from '../src/image-sources.mjs';
 
 const widths = new Set(imageWidths);
+export const homeCoverWidth = 768;
+type ImageMode = boolean | 'home-cover';
 const isMissing=(error:unknown)=>error instanceof Error && 'code' in error && error.code==='ENOENT';
 type VariantQueue = { pending: Map<string,Promise<string|null>>; queue: Promise<unknown> };
 const queues = new Map<string,VariantQueue>();
@@ -14,15 +16,15 @@ function variantQueue(directory:string) {
   if(!state) {state={pending:new Map(),queue:Promise.resolve()};queues.set(cache,state);}
   return state;
 }
-const variantKey=(source:string, size:number, modified:number, width:number, presentation:boolean)=>createHash('sha256').update(`${presentation ? 'v3-display-q92' : 'v2-lossless'}:${source}:${size}:${modified}:${width}`).digest('hex');
+const variantKey=(source:string, size:number, modified:number, width:number, mode:ImageMode)=>createHash('sha256').update(`${mode === 'home-cover' ? 'home-cover-q84' : mode ? 'v3-display-q92' : 'v2-lossless'}:${source}:${size}:${modified}:${width}`).digest('hex');
 
 /** Serialize cache removal and the caller's guarded source deletion with generation. */
 export async function removeImageVariants(directory:string, source:string, removeSource?:()=>Promise<void>) {
   const state=variantQueue(directory),cache=resolve(directory,'image-cache');
   const job=state.queue.then(async()=>{
     const info=await stat(source).catch(error=>{if(isMissing(error))return null;throw error;});
-    if(info) for(const width of imageWidths) for(const presentation of [false,true]) {
-      const key=variantKey(source,info.size,info.mtimeMs,width,presentation);
+    if(info) for(const width of imageWidths) for(const mode of (width === homeCoverWidth ? [false,true,'home-cover'] as const : [false,true])) {
+      const key=variantKey(source,info.size,info.mtimeMs,width,mode);
       for(const suffix of ['webp','original']) await unlink(resolve(cache,`${key}.${suffix}`)).catch(error=>{if(!isMissing(error))throw error;});
     }
     await removeSource?.();
@@ -33,11 +35,12 @@ export async function removeImageVariants(directory:string, source:string, remov
 export function createImageVariants(directory:string) {
   const cache = resolve(directory, 'image-cache');
   const state=variantQueue(directory),pending=state.pending;
-  return async (source:string, requestedWidth:unknown, mime:string, presentation = false) => {
+  return async (source:string, requestedWidth:unknown, mime:string, mode:ImageMode = false) => {
     const width = Number(requestedWidth);
-    if (!widths.has(width) || !/^image\/(jpeg|png|webp|avif)$/.test(mime)) return null;
+    const homeCover = mode === 'home-cover';
+    if (!widths.has(width) || (homeCover && width !== homeCoverWidth) || !/^image\/(jpeg|png|webp|avif)$/.test(mime)) return null;
     const info = await stat(source);
-    const key = variantKey(source,info.size,info.mtimeMs,width,presentation);
+    const key = variantKey(source,info.size,info.mtimeMs,width,mode);
     const path = resolve(cache, `${key}.webp`);
     const originalMarker = resolve(cache, `${key}.original`);
     try {await stat(originalMarker); return null;} catch(error) {if(!isMissing(error)) throw error;}
@@ -54,9 +57,9 @@ export function createImageVariants(directory:string) {
         await mkdir(cache, {recursive:true, mode:0o700});
         const temporary = resolve(cache, `${key}-${randomUUID()}.tmp`);
         try {
-          await input.rotate().resize({width, height:width * 2, fit:'inside', withoutEnlargement:true})
-            .webp(presentation ? {quality:92, smartSubsample:true, effort:4} : {lossless:true, effort:4}).toFile(temporary);
-          if ((await stat(temporary)).size >= info.size) {
+          await input.rotate().resize({width, height:homeCover ? width : width * 2, fit:'inside', withoutEnlargement:true})
+            .webp(mode ? {quality:homeCover ? 84 : 92, smartSubsample:true, effort:4} : {lossless:true, effort:4}).toFile(temporary);
+          if (!homeCover && (await stat(temporary)).size >= info.size) {
             await writeFile(originalMarker, '', {mode:0o600});
             return null;
           }

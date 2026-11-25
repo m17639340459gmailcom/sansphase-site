@@ -316,6 +316,14 @@
   padding: 20px 24px;
   overflow-wrap: anywhere;
 }
+/* Keep Chinese work titles in one complete Song family. Partial locally
+   installed Heavy fonts can otherwise leave characters such as 卸 in fallback. */
+.catalog-page[data-section="works"] .catalog-feature-copy h2,
+.catalog-page[data-section="works"] .catalog-card-copy h2,
+.catalog-detail-page[data-section="works"] .reading-article > h1 {
+  font-family: var(--font-wordmark);
+  font-weight: 700;
+}
 .catalog-feature-copy h2 {
   font-size: 22px;
   line-height: 1.5;
@@ -369,6 +377,10 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
+}
+.catalog-page[data-section="works"] .catalog-hero .catalog-feature-copy h2 {
+  /* Chinese titles must not shrink when a Song font has narrower Latin digits. */
+  max-width: 14em;
 }
 .catalog-hero .catalog-feature-copy p {
   max-width: 52ch;

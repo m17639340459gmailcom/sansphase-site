@@ -1,7 +1,8 @@
-import { readFile, mkdir, copyFile, writeFile } from "node:fs/promises";
+import { readFile, mkdir, copyFile, writeFile, chmod } from "node:fs/promises";
 import { resolve, dirname, sep } from "node:path";
 import {fileHash} from '../server/file-hash.ts';
 import { verifyReaderProfileWorkflowSnapshot } from '../server/reader-profile-backup.ts';
+import { rotateRestoredLoginVerificationKeys } from '../server/login-verification-backup.ts';
 const [backupPath, targetPath, configPath] = process.argv.slice(2);
 if (!backupPath || !targetPath || !configPath)
   throw Error(
@@ -36,10 +37,11 @@ for (const file of manifest.files) {
   const destination = resolve(target, file.path);
   await mkdir(dirname(destination), { recursive: true });
   await copyFile(resolve(source, file.path), destination);
+  if (file.path === 'login-verification.db') await chmod(destination, 0o600);
 }
-const settings = JSON.parse(
+const settings = rotateRestoredLoginVerificationKeys(JSON.parse(
   await readFile(resolve(source, "settings.json"), "utf8"),
-);
+));
 settings.directory = target;
 await writeFile(resolve(configPath), JSON.stringify(settings, null, 2), {
   mode: 0o600,

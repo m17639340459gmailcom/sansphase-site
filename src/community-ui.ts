@@ -1,22 +1,24 @@
 import { createBookImageViewer } from './book-image-viewer.mjs';
 import { prepareUploadImage } from './upload-image.mjs';
+import { publicShareURL } from './share-links.mjs';
+import { invitationShareURL } from './community-invitations.mjs';
 // 社区页面的数据和交互：读接口、排序、搜索、加载更多、发帖（按版块类型）、编辑、回复（引用、@、排序）、
 // 赞、收藏、感谢、采纳、举报、删除、悬赏、提示词解锁、资源投票、付费置顶和高亮、签到和补签、星尘明细、
 // 兑换所、关注、通知，以及站长和协管的置顶、精华、锁帖、移动、审核、禁言、举报处理、发货和上架。
 // 页面 HTML 由 community.ts、community-post.ts 和 community-pages.ts 生成；这里先确认当前路由的身份，再显示缓存与新的页面结果。
 import {
   communityRoute, communityHomeHTML, communityBoardsHTML, communityBoardHTML, communityBoard, installCommunityBoardCatalog, communityTagHTML, communityBookmarksHTML,
-  communityBodyHTML, communityBoards, communityRules, communitySearchLimit, isCommunitySort, boardHref, postHref, readyData, imageLimit, avatarHTML, nameLabelHTML, communityManagementRole, communityReaderReadOnly, communityStatusHTML,
+  communityBodyHTML, communityBoards, communityRules, communitySearchLimit, isCommunitySort, boardHref, postHref, readyData, imageLimit, communityManagementRole, communityReaderReadOnly, communityStatusHTML,
 } from './community.mjs';
 import type {
-  CommunityLoad, CommunityListing, CommunitySort, CommunitySummary, CommunityBoardCatalog, CommunityRoute, CommunityMe, CommunityPerson, CommunityModerationContact, CommunityModerationContacts, Escape, Translate,
+  CommunityLoad, CommunityListing, CommunitySort, CommunitySummary, CommunityBoardCatalog, CommunityRoute, CommunityMe, CommunityModerationContact, CommunityModerationContacts, Escape, Translate,
 } from './community.ts';
 import { communityPostHTML, communityComposeHTML, communityLimits, bodyLimits, composePreviewHTML, editingFrom } from './community-post.mjs';
 import type { CommunityThread, CommunityUpload, CommunityTarget, CommunityReplySort } from './community-post.ts';
 import { bodyImageContent } from './community-body-images.mjs';
 import { communityImageBytes, communityNameEffect } from './community-rules.mjs';
 import { communityNewsBoard } from './community-news.mjs';
-import { readNameEffectFile } from './community-equipment-import.mjs';
+import { createCommunityEquipmentController } from './community-equipment-controller.mjs';
 import { communityCanManageItems } from './community-management.mjs';
 import { communityIconDefinition } from './community-icon-policy.mjs';
 import { syncCommunityIconPanel, communityIconBrowse, communityIconPanelHTML, communityIconCategory } from './community-icon-display.mjs';
@@ -32,11 +34,12 @@ import type { CommunityConvention } from './community-convention.ts';
 import type { CommunityGrowthState, CommunityVIPGrowthState } from './community-growth.ts';
 import { createCommunityWriteRequest } from './community-write-request.mjs';
 import { createCommunityProfileDialog } from './community-profile-dialog.mjs';
+import { createCommunityProfileContrast } from './community-profile-contrast.mjs';
 import { createCommunityShopDialog, communityShopCardMaterials, communityShopCardPointer, communityShopCardExit } from './community-shop-dialog.mjs';
 import type { CommunityProfile } from './community-profile.ts';
 import { validReaderNickname } from './reader-policy.mjs';
-import { communityStaffCapabilities, communityStaffAssignableRoles, communityStaffCanAppointRole } from './community-staff.mjs';
-import type { CommunityStaffState, CommunityStaffPermission } from './community-staff.ts';
+import { createCommunityStewardController } from './community-steward-controller.mjs';
+import type { CommunityStaffState } from './community-staff.ts';
 import { communityFrameBannersHTML } from './community-frame-banners.mjs';
 import type { CommunityBannerConfig } from './community-banners.ts';
 import type { CommunityComposeEditor } from './community-compose-editor.ts';
@@ -68,6 +71,7 @@ export type CommunityContext = {
   showActiveMembers?: boolean;
   showHomeCompose?: boolean;
   simpleCompose?: boolean;
+  teahouseEnabled?: boolean;
   mountSelect?: (select: HTMLSelectElement, icons: Record<string, string>) => { update(): void; dispose(): void };
 };
 type Options = { request?: typeof fetch; navigate?: (hash: string) => void; createProfileCrop?: typeof import('./community-profile-crop.ts').createCommunityProfileCrop; loadComposeEditor?: () => Promise<typeof import('./community-compose-editor.mjs')> };
@@ -196,7 +200,10 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   }
   let rank: CommunityLoad<CommunityRank> | null = null;
   let flow: CommunityFlow = 'all';
-  const stardusts = new Map<CommunityFlow, CommunityLoad<CommunityStardust>>();
+  type StardustKey = CommunityFlow | 'invites';
+  const stardusts = new Map<StardustKey, CommunityLoad<CommunityStardust>>();
+  const stardustKey = (tab: string): StardustKey => tab === 'invites' ? 'invites' : flow;
+  const stardustPath = (key: StardustKey) => key === 'invites' ? 'stardust?tab=invites' : `stardust${key === 'all' ? '' : `?flow=${key}`}`;
   const levelExplorer = createCommunityLevelExplorer({
     root: () => route().view === 'stardust' && route().tab === 'levels' ? mounted?.main.querySelector<HTMLElement>('[data-level-explorer]') || null : null,
     data: () => readyData(stardusts.get(flow)),
@@ -251,13 +258,6 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   const reviewSelection = new Set<string>();
   let reviewBusy = false;
   let managementBoard = '';
-  let stewardCandidate: CommunityLoad<CommunityMember> | null = null;
-  let stewardLookupUid = '';
-  let stewardLookupRequest = 0;
-  let stewardBusy = false;
-  let stewardConfirmation: { form: Form; configuration: string } | null = null;
-  let stewardEditingUid: string | null = null;
-  let stewardScopeDraft: { uid: string; boards: string[]; role?: string; permissions?: CommunityStaffPermission[]; delegable?: CommunityStaffPermission[] } | null = null;
   let managementOpener: { action: string; id: string } | null = null;
   const managementBackground = new Map<HTMLElement, boolean>();
   // The board picked in the compose form (null: the one in the address).
@@ -265,6 +265,12 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   let uploads: CommunityUpload[] = [];
   let uploadsFor = '';
   let mounted: { main: HTMLElement; ctx: CommunityContext } | null = null;
+  let profileContrast: ReturnType<typeof createCommunityProfileContrast> | null = null;
+  function notifyPainted() {
+    if (!mounted) return;
+    profileContrast?.sync(mounted.main);
+    mounted.ctx.painted?.();
+  }
   // The reading frame owns its inner viewport. Management and baseline pages
   // scroll the document, whose height can collapse while a request is pending.
   let documentReading: {
@@ -290,7 +296,6 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   let restoringHistory = false;
   let headerKey = '';
   let searchTimer: ReturnType<typeof setTimeout> | undefined;
-  let equipmentDragDepth = 0;
   let passiveRefresh: ReturnType<typeof createCommunityPassiveRefresh> | null = null;
   let passiveRecovery: { hash: string; frame: number; revision: number } | null = null;
   let foregroundRevision = 0;
@@ -322,13 +327,12 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   const removeDraft = (key: string | null) => { if (!key) return; memoryDrafts.delete(key); try { storage()?.removeItem(key); } catch { /* storage is optional */ } };
   type SavedComposeDraft = { board: string; title: string; body: string; tags: string[]; bounty: number };
   const draftHasText = (value: SavedComposeDraft | { body: string } | null) => Boolean(value && (value.body.trim() || ('title' in value && value.title.trim()) || ('tags' in value && value.tags.length) || ('bounty' in value && value.bounty)));
-  const staffFormDirty = () => Boolean([...mounted?.main.querySelectorAll<HTMLInputElement | HTMLSelectElement>('[data-community-form="steward-scope"] input, [data-community-form="steward-scope"] select') || []].some(field => field instanceof HTMLInputElement ? field.type === 'checkbox' ? field.checked !== field.defaultChecked : field.value !== field.defaultValue : [...field.options].some(option => option.selected !== option.defaultSelected)));
   const hasUnsavedDraft = (hash = location.hash) => {
     const current = communityRoute(hash);
     if (profileDialog.opened()) return Boolean(profileWrite || profileDialog.dirty());
     if (current.view === 'new') return draftHasText(readDraft<SavedComposeDraft>(draftKey('compose', hash)));
     if (current.view === 'post') return draftHasText(readDraft<{ body: string }>(draftKey('reply', current.id)));
-    if (current.view === 'manage' && current.tab === 'stewards') return stewardBusy || staffFormDirty();
+    if (current.view === 'manage' && current.tab === 'stewards') return stewardEditor.busy || staffFormDirty();
     if (current.view === 'manage' && current.tab === 'boards') return boardEditor.state().busy || boardEditor.dirty();
     return false;
   };
@@ -544,6 +548,28 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     conflict: () => loadManage('banners'),
   });
 
+  const stewardEditor = createCommunityStewardController({
+    root: () => mounted?.main || null, viewer: () => readyData(me),
+    roster: () => readyData(manages.get('stewards')),
+    inRoster: () => route().view === 'manage' && route().tab === 'stewards',
+    identity: () => frameIdentity,
+    loadMember: uid => load<CommunityMember>(`members/${enc(uid)}?tab=topics`, null),
+    refreshRoster: () => loadManage('stewards'), refreshViewer: loadMe,
+    save: (uid, configuration) => send(`members/${enc(uid)}/steward`, configuration),
+    reload, paint, notify, t: tr, status, invalid, confirmed,
+    syncSelects: () => { for (const [select, control] of selects) if (select.form?.dataset.communityForm === 'steward-scope') control.update(); },
+  });
+  const { lookup: submitStewardLookup, submit: submitStewardScope, update: updateSteward,
+    sync: syncStewardTools, change: changeStewardScope, dirty: staffFormDirty } = stewardEditor;
+
+  const equipmentEditor = createCommunityEquipmentController({
+    root: () => mounted?.main || null,
+    common: () => mounted?.ctx || null,
+    person: () => readyData(me), active: canManageItems, identity: () => frameIdentity,
+    prepare: prepareScopedImage, request: api, t: tr,
+  });
+  const { updateProductPreview, syncItemForm, uploadProduct, importNameEffect, clear: clearEquipmentDrag } = equipmentEditor;
+
   const scopeOf = (current = route()) => current.view === 'board' ? current.board : current.view === 'tag' ? `tag:${current.id}` : '';
   const queryOf = (scope: string) => queries.get(scope) || '';
   const listKey = (scope: string) => `${scope}|${sort}|${queryOf(scope)}`;
@@ -630,7 +656,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       summary = null; lists.clear(); listRequests.clear(); threads.clear(); manages.clear(); manageRequests.clear();
       memberPages.clear(); frameHighlights.clear(); frameHighlightsPending.clear(); banners.clear(); bannerRequests.clear();
       shop = null; shopMine = null; bookmarks = null; rank = null; stardusts.clear(); stardustRequest++;
-      reviewSelection.clear(); managementBoard = ''; stewardCandidate = null; stewardLookupRequest++;
+      reviewSelection.clear(); managementBoard = ''; stewardEditor.invalidateCandidate();
     }
     me = { state: 'ready', data: next }; viewerFailure = null; viewerVerified = true; viewerHash = hash;
     // Updating an LRU entry changes its traversal order. Snapshot first so
@@ -712,8 +738,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   async function loadRank() { await assignLoad('rank', rank, value => { rank = value; }); }
   let stardustRequest = 0;
   async function loadStardust() {
-    const token = ++stardustRequest, selected = flow;
-    const value = await load<CommunityStardust>(`stardust${selected === 'all' ? '' : `?flow=${selected}`}`, stardusts.get(selected));
+    const token = ++stardustRequest, selected = stardustKey(route().tab);
+    const value = await load<CommunityStardust>(stardustPath(selected), stardusts.get(selected));
     const current = token === stardustRequest;
     if (current) stardusts.set(selected, value);
     return current;
@@ -905,7 +931,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const current = route();
     if (['unknown', 'landing', 'new', 'edit', 'profile'].includes(current.view)
       || reporting || editingReply || quoting || postMenu || deleting || moving || retagging || redeeming || delivery
-      || muting || itemEditing || shippingOrder || rejecting || reviewSelection.size || reviewBusy || stewardBusy) return false;
+      || muting || itemEditing || shippingOrder || rejecting || reviewSelection.size || reviewBusy || stewardEditor.busy) return false;
     if (document.querySelector('dialog[open], [role="dialog"][aria-modal="true"], .community-select-menu')
       || mounted.main.querySelector('[data-uploading="true"], [data-community-form="reply-edit"]')
       || uploads.some(upload => upload.state === 'uploading') || [...editors.values()].some(editor => editor.state().pending)) return false;
@@ -982,8 +1008,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         break;
       }
       case 'stardust': {
-        const selected = flow;
-        stage<CommunityStardust>(`stardust${selected === 'all' ? '' : `?flow=${selected}`}`, value => { stardusts.set(selected, value); }); break;
+        const selected = stardustKey(current.tab);
+        stage<CommunityStardust>(stardustPath(selected), value => { stardusts.set(selected, value); }); break;
       }
       case 'inbox': stage<CommunityInbox>(`inbox?tab=${enc(current.tab)}`, value => { inboxes.set(current.tab, value); }); break;
       case 'shop':
@@ -1091,7 +1117,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const canPostMembers = !communityReaderReadOnly(identity) && Boolean(identity ? identity.vip || identity.owner : ctx.members);
     ctx = { ...ctx, members: members(ctx) };
     const current = route();
-    const common = { t: ctx.t, esc: ctx.esc, icons: ctx.icons, ownerAvatar: ctx.ownerAvatar ?? null, showTopicCovers: ctx.simpleCompose, meForSort: identity };
+    const common = { t: ctx.t, esc: ctx.esc, icons: ctx.icons, ownerAvatar: ctx.ownerAvatar ?? null, showTopicCovers: ctx.simpleCompose, meForSort: identity, teahouseEnabled: ctx.teahouseEnabled };
     const identityFailure = displayedViewerFailure(ctx.t);
     if (identityFailure && current.view !== 'unknown' && current.view !== 'landing')
       return `<section class="page community-page" data-community="${current.view}">${communityStatusHTML(identityFailure, common)}</section>`;
@@ -1133,10 +1159,10 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       case 'post': return communityPostHTML({ ...common, thread: threads.get(current.id) || loading, me: viewer, reporting, editingReply, menuOpen: postMenu, deleting, moving, retagging, quoting, replySort });
       case 'checkin': return communityCheckinHTML({ ...common, checkin: checkin || loading, me: viewer });
       case 'bookmarks': return communityBookmarksHTML({ ...common, list: bookmarks || loading });
-      case 'manage': return communityManageHTML({ ...common, manage: manages.get(current.tab === 'convention' ? 'queue' : current.tab) || loading, tab: current.tab, itemEditing, shippingOrder, rejecting, deleting, me: viewer, selectedReviews: [...reviewSelection], managementBoard, stewardCandidate, stewardEditingUid, bannerEditor: bannerEditor.state(), boardEditor: boardEditor.state(), convention });
+      case 'manage': return communityManageHTML({ ...common, manage: manages.get(current.tab === 'convention' ? 'queue' : current.tab) || loading, tab: current.tab, itemEditing, shippingOrder, rejecting, deleting, me: viewer, selectedReviews: [...reviewSelection], managementBoard, stewardCandidate: stewardEditor.candidate, stewardEditingUid: stewardEditor.editingUid, bannerEditor: bannerEditor.state(), boardEditor: boardEditor.state(), convention });
       case 'member': return communityMemberHTML({ ...common, member: memberPages.get(memberKey(current.id, current.tab)) || loading, me: viewer, muting, badgeSelection: badgeExplorer.state(), iconSelection, frames: profile || loading });
       case 'profile': return communityMemberHTML({ ...common, member: memberPages.get(memberKey(viewer?.uid || readyData(profile)?.person.uid || '', 'topics')) || loading, me: viewer });
-      case 'stardust': return communityStardustHTML({ ...common, stardust: stardusts.get(flow) || loading, tab: current.tab, levelSelection: levelExplorer.state() });
+      case 'stardust': return communityStardustHTML({ ...common, stardust: stardusts.get(stardustKey(current.tab)) || loading, tab: current.tab, levelSelection: levelExplorer.state() });
       case 'inbox': return communityInboxHTML({ ...common, inbox: inboxes.get(current.tab) || loading, tab: current.tab, me: viewer });
       case 'shop': return current.tab === 'mine'
         ? communityShopMineHTML({ ...common, mine: shopMine || loading, me: viewer, delivery })
@@ -1273,7 +1299,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       } else results.replaceChildren(...next.childNodes);
     } else results.replaceChildren(...next.childNodes);
     listBusy(false);
-    mounted?.ctx.painted?.();
+    notifyPainted();
     restoreView?.();
     if (documentPosition && section) restoreDocumentReading(section, documentPosition);
   }
@@ -1306,7 +1332,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       paintedPage.news = nextNewsMarkup;
       paintedPage.markup = '';
     }
-    mounted?.ctx.painted?.(); restoreView?.();
+    notifyPainted(); restoreView?.();
     if (position && section) restoreDocumentReading(section, position);
   }
   async function changeList() {
@@ -1478,7 +1504,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
           const beforeAvatar = before.querySelector('.community-m-id > .community-av');
           if (avatar && nextAvatar && beforeAvatar?.outerHTML !== nextAvatar.outerHTML) avatar.replaceWith(nextAvatar);
         }
-        mounted.ctx.painted?.();
+        notifyPainted();
         return;
       }
     }
@@ -1487,7 +1513,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (staged && sameAccount && samePage && paintedPage) {
       if (paintedPage.markup === markup) {
         // Supporting frame reads do not recreate an unchanged readable page.
-        mounted.ctx.painted?.(); return;
+        notifyPainted(); return;
       }
       const view = route().view;
       const core = section.querySelector('.community-main'), nextCore = next.querySelector('.community-main');
@@ -1517,7 +1543,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
             if (selector === '.community-news') replaceNews(current, replacement); else current.replaceWith(replacement);
           }
         }
-        mountSelects(); mounted.ctx.painted?.(); restoreView?.();
+        mountSelects(); notifyPainted(); restoreView?.();
         return;
       }
     }
@@ -1618,9 +1644,12 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       documentPosition.node = next; documentPosition.minHeight = next.style.minHeight;
       next.style.minHeight = `${Math.ceil(documentPosition.height)}px`;
     }
-    if (sameAccount && section.hasAttribute('data-community-pending-route') && viewerVerified && viewerHash === location.hash && route().view === 'manage'
+    // Supporting reads and form updates must retain the same navigation too,
+    // not only the first paint after changing management sections.
+    if (sameAccount && viewerVerified && viewerHash === location.hash && route().view === 'manage'
       && next.matches('.community-management-page[data-community="manage"]') && installManagementPage(section, next)) next = section;
     else section.replaceWith(next);
+    if (documentPosition) documentPosition.node = next;
     paintedAccount = currentAccount;
     for (const field of next.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input[name], textarea[name]')) { count(field); autosize(field); }
     for (const id of previews) { const button = next.querySelector<HTMLButtonElement>(`[data-action="community-md-preview"][data-for=${quoted(id)}]`); if (button) togglePreview(button, true); }
@@ -1651,7 +1680,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (!focused && retainedFocus?.isConnected && next.contains(retainedFocus)) retainedFocus.focus({ preventScroll: true });
     if (focused && caret) try { focused.setSelectionRange(...caret); } catch { /* not a text field */ }
     for (const field of next.querySelectorAll<HTMLElement>('textarea[id]')) field.scrollTop = fieldScroll.get(field.id) || 0;
-    mounted?.ctx.painted?.();
+    notifyPainted();
     restoreView?.();
     if (documentPosition) restoreDocumentReading(next, documentPosition);
     if (resetManagementScroll) window.scrollTo({ top: 0, behavior: 'instant' });
@@ -1898,15 +1927,14 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     profileReviewWrites.add(id);
     const controls = [...form.querySelectorAll<HTMLButtonElement | HTMLInputElement>('button, input')];
     controls.forEach(button => { button.disabled = true; });
-    const identity = frameIdentity;
+    const identity = frameIdentity, hash = location.hash;
     try {
-      await act(target, async () => {
-        try {
-          await send(`manage/profiles/${enc(id)}/${action === 'advise' ? 'advise' : decision}`, action === 'advise' ? { decision, reason } : { reason });
-          if (identity === frameIdentity) notify(action === 'advise' ? tr('建议已提交，资料仍待最终审批。', 'Advice submitted; the profile is still awaiting a final decision.') : tr('审核已处理。', 'Review processed.'));
-        } finally {
-          if (identity === frameIdentity) { await loadManage('profiles'); paint(); }
-        }
+      await busy(form, tr('正在处理…', 'Processing…'), async () => {
+        await send(`manage/profiles/${enc(id)}/${action === 'advise' ? 'advise' : decision}`, action === 'advise' ? { decision, reason } : { reason });
+        if (identity !== frameIdentity) return;
+        notify(action === 'advise' ? tr('建议已提交，资料仍待最终审批。', 'Advice submitted; the profile is still awaiting a final decision.') : tr('审核已处理。', 'Review processed.'));
+        await loadManage('profiles');
+        if (identity === frameIdentity && hash === location.hash) paint();
       });
     } finally { profileReviewWrites.delete(id); controls.forEach(button => { if (button.isConnected) button.disabled = false; }); }
   }
@@ -1922,14 +1950,16 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     const reason = valueOf(form, 'reason').trim();
     if (decision === 'reject' && !reason) return invalid(form, fieldOf(form, 'reason'), tr('请填写驳回理由。', 'Give a rejection reason.'));
     if (length(reason) > 200) return invalid(form, fieldOf(form, 'reason'), tr('审核理由最多 200 个字符。', 'The review reason is limited to 200 characters.'));
-    const identity = frameIdentity;
+    const identity = frameIdentity, hash = location.hash;
     const controls = [...form.querySelectorAll<HTMLInputElement | HTMLButtonElement>('input, button')];
     profileReviewWrites.add(key); controls.forEach(field => { field.disabled = true; });
     try {
       await busy(form, tr('正在处理…', 'Processing…'), async () => {
-        try { await send('manage/profile-background', { memberUid: form.dataset.uid, imageId: form.dataset.image, approve: decision === 'approve', reason, action }); }
-        catch (error) { if (identity === frameIdentity) notify(message(error)); }
-        finally { if (identity === frameIdentity) { await loadManage('profiles'); paint(); } }
+        await send('manage/profile-background', { memberUid: form.dataset.uid, imageId: form.dataset.image, approve: decision === 'approve', reason, action });
+        if (identity !== frameIdentity) return;
+        notify(action === 'advise' ? tr('建议已提交，资料仍待最终审批。', 'Advice submitted; the profile is still awaiting a final decision.') : tr('审核已处理。', 'Review processed.'));
+        await loadManage('profiles');
+        if (identity === frameIdentity && hash === location.hash) paint();
       });
     } finally { profileReviewWrites.delete(key); controls.forEach(field => { if (field.isConnected) field.disabled = false; }); }
   }
@@ -2224,136 +2254,6 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (id) await loadThread(id);
     paint();
   }
-  async function submitStewardLookup(form: Form) {
-    if (!canAppointStaff() || route().view !== 'manage' || route().tab !== 'stewards') return;
-    const uid = valueOf(form, 'uid').trim();
-    if (!uid || uid.length > 64) return invalid(form, fieldOf(form, 'uid'), tr('请输入有效的读者 UID。', 'Enter a valid reader UID.'));
-    if (stewardBusy || (stewardCandidate?.state === 'loading' && stewardLookupUid === uid)) return;
-    const requestId = ++stewardLookupRequest, identity = frameIdentity, hash = location.hash;
-    stewardLookupUid = uid;
-    stewardCandidate = loading;
-    paint();
-    const result = await load<CommunityMember>(`members/${enc(uid)}?tab=topics`, null);
-    if (requestId !== stewardLookupRequest || identity !== frameIdentity || hash !== location.hash) return;
-    stewardCandidate = result;
-    if (result.state === 'ready' && result.data.steward) {
-      await loadManage('stewards');
-      if (requestId !== stewardLookupRequest || identity !== frameIdentity || hash !== location.hash) return;
-    }
-    paint();
-  }
-  function syncStewardTools(root: ParentNode) {
-    const scopeDraft = stewardScopeDraft;
-    root.querySelectorAll<HTMLButtonElement>('[data-action="community-steward"], [data-action="community-steward-edit"], [data-action="community-steward-edit-cancel"], [data-community-form="steward-scope"] button[type="submit"]').forEach(control => { control.disabled = stewardBusy; });
-    root.querySelectorAll<HTMLInputElement>('[data-community-form="steward-scope"] input[type="checkbox"]').forEach(control => {
-      control.disabled = stewardBusy;
-      if (stewardBusy && scopeDraft && control.form?.dataset.uid === scopeDraft.uid) control.checked = (control.name === 'boards' ? scopeDraft.boards : control.name === 'permissions' ? scopeDraft.permissions : scopeDraft.delegable)?.includes(control.value as CommunityStaffPermission) ?? control.checked;
-    });
-    root.querySelectorAll<HTMLSelectElement>('[data-community-form="steward-scope"] select').forEach(control => { control.disabled = stewardBusy; if (stewardBusy && scopeDraft?.role && control.form?.dataset.uid === scopeDraft.uid) control.value = scopeDraft.role; });
-    root.querySelectorAll<Form>('[data-community-form="steward-scope"]').forEach(syncStewardWarning);
-    for (const [select, control] of selects) if (select.form?.dataset.communityForm === 'steward-scope') control.update();
-    const lookup = root.querySelector<HTMLButtonElement>('[data-community-form="steward-lookup"] button[type="submit"]');
-    if (lookup) lookup.disabled = stewardBusy || stewardCandidate?.state === 'loading';
-  }
-  function syncStewardWarning(form: Form) {
-    const warning = form.querySelector<HTMLElement>('[data-steward-chain-warning]');
-    if (warning) warning.hidden = form.dataset.parentChange !== 'true' && valueOf(form, 'role') === form.dataset.originalRole;
-  }
-  function changeStewardScope(field: HTMLInputElement | HTMLSelectElement) {
-    const form = field.form;
-    if (!form || form.dataset.communityForm !== 'steward-scope') return false;
-    if (stewardBusy) { syncStewardTools(form); return true; }
-    stewardConfirmation = null;
-    if (field instanceof HTMLInputElement && (field.name === 'permissions' || field.name === 'delegable')) {
-      const counterpart = [...form.querySelectorAll<HTMLInputElement>(`input[name="${field.name === 'permissions' ? 'delegable' : 'permissions'}"]`)].find(input => input.value === field.value);
-      if (counterpart && (field.name === 'permissions' ? !field.checked : field.checked)) counterpart.checked = field.checked;
-    }
-    syncStewardWarning(form);
-    status(form, '');
-    return true;
-  }
-  async function submitStewardScope(form: Form) {
-    if (stewardBusy || !canAppointStaff() || route().view !== 'manage' || route().tab !== 'stewards') return;
-    const uid = form.dataset.uid || '';
-    const existing = form.dataset.existing === 'true';
-    if (existing) {
-      if (uid !== stewardEditingUid || !readyData(manages.get('stewards'))?.stewards?.some(person => person.uid === uid && person.role === 'reader')) return;
-    } else {
-      const candidate = readyData(stewardCandidate);
-      const lookup = mounted?.main.querySelector<Form>('[data-community-form="steward-lookup"]');
-      if (!candidate?.canAppoint || candidate.self || candidate.steward || candidate.person.role !== 'reader' || candidate.person.uid !== uid || !lookup || valueOf(lookup, 'uid').trim() !== uid) return;
-    }
-    const boards = [...form.querySelectorAll<HTMLInputElement>('input[name="boards"]:checked')].map(input => input.value);
-    if (!boards.length) return invalid(form, form.querySelector('input[name="boards"]'), tr('请至少选择一个负责板块。', 'Select at least one assigned board.'));
-    if (new Set(boards).size !== boards.length || boards.some(id => !communityBoards.some(board => board.id === id))) return status(form, tr('板块选择无效，请重新选择。', 'Invalid board selection. Select again.'));
-    const staff = readyData(me)?.staff;
-    if (staff !== undefined) {
-      const target = existing ? readyData(manages.get('stewards'))?.stewards?.find(person => person.uid === uid) : null;
-      const role = valueOf(form, 'role');
-      if (!staff || !communityStaffCanAppointRole(staff.role, role) || (existing && target?.canAppoint !== true) || boards.some(board => !staff.boards.includes(board))) return status(form, tr('管理身份或板块授权已改变，请重新读取后配置。', 'Management authority or board scope changed; reload before configuring.'));
-      const selected = (name: string) => [...form.querySelectorAll<HTMLInputElement>(`input[name="${name}"]:checked`)].map(input => input.value);
-      const requested = selected('permissions'), delegated = selected('delegable');
-      const validCapability = (value: string): value is CommunityStaffPermission => communityStaffCapabilities.some(cap => cap.id === value);
-      if (!requested.every(validCapability) || !delegated.every(validCapability) || requested.some(cap => !staff.delegable.includes(cap)) || delegated.some(cap => !requested.includes(cap))) return status(form, tr('只可下发上级允许的能力；可继续下发的能力必须同时设为可执行。', 'Grant only capabilities your superior permits; delegable capabilities must also be granted.'));
-      const configuration = { role, boards, permissions: requested, delegable: delegated };
-      const chainChanges = existing && (target?.staff?.role !== role || (staff.role === 'owner' && target?.staff?.parent?.kind === 'reader'));
-      if (chainChanges) {
-        const confirmation = JSON.stringify(configuration);
-        if (stewardConfirmation?.form !== form || stewardConfirmation.configuration !== confirmation) {
-          stewardConfirmation = { form, configuration: confirmation };
-          return status(form, tr('此操作会撤销这位成员的全部下属职务。请核对配置，再次点击保存以确认。', 'This revokes all subordinate appointments. Check the configuration, then click Save again to confirm.'));
-        }
-      }
-      stewardConfirmation = null;
-      stewardScopeDraft = { uid, ...configuration };
-      await saveSteward(uid, true, configuration);
-    } else {
-      stewardScopeDraft = { uid, boards };
-      await saveSteward(uid, true, { boards });
-    }
-  }
-  function canAppointStaff() {
-    const viewer = readyData(me);
-    return Boolean(viewer && !viewer.management?.browsingAsReader && (viewer.staff === undefined ? viewer.owner : viewer.staff && communityStaffAssignableRoles(viewer.staff.role).length && viewer.staff.permissions.includes('staff.appoint')));
-  }
-  async function updateSteward(button: HTMLButtonElement) {
-    if (stewardBusy || !canAppointStaff()) return;
-    const uid = button.dataset.uid || '';
-    if (!uid || button.dataset.on !== 'false') return;
-    if (!confirmed(button, tr('确认撤销', 'Confirm removal'))) return;
-    await saveSteward(uid, false);
-  }
-  async function saveSteward(uid: string, on: boolean, configuration?: { boards: string[]; role?: string; permissions?: CommunityStaffPermission[]; delegable?: CommunityStaffPermission[] }) {
-    const roster = route().view === 'manage' && route().tab === 'stewards';
-    const requestId = stewardLookupRequest, identity = frameIdentity, hash = location.hash;
-    stewardBusy = true;
-    if (mounted) syncStewardTools(mounted.main);
-    try {
-      await send(`members/${enc(uid)}/steward`, { on, ...(on ? configuration : {}) });
-      if (identity !== frameIdentity) return;
-      notify(tr('管理成员已更新。', 'Staff member updated.'));
-      if (stewardEditingUid === uid) stewardEditingUid = null;
-      stewardScopeDraft = null;
-      if (!roster) { await reload(); return; }
-      const refreshCandidate = async () => {
-        if (stewardLookupUid !== uid || requestId !== stewardLookupRequest) return;
-        const result = await load<CommunityMember>(`members/${enc(uid)}?tab=topics`, null);
-        if (requestId === stewardLookupRequest && identity === frameIdentity && hash === location.hash) stewardCandidate = result;
-      };
-      await Promise.all([loadManage('stewards'), loadMe(), refreshCandidate()]);
-      if (identity === frameIdentity && hash === location.hash) paint();
-    } catch (error) {
-      if (identity !== frameIdentity || hash !== location.hash) return;
-      const form = mounted?.main.querySelector<Form>(`[data-community-form="steward-scope"][data-uid=${quoted(uid)}]`) || mounted?.main.querySelector<Form>('[data-community-form="steward-lookup"]');
-      if (form) status(form, message(error)); else notify(message(error));
-    } finally {
-      if (identity === frameIdentity) {
-        stewardBusy = false;
-        stewardScopeDraft = null;
-        if (mounted) syncStewardTools(mounted.main);
-      }
-    }
-  }
   // Confirming actions take two clicks on the same button: the first asks.
   const confirmTimers = new Set<ReturnType<typeof setTimeout>>();
   function confirmed(button: HTMLButtonElement, ask: string) {
@@ -2470,10 +2370,34 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
   }
   async function copy(button: HTMLButtonElement, text: string, idle: string) {
     const label = button.querySelector('span') || button;
-    try { await navigator.clipboard.writeText(text); label.textContent = tr('已复制', 'Copied'); }
+    let copied = false;
+    try { await navigator.clipboard.writeText(text); copied = true; label.textContent = tr('已复制', 'Copied'); }
     catch { label.textContent = tr('复制失败，请手动复制', 'Copy it by hand'); }
     const timer = setTimeout(() => { confirmTimers.delete(timer); if (button.isConnected) label.textContent = idle; }, 2000);
     confirmTimers.add(timer);
+    return copied;
+  }
+
+  async function shareInvitation(button: HTMLButtonElement) {
+    const current = route(), data = readyData(stardusts.get('invites'))?.referrals;
+    if (current.view !== 'stardust' || current.tab !== 'invites' || !data) return;
+    const url = invitationShareURL(data.shareUrl);
+    if (!url) { notify(tr('邀请暂不可用，请稍后再试。', 'Invitations are temporarily unavailable.')); return; }
+    const identity = frameIdentity, hash = location.hash, operation = {};
+    const active = () => identity === frameIdentity && hash === location.hash && button.isConnected;
+    interactionWorks.set(operation, identity); passiveRefresh?.invalidate(); button.disabled = true;
+    try {
+      if (typeof navigator.share === 'function') {
+        try { await navigator.share({ title: tr('一起加入無相社区', 'Join the SANSPHASE community'), url }); return; }
+        catch (error) { if (error instanceof Error && error.name === 'AbortError') return; }
+      }
+      if (!active()) return;
+      const copied = await copy(button, url, tr('分享邀请', 'Share invitation'));
+      if (copied && active()) notify(tr('分享地址已复制，卡片显示取决于聊天平台', 'Invitation link copied. Card previews depend on the chat platform.'));
+    } finally {
+      interactionWorks.delete(operation);
+      if (active()) button.disabled = false;
+    }
   }
 
   // Images upload one at a time as they are chosen; the post only sends their ids.
@@ -2656,7 +2580,13 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       }
       case 'community-delete-topic': case 'community-delete-reply': void remove(target); return;
       case 'community-delete-cancel': deleting = null; paint(); restoreManagementFocus(); return;
-      case 'community-copy-link': void copy(target, location.href, tr('复制链接', 'Copy link')); return;
+      case 'community-copy-link': {
+        const url = publicShareURL(location.href);
+        if (url) void copy(target, url, tr('复制链接', 'Copy link'));
+        else notify(tr('当前内容暂不可分享。', 'This content cannot be shared yet.'));
+        return;
+      }
+      case 'community-share-invitation': void shareInvitation(target); return;
       case 'community-copy-prompt': void copy(target, mounted.main.querySelector('[data-prompt]')?.textContent || '', tr('复制', 'Copy')); return;
       case 'community-copy-delivery': void copy(target, mounted.main.querySelector('[data-delivery]')?.textContent || '', tr('复制', 'Copy')); return;
       case 'community-like': void toggle(target, 'like'); return;
@@ -2804,7 +2734,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         panel.dataset.iconKind = nextBrowse.kind;
         for (const button of panel.querySelectorAll('[data-icon-category]')) button.setAttribute('aria-pressed', String(button.getAttribute('data-icon-category') === nextBrowse.kind));
         target.focus({ preventScroll: true });
-        mounted.ctx.painted?.();
+        notifyPainted();
         return;
       }
       case 'community-icon-equip': {
@@ -2885,7 +2815,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       }
       case 'community-delivery':
         void act(target, async () => {
-          const data = await api<{ name: string; delivery: string }>(`shop/items/${enc(id)}/delivery`);
+          const data = await api<Omit<CommunityDelivery, 'id'>>(`shop/items/${enc(id)}/delivery`);
           shopDialog.close();
           delivery = { id, ...data };
           redeeming = null;
@@ -2917,20 +2847,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       case 'community-steward':
         void updateSteward(target);
         return;
-      case 'community-steward-edit':
-        if (stewardBusy || !canAppointStaff() || route().view !== 'manage' || route().tab !== 'stewards' || !readyData(manages.get('stewards'))?.stewards?.some(person => person.uid === target.dataset.uid)) return;
-        if (readyData(me)?.staff !== undefined && stewardEditingUid !== target.dataset.uid && staffFormDirty()
-          && !window.confirm(tr('管理配置尚未保存，确定切换成员吗？', 'The management configuration is unsaved. Switch members?'))) return;
-        stewardEditingUid = target.dataset.uid || null; paint();
-        return;
-      case 'community-steward-edit-cancel':
-        if (!stewardBusy) {
-          const form = target.closest<Form>('[data-community-form="steward-scope"]');
-          if (form?.dataset.existing === 'false') { stewardCandidate = null; stewardLookupUid = ''; stewardLookupRequest++; }
-          else if (form?.dataset.uid === stewardEditingUid) stewardEditingUid = null;
-          paint();
-        }
-        return;
+      case 'community-steward-edit': stewardEditor.edit(target); return;
+      case 'community-steward-edit-cancel': stewardEditor.cancel(target); return;
       case 'community-lift':
         if (!confirmed(target, tr('确认解除', 'Confirm'))) return;
         void act(target, async () => { await send(`manage/sanctions/${enc(id)}/lift`); notify(tr('已解除禁言。', 'Mute lifted.')); await reload(); });
@@ -3079,15 +2997,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     count(field);
     autosize(field);
     const form = field.form;
-    if (form?.dataset.communityForm === 'steward-lookup' && field.name === 'uid') {
-      stewardLookupRequest++;
-      stewardLookupUid = '';
-      stewardCandidate = null;
-      mounted?.main.querySelector('.community-steward-candidate')?.replaceChildren();
-      mounted?.main.querySelector('.community-steward-candidate')?.removeAttribute('aria-busy');
-      const button = form.querySelector<HTMLButtonElement>('button[type="submit"]'); if (button) button.disabled = stewardBusy;
-      status(form, '');
-    }
+    stewardEditor.input(field);
     if (form?.dataset.communityForm === 'topic' && !form.dataset.edit) {
       writeDraft(draftKey('compose', location.hash), {
         board: checkedOf(form, 'board'), title: valueOf(form, 'title'), body: valueOf(form, 'body'),
@@ -3099,141 +3009,20 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (field.form?.dataset.communityForm === 'topic') syncForms(mounted?.main || document);
     if (field.form?.dataset.communityForm === 'item') syncItemForm(field.form);
   }
-  function updateProductPreview(form: Form, id: string) {
-    const preview = form.querySelector<HTMLElement>('[data-item-image-preview]');
-    if (!preview) return;
-    const src = id ? `/api/community/images/${enc(id)}.webp` : '';
-    if (id && preview.querySelector('img')?.getAttribute('src') !== src) { const img = document.createElement('img'); img.src = src; img.alt = tr('商品图片预览', 'Product preview'); preview.replaceChildren(img); }
-    else if (!id && preview.querySelector('img')) { const label = document.createElement('span'); label.textContent = tr('商品图片', 'Product image'); preview.replaceChildren(label); }
-    const remove = form.querySelector<HTMLButtonElement>('[data-action="community-item-image-remove"]');
-    if (remove) remove.hidden = !id;
-    syncItemForm(form);
-  }
-  function syncItemForm(form: Form) {
-    if (!mounted) return;
-    const kind = checkedOf(form, 'kind') || valueOf(form, 'kind') || 'goods';
-    const wearable = kind === 'frame' || kind === 'color' || kind === 'cover';
-    const cat = fieldOf(form, 'cat'); if (cat) cat.value = wearable ? 'look' : kind;
-    const show = (selector: string, visible: boolean) => { const node = form.querySelector<HTMLElement>(selector); if (node) node.hidden = !visible; };
-    show('[data-item-media]', kind !== 'color'); show('[data-item-effect]', kind === 'color'); show('[data-item-wear-preview]', wearable);
-    show('[data-item-delivery]', kind === 'digital'); show('[data-item-stock]', !wearable);
-    const stock = fieldOf(form, 'stock'); if (stock) stock.disabled = wearable;
-    const help = form.querySelector('[data-item-media-help]');
-    if (help) help.textContent = kind === 'frame' ? tr('上传正方形透明 PNG / WebP / GIF，中心留空；支持动画，最多 25MB / 120 帧。', 'Square transparent PNG / WebP / GIF with a clear centre; up to 25MB / 120 frames.') : kind === 'cover' ? tr('主页背景支持 JPG、PNG、WebP、GIF，最多 25MB / 120 帧。建议使用横向图片。', 'Profile backgrounds: JPG, PNG, WebP, GIF; up to 25MB / 120 frames. Landscape artwork is recommended.') : tr('商品展示图支持 JPG、PNG、WebP、GIF，最多 25MB / 120 帧。', 'Artwork: JPG, PNG, WebP, GIF; up to 25MB / 120 frames.');
-    const hint = form.querySelector('[data-item-wear-help]');
-    if (hint) hint.textContent = kind === 'frame' ? tr('素材会叠加在用户头像上；兑换后自动换上，也可以从已拥有取下。', 'The asset overlays the avatar. Redemption applies it; remove it from Owned items.') : kind === 'cover' ? tr('仅用于社区个人主页背景；兑换后自动使用，也可以在已拥有中更换。一次只显示一张背景。', 'Community profile background only. Redemption applies it; switch it in Owned items. One background is displayed at a time.') : tr('兑换后会应用到社区昵称，帖子、回复和排行榜统一显示。', 'Applies to names in posts, replies and rankings.');
-    const effect = kind === 'color' ? communityNameEffect({ style: valueOf(form, 'effectStyle'), colors: [valueOf(form, 'effectStart'), ...(valueOf(form, 'effectStyle') === 'solid' ? [] : [valueOf(form, 'effectEnd')])] }) : null;
-    const sample: CommunityPerson = { name: readyData(me)?.name || tr('無相', 'Preview'), uid: null, role: 'reader', frame: kind === 'frame' && valueOf(form, 'image') ? `image:${valueOf(form, 'image')}` : null, nameEffect: effect };
-    const preview = form.querySelector('[data-item-wear-sample]');
-    const image = valueOf(form, 'image');
-    const key = `${kind}|${image}|${sample.frame}|${sample.name}|${JSON.stringify(effect)}`;
-    if (preview && wearable && preview.getAttribute('data-preview-key') !== key) {
-      preview.innerHTML = kind === 'cover' ? /^[0-9a-f-]{36}$/.test(image) ? `<span class="community-cover-sample"><img src="/api/community/images/${mounted.ctx.esc(image)}.webp" alt="${tr('主页背景预览', 'Profile background preview')}"></span>` : '' : avatarHTML(sample, mounted.ctx, 'lg', false) + nameLabelHTML(sample, mounted.ctx);
-      preview.setAttribute('data-preview-key', key);
-    }
-  }
-  function equipmentStatus(form: Form, text: string, effect = false) {
-    const line = form.querySelector<HTMLElement>(effect ? '[data-item-effect-status]' : '[data-item-upload-status]');
-    if (line) line.textContent = text;
-  }
-  function setEquipmentBusy(form: Form, value: boolean) {
-    if (value) form.dataset.uploading = 'true'; else delete form.dataset.uploading;
-    form.setAttribute('aria-busy', String(value));
-    form.querySelectorAll<HTMLInputElement | HTMLButtonElement>('[data-community-item-upload], [data-community-effect-upload], button[type="submit"]').forEach(field => { field.disabled = value; });
-  }
-  async function uploadProduct(form: Form, file?: File) {
-    if (!canManageItems()) return;
-    if (!file || form.dataset.uploading === 'true' || form.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled) return;
-    const line = form.querySelector<HTMLElement>('[data-item-upload-status]');
-    const say = (text: string) => { if (line) line.textContent = text; };
-    if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) { say(tr('请选择 JPG、PNG、WebP 或 GIF 图片。', 'Choose JPG, PNG, WebP or GIF.')); return; }
-    if (file.size > communityImageBytes(true)) { say(tr('商品图片不能超过 25MB。', 'Product images cannot exceed 25MB.')); return; }
-    const identity = frameIdentity;
-    setEquipmentBusy(form, true);
-    say(tr('正在上传商品图片…', 'Uploading product image…'));
-    try {
-      const prepared = await prepareScopedImage(file, true, () => form.isConnected && canManageItems());
-      if (!form.isConnected || identity !== frameIdentity || !canManageItems()) return;
-      const body = new FormData(); body.append('file', prepared);
-      const image = await api<{ id: string; frameReady: boolean }>('manage/item-image', { method: 'POST', headers: { 'X-Reader-Request': '1' }, body });
-      if (!form.isConnected || identity !== frameIdentity) return;
-      const value = fieldOf(form, 'image'); if (value) value.value = image.id;
-      form.dataset.frameReady = String(image.frameReady);
-      updateProductPreview(form, image.id); say(tr('图片已上传，保存商品后生效。', 'Image uploaded; save the product to apply it.'));
-    } catch (error) { if (form.isConnected) say(message(error)); }
-    finally { if (form.isConnected) setEquipmentBusy(form, false); }
-  }
-  async function importNameEffect(form: Form, file?: File) {
-    if (!canManageItems()) return;
-    if (!file || form.dataset.uploading === 'true' || form.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled) return;
-    const identity = frameIdentity;
-    setEquipmentBusy(form, true);
-    equipmentStatus(form, tr('正在读取昵称特效…', 'Reading nickname effect…'), true);
-    try {
-      const effect = await readNameEffectFile(file);
-      if (!form.isConnected || identity !== frameIdentity) return;
-      if ((checkedOf(form, 'kind') || valueOf(form, 'kind')) !== 'color') {
-        equipmentStatus(form, tr('物品类型已切换，未应用这个昵称特效。', 'Product type changed; this nickname effect was not applied.'), true);
-        return;
-      }
-      const style = fieldOf(form, 'effectStyle'), start = fieldOf(form, 'effectStart'), end = fieldOf(form, 'effectEnd');
-      if (style) style.value = effect.style;
-      if (start) start.value = effect.colors[0];
-      if (end) end.value = effect.colors[1] || effect.colors[0];
-      syncItemForm(form);
-      equipmentStatus(form, tr('效果已导入，请确认预览；保存商品后生效。', 'Effect imported. Check the preview, then save the product.'), true);
-    } catch (error) { if (form.isConnected && identity === frameIdentity) equipmentStatus(form, message(error), true); }
-    finally { if (form.isConnected) setEquipmentBusy(form, false); }
-  }
-  function equipmentForm() {
-    if (routeHandoffPending() || !canManageItems()) return null;
-    // Only an open product manager's editor accepts desktop files. Other page
-    // editors retain their own drag handlers, including inline reply images.
-    return mounted?.main.querySelector<Form>('form[data-community-form="item"]') || null;
-  }
-  function clearEquipmentDrag() {
-    equipmentDragDepth = 0;
-    mounted?.main.querySelectorAll('.community-equipment-drop.is-dragging').forEach(zone => zone.classList.remove('is-dragging'));
-  }
-  function fileTransfer(event: DragEvent) {
-    return event.dataTransfer && (Array.from(event.dataTransfer.types).includes('Files') || event.dataTransfer.files.length > 0);
-  }
   function onEquipmentDrag(event: DragEvent) {
-    if (routeHandoffPending()) { if (fileTransfer(event)) event.preventDefault(); return; }
+    if (routeHandoffPending()) { if (equipmentEditor.fileTransfer(event)) event.preventDefault(); return; }
     if (bannerEditor.drag(event)) return;
-    const form = equipmentForm();
-    if (!form || !fileTransfer(event)) return;
-    event.preventDefault();
-    if (event.type === 'dragenter') equipmentDragDepth++;
-    const busy = form.dataset.uploading === 'true' || form.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled;
-    if (event.dataTransfer) event.dataTransfer.dropEffect = busy ? 'none' : 'copy';
-    if (!busy) {
-      const effect = (checkedOf(form, 'kind') || valueOf(form, 'kind')) === 'color';
-      form.querySelector(effect ? '.community-effect-import' : '[data-item-media]')?.classList.add('is-dragging');
-    }
+    equipmentEditor.drag(event);
   }
   function onEquipmentLeave(event: DragEvent) {
     if (routeHandoffPending()) return;
     if (bannerEditor.drag(event)) return;
-    if (!equipmentForm() || !fileTransfer(event)) return;
-    equipmentDragDepth = Math.max(0, equipmentDragDepth - 1);
-    if (equipmentDragDepth === 0) clearEquipmentDrag();
+    equipmentEditor.leave(event);
   }
   function onEquipmentDrop(event: DragEvent) {
-    if (routeHandoffPending()) { if (fileTransfer(event)) event.preventDefault(); return; }
+    if (routeHandoffPending()) { if (equipmentEditor.fileTransfer(event)) event.preventDefault(); return; }
     if (bannerEditor.drag(event)) return;
-    const form = equipmentForm();
-    if (!form || !fileTransfer(event)) return;
-    event.preventDefault();
-    clearEquipmentDrag();
-    const effect = (checkedOf(form, 'kind') || valueOf(form, 'kind')) === 'color';
-    if (form.dataset.uploading === 'true' || form.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled) return;
-    const files = event.dataTransfer?.files;
-    if (files?.length !== 1) {
-      equipmentStatus(form, files?.length ? tr('每次请拖入一个素材文件。', 'Drop one asset file at a time.') : tr('请打开文件夹，拖入里面的素材文件。', 'Open the folder and drag an asset file from inside it.'), effect);
-      return;
-    }
-    if (effect) void importNameEffect(form, files[0]); else void uploadProduct(form, files[0]);
+    equipmentEditor.drop(event);
   }
   async function reviewTask(work: () => Promise<void>) {
     if (reviewBusy) return;
@@ -3316,7 +3105,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     if (!link || link.getAttribute('href') === location.hash || link.target === '_blank' || link.hasAttribute('download')) return;
     event.preventDefault(); event.stopPropagation();
     if (profileWrite) { notify(tr('正在提交资料，请稍候。', 'Profile submission in progress. Please wait.')); return; }
-    if (stewardBusy) { notify(tr('正在提交管理配置，请先等待结果。', 'Management configuration is being submitted; wait for the result.')); return; }
+    if (stewardEditor.busy) { notify(tr('正在提交管理配置，请先等待结果。', 'Management configuration is being submitted; wait for the result.')); return; }
     const href = link.getAttribute('href') || '';
     if (typeof window.confirm === 'function' && !window.confirm(tr('还有未发布的内容，确定离开吗？', 'You have an unsent draft. Leave this page?'))) return;
     approvedNavigation = href;
@@ -3368,7 +3157,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     managementOpener = null;
     reviewBusy = false;
     reviewSelection.clear();
-    managementBoard = ''; stewardCandidate = null; stewardLookupUid = ''; stewardLookupRequest++; stewardBusy = false; stewardEditingUid = null; stewardScopeDraft = null; stewardConfirmation = null;
+    managementBoard = ''; stewardEditor.reset();
     checkinRequest++; stardustRequest++;
     levelExplorer.reset();
     badgeExplorer.reset(); iconSelection = undefined;
@@ -3438,7 +3227,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       const frameMembers = !viewerFailure && visibleMembers;
       return `<div data-frame-highlights-state="${list.state}" data-frame-board="${ctx.esc(activityBoard)}">` + communityHomeHTML({ t: ctx.t, esc: ctx.esc, icons: ctx.icons,
         summary: identityFailure || summary || loading, list, sort: 'active', members: frameMembers, me: viewerFailure ? null : me, activityBoard,
-        showCompose: !rejected, showTopicCovers: ctx.simpleCompose })
+        showCompose: !rejected, showTopicCovers: ctx.simpleCompose, teahouseEnabled: ctx.teahouseEnabled })
         + communityFrameBannersHTML(rejected || (scope === 'vip' && !visibleMembers ? { state: 'error', status: 403, message: '' } : banners.get(scope || 'home') || loading), ctx, scope || 'home') + '</div>';
     },
     // What the header needs (bell, account menu, check-in dot); null until it is read.
@@ -3447,6 +3236,8 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
     // Called after each render of a community page; returns the cleanup for the next render.
     mount(main: HTMLElement, ctx: CommunityContext) {
       passiveRefresh?.stop();
+      profileContrast?.dispose();
+      profileContrast = createCommunityProfileContrast(main.ownerDocument, main.ownerDocument.defaultView!);
       mounted = { main, ctx };
       composing = false;
       passiveRefresh = createCommunityPassiveRefresh({ document: main.ownerDocument, window: main.ownerDocument.defaultView!, run: readPassive, allowed: passiveAllowed });
@@ -3485,7 +3276,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
       if (location.hash !== lastHash) {
         locatedReplyHash = '';
         legacyProfileOpened = false;
-        stewardCandidate = null; stewardLookupUid = ''; stewardLookupRequest++;
+        stewardEditor.resetLookup();
       }
       if (!routeHandoffPending()) syncForms(main);
       paint();
@@ -3500,6 +3291,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
         void refresh();
       }
       return () => {
+        profileContrast?.dispose(); profileContrast = null;
         cancelImagePreparations();
         shopDialog.close();
         closeImageViewer();
@@ -3552,7 +3344,7 @@ export function createCommunityUI({ request = (...args) => fetch(...args), navig
           const previous = communityRoute(lastHash), current = route();
           if (['unknown', 'landing'].includes(current.view) || (previous.view === 'manage') !== (current.view === 'manage')) { confirmedPage = null; pendingRoute = null; coreRoute = null; }
           if (previous.view !== 'manage' || current.view !== 'manage' || !['queue', 'reports'].includes(previous.tab) || !['queue', 'reports'].includes(current.tab)) managementBoard = '';
-          stewardCandidate = null; stewardLookupUid = ''; stewardLookupRequest++; stewardEditingUid = null; stewardScopeDraft = null;
+          stewardEditor.leave();
           reviewSelection.clear();
           lastHash = '';
         }

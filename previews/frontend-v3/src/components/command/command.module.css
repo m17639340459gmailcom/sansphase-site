@@ -1,0 +1,153 @@
+/* One-shot keyframes for the command palette, toasts and the `g` leader HUD.
+   Colors: site tokens only. Reduced motion shows every final state. */
+
+/* Radar ping around toast / empty-state icons. */
+.ping {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--accent);
+  border-radius: inherit;
+  pointer-events: none;
+  animation: ping 0.9s var(--fx-ease) 0.12s both;
+}
+
+@keyframes ping {
+  from {
+    opacity: 0.85;
+    scale: 1;
+  }
+  to {
+    opacity: 0;
+    scale: 1.8;
+  }
+}
+
+/* Remaining lifetime of a toast / leader sequence. */
+.timer {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 2px;
+  transform-origin: left center;
+  background: linear-gradient(90deg, var(--accent), var(--amber));
+  animation: drain linear both;
+}
+
+@keyframes drain {
+  from {
+    scale: 1 1;
+  }
+  to {
+    scale: 0 1;
+  }
+}
+
+/* A comet that streaks along the search field on every keystroke. */
+.sweep {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 38%;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--amber) 55%, var(--accent));
+  box-shadow: 0 0 12px var(--accent-glow);
+  animation: sweep 0.7s var(--fx-ease) both;
+}
+
+@keyframes sweep {
+  from {
+    translate: -100% 0;
+    opacity: 1;
+  }
+  75% {
+    opacity: 1;
+  }
+  to {
+    translate: 265% 0;
+    opacity: 0;
+  }
+}
+
+/* Matched characters flare up as they start matching. */
+.mark {
+  color: var(--accent);
+  background: none;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, var(--accent) 45%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.22em;
+  animation: ignite 0.45s var(--fx-ease) both;
+}
+
+@keyframes ignite {
+  from {
+    color: var(--amber);
+    text-shadow: 0 0 14px var(--accent-glow);
+  }
+  to {
+    color: var(--accent);
+    text-shadow: 0 0 0 transparent;
+  }
+}
+
+/* One scan band sweeping down the palette as it boots. */
+.boot {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 45%;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in oklab, var(--accent) 9%, transparent) 70%,
+    color-mix(in oklab, var(--accent) 45%, transparent) 99%,
+    transparent
+  );
+  animation: boot 0.85s var(--fx-ease-in-out) 0.05s both;
+}
+
+@keyframes boot {
+  from {
+    translate: 0 -100%;
+    opacity: 1;
+  }
+  to {
+    translate: 0 240%;
+    opacity: 0;
+  }
+}
+
+/* Leader HUD: rejected key. */
+.shake {
+  animation: shake 0.36s var(--fx-ease) both;
+}
+
+@keyframes shake {
+  20% {
+    translate: -7px 0;
+  }
+  40% {
+    translate: 6px 0;
+  }
+  60% {
+    translate: -4px 0;
+  }
+  80% {
+    translate: 2px 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ping,
+  .timer,
+  .sweep,
+  .boot {
+    display: none;
+  }
+  .mark,
+  .shake {
+    animation: none;
+  }
+}

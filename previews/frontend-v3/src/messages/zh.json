@@ -1,0 +1,820 @@
+{
+  "Metadata": {
+    "title": "無相 SANSPHASE · 创作与记录",
+    "titleTemplate": "%s · 無相",
+    "description": "记录 AI 影像、个人知识库和创作实践。浏览作品、博客、资料和资源中心。",
+    "projects": "作品",
+    "projectsDescription": "無相的作品和实践，涵盖个人网站、AI 影像工作流与个人知识库。",
+    "skills": "技术与工具",
+    "skillsDescription": "学习与项目中接触的技术和工具，涵盖 AI 应用、全栈开发、数据分析与部署；项目详情说明实际使用的部分。",
+    "blog": "博客",
+    "blogDescription": "AI 编程、项目配置与工程方法的实践记录，整理具体做法、适用条件和开发经验。",
+    "about": "关于我",
+    "aboutDescription": "陶鼎新，AI Native 开发者。了解教育背景、项目实践、学术研究与开发协作方式。",
+    "contact": "联系方式",
+    "contactDescription": "联系陶鼎新，交流 AI 应用、全栈开发和 FDE 相关工作机会及项目合作。"
+  },
+  "Nav": {
+    "home": "首页",
+    "projects": "项目",
+    "skills": "技术与工具",
+    "blog": "博客",
+    "learn": "学习",
+    "about": "关于我",
+    "contact": "联系方式",
+    "signIn": "登录",
+    "cta": "联系無相",
+    "menu": "菜单",
+    "close": "关闭",
+    "openMenu": "打开菜单",
+    "closeMenu": "关闭菜单",
+    "toggleTheme": "切换主题",
+    "light": "亮色",
+    "dark": "暗色",
+    "switchLocale": "切换语言",
+    "available": "寻求工作机会",
+    "work": "作品",
+    "learning": "资料",
+    "resources": "资源中心",
+    "software": "软件推荐",
+    "community": "社区"
+  },
+  "Common": {
+    "viewAll": "查看全部",
+    "readMore": "阅读更多",
+    "learnMore": "了解更多",
+    "viewProject": "查看作品",
+    "caseStudy": "项目详情",
+    "back": "返回",
+    "backToProjects": "返回作品列表",
+    "backToBlog": "全部文章",
+    "minRead": "阅读约 {minutes} 分钟",
+    "published": "发布于",
+    "updated": "更新于",
+    "stack": "技术栈",
+    "role": "角色",
+    "year": "年份",
+    "links": "链接",
+    "source": "源码",
+    "sourcePrivate": "GitHub（私有仓库）",
+    "liveDemo": "在线演示",
+    "download": "下载安装包（Windows，未签名）",
+    "tableOfContents": "本页目录",
+    "scroll": "滚动",
+    "localTime": "北京时间",
+    "copied": "已复制",
+    "copyEmail": "复制邮箱",
+    "loading": "加载中",
+    "next": "下一个",
+    "previous": "上一个",
+    "index": "索引"
+  },
+  "Home": {
+    "eyebrow": "無相 / SANSPHASE",
+    "headline1": "学习资源与",
+    "headline2": "创作社区",
+    "intro": "找学习资料、实用软件和作者作品，也能在社区交流与兑换。",
+    "ctaPrimary": "探索我的实践",
+    "ctaSecondary": "阅读博客",
+    "ctaResume": "下载简历",
+    "scrollHint": "浏览实践与记录",
+    "particles": {
+      "description": "粒子自动轮播，依次组成多层神经网络架构、三层立体数据库和六层薄片。也可点击或轻触切换形态，靠近网络层可查看层间传递的信号。",
+      "previewDescription": "神经网络粒子预览",
+      "next": "切换到下一个粒子造型，当前为{shape}；自动轮播将继续",
+      "monogram": "字母",
+      "database": "数据库",
+      "network": "神经网络",
+      "lattice": "层叠"
+    },
+    "marquee": [
+      "AI 影像",
+      "个人知识库",
+      "Obsidian",
+      "Codex",
+      "创作工作流",
+      "网站建设"
+    ],
+    "whatIDo": {
+      "eyebrow": "创作方向",
+      "title": "创作",
+      "titleAccent": "与实践。",
+      "cta": "查看作品",
+      "categories": {
+        "works": "作品",
+        "resources": "资料",
+        "resource-center": "资源中心",
+        "software": "软件推荐"
+      },
+      "viewEntry": "查看详情",
+      "browseCategory": "浏览{category}",
+      "empty": "暂无已发布内容",
+      "unavailable": "最新内容暂时无法读取",
+      "items": [
+        {
+          "title": "AI 影像",
+          "body": "从文案、配音、分镜到成片验收，记录短视频工作流如何逐步成形。",
+          "label": "创作工作流",
+          "cta": "查看流程复盘"
+        },
+        {
+          "title": "个人知识库",
+          "body": "用 Obsidian 连接项目背景、方法与任务记录，让自己和 AI 能接续工作。",
+          "label": "知识与协作",
+          "cta": "阅读知识库记录"
+        },
+        {
+          "title": "网站建设",
+          "body": "从需求到交付，承接网站搭建、功能开发与自动化脚本。",
+          "label": "开发与合作",
+          "cta": "联系無相"
+        },
+        {
+          "title": "创作笔记",
+          "body": "记录工具、做法与取舍，分享实际项目里遇到的问题。",
+          "label": "写作与复盘",
+          "cta": "阅读博客"
+        }
+      ]
+    },
+    "featured": {
+      "eyebrow": "精选实践",
+      "title": "从想法到",
+      "titleAccent": "动手实践。",
+      "body": "四篇实践记录，回看 AI 短视频和个人知识库是怎么做出来的。",
+      "cta": "查看作品",
+      "carousel": {
+        "label": "精选实践展示",
+        "role": "轮播",
+        "slide": "文章",
+        "previous": "上一篇",
+        "next": "下一篇",
+        "pause": "暂停自动切换",
+        "play": "开启自动切换",
+        "choose": "选择文章",
+        "select": "展示 {name}",
+        "open": "阅读 {name}",
+        "position": "第 {index} 篇，共 {count} 篇：{name}",
+        "read": "阅读原文"
+      }
+    },
+    "facts": {
+      "eyebrow": "关于本站",
+      "selected": "首页精选记录",
+      "topics": "实践主题",
+      "languages": "阅读语言",
+      "time": "本站时间"
+    },
+    "sitePublishing": {
+      "eyebrow": "站内发布",
+      "title": "最新文章与",
+      "titleAccent": "发布日历。",
+      "body": "阅读最新文章，按日期回看本站发布的内容。",
+      "notes": "公开文章",
+      "resourceCenter": "资源中心",
+      "materials": "资料",
+      "lastNote": "最新文章 · {date}",
+      "viewSite": "打开博客目录",
+      "preview": "V3 本地演示",
+      "readNote": "阅读文章",
+      "unavailable": "站内发布列表暂时不可用。",
+      "details": "文章标签",
+      "noNotes": "暂无公开文章。",
+      "noDescription": "暂无简介",
+      "calendar": {
+        "eyebrow": "发布日历",
+        "summary": "{period}，共发布 {count} 项",
+        "period": "近一年",
+        "chooseYear": "选择发布年份",
+        "unavailable": "发布数据暂不可用。",
+        "hint": "悬停或点选格子，查看当天的发布数量。",
+        "keyboardHint": "方向键切换日期：左右移动一周，上下移动一天；Home 跳到第一天，End 跳到最后一天。",
+        "scrollHint": "左右滑动查看全年。",
+        "source": "本地演示数据 · {scope}",
+        "scope": "按北京时间统计作品、资料、资源中心和软件推荐的首次发布。",
+        "view": "打开资源中心",
+        "less": "少",
+        "more": "多",
+        "monday": "一",
+        "wednesday": "三",
+        "friday": "五",
+        "day": "{date} · 发布 {count} 项"
+      }
+    },
+    "aiUsage": {
+      "title": "AI 使用记录",
+      "total": "已记录的累计用量",
+      "ranking": "按用量从高到低",
+      "share": "占已记录总量",
+      "value": "{amount} Tokens，占已记录总量的 {share}",
+      "source": "数据由本人提供并手动更新，按工具 / 模型系列汇总；未限定统计起止时间，不代表实时用量。"
+    },
+    "writing": {
+      "eyebrow": "博客",
+      "title": "边做边写的",
+      "titleAccent": "实践笔记。",
+      "cta": "全部文章"
+    },
+    "cta": {
+      "eyebrow": "06 / 联系",
+      "title": "工作机会与",
+      "titleAccent": "项目合作。",
+      "body": "正在关注 AI 应用、全栈开发与 FDE 相关岗位，也欢迎交流项目合作。可以通过邮件或联系表单与我沟通。",
+      "button": "联系我",
+      "secondary": "了解我"
+    },
+    "brandTitle": "無相 SANSPHASE · 学习资源与创作社区",
+    "topics": {
+      "eyebrow": "阅读索引",
+      "title": "按主题阅读",
+      "total": "篇精选记录",
+      "grouping": "精选文章分类",
+      "share": "占精选文章比例",
+      "value": "{count} 篇，占 {share}",
+      "source": "统计范围为本页精选文章。"
+    }
+  },
+  "Projects": {
+    "featuredCase": "精选作品",
+    "eyebrow": "SANSPHASE",
+    "title": "作品",
+    "titleAccent": "与实践。",
+    "intro": "通过三个虚构案例浏览个人站、AI 影像和知识库的作品介绍、制作过程与成果。",
+    "filters": {
+      "all": "全部",
+      "ai": "AI 影像",
+      "fullstack": "网站开发",
+      "data": "知识管理",
+      "fde": "前沿部署"
+    },
+    "count": "{count} 件作品",
+    "empty": "该分类下暂时没有作品。",
+    "gallery": {
+      "label": "项目截图",
+      "carousel": "图片轮播",
+      "slide": "截图",
+      "previous": "上一张截图",
+      "next": "下一张截图",
+      "open": "查看原图",
+      "openLabel": "在新标签页查看当前原图",
+      "hint": "项目截图，可左右滑动或使用左右方向键切换",
+      "thumbnails": "选择项目截图",
+      "show": "查看第 {index} 张：{caption}"
+    },
+    "detail": {
+      "overview": "概览",
+      "problem": "作品背景",
+      "approach": "实现方案",
+      "impact": "当前成果",
+      "notice": "维护状态",
+      "learning": "实践收获",
+      "highlights": "实践要点",
+      "more": "更多作品",
+      "nextProject": "下一件作品",
+      "relatedMaterials": "查看相关资料"
+    }
+  },
+  "Skills": {
+    "eyebrow": "技术与工具",
+    "title": "技术",
+    "titleAccent": "与工具。",
+    "intro": "整理学习与项目中接触的技术，涵盖 AI 应用、前后端开发和部署。项目详情说明其中实际使用的技术与实现方式。",
+    "sphereHint": "拖动旋转，点击分类查看",
+    "categories": "分类",
+    "all": "全部",
+    "proficiency": "技术分类",
+    "levels": {
+      "expert": "精通",
+      "advanced": "熟练",
+      "proficient": "掌握",
+      "familiar": "了解"
+    },
+    "principles": {
+      "eyebrow": "工作方式",
+      "title": "AI 协作",
+      "titleAccent": "开发流程。",
+      "items": [
+        {
+          "title": "明确需求与上下文",
+          "body": "开发前整理需求与相关代码，确认修改位置、约束和预期结果，再进入实现。",
+          "link": "阅读任务梳理方法"
+        },
+        {
+          "title": "核对审查依据",
+          "body": "结合具体代码和使用场景检查审查意见，分析问题影响、复现条件与修复优先级。",
+          "link": "查看 As-a 实践"
+        },
+        {
+          "title": "控制修改范围",
+          "body": "围绕当前需求组织改动，将额外重构和新功能分开处理，便于审查、验证与回溯。",
+          "link": "查看 Omnigate 定制"
+        },
+        {
+          "title": "维护项目文档",
+          "body": "将反复遇到的问题、必要约束和验证方式整理进项目文档，随实现变化更新，供后续开发参考。",
+          "link": "阅读开发笔记"
+        }
+      ]
+    },
+    "toolbelt": {
+      "eyebrow": "工具箱",
+      "title": "开发时用的",
+      "titleAccent": "工具。"
+    }
+  },
+  "SiteContact": {
+    "navTitle": "联系方式",
+    "title": "联系",
+    "accent": "無相。",
+    "intro": "展开下面的联系渠道，查看项目沟通和公开影像主页的演示内容。",
+    "channels": "联系渠道",
+    "channel": {
+      "qq": { "name": "QQ 联系示例", "description": "项目沟通、站点反馈和账号相关问题。", "example": "合作示例：你好，我想整理一批课程视频。素材已剪好，希望两周内做出一份带目录和检索的资料页。" },
+      "douyin": { "name": "抖音主页示例", "description": "预览公开发布的影像和创作内容。", "example": "作品示例：《雨夜车窗》｜45 秒影像练习，展示镜头版本之间的节奏对比。" }
+    },
+    "collaboration": "项目合作",
+    "collaborationHint": "联系时可以简单说明要解决的问题、已有材料和希望的交付时间。",
+    "services": { "websites": "网站搭建", "features": "功能开发", "automation": "自动化脚本" },
+    "viewWork": "查看本地作品",
+    "published": {
+      "intro": "查看作者公开的联系方式和创作主页。",
+      "empty": "作者暂未发布联系方式。",
+      "unavailable": "暂时无法读取联系方式，请稍后刷新。",
+      "viewWork": "查看作品",
+      "channel": {
+        "qq": { "name": "QQ", "action": "打开 QQ 链接" },
+        "douyin": { "name": "抖音主页", "action": "打开抖音主页" }
+      }
+    }
+  },
+  "SiteSupport": {
+    "navTitle": "赞助与支持",
+    "title": "感谢你的关注。",
+    "body": "赞助渠道暂未开放。",
+    "home": "返回首页"
+  },
+  "CommunityLanding": {
+    "navTitle": "社区",
+    "title": "分享你的做法，",
+    "accent": "和同路人交流。",
+    "intro": "聊 AI 学习、作品制作和实用工具。通过正式站点进入社区，继续使用已有账号。",
+    "enter": "前往正式站进入社区",
+    "boards": "在社区可以聊什么",
+    "board": {
+      "questions": { "name": "学习问答", "description": "说清要解决的问题、已经尝试的步骤，以及卡在哪里。" },
+      "showcase": { "name": "作品展廊", "description": "展示用 AI 做的作品，分享用到的工具和模型。" },
+      "tools": { "name": "工具资源", "description": "交流实用的软件、网站和教程，说明各自适合什么场景。" }
+    }
+  },
+  "Library": {
+    "navTitle": "资源中心",
+    "title": "收藏成册，",
+    "accent": "逐章阅读。",
+    "intro": "浏览创作手册、影像笔记和知识库指南。本地演示书籍可按目录阅读并下载单章。",
+    "publishedIntro": "浏览已发布的书籍，按目录逐章阅读。",
+    "sample": "演示书架",
+    "draftPreview": "作者草稿预览",
+    "booksCount": "{count} 本书",
+    "chaptersCount": "{count} 章",
+    "vipDemo": "VIP · 演示",
+    "vip": "VIP",
+    "vipLocked": "VIP 专属",
+    "vipRequired": "阅读本书需要有效的 VIP 会员资格。",
+    "signInRequired": "请登录后查看资源中心。",
+    "signIn": "前往登录",
+    "editionChanged": "本章已更新，请重新打开继续阅读。",
+    "reloadChapter": "重新打开本章",
+    "downloadBook": "下载书籍",
+    "resumeReading": "继续上次阅读",
+    "bookmarks": "书签",
+    "toggleBookmark": "添加或取消当前位置的书签",
+    "removeBookmark": "删除书签 · {title}",
+    "localBookmarks": "阅读位置和书签保存在当前浏览器。",
+    "noBookmarks": "还没有书签。",
+    "bookmarksUnavailable": "当前浏览器无法保存书签。",
+    "positionMoved": "原位置已有修改，已定位到附近内容。",
+    "back": "返回资源中心",
+    "chapters": "书籍目录",
+    "subsections": "本章小节",
+    "overview": "书籍介绍",
+    "chapterNavigation": "章节切换",
+    "downloadChapter": "下载本章 Markdown",
+    "start": "开始阅读",
+    "previous": "上一章",
+    "next": "下一章",
+    "catalog": {
+      "latest": "最新上架",
+      "allPosts": "全部藏书",
+      "empty": "书架暂时没有藏书。",
+      "searchLabel": "搜索书籍",
+      "searchPlaceholder": "搜索书名、摘要、分类或标签",
+      "sortLabel": "排序方式",
+      "sortNewest": "最新发布",
+      "sortOldest": "最早发布",
+      "sortTitle": "按书名排序",
+      "resultsRange": "共 {count} 本 · 显示 {start}–{end} 本",
+      "resultsCount": "共 {count} 本",
+      "reset": "重置筛选",
+      "noResults": "没有找到匹配的书籍",
+      "noResultsHint": "试试其他关键词，或重置筛选查看全部藏书。",
+      "paginationLabel": "书架分页",
+      "previousPage": "上一页",
+      "nextPage": "下一页",
+      "goToPage": "前往第 {page} 页",
+      "pageOf": "第 {page} 页 / 共 {pages} 页",
+      "perPage": "{count} 本/页",
+      "openBook": "阅读本书"
+    }
+  },
+  "Learning": {
+    "navTitle": "资料",
+    "title": "学习记录与",
+    "accent": "实践模板。",
+    "intro": "三份带虚构样例的 Markdown 模板，适合记录一次学习、准备作品交付或整理资料来源。可以先预览再下载。",
+    "filterLabel": "按用途筛选资料",
+    "filter": {
+      "all": "全部",
+      "learning-journal": "学习记录",
+      "project-checklist": "作品整理",
+      "source-index": "资料管理"
+    },
+    "count": "{count} 份模板",
+    "download": "下载模板",
+    "downloadNamed": "下载 {title}",
+    "preview": "查看介绍",
+    "previewNamed": "查看介绍：{title}",
+    "back": "返回资料目录"
+  },
+  "Blog": {
+    "eyebrow": "博客",
+    "title": "开发实践与",
+    "titleAccent": "技术笔记。",
+    "intro": "浏览 AI 影像制作与个人知识库的四篇虚构案例，查看具体做法、试验结果和仍待解决的问题。",
+    "latest": "最新",
+    "allPosts": "全部文章",
+    "empty": "还没有发布文章，稍后再来看看。",
+    "searchLabel": "搜索文章",
+    "searchPlaceholder": "搜索标题、摘要或标签",
+    "sortLabel": "排序方式",
+    "sortTopic": "按主题",
+    "sortNewest": "最新发布",
+    "sortOldest": "最早发布",
+    "sortTitle": "按标题排序",
+    "resultsRange": "共 {count} 篇 · 显示 {start}–{end} 篇",
+    "resultsCount": "共 {count} 篇",
+    "reset": "重置筛选",
+    "noResults": "没有找到匹配的文章",
+    "noResultsHint": "试试其他关键词，或重置筛选查看全部文章。",
+    "paginationLabel": "文章分页",
+    "previousPage": "上一页",
+    "nextPage": "下一页",
+    "goToPage": "前往第 {page} 页",
+    "pageOf": "第 {page} 页 / 共 {pages} 页",
+    "perPage": "{count} 篇/页",
+    "share": "分享",
+    "writtenBy": "作者",
+    "demoAuthor": "演示作者",
+    "relatedPosts": "继续阅读"
+  },
+  "About": {
+    "eyebrow": "关于我",
+    "title": "我是",
+    "titleAccent": "無相",
+    "intro": "记录 AI 影像制作与个人知识库，从分镜试看到资料整理和复盘。",
+    "clock": "北京时间",
+    "story": {
+      "eyebrow": "写作与实践",
+      "paragraphs": [
+        "这份博客从两个问题写起：怎样把一个想法剪成看得懂的短片，以及怎样在需要的时候找回当初做决定的依据。",
+        "影像篇把文稿、旁白和分镜放在同一次试看里，记录画面、声音与字幕衔接时遇到的断点。",
+        "知识库篇从几份资料入手，用来源卡和索引连接原始记录、线索与结论，再用具体问题检验能否找回答案。",
+        "下面按日期整理了本地演示文章。每篇都可以打开阅读全文，查看试验步骤、示例图片和复盘。"
+      ]
+    },
+    "timeline": {
+      "eyebrow": "发布记录",
+      "title": "写作",
+      "titleAccent": "时间线"
+    },
+    "publications": {
+      "eyebrow": "博客",
+      "title": "博客文章",
+      "intro": "两组文章分别记录 AI 影像工作流与个人知识库，包含制作、检索和交接的具体案例。",
+      "format": "实践笔记",
+      "read": "阅读全文",
+      "readArticle": "阅读全文：{title}",
+      "related": "同主题文章",
+      "relatedArticle": "同主题文章：{title}"
+    },
+    "now": {
+      "eyebrow": "文章索引",
+      "title": "近期写作"
+    },
+    "values": {
+      "eyebrow": "常写的主题",
+      "items": [
+        {
+          "title": "影像试作",
+          "body": "对照文稿、旁白和分镜，记录观众从画面与声音里实际接收到的信息。"
+        },
+        {
+          "title": "创作复盘",
+          "body": "从试看的反馈回查交接点，记录下一次制作时可复用的检查办法。"
+        },
+        {
+          "title": "整理资料",
+          "body": "用索引串起资料、来源卡和决定，让一条线索能回到原始记录。"
+        },
+        {
+          "title": "检索与交接",
+          "body": "用真实的问题检验整理方式，记下能找回的答案和仍然缺少的证据。"
+        }
+      ]
+    },
+    "cta": "联系我"
+  },
+  "Contact": {
+    "eyebrow": "联系方式",
+    "title": "工作机会与",
+    "titleAccent": "项目合作。",
+    "intro": "欢迎联系我，交流 AI 应用、全栈开发或 FDE 相关岗位，以及项目合作。附上岗位介绍或项目背景，便于进一步沟通。",
+    "responseTime": "有相关链接或项目背景的话，可以一起发来。",
+    "directEmail": "直接邮件联系",
+    "elsewhere": "其他平台",
+    "resume": "简历",
+    "resumeFormat": "PDF",
+    "wechat": {
+      "title": "微信联系",
+      "trigger": "添加微信",
+      "shortNote": "添加时请备注来意和来源。",
+      "close": "关闭微信二维码",
+      "scan": "用微信扫一扫，添加好友",
+      "alt": "陶鼎新的微信好友二维码",
+      "note": "添加时请备注来意，以及你是从哪里找到我的。",
+      "example": "例如：项目合作 · 来自个人网站 / GitHub",
+      "save": "保存二维码",
+      "open": "查看原图",
+      "mobileHint": "手机浏览时，可先保存图片，再到微信「扫一扫」中从相册选择。"
+    },
+    "form": {
+      "name": "姓名",
+      "namePlaceholder": "你的名字",
+      "email": "邮箱",
+      "emailPlaceholder": "you@example.com",
+      "company": "公司（可选）",
+      "companyPlaceholder": "你所在的公司",
+      "topic": "联系主题",
+      "topics": {
+        "fde": "前沿部署工程师（FDE）岗位",
+        "ai": "AI 工程岗位",
+        "contract": "合同 / 自由职业项目",
+        "collab": "项目合作",
+        "other": "其他"
+      },
+      "message": "留言",
+      "messagePlaceholder": "请简要介绍岗位或项目背景，以及希望进一步交流的内容。",
+      "submit": "发送消息",
+      "sending": "发送中…",
+      "successTitle": "已收到你的消息。",
+      "successBody": "谢谢你的来信，{name}。",
+      "successBodyNoDelivery": "{name}，当前网站尚未配置邮件投递，我可能无法收到这条消息。请直接给我发邮件。",
+      "errorTitle": "出了点问题。",
+      "errorBody": "请重试，或直接给我发邮件。",
+      "rateLimited": "来自该网络的消息过多，请稍后再试。",
+      "sendAnother": "再发一条",
+      "validation": {
+        "name": "请输入你的名字。",
+        "email": "请输入有效的邮箱地址。",
+        "message": "请至少写 20 个字符。"
+      }
+    }
+  },
+  "Footer": {
+    "bannerEyebrow": "项目合作",
+    "bannerBody": "网站搭建、功能开发和创作流程，有具体想法可以来聊聊。",
+    "tagline": "有想法，",
+    "taglineAccent": "一起聊聊。",
+    "cta": "联系我",
+    "navigate": "导航",
+    "connect": "联系",
+    "wechat": "微信 · 添加好友",
+    "colophon": "关于本站",
+    "colophonBody": "记录 AI 影像、个人知识库和创作方法。",
+    "source": "GitHub 源码",
+    "rights": "© {year} 無相 SANSPHASE",
+    "backToTop": "回到顶部"
+  },
+  "NotFound": {
+    "code": "404",
+    "title": "没有找到",
+    "titleAccent": "这个页面。",
+    "body": "链接可能有误，页面也可能已经移动。可以回首页找找。",
+    "cta": "返回首页"
+  },
+  "Error": {
+    "title": "出了点",
+    "titleAccent": "问题。",
+    "body": "页面暂时出了问题，请重试。如果仍然打不开，可以返回首页。",
+    "retry": "重试",
+    "home": "返回首页"
+  },
+  "FX": {
+    "common": {
+      "preloader": {
+        "label": "创作与记录",
+        "loading": "加载中",
+        "ready": "就绪"
+      },
+      "cursor": {
+        "open": "打开",
+        "view": "查看",
+        "read": "阅读",
+        "visit": "访问",
+        "drag": "拖动",
+        "play": "播放",
+        "copy": "复制",
+        "close": "关闭"
+      }
+    },
+    "nav": {
+      "search": "搜索",
+      "command": "搜索与快捷操作",
+      "clock": "北京",
+      "current": "当前"
+    },
+    "command": {
+      "title": "命令面板",
+      "hud": "命令",
+      "inputLabel": "搜索栏目、文章和操作",
+      "placeholder": "搜索或跳转…",
+      "close": "关闭命令面板",
+      "results": "搜索结果",
+      "count": "{count, plural, other {# 项}}",
+      "announce": "{count, plural, =0 {没有结果} other {# 个结果}}",
+      "current": "当前",
+      "groups": {
+        "pages": "页面",
+        "projects": "项目",
+        "posts": "文章",
+        "actions": "操作",
+        "shortcuts": "键盘快捷键"
+      },
+      "empty": {
+        "eyebrow": "无信号",
+        "title": "没有与<q>“{query}”</q>匹配的结果",
+        "hint": "试试栏目或文章名称，输入问号查看键盘快捷键。"
+      },
+      "footer": {
+        "navigate": "选择",
+        "open": "打开",
+        "newTab": "新标签页",
+        "shortcuts": "快捷键"
+      },
+      "actions": {
+        "themeDark": "切换到暗色主题",
+        "themeLight": "切换到亮色主题",
+        "language": "切换语言为 English",
+        "copyEmail": "复制邮箱地址",
+        "github": "打开 GitHub 主页",
+        "source": "查看本站源码",
+        "resume": "下载简历",
+        "top": "回到顶部",
+        "intro": "重播开场动画",
+        "fireworks": "放一场烟花"
+      },
+      "shortcuts": {
+        "palette": "打开命令面板",
+        "search": "搜索全站",
+        "help": "显示键盘快捷键",
+        "goto": "前往{page}",
+        "then": "再按",
+        "secret": "经典秘籍"
+      },
+      "leader": {
+        "title": "前往",
+        "hint": "按下对应按键"
+      },
+      "toast": {
+        "copied": "邮箱地址已复制",
+        "copyFailed": "复制失败，邮箱地址为：",
+        "resume": "简历开始下载",
+        "konami": "秘籍已激活",
+        "konamiBody": "+30 条命。感谢你留意这些细节。"
+      },
+      "console": {
+        "source": "本站源码：{url}",
+        "hint": "提示：随处按 ⌘K / Ctrl K 打开命令面板，经典秘籍同样有效。"
+      }
+    },
+    "hero": {
+      "marquee": "技术栈",
+      "hud": {
+        "shape": "形态",
+        "engine": "WebGL · GLSL",
+        "loading": "正在加载动画",
+        "gathering": "正在汇聚",
+        "morphing": "变形中",
+        "stable": "稳定",
+        "static": "静态预览",
+        "hint": "点击切换形态 · 拖动旋转",
+        "hintTouch": "轻触切换形态"
+      }
+    },
+    "home": {
+      "showcaseCursorPrev": "上一个",
+      "showcaseCursorNext": "下一个",
+      "publicationViewLabel": "发布日历视图",
+      "publicationViewGrid": "平面",
+      "publicationViewCity": "立体",
+      "publicationOrbitHint": "移动指针旋转视角",
+      "publicationUnit": "{count, plural, other {项发布}}",
+      "publicationActiveDays": "发布天数",
+      "publicationLongestStreak": "最长连续",
+      "publicationCurrentStreak": "当前连续",
+      "publicationBusiestDay": "单日最多",
+      "publicationDayUnit": "{count, plural, other {天}}",
+      "publicationPeak": "峰值",
+      "learningMap": "课程地图"
+    },
+    "projects": {
+      "filterLabel": "按类别筛选作品",
+      "unit": "{count, plural, other {件作品}}",
+      "layout": "布局",
+      "grid": "卡片",
+      "list": "索引",
+      "screens": "{count} 张截图",
+      "columns": {
+        "project": "项目",
+        "category": "类别"
+      },
+      "caseIndex": "案例 {index} / {total}",
+      "expandLabel": "在全屏查看器中打开第 {index} 张截图",
+      "lightbox": {
+        "label": "截图查看器",
+        "close": "关闭查看器",
+        "zoomIn": "放大",
+        "zoomOut": "缩小",
+        "reset": "适应屏幕",
+        "zoom": "缩放比例",
+        "hint": "滚轮或双指缩放，拖动平移，方向键切换截图，按 Esc 关闭。"
+      },
+      "nextLabel": "下一个项目：{title}"
+    },
+    "blog": {
+      "entries": "{count, plural, other {# 篇文章}}",
+      "tags": "按标签筛选",
+      "allTags": "全部",
+      "moreTags": "更多 {count}",
+      "fewerTags": "收起",
+      "clearSearch": "清空搜索",
+      "readArticle": "阅读全文",
+      "copyCode": "复制代码",
+      "codeLines": "{count, plural, other {# 行}}",
+      "readingProgress": "阅读进度",
+      "sections": "{count, plural, other {# 节}}",
+      "backToTop": "回到顶部",
+      "zoomImage": "放大图片",
+      "closeImage": "关闭图片",
+      "openOriginal": "打开原图",
+      "zoomHint": "按 Esc、点击或滚动即可关闭",
+      "upNext": "下一篇",
+      "endOfArticle": "全文完",
+      "learn": {
+        "modules": "课程模块",
+        "modulesBody": "每个模块完成贯穿项目的一部分，点击卡片从该模块的第一课开始。",
+        "output": "产出",
+        "minutes": "{minutes} 分钟",
+        "readCount": "已读 {read}/{total}",
+        "lessonOf": "第 {current} 课 · 共 {total} 课",
+        "track": "模块进度"
+      }
+    },
+    "about": {
+      "portrait": {
+        "label": "个人档案"
+      },
+      "skills": {
+        "nodes": "{count} 个节点",
+        "share": "目录占比"
+      }
+    },
+    "contact": {
+      "form": {
+        "ready": "就绪",
+        "sending": "发送中",
+        "sent": "已接收",
+        "failed": "发送失败",
+        "shortcut": "⌘ / Ctrl + Enter 发送"
+      },
+      "notFound": {
+        "status": "未找到该路由",
+        "jump": "或前往",
+        "search": "搜索全站"
+      },
+      "error": {
+        "status": "运行时错误"
+      }
+    },
+    "footer": {}
+  }
+}

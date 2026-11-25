@@ -8,6 +8,7 @@ import { communityTablesReady, createCommunityStore } from './community-store.ts
 import type { CommunityAuthor } from './community-store.ts';
 import { createCommunityService } from './community-service.ts';
 import type { CommunityViewer, PersonInfo } from './community-service.ts';
+import type { ServiceOptions } from './community-context.ts';
 import type { CommunityProfileAccess } from './community-profile-access.ts';
 import { membershipState } from './reader-membership.ts';
 import type { ApprovedAvatarRead } from './community-identity-protocol.ts';
@@ -32,6 +33,7 @@ type Options = {
   authorId: string;
   uidStore: { get: (id: string) => string; readerId: (uid: string) => string | null };
   profile?: CommunityProfileAccess;
+  referrals?: Pick<ServiceOptions, 'referralAttribution' | 'referralSelf' | 'referralOrigin' | 'assertReferralActive'>;
   queueFile?: (filename: string, reason: string) => void;
   drainFileQueue?: () => Promise<unknown>;
 };
@@ -167,7 +169,7 @@ export function createCommunityRuntime(options: Options) {
     },
     service: createCommunityService({ store, siteOrigin, directory, ownerId: authorId, identify,
       ownerReaderIdentity: async req => { const personal = await options.ownerReaderIdentity?.(req); return personal ? { kind: 'reader', id: personal.id, name: personal.nickname, vip: personal.vip === true } : null; },
-      ...profiles, avatarBytes: profiles.avatar, audit, words: readWords(directory), profile: options.profile, drainFileQueue: options.drainFileQueue }),
+      ...profiles, ...options.referrals, avatarBytes: profiles.avatar, audit, words: readWords(directory), profile: options.profile, drainFileQueue: options.drainFileQueue }),
     close() { store?.close(); },
   };
 }

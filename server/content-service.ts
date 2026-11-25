@@ -1,5 +1,6 @@
 import sanitizeHtml from "sanitize-html";
 import {normalizeBodyLinks} from '../src/body-links.mjs';
+import {validBlogSlug} from '../src/blog-route.ts';
 import {applyContentOrder} from './content-order.ts';
 import {imageSourceSet} from '../src/image-sources.mjs';
 import { normalizeSocialLink } from "../src/social-links.mjs";
@@ -26,7 +27,8 @@ type PublicRows = [ContentRow[], ProfileRow | null, ContentRow[], ContentRow[], 
 type ContentStore = Pick<ReturnType<typeof createPayloadStore>, 'publicData' | 'preview' | 'readMedia'>;
 type ContentOptions = { url: string; token?: string; fetcher?: typeof fetch; store?: ContentStore; revision?: () => unknown };
 type LibraryKind = 'works' | 'resources' | 'software' | 'resource-center';
-type MediaOptions = { previewId?: string; cookie?: string; download?: boolean; range?: string; width?: number; presentation?: boolean; member?: boolean; vip?: boolean };
+type MediaOptions = { previewId?: string; cookie?: string; download?: boolean; range?: string; width?: number; presentation?: boolean; member?: boolean; vip?: boolean; homeCover?: boolean };
+type HomeCard = { id: string; title: string; summary: string; coverSrc?: string };
 export const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const articleFields =
@@ -45,6 +47,68 @@ const publishedFilter = {
 export const isPublished = (row: Pick<ContentRow, 'status' | 'published_at'>, now = Date.now()) =>
   row.status === "published" &&
   (!row.published_at || Date.parse(row.published_at) <= now);
+
+type ResourceActivityKind = 'resourceCenter' | 'materials' | 'works' | 'software';
+type ResourceActivityDay = { date: string } & Record<ResourceActivityKind, number>;
+const resourceActivityKinds = new Map<string, ResourceActivityKind>([
+  ['resource-center', 'resourceCenter'], ['resources', 'materials'], ['works', 'works'], ['software', 'software'],
+]);
+const publicationDay = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+});
+
+function libraryPublicationTime(row: ContentRow, now: number) {
+  const value = row.published_at;
+  if (!value || row.vip_only || row.status !== 'published') return null;
+  // Legacy date-only values denote a Beijing calendar day. Full timestamps need an explicit offset.
+  if (!/^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2}))?$/i.test(value)) return null;
+  const isoDay = value.slice(0, 10);
+  const midnight = new Date(`${isoDay}T00:00:00Z`);
+  if (!Number.isFinite(midnight.getTime()) || midnight.toISOString().slice(0, 10) !== isoDay) return null;
+  const time = Date.parse(value.length === 10 ? `${value}T00:00:00+08:00` : value);
+  return Number.isFinite(time) && time <= now ? time : null;
+}
+
+function summarizeLibrary(library: ContentRow[], serveCovers: boolean) {
+  const now = Date.now();
+  const firstPublication = new Map<string, { kind: ResourceActivityKind; date: string }>();
+  const picks = new Map<string, { row: ContentRow; title: string; time: number }>();
+  for (const row of library) {
+    if (!row.kind || !row.id) continue;
+    const kind = resourceActivityKinds.get(row.kind);
+    const time = libraryPublicationTime(row, now);
+    if (!kind || time === null) continue;
+    const date = publicationDay.format(time);
+    const key = `${kind}:${row.id}`;
+    const previous = firstPublication.get(key);
+    if (!previous || date < previous.date) firstPublication.set(key, { kind, date });
+
+    const title = row.title?.trim();
+    if (!title || !row.slug || !validBlogSlug(row.slug)) continue;
+    const pick = picks.get(row.kind);
+    if (!pick || time > pick.time || (time === pick.time && row.slug < pick.row.slug)) picks.set(row.kind, { row, title, time });
+  }
+  const totals = new Map<string, ResourceActivityDay>();
+  for (const { kind, date } of firstPublication.values()) {
+    const day = totals.get(date) ?? { date, resourceCenter: 0, materials: 0, works: 0, software: 0 };
+    day[kind]++;
+    totals.set(date, day);
+  }
+  const featured: Partial<Record<LibraryKind, HomeCard>> = {};
+  const homeCoverMedia = new Set<string>();
+  for (const [kind, { row, title }] of picks) {
+    const card: HomeCard = { id: row.slug, title, summary: row.summary?.trim() ?? '' };
+    if (serveCovers && row.cover && uuidPattern.test(row.cover)) {
+      const id = row.cover.toLowerCase();
+      card.coverSrc = `/api/media/${id}?view=home-cover`;
+      homeCoverMedia.add(id);
+    }
+    featured[kind as LibraryKind] = card;
+  }
+  const resourceActivity = { days: [...totals.values()].sort((left, right) => left.date.localeCompare(right.date)) };
+  return { resourceActivity, featured, homeCoverMedia };
+}
+
 export function safeLink(value: unknown) {
   try {
     const url = new URL(String(value));
@@ -279,7 +343,7 @@ export function createContentService({ url, token, fetcher = fetch, store, revis
     }
     for(const kind of ['works','resources','software','resource-center'] as LibraryKind[])
       data[kind]=applyContentOrder(data[kind],profile?.content_order?.[kind],'recordId');
-    return { data, media:new Set([...publicMedia,...memberMedia,...vipMedia]), publicMedia,
+    return { data, ...summarizeLibrary(library || [], Boolean(store)), media:new Set([...publicMedia,...memberMedia,...vipMedia]), publicMedia,
       memberMedia:new Set([...publicMedia,...memberMedia]), vipMedia, expiresAt:nextPublicationAt ?? Infinity };
   }
   const snapshot=revision ? createPublicSnapshotCache({load:buildSnapshot,revision}) : buildSnapshot;
@@ -317,9 +381,13 @@ export function createContentService({ url, token, fetcher = fetch, store, revis
   return {
     snapshot,
     preview,
-    async media(id: string, { previewId, cookie = "", download = false, range, width, presentation = false, member = true, vip = true }: MediaOptions = {}) {
+    async media(id: string, { previewId, cookie = "", download = false, range, width, presentation = false, member = true, vip = true, homeCover = false }: MediaOptions = {}) {
       if (!uuidPattern.test(id))
         throw Object.assign(new Error("Not found"), { status: 404 });
+      if (homeCover) {
+        if (!store || !(await snapshot()).homeCoverMedia.has(id)) throw Object.assign(new Error('Not found'), { status: 404 });
+        return store.readMedia(id, undefined, undefined, { homeCover: true });
+      }
       const state=previewId ? null : await snapshot();
       const allowed = previewId
         ? (await preview(previewId, cookie)).media

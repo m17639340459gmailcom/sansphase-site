@@ -1,0 +1,231 @@
+/* Home hero. Keep the heading readable while the separate stage and cue animate. */
+
+/* ------------------------------------------- Stage: scan-line reveal */
+/* Negative insets leave room for the drawing surface, which overflows the square stage. */
+.reveal {
+  clip-path: inset(-20% -30% 120% -50%);
+  opacity: 0;
+  transform: scale(0.965);
+}
+:global([data-fx-state="play"]) .reveal {
+  clip-path: none;
+  opacity: 1;
+  transform: none;
+  animation: reveal 1.5s var(--fx-ease-in-out) 0.2s backwards;
+}
+:global([data-fx-state="ssr"]) .reveal {
+  animation: reveal 1s var(--fx-ease) 4s forwards;
+}
+@keyframes reveal {
+  from {
+    clip-path: inset(-20% -30% 120% -50%);
+    opacity: 0.4;
+    transform: scale(0.965);
+  }
+  to {
+    clip-path: inset(-20% -30% -20% -50%);
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.scan {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+}
+.scan::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: 100%;
+  height: 5.5rem;
+  background: linear-gradient(to top, color-mix(in oklab, var(--accent) 12%, transparent), transparent);
+}
+.scan::after {
+  content: "";
+  position: absolute;
+  inset-inline: -6%;
+  top: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent) 18%, var(--amber) 50%, var(--accent) 82%, transparent);
+  box-shadow: 0 0 14px 1px var(--accent-glow);
+}
+:global([data-fx-state="play"]) .scan {
+  animation: scan 1.5s var(--fx-ease-in-out) 0.2s both;
+}
+@keyframes scan {
+  0% {
+    opacity: 1;
+    translate: 0 -20%;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    translate: 0 120%;
+  }
+}
+
+/* ------------------------------------------------ Accent line glint */
+/* Keep the glyph boxes and underline geometry, without waiting for the entrance. */
+.readableAccent :global(.fx-u) {
+  animation: none;
+  opacity: 1;
+  translate: none;
+}
+.readableAccent :global(.fx-draw) path {
+  animation: none;
+  stroke-dashoffset: 0;
+}
+
+/* Per glyph; the negative margin keeps layout while the padded box leaves room for italic
+   overhangs and descenders, which would otherwise lose their clipped fill. */
+.shine {
+  margin: -0.15em -0.12em;
+  padding: 0.15em 0.12em;
+  background-image: linear-gradient(
+    100deg,
+    var(--accent) 40%,
+    color-mix(in oklab, var(--amber) 80%, var(--accent)) 50%,
+    var(--accent) 60%
+  );
+  background-size: 400% 100%;
+  background-position: 100% 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+:global(.fx-split[data-fx-state="play"]) .shine {
+  background-position: 0 0;
+  transition: background-position 1.4s var(--fx-ease-in-out)
+    calc(var(--fx-delay, 0s) + var(--i, 0) * var(--fx-stagger, 0.05s) + 0.5s);
+}
+@media (forced-colors: active) {
+  .shine {
+    background: none;
+    color: inherit;
+  }
+}
+
+/* ------------------------------------------------------- Scroll cue */
+.cue {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.cue[data-fx-state="play"] {
+  opacity: 1;
+  transform: none;
+  animation: cue-in 1s var(--fx-ease) 1.6s backwards;
+}
+.cue[data-fx-state="ssr"] {
+  animation: cue-in 0.8s var(--fx-ease) 4s forwards;
+}
+@keyframes cue-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.mouse {
+  position: relative;
+  flex: none;
+  width: 14px;
+  height: 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+}
+.wheel {
+  position: absolute;
+  left: 50%;
+  top: 4px;
+  width: 2px;
+  height: 5px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--accent);
+  animation: wheel 1.9s var(--fx-ease-in-out) infinite;
+}
+@keyframes wheel {
+  0% {
+    opacity: 0;
+    translate: 0 -1px;
+  }
+  25% {
+    opacity: 1;
+  }
+  75%,
+  100% {
+    opacity: 0;
+    translate: 0 8px;
+  }
+}
+.cueLine::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  left: 0;
+  width: 28%;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: travel 3.2s var(--fx-ease-in-out) infinite;
+}
+@keyframes travel {
+  from {
+    translate: -100% 0;
+  }
+  to {
+    translate: 360% 0;
+  }
+}
+.cueFrame[data-paused] .wheel,
+.cueFrame[data-paused] .cueLine::after {
+  animation-play-state: paused;
+}
+
+/* --------------------------------------------------- Grid trail */
+.trail {
+  position: absolute;
+  inset: 0;
+  z-index: -10;
+  overflow: hidden;
+  pointer-events: none;
+}
+/* 65px: the cell's far edges land on the next 1px grid line. */
+.trailCell {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 65px;
+  height: 65px;
+}
+.trailCell {
+  opacity: 0;
+  background: color-mix(in oklab, var(--accent) 6%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 24%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal,
+  .cue {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+    clip-path: none !important;
+  }
+  .scan {
+    display: none;
+  }
+  .readableAccent :global(.fx-split[data-fx-state="play"]) .shine {
+    transition: none;
+  }
+  .wheel,
+  .cueLine::after {
+    animation: none !important;
+  }
+}

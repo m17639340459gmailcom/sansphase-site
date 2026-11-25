@@ -16,7 +16,9 @@ import { communityStaffRoles } from '../src/community-staff.mjs';
 import type { CommunityProfileReviewerRole } from './community-profile-reviewer.ts';
 import { readerProfileReason } from './reader-profile-commands.ts';
 import { validatedFrameEligibility } from './community-frame-authority.ts';
-import type { IdentityFrameEligibility } from './community-identity-protocol.ts';
+import type { IdentityFrameEligibility, IdentityReferralAttribution, IdentityReferralSelf } from './community-identity-protocol.ts';
+import { validInvitationCode } from './reader-invitations.ts';
+import { readerNicknameMax } from '../src/reader-policy.ts';
 
 type ReaderSource = { id: string; uid?: string | null; nickname: string; signature?: string | null; avatar?: string | null; vip?: boolean; vipStartedAt?: string | null; vipUntil?: string | null };
 export type IdentityAuthorityOptions = {
@@ -30,6 +32,10 @@ export type IdentityAuthorityOptions = {
   avatar: (uid: string) => Promise<Buffer | null>;
   approvedAvatar?: (uid: string, knownVersion: string | null) => Promise<ApprovedAvatarRead | null>;
   frameEligibility?: (readerId: string) => Promise<IdentityFrameEligibility>;
+  invitations?: {
+    attribution: (readerId: string) => IdentityReferralAttribution | Promise<IdentityReferralAttribution>;
+    self: (readerId: string) => IdentityReferralSelf | Promise<IdentityReferralSelf>;
+  };
   purgeRemote?: (readerId: string) => Promise<unknown>;
   profiles?: ReaderProfileCommands;
   profileReviewer?: CommunityProfileReviewerCheck;
@@ -111,6 +117,31 @@ export function createIdentityAuthority(options: IdentityAuthorityOptions) {
         try { value = objectValue(JSON.parse(body.toString('utf8'))); } catch { throw invalidInput(); }
         const input = objectValue(value.input);
         if (avatarEnvelope && value.operation !== 'profile-avatar' || !avatarEnvelope && body.length > identityRequestBytes) throw invalidInput();
+        if (value.operation === 'referral-attribution') {
+          exactKeys(value, ['operation', 'input']); exactKeys(input, ['readerId']);
+          if (typeof input.readerId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(input.readerId)) throw invalidInput();
+          if (!options.invitations) throw new IdentityBridgeError('邀请服务尚未配置。', 503);
+          const result = await options.invitations.attribution(input.readerId);
+          if (!result) { send(res, null); return; }
+          if (result.inviter.kind !== 'reader' || result.inviter.id === input.readerId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(result.inviter.id)
+            || !Number.isFinite(Date.parse(result.registeredAt))) throw new IdentityBridgeError('邀请归属暂不可用。', 503);
+          send(res, { inviter: { kind: 'reader', id: result.inviter.id }, registeredAt: result.registeredAt }); return;
+        }
+        if (value.operation === 'referral-self') {
+          exactKeys(value, ['operation', 'input']); exactKeys(input, ['sessionRef', 'asReader']);
+          const dto = await validateSession(req, input);
+          const asReader = Object.hasOwn(input, 'asReader');
+          if (asReader && (input.asReader !== true || dto.viewer.kind !== 'owner')) throw invalidInput();
+          const readerId = dto.viewer.kind === 'reader' ? dto.viewer.id : asReader ? dto.ownerReader?.id : null;
+          if (!readerId) throw new IdentityBridgeError('请切换到已绑定的读者身份参与邀请。', 403);
+          if (!options.invitations) throw new IdentityBridgeError('邀请服务尚未配置。', 503);
+          const result = await options.invitations.self(readerId);
+          const final = await validateSession(req, input);
+          if (final.viewer.kind !== dto.viewer.kind || final.viewer.id !== dto.viewer.id || (asReader ? final.ownerReader?.id : final.viewer.id) !== readerId) throw invalidSession();
+          if (result.readerId !== readerId || !validInvitationCode(result.code) || !Array.isArray(result.invitees) || result.invitees.length > 100
+            || result.invitees.some(row => !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(row.readerId) || !Number.isFinite(Date.parse(row.registeredAt)))) throw new IdentityBridgeError('邀请记录暂不可用。', 503);
+          send(res, { readerId, code: result.code, invitees: result.invitees.map(row => ({ readerId: row.readerId, registeredAt: row.registeredAt })) }); return;
+        }
         if (value.operation === 'frame-eligibility') {
           exactKeys(value, ['operation', 'input']); exactKeys(input, ['readerId']);
           if (typeof input.readerId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(input.readerId)) throw invalidInput();
@@ -225,7 +256,7 @@ export function createIdentityAuthority(options: IdentityAuthorityOptions) {
           if (avatar && avatar.length > 1_500_000) throw new IdentityBridgeError('头像服务暂不可用。');
           send(res, avatar ? { base64: avatar.toString('base64') } : null); return;
         }
-        if (!Array.isArray(input.names) || input.names.length > 50 || input.names.some(name => typeof name !== 'string' || !name.trim() || [...name].length > 8)) throw invalidInput();
+        if (!Array.isArray(input.names) || input.names.length > 50 || input.names.some(name => typeof name !== 'string' || !name.trim() || [...name].length > readerNicknameMax)) throw invalidInput();
         const names = input.names as string[], result = await options.findByNames(names), requested = new Set(names);
         send(res, [...result].filter(([name]) => requested.has(name)).map(([name, member]) => [name, memberValue(member)]));
       } catch (error) {

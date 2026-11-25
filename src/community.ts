@@ -32,7 +32,7 @@ export type Translate = (zh: string, en: string) => string;
 export type Escape = (value?: unknown) => string;
 export type Icons = Record<string, string>;
 // What every template needs: translation, escaping, the clock, icons and the owner's site avatar.
-export type Common = { t: Translate; esc: Escape; now?: number; icons?: Icons; ownerAvatar?: string | null; meForSort?: CommunityMe | null; showTopicCovers?: boolean };
+export type Common = { t: Translate; esc: Escape; now?: number; icons?: Icons; ownerAvatar?: string | null; meForSort?: CommunityMe | null; showTopicCovers?: boolean; teahouseEnabled?: boolean };
 
 export type CommunityBoard = {
   id: string; zh: string; en: string; description: string; descriptionEn: string; color: string; lightColor: string;
@@ -681,7 +681,7 @@ function boardsMiniHTML(summary: CommunitySummary | null, members: boolean, comm
   return communityBoards.map((item) => {
     const locked = item.id === "vip" && !members;
     const count = summary?.boards[item.id]?.topics || 0;
-    return `<a class="community-board-link" href="${boardHref(item.id)}" data-board-id="${esc(item.id)}" data-board-icon="${esc(item.icon)}" data-board-color="${esc(item.color)}" data-board-light-color="${esc(item.lightColor)}" style="${communityBoardStyle(item.id)};--w:${locked ? 0 : Math.round(count / max * 100)}%"><i aria-hidden="true"></i><span>${esc(t(item.zh, item.en))}</span>`
+    return `<a class="community-board-link" href="${item.id === 'vip' && common.teahouseEnabled ? '/teahouse' : boardHref(item.id)}" data-board-id="${esc(item.id)}" data-board-icon="${esc(item.icon)}" data-board-color="${esc(item.color)}" data-board-light-color="${esc(item.lightColor)}" style="${communityBoardStyle(item.id)};--w:${locked ? 0 : Math.round(count / max * 100)}%"><i aria-hidden="true"></i><span>${esc(t(item.zh, item.en))}</span>`
       + (locked ? `<span class="community-board-lock" aria-label="${t("仅 VIP", "VIP only")}">${icons.lock || ""}</span>` : `<span class="community-board-count">${summary ? count : ""}</span>`) + `</a>`;
   }).join("");
 }
@@ -715,7 +715,7 @@ export function communityBoardsHTML({ summary, members, ...common }: Common & { 
     const locked = item.id === "vip" && !members;
     const stats = ready?.boards[item.id];
     const latest = !locked && stats?.latest;
-    return `<a class="community-board-card community-rv community-spot${locked ? " is-locked" : ""}" href="${boardHref(item.id)}" style="${communityBoardStyle(item.id)};--i:${i + 2}">`
+    return `<a class="community-board-card community-rv community-spot${locked ? " is-locked" : ""}" href="${item.id === 'vip' && common.teahouseEnabled ? '/teahouse' : boardHref(item.id)}" style="${communityBoardStyle(item.id)};--i:${i + 2}">`
       + `<div class="community-bc-top"><span class="community-bc-icon">${icons[item.icon] || ""}</span><div class="community-bc-name"><h2>${esc(t(item.zh, item.en))}</h2><span>${esc(item.en.toUpperCase())}</span></div>${locked ? `<span class="community-bc-lock">${icons.lock || ""}VIP</span>` : ""}</div>`
       + `<p>${esc(t(item.description, item.descriptionEn))}</p>`
       + `<dl class="community-bc-stats"><div><dt>${t("类型", "Type")}</dt><dd>${t(item.kind, item.kindEn)}</dd></div><div><dt>${t("主题", "Topics")}</dt><dd>${ready ? visibleCount(stats?.topics, locked) : "—"}</dd></div><div><dt>${t("24 小时回复", "Replies · 24 h")}</dt><dd>${ready ? visibleCount(stats?.repliesToday, locked) : "—"}</dd></div></dl>`

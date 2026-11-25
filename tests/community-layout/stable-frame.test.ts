@@ -89,6 +89,54 @@ test('management routes do not use the ordinary three-column reading frame', () 
   } finally { frame.dispose(); window.close(); }
 });
 
+test('desktop frame clears inherited document scrolling without changing its reading columns', () => {
+  const { window } = new JSDOM('<main></main>', { url: 'http://localhost/#/community/home' });
+  const callbacks = new Map<number, FrameRequestCallback>(); let sequence = 0;
+  window.requestAnimationFrame = callback => { callbacks.set(++sequence, callback); return sequence; };
+  window.cancelAnimationFrame = id => { callbacks.delete(id); };
+  const flush = () => { const pending = [...callbacks.values()]; callbacks.clear(); pending.forEach(callback => callback(0)); };
+  const document = window.document, main = document.querySelector('main')!;
+  document.documentElement.scrollTop = 160;
+  document.body.scrollTop = 210;
+  const frame = createStableCommunityFrame(document, window);
+  try {
+    frame.render(main, page('home'), summary);
+    assert.equal(document.documentElement.scrollTop, 0, 'the old outer scroll cannot push all three columns above the header');
+    assert.equal(document.body.scrollTop, 0, 'the inherited body overflow must not become a second scrolling host');
+    document.documentElement.scrollTop = 196; // Reload restoration commits after the first synchronous render.
+    document.body.scrollTop = 210;
+    flush();
+    assert.equal(document.documentElement.scrollTop, 0, 'the first layout restoration clears a late reload offset');
+    assert.equal(document.body.scrollTop, 0);
+    const center = frame.center()!, right = main.querySelector<HTMLElement>('[data-frame-right]')!;
+    center.scrollTop = 280; right.scrollTop = 70;
+    const restore = frame.preserveReadingPosition();
+    restore();
+    document.documentElement.scrollTop = 160; // Document restoration after the synchronous repaint.
+    document.body.scrollTop = 210;
+    flush();
+    assert.equal(document.documentElement.scrollTop, 0);
+    assert.equal(document.body.scrollTop, 0);
+    assert.equal(center.scrollTop, 280, 'only the inactive outer host is reset');
+    assert.equal(right.scrollTop, 70, 'independent sidebar reading position is retained');
+    const interrupted = frame.preserveReadingPosition(); interrupted();
+    document.documentElement.scrollTop = 160;
+    document.body.scrollTop = 210;
+    center.dispatchEvent(new window.Event('pointerdown', { bubbles: true }));
+    flush();
+    assert.equal(document.documentElement.scrollTop, 0, 'user input cannot cancel the outer-scroll guard along with pending position restoration');
+    assert.equal(document.body.scrollTop, 0);
+    document.body.scrollTop = 210;
+    document.body.dispatchEvent(new window.Event('scroll'));
+    assert.equal(document.body.scrollTop, 0, 'a late body scroll cannot move the whole frame after layout restoration');
+    document.documentElement.scrollTop = 196;
+    document.dispatchEvent(new window.Event('scroll'));
+    assert.equal(document.documentElement.scrollTop, 0, 'a late viewport scroll uses the same guard');
+    assert.equal(center.scrollTop, 280);
+    assert.equal(right.scrollTop, 70);
+  } finally { frame.dispose(); window.close(); }
+});
+
 test('crossing between the reading frame and management preserves the document scrollbar gutter', async () => {
   const foundation = await readFile(new URL('../../src/styles-foundation.css', import.meta.url), 'utf8');
   const stable = await readFile(new URL('../../src/community-layout/stable-frame.css', import.meta.url), 'utf8');

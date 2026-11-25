@@ -1,0 +1,30 @@
+[Unit]
+Description=SANSPHASE private login puzzle verifier
+After=network.target
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=sansphase
+Group=sansphase
+WorkingDirectory=/opt/sansphase-captcha/current
+EnvironmentFile=/etc/sansphase/login-captcha.env
+ExecStart=/usr/bin/java -Xms32m -Xmx192m -XX:ActiveProcessorCount=2 -Djava.awt.headless=true -jar login-captcha-service-1.0.0.jar
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+MemoryMax=320M
+CPUQuota=100%
+TasksMax=32
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sansphase-login-captcha
+
+[Install]
+WantedBy=multi-user.target

@@ -5,17 +5,21 @@ import {bookManifest,bookPart} from './server/book-delivery.ts';
 import {imageSources} from './src/image-sources.mjs';
 import {uploadTimeoutMs} from './src/upload-policy.mjs';
 import {communityHostDocument} from './server/community-host-document.ts';
+import {createSharePreview} from './server/share-preview.ts';
+import {publicBlogDocument,publicBlogRobots,publicBlogSitemap,publicBlogSlug} from './server/blog-seo.ts';
+import {frontendV2Document,originalFrontendDocument} from './server/frontend-v2.ts';
+import {adminConsoleDocument} from './server/admin-console-assets.ts';
 import http from "node:http";
 import { open, readFile, realpath } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { serializeContent } from "./server/content-service.ts";
 import { pipeline } from "node:stream/promises";
-import { resolve, extname, sep } from "node:path";
+import { resolve, extname, sep, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 const defaultRoot = fileURLToPath(new URL("./dist/", import.meta.url));
 // Public bundles remain readable by browsers. Source, private data and debug
 // artefacts are never static assets, even if copied into dist accidentally.
-const privateStaticDirectories = new Set(['src', 'server', 'scripts', 'tests', 'docs', 'archive', 'outputs', 'uploads', 'logs', 'node_modules']);
+const privateStaticDirectories = new Set(['src', 'server', 'scripts', 'tests', 'docs', 'archive', 'outputs', 'uploads', 'logs', 'node_modules', 'frontend-v2']);
 const privateStaticPath = path => {
   const segments = path.toLowerCase().split('/').filter(Boolean);
   return path.includes(':') || segments.some((part, index) => part.startsWith('.') && !(index === 0 && part === '.well-known'))
@@ -36,6 +40,9 @@ const types = {
   ".txt": "text/plain; charset=utf-8",
   ".mp4": "video/mp4",
   ".webm": "video/webm",
+  ".woff": "font/woff",
+  ".woff2": "font/woff2",
+  ".ttf": "font/ttf",
 };
 
 export function createPreviewServer({
@@ -47,16 +54,25 @@ export function createPreviewServer({
   communityService,
   communityEnabled = false,
   identityAuthority,
+  invitationEligible,
   communityDestination,
   communityOnly = false,
+  teahouseEnabled = false,
   mainSiteOrigin,
+  siteOrigin = 'https://www.sansphase.com',
   requestMiddleware,
+  mainFrontend = 'v1',
   healthCheck = async () => {},
   release = 'development',
   requestLogger,
+  diagnosticsService,
 } = {}) {
   const rootPath = resolve(root);
   const communityOpen = communityEnabled === true && Boolean(communityService);
+  const shares = createSharePreview({siteOrigin,root:rootPath,communityOnly,communityDestination,invitationEligible,
+    snapshot:contentService?.snapshot?.bind(contentService),
+    topic:communityOpen ? communityService.shareTopic?.bind(communityService) : undefined,
+    topicImage:communityOpen ? communityService.shareImage?.bind(communityService) : undefined});
   let communityModules;
   const loadCommunityModules = () => communityModules ??= readFile(resolve(rootPath, 'static-delivery.json'), 'utf8')
     .then(text => {
@@ -80,6 +96,7 @@ export function createPreviewServer({
       res.end(req.method === "HEAD" ? undefined : body);
     };
     try {
+      if (await shares.handle(req,res)) return;
       if(req.url.split('?')[0]==='/healthz' && ['GET','HEAD'].includes(req.method)) {
         let healthy=true;
         try {await healthCheck();} catch {healthy=false;}
@@ -123,18 +140,59 @@ export function createPreviewServer({
         return;
       }
       const requestURL = new URL(req.url, "http://localhost");
+      const frontendDocument = frontendV2Document(req);
+      if (frontendDocument && communityOnly) { respond(404, 'Not found'); return; }
+      if (frontendDocument && !contentService) { respond(503, 'Content service unavailable'); return; }
+      const articlePath = requestURL.pathname.startsWith('/blog/');
+      const articleSlug = articlePath ? publicBlogSlug(requestURL.pathname) : null;
+      if (articlePath && (!articleSlug || communityOnly || !contentService || requestURL.searchParams.has('preview') || requestURL.searchParams.has('previewKind'))) { respond(404, 'Not found'); return; }
       const path = decodeURIComponent(requestURL.pathname).replaceAll(
         "\\",
         "/",
       );
-      if (path === '/manage' || path === '/manage/') {
-        res.writeHead(302, { Location: '/#/admin' });
+      // File resolution also normalizes slashes and dot segments. Classify the
+      // same destination here so encoded separators cannot bypass host isolation
+      // or the console's response headers (including on case-insensitive hosts).
+      const routePath = posix.normalize(path).toLowerCase();
+      const adminAsset = routePath === '/admin-console' || routePath.startsWith('/admin-console/');
+      const adminAlias = routePath === '/manage' || routePath === '/manage/';
+      if (communityOnly && (adminAsset || adminAlias)) { respond(404, 'Not found'); return; }
+      if (routePath === '/admin-console' || adminAlias) {
+        res.writeHead(302, { Location: '/admin-console/' });
         res.end();
         return;
       }
+      const adminPage = routePath === '/admin-console/' || routePath === '/admin-console/index.html';
+      if (adminAsset) {
+        // The shell and bundles contain no account data. React-admin checks the
+        // existing author session before rendering; every manage API separately
+        // authorizes the request. Keeping the shell available preserves hash
+        // bookmarks through the existing login flow without a second login UI.
+        res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; font-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+        res.setHeader('Referrer-Policy', 'no-referrer');
+        res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+        if (adminPage) res.setHeader('Cache-Control', 'private, no-store');
+      }
+      const teahousePage = path === '/teahouse' || path === '/teahouse.html';
+      if (teahousePage && !(communityOnly && communityOpen && teahouseEnabled === true)) { respond(404, 'Not found'); return; }
+      if (teahousePage) {
+        const socketOrigin = new URL(siteOrigin);
+        socketOrigin.protocol = socketOrigin.protocol === 'https:' ? 'wss:' : 'ws:';
+        res.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: blob: data:; connect-src 'self' ${socketOrigin.origin}; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'`);
+        res.setHeader('Referrer-Policy', 'no-referrer');
+        res.setHeader('Cache-Control', 'private, no-store');
+      }
+      const discoveryPath = path === '/robots.txt' || path === '/sitemap.xml';
+      if (discoveryPath && (communityOnly || !contentService)) { respond(404, 'Not found'); return; }
+      if (path === '/robots.txt') {
+        res.setHeader('Content-Type','text/plain; charset=utf-8');
+        const text = publicBlogRobots(siteOrigin);
+        res.setHeader('Content-Length',Buffer.byteLength(text));
+        res.end(req.method === 'HEAD' ? undefined : text); return;
+      }
       if (
         contentService &&
-        (path.startsWith("/api/") || path === "/" || path === "/index.html")
+        (path.startsWith("/api/") || path === "/" || path === "/index.html" || articleSlug || path === '/sitemap.xml' || frontendDocument)
       ) {
         try {
           let viewerPromise;
@@ -145,7 +203,12 @@ export function createPreviewServer({
             return await authorService?.identity(req) ? {role:'owner',vip:true} : null;
           })();
           if (path.startsWith("/api/media/")) {
-            const identity = readerService ? await viewer() : {role:'owner',vip:true};
+            const mediaParams = requestURL.searchParams;
+            const homeCover = mediaParams.getAll('view').includes('home-cover');
+            if (homeCover && (communityOnly || mediaParams.size !== 1 || req.headers.range)) {
+              respond(404, 'Not found'); return;
+            }
+            const identity = homeCover ? null : readerService ? await viewer() : {role:'owner',vip:true};
             const member = Boolean(identity);
             const upstream = await contentService.media(
               path.slice("/api/media/".length),
@@ -158,6 +221,7 @@ export function createPreviewServer({
                 presentation: requestURL.searchParams.get('view') === 'content',
                 member,
                 vip: identity?.role === 'owner' || identity?.vip === true,
+                homeCover,
               },
             );
             const type =
@@ -217,14 +281,35 @@ export function createPreviewServer({
           }
           // Author identity and previews belong to this request, never to the
           // shared public snapshot used by subsequent visitors/media requests.
-          const view = requestURL.searchParams.get('view');
+          const params = requestURL.searchParams;
+          const view = params.get('view');
+          if (path === '/api/content' && params.has('activity')) {
+            res.setHeader('Cache-Control', 'private, no-store');
+            if (communityOnly) { respond(404, 'Not found'); return; }
+            const includeFeatured = params.get('featured') === '1';
+            if (params.size !== (includeFeatured ? 4 : 3) || view !== 'bootstrap' || params.get('public') !== '1' || params.get('activity') !== 'resources') {
+              respond(400, 'Invalid content query'); return;
+            }
+            const { resourceActivity, featured } = await contentService.snapshot();
+            if (!resourceActivity) { respond(503, 'Content service unavailable'); return; }
+            res.setHeader('Content-Type', 'application/json; charset=utf-8');
+            res.end(req.method === 'HEAD' ? undefined : serializeContent({ resourceActivity, ...(includeFeatured ? { featured } : {}) }));
+            return;
+          }
           if (path === '/api/content' && ['list','detail','book-part'].includes(view) && !publicKind(requestURL.searchParams.get('kind')) && readerService && !await viewer()) {
             respond(401, '请先登录后查看此内容。');
             return;
           }
           // Deny restricted reads before rebuilding the shared snapshot. This
           // matters when many visitors or bots request book/article URLs.
-          const snapshot = (await contentService.snapshot()).data;
+          let snapshot = (await contentService.snapshot()).data;
+          if (path === '/sitemap.xml') {
+            const xml = publicBlogSitemap(snapshot.notes || [],siteOrigin);
+            res.setHeader('Content-Type','application/xml; charset=utf-8');
+            res.setHeader('Content-Length',Buffer.byteLength(xml));
+            res.end(req.method === 'HEAD' ? undefined : xml); return;
+          }
+          let article = articleSlug ? publicPage(snapshot,new URLSearchParams({view:'detail',kind:'notes',id:articleSlug})).item : null;
           let bookPreview;
           if(requestURL.searchParams.has('preview')&&requestURL.searchParams.get('previewKind')==='resource-center'){
             res.setHeader('Cache-Control','private, no-store');
@@ -249,12 +334,19 @@ export function createPreviewServer({
             res.setHeader('Content-Type','application/json; charset=utf-8');
             res.end(req.method==='HEAD'?undefined:body);return;
           }
-          const visible = readerService ? visibleBootstrap(snapshot,await viewer()) : snapshot;
+          const access = readerService ? await viewer() : null;
+          const visible = readerService ? visibleBootstrap(snapshot,access) : snapshot;
           const data = path === '/api/content'
             ? view ? publicPage(visible,requestURL.searchParams) : {...visible}
             : publicBootstrap(visible);
           if (authorService) data.author = await authorService.identity(req);
+          // Sampling is chosen for this response only, without cookies or IDs.
+          const diagnostics = diagnosticsService?.bootstrap
+            ? diagnosticsService.bootstrap(req) : diagnosticsService ? { enabled: true } : undefined;
+          if (diagnostics?.enabled === true) data.diagnostics = { enabled: true };
+          else delete data.diagnostics;
           data.communityEnabled = communityOpen;
+          data.teahouseEnabled = communityOnly && communityOpen && teahouseEnabled === true;
           if (communityDestination) data.communityDestination = communityDestination;
           if (communityOnly) { data.communityOnly = true; data.mainSiteOrigin = mainSiteOrigin; }
           if (readerService) {
@@ -274,7 +366,18 @@ export function createPreviewServer({
             res.end(req.method === "HEAD" ? undefined : serializeContent(data));
             return;
           }
-          let html = await readFile(resolve(rootPath, "index.html"), "utf8");
+          let html = frontendDocument ? await frontendDocument.read() : await readFile(resolve(rootPath, "index.html"), "utf8");
+          if (originalFrontendDocument(req)) html = html.replace('<html', '<html data-frontend-entry="original"');
+          if (article) {
+            // Identity/template reads can yield while an author withdraws or
+            // edits this article. Check the current publication once more;
+            // rendering, metadata and bootstrap then share one final snapshot.
+            snapshot = (await contentService.snapshot()).data;
+            article = publicPage(snapshot,new URLSearchParams({view:'detail',kind:'notes',id:articleSlug})).item;
+            Object.assign(data,publicBootstrap(readerService ? visibleBootstrap(snapshot,access) : snapshot));
+            data.notes = [article]; data.articleEntry = {id:article.id};
+          }
+          if (!article) html = html.replace('</head>', shares.head(snapshot) + '</head>');
           if (communityOnly) html = communityHostDocument(html, await loadCommunityModules());
           if (data.profile?.background) {
             html = html.replaceAll(
@@ -288,6 +391,7 @@ export function createPreviewServer({
             "</head>",
             `<script id="site-content" type="application/json">${serializeContent(data)}</script></head>`,
           );
+          if (article) html = publicBlogDocument(html,article,{siteOrigin,siteName:snapshot.profile?.name,siteContent:data,mainId:frontendDocument?.articleMainId});
           res.setHeader("Content-Type", "text/html; charset=utf-8");
           res.setHeader("Content-Length", Buffer.byteLength(html));
           res.end(req.method === "HEAD" ? undefined : html);
@@ -313,7 +417,7 @@ export function createPreviewServer({
       }
       const file = resolve(
         rootPath,
-        "." + (path === "/" ? "/index.html" : path),
+        "." + (adminPage ? '/admin-console/index.html' : teahousePage ? '/teahouse.html' : path === "/" ? "/index.html" : path),
       );
       if (!file.startsWith(rootPrefix)) {
         respond(403, "Forbidden");
@@ -329,6 +433,17 @@ export function createPreviewServer({
         await fileHandle.close();
         fileHandle = undefined;
         respond(404, "Not found");
+        return;
+      }
+      if (adminPage) {
+        // Fixed public routing metadata only. Keep the author checks in the
+        // existing console and APIs; neither URL queries nor cookies choose it.
+        const html = adminConsoleDocument(await fileHandle.readFile('utf8'), mainFrontend);
+        await fileHandle.close(); fileHandle = undefined;
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        res.setHeader('Content-Length', Buffer.byteLength(html));
+        res.writeHead(200);
+        res.end(req.method === 'HEAD' ? undefined : html);
         return;
       }
       // Stable file names revalidate, while esbuild's content-hashed chunks can
@@ -393,7 +508,12 @@ export function createPreviewServer({
   };
   return http.createServer({requestTimeout:uploadTimeoutMs}, (req, res) => {
     const dispatch = requestMiddleware ? () => requestMiddleware(req, res, () => handle(req, res)) : () => handle(req, res);
-    Promise.resolve().then(dispatch).catch(() => {
+    Promise.resolve().then(async () => {
+      // This narrow service verifies its socket peer, Host and Origin itself.
+      // It handles only diagnostics, leaving business access gates unchanged.
+      if (diagnosticsService && await diagnosticsService.handle(req, res)) return;
+      await dispatch();
+    }).catch(() => {
       if (res.headersSent) { res.destroy(); return; }
       res.writeHead(503, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'private, no-store' });
       res.end('服务暂时不可用，请稍后重试。');

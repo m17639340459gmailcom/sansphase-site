@@ -1,0 +1,184 @@
+/* Home facts grid. The 1px gaps are the rules, so the lit layer behind the opaque cells glows only
+   along the lines near the pointer, at every breakpoint. */
+.grid {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  padding-block: 1px;
+  background: var(--line);
+}
+@media (min-width: 1024px) {
+  .grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+.grid::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(
+    18rem circle at var(--mx, 50%) var(--my, -40rem),
+    color-mix(in oklab, var(--accent) 90%, transparent),
+    color-mix(in oklab, var(--amber) 45%, transparent) 30%,
+    transparent 70%
+  );
+  opacity: 0;
+  transition: opacity 0.5s var(--fx-ease);
+}
+.grid[data-fx-spot-active]::before {
+  opacity: 1;
+}
+
+.cell {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  min-height: 11rem;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 1.75rem;
+  overflow: hidden;
+  padding: 1.25rem;
+  background: var(--bg);
+  transition: background-color 0.5s var(--fx-ease);
+}
+@media (min-width: 640px) {
+  .cell {
+    min-height: 12.5rem;
+    padding: 1.75rem;
+  }
+}
+/* Soft light inside the cell, following the pointer. */
+.cell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(
+    20rem circle at var(--mx, 50%) var(--my, -40rem),
+    color-mix(in oklab, var(--accent) 8%, transparent),
+    transparent 62%
+  );
+  opacity: 0;
+  transition: opacity 0.5s var(--fx-ease);
+}
+.grid[data-fx-spot-active] .cell::after {
+  opacity: 1;
+}
+
+/* A light runs along the cell's top rule as it enters. */
+.sweep {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(90deg, transparent, var(--accent) 45%, var(--amber));
+  transform-origin: left center;
+  opacity: 0;
+}
+.cell[data-fx-state="play"] .sweep {
+  animation: sweep 1.3s var(--fx-ease-in-out) var(--delay, 0s) both;
+}
+@keyframes sweep {
+  0% {
+    opacity: 1;
+    scale: 0 1;
+  }
+  60% {
+    opacity: 1;
+    scale: 1 1;
+  }
+  100% {
+    opacity: 0;
+    scale: 1 1;
+  }
+}
+
+/* Big outlined index numeral; an accent copy lights up around the pointer. */
+.index {
+  position: relative;
+  display: block;
+  width: fit-content;
+  font-family: var(--font-display);
+  font-size: clamp(3rem, 6.5vw, 4.75rem);
+  font-weight: 600;
+  line-height: 0.82;
+  letter-spacing: -0.05em;
+  user-select: none;
+  transition: translate 0.6s var(--fx-ease);
+}
+.indexBase,
+.indexLit {
+  color: transparent;
+  -webkit-text-stroke: 1px var(--line-strong);
+  transition:
+    color 0.5s var(--fx-ease),
+    -webkit-text-stroke-color 0.5s var(--fx-ease);
+}
+.indexLit {
+  position: absolute;
+  inset: 0;
+  -webkit-text-stroke-color: var(--accent);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  transition: translate 0.6s var(--fx-ease);
+}
+.label {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.cell[data-fx-state="play"] .label {
+  opacity: 1;
+  transform: none;
+  animation: rise 0.8s var(--fx-ease) calc(var(--delay, 0s) + 0.35s) backwards;
+}
+.cell[data-fx-state="ssr"] .label {
+  animation: rise 0.6s var(--fx-ease) 4s forwards;
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .cell:hover {
+    background: var(--bg-elevated);
+  }
+  .cell:hover .body {
+    translate: 0 -4px;
+  }
+  .cell:hover .index {
+    translate: 0 -3px;
+  }
+  .cell:hover .indexBase {
+    color: color-mix(in oklab, var(--accent) 12%, transparent);
+    -webkit-text-stroke-color: color-mix(in oklab, var(--accent) 45%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sweep {
+    display: none;
+  }
+  .label {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
