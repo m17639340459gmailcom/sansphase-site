@@ -7,8 +7,9 @@ import { resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { getPayload, createLocalReq, logoutOperation } from 'payload';
 import { makePayloadConfig } from '../server/payload/config.ts';
-import { loginEventsSchema } from '../server/payload/reader-migration.ts';
+import { loginEventsSchema, migrateReaderAccounts, assertReaderAdminRemarksReady } from '../server/payload/reader-migration.ts';
 import { migratePayloadAuthSecurity, assertPayloadAuthSchemaReady } from '../server/payload/auth-security-migration.ts';
+import { migrateReaderInvitations, assertReaderInvitationsReady } from '../server/payload/invitation-migration.ts';
 import { legacyAuthFixture } from './fixtures/payload-auth-3-89.mjs';
 
 test('explicitly migrated 3.89 accounts authenticate, upgrade hashes, reset locks/sessions and survive a push:false restart without changing UID/VIP/uploads', { timeout: 120000 }, async () => {
@@ -16,18 +17,21 @@ test('explicitly migrated 3.89 accounts authenticate, upgrade hashes, reset lock
   const secret = randomBytes(48).toString('hex'), sent = [];
   const emailAdapter = () => ({ name: 'isolated-upgrade-mail', defaultFromAddress: 'noreply@example.test', defaultFromName: 'Fixture', sendEmail: async mail => { sent.push(mail); } });
   let payload;
+  const connections = new Set();
+  const openDatabase = (options = {}) => { const db = new DatabaseSync(resolve(directory, 'content.db'), options); connections.add(db); return db; };
   const close = async () => { if (payload) { await payload.destroy(); await payload.db.client.close(); payload = undefined; } };
   try {
     payload = await getPayload({ config: makePayloadConfig({ directory, secret, push: true, emailAdapter }), key: `auth-schema-${directory}` });
     const modernColumns = {};
-    const modern = new DatabaseSync(resolve(directory, 'content.db'), { readOnly: true });
+    const modern = openDatabase({ readOnly: true });
     const shape = (db, table) => db.prepare(`PRAGMA table_xinfo(${table})`).all().map(({ cid: _cid, ...column }) => column).sort((a, b) => String(a.name).localeCompare(String(b.name)));
-    for (const table of ['authors', 'readers']) modernColumns[table] = shape(modern, table);
+    const separateBusinessColumns = new Set(['invitation_code', 'invited_by', 'invitation_bound', 'admin_remark']);
+    for (const table of ['authors', 'readers']) modernColumns[table] = shape(modern, table).filter(column => table !== 'readers' || !separateBusinessColumns.has(column.name));
     modern.close();
     const media = await payload.create({ collection: 'media', data: { title: '模拟上传', originalName: 'fixture.txt' }, file: { data: Buffer.from('immutable isolated media'), name: 'fixture.txt', mimetype: 'text/plain', size: 24 } });
     await payload.create({ collection: 'site_profile', data: { name: '模拟既有作者资料', signature: '迁移不得修改' } });
     await close();
-    const db = new DatabaseSync(resolve(directory, 'content.db'));
+    const db = openDatabase();
     db.exec('PRAGMA foreign_keys=OFF; DROP TABLE authors_sessions; DROP TABLE readers_sessions; DROP TABLE authors; DROP TABLE readers;');
     for (const type of ['table', 'index', 'trigger']) for (const entry of legacyAuthFixture.schema.filter(row => row.type === type)) db.exec(entry.sql);
     for (const [table, rows] of Object.entries(legacyAuthFixture.accounts)) for (const row of rows) {
@@ -44,19 +48,38 @@ test('explicitly migrated 3.89 accounts authenticate, upgrade hashes, reset lock
     const migrated = await migratePayloadAuthSecurity(directory);
     assert.deepEqual(migrated.tables, ['authors', 'readers']);
     assertPayloadAuthSchemaReady(directory);
-    const after = new DatabaseSync(resolve(directory, 'content.db'), { readOnly: true });
-    for (const table of ['authors', 'readers']) assert.deepEqual(shape(after, table), modernColumns[table], 'actual fresh 3.90 schema and explicitly upgraded auth schema must match without push');
+    const after = openDatabase({ readOnly: true });
+    for (const table of ['authors', 'readers']) assert.deepEqual(shape(after, table), modernColumns[table], 'the auth-only upgrade matches the modern auth schema without applying separate invitation or private-remark business migrations');
     assert.deepEqual(after.prepare("SELECT type,name,sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT IN ('authors','readers') ORDER BY type,name").all(), otherSchema);
     const { reset_password_requested_at: authorDate, ...author } = after.prepare('SELECT * FROM authors').get();
     const { reset_password_requested_at: readerDate, ...reader } = after.prepare('SELECT * FROM readers').get();
     assert.equal(authorDate, null); assert.equal(readerDate, null);
     assert.deepEqual(author, { ...beforeAuthor }); assert.deepEqual(reader, { ...beforeReader }); after.close();
+    assert.throws(() => assertReaderInvitationsReady(directory), /explicit reader invitation migration/);
+    assert.equal((await migrateReaderInvitations(directory)).migrated, true);
+    assertReaderInvitationsReady(directory);
+    assert.equal((await migrateReaderInvitations(directory)).migrated, false);
+    const invitationUpgrade = openDatabase({ readOnly: true });
+    const { invitation_code, invited_by, invitation_bound, reset_password_requested_at, ...preservedReader } = invitationUpgrade.prepare('SELECT * FROM readers').get();
+    assert.equal(invitation_code, null); assert.equal(invited_by, null); assert.equal(invitation_bound, 0); assert.equal(reset_password_requested_at, null);
+    assert.deepEqual(preservedReader, { ...beforeReader }, 'the later invitation migration preserves every old account value, including password hash and VIP dates');
+    const beforeRemarkUpgrade = invitationUpgrade.prepare('SELECT * FROM readers').get();
+    invitationUpgrade.close();
+    assert.throws(() => assertReaderAdminRemarksReady(directory), /explicit reader account migration/);
+    assert.equal((await migrateReaderAccounts(directory)).migrated, true);
+    assertReaderAdminRemarksReady(directory);
+    assert.equal((await migrateReaderAccounts(directory)).migrated, false);
+    const remarkUpgrade = openDatabase({ readOnly: true });
+    const { admin_remark, ...remarkPreservedReader } = remarkUpgrade.prepare('SELECT * FROM readers').get();
+    assert.equal(admin_remark, null);
+    assert.deepEqual(remarkPreservedReader, { ...beforeRemarkUpgrade }, 'the separate private-remark migration retains every existing account value before production authentication');
+    remarkUpgrade.close();
     payload = await getPayload({ config: makePayloadConfig({ directory, secret, push: false, emailAdapter }), key: `auth-upgraded-${directory}` });
     const oldAuthor = legacyAuthFixture.accounts.authors[0], oldReader = legacyAuthFixture.accounts.readers[0];
     assert.equal((await payload.login({ collection: 'authors', data: { email: oldAuthor.email, password: legacyAuthFixture.password } })).user.id, oldAuthor.id);
     const oldSession = await payload.login({ collection: 'readers', data: { email: oldReader.email, password: legacyAuthFixture.password } });
     assert.equal(oldSession.user.id, oldReader.id);
-    const upgraded = new DatabaseSync(resolve(directory, 'content.db'));
+    const upgraded = openDatabase();
     assert.match(upgraded.prepare('SELECT hash FROM authors').get().hash, /^pbkdf2-sha256-v1:/);
     assert.match(upgraded.prepare('SELECT hash FROM readers').get().hash, /^pbkdf2-sha256-v1:/);
     assert.deepEqual(upgraded.prepare('SELECT * FROM reader_uids').all(), beforeUID);
@@ -72,7 +95,7 @@ test('explicitly migrated 3.89 accounts authenticate, upgrade hashes, reset lock
     assert.equal((await payload.auth({ headers: new Headers({ Authorization: `JWT ${oldSession.token}` }) })).user, null);
     await logoutOperation({ allSessions: true, collection: payload.collections.readers, req: await createLocalReq({ user: reset.user }, payload) });
     assert.equal((await payload.auth({ headers: new Headers({ Authorization: `JWT ${reset.token}` }) })).user, null);
-    const locked = new DatabaseSync(resolve(directory, 'content.db'), { readOnly: true });
+    const locked = openDatabase({ readOnly: true });
     const resetRow = locked.prepare('SELECT login_attempts,lock_until,reset_password_requested_at FROM readers').get();
     assert.equal(resetRow.login_attempts, 0); assert.equal(resetRow.lock_until, null); assert.ok(resetRow.reset_password_requested_at); locked.close();
     const newPassword = 'isolated-new-reader-password-2026';
@@ -82,7 +105,7 @@ test('explicitly migrated 3.89 accounts authenticate, upgrade hashes, reset lock
     assert.equal((await payload.login({ collection: 'readers', data: { email: oldReader.email, password: resetPassword } })).user.id, oldReader.id);
     assert.equal((await payload.login({ collection: 'readers', data: { email: created.email, password: newPassword } })).user.id, created.id);
     assert.equal((await payload.login({ collection: 'authors', data: { email: oldAuthor.email, password: legacyAuthFixture.password } })).user.id, oldAuthor.id);
-    const final = new DatabaseSync(resolve(directory, 'content.db'), { readOnly: true });
+    const final = openDatabase({ readOnly: true });
     const persistent = final.prepare('SELECT nickname,phone,signature,avatar,vip_started_at,vip_until FROM readers WHERE id=?').get(oldReader.id);
     assert.deepEqual(persistent, Object.assign(Object.create(null), Object.fromEntries(Object.keys(persistent).map(key => [key, beforeReader[key]]))));
     assert.deepEqual(final.prepare('SELECT * FROM reader_uids WHERE reader_id=?').all(oldReader.id), beforeUID);
@@ -90,5 +113,8 @@ test('explicitly migrated 3.89 accounts authenticate, upgrade hashes, reset lock
     assert.deepEqual(final.prepare('PRAGMA foreign_key_check').all(), []); final.close();
     assert.deepEqual(await readFile(resolve(directory, 'uploads', media.filename)), originalUpload);
     assert.equal((await payload.find({ collection: 'site_profile' })).docs[0].name, '模拟既有作者资料');
-  } finally { await close(); await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+  } finally {
+    for (const db of connections) if (db.isOpen) db.close();
+    await close(); await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  }
 });

@@ -13,6 +13,7 @@ const isCard = (value: unknown): value is Card => value === 'makeup' || value ==
 const isEquipment = (value: unknown): value is Equipment => value === 'frame' || value === 'color' || value === 'cover';
 type CustomItemRow = {
   image: string | null;
+  art_style: 'holo-card' | null; delivery_contact: 'author-qq' | null;
   category: string | null; kind: Equipment | Card | null; effect: string | null;
   id: string; cat: 'digital' | 'goods' | 'card'; name: string; description: string; price: number; stock: number | null; stock_left: number | null;
   limit_per: 'month' | 'year' | 'once' | null; limit_n: number | null; min_level: number; min_days: number; delivery: string; note: string; active: number;
@@ -26,10 +27,12 @@ export type Shipping = { name: string; phone: string; address: string };
 export type Tracking = { company: string; number: string };
 export type CustomItemInput = {
   image?: string | null;
+  artStyle?: 'holo-card' | null; deliveryContact?: 'author-qq' | null;
   category?: string | null; kind?: Equipment | Card; effect?: NameEffect | null;
   cat: 'look' | 'digital' | 'goods' | 'card'; name: string; description: string; price: number; stock: number | null; limitPer: 'month' | 'year' | 'once' | null;
   limitN: number | null; minLevel: number; minDays: number; delivery: string; note: string; active: boolean;
 };
+type CustomItemDTO = ShopItem & { active: boolean; delivery: string; deliveryContact?: 'author-qq' };
 const previousDay = (key: string) => new Date(Date.parse(`${key}T00:00:00Z`) - day).toISOString().slice(0, 10);
 
 // 签到、补签、兑换所、道具卡、提示词解锁、悬赏、付费置顶和标题高亮。
@@ -62,10 +65,11 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
   const insertCategory = db.prepare('INSERT INTO community_shop_categories (id, name, created_at) VALUES (?, ?, ?)');
   const customItems = db.prepare('SELECT * FROM community_shop_items ORDER BY active DESC, cat, price');
   const customItem = db.prepare('SELECT * FROM community_shop_items WHERE id = ?');
-  const insertItem = db.prepare(`INSERT INTO community_shop_items (id, cat, name, description, price, stock, stock_left, limit_per, limit_n, min_level, min_days, delivery, note, active, created_at, updated_at, image, category, kind, effect)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  const insertItem = db.prepare(`INSERT INTO community_shop_items (id, cat, name, description, price, stock, stock_left, limit_per, limit_n, min_level, min_days, delivery, note, active, created_at, updated_at, image, category, kind, effect, art_style, delivery_contact)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const updateItem = db.prepare(`UPDATE community_shop_items SET name = ?, description = ?, price = ?, stock = ?, stock_left = ?, limit_per = ?, limit_n = ?, min_level = ?, min_days = ?,
-    delivery = ?, note = ?, active = ?, updated_at = ?, image = ?, category = ?, effect = ?, cat = ?, kind = ? WHERE id = ?`);
+    delivery = ?, note = ?, active = ?, updated_at = ?, image = ?, category = ?, effect = ?, cat = ?, kind = ?, art_style = ?, delivery_contact = ? WHERE id = ?`);
+  const usableShopImage = db.prepare("SELECT 1 FROM community_images WHERE id = ? AND deleted_at IS NULL AND purpose = 'shop' AND topic_id IS NULL AND reply_id IS NULL");
   const updateItemActive = db.prepare('UPDATE community_shop_items SET active = ?, updated_at = ? WHERE id = ?');
   const visibleImage = db.prepare('SELECT 1 FROM community_shop_items WHERE image = ? AND active = 1 LIMIT 1');
   const redeemedImage = db.prepare(`SELECT 1 FROM community_orders o JOIN community_shop_items i ON i.id = o.item
@@ -169,12 +173,14 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
   // purpose. Owned rows and a worn image also cover legacy entitlement records.
   const itemPurposeLocked = (row: CustomItemRow) => Boolean(itemOrdered.get(row.id) || itemOwned.get(row.id)
     || (row.kind === 'frame' || row.kind === 'cover') && row.image && equippedImage.get(`image:${row.image}`, `image:${row.image}`));
-  const customToItem = (row: CustomItemRow): ShopItem & { active: boolean; delivery: string } => {
+  const customToItem = (row: CustomItemRow): CustomItemDTO => {
     const card = row.cat === 'card' && isCard(row.kind) ? row.kind : null;
     if (row.cat === 'card' && !card) throw fail('道具卡用途无效。', 503);
     const equipment = row.cat === 'digital' && isEquipment(row.kind) ? row.kind : null;
     return {
       image: row.image, category: row.category, effect: row.kind === 'color' ? communityNameEffect(parseJson<unknown>(row.effect, null)) : null,
+      ...(row.art_style ? { artStyle: row.art_style } : {}),
+      ...(row.delivery_contact ? { deliveryContact: row.delivery_contact } : {}),
       ...(card ? { ref: card } : equipment ? { ref: equipment === 'color' ? `effect:${row.id}` : `image:${row.image}` } : {}),
       id: row.id, cat: equipment ? 'look' : row.cat, kind: row.cat === 'card' ? 'card' : equipment || row.cat, name: row.name, desc: row.description, price: row.price,
       limit: row.limit_per ? { per: row.limit_per, n: row.limit_n || 1 } : null, minLevel: row.min_level, minDays: row.min_days,
@@ -185,7 +191,7 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
   // Sample definitions remain available for historical orders and owned
   // decorations. Only an explicitly constructed local preview sells them;
   // formal publication comes from the author's persisted active products.
-  const builtinItem = (item: ShopItem) => ({ ...item, active: previewCatalog, delivery: '' });
+  const builtinItem = (item: ShopItem): CustomItemDTO => ({ ...item, active: previewCatalog, delivery: '' });
   const allItems = () => [...communityBuiltinItems.map(builtinItem), ...allCustom()];
   function findItem(id: string) {
     const builtin = communityBuiltinItems.find(item => item.id === id);
@@ -310,8 +316,13 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
       // A GET snapshot is local to this synchronous catalogue construction.
       // It is never passed into redeem(), which keeps its transaction checks.
       const ownedItems = owned(member), balance = ledger.balance(member), now = context.now ?? Date.now();
-      return { balance, items: items.map(item => ({ ...item, delivery: undefined,
-        state: redemptionState(member, item, { ...context, now }, canOwn(item) && ownedItems.has(item.id), () => balance) })) };
+      return { balance, items: items.map(item => {
+        const publicItem = { ...item, delivery: undefined,
+          state: redemptionState(member, item, { ...context, now }, canOwn(item) && ownedItems.has(item.id), () => balance) };
+        // Receipt/contact metadata belongs to the owned delivery and management views.
+        delete publicItem.deliveryContact;
+        return publicItem;
+      }) };
     },
     redeem(member: CommunityAuthor, id: string, context: RedeemContext & { shipping?: Shipping | null }) {
       return tx(() => {
@@ -347,7 +358,7 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
     delivery(member: CommunityAuthor, id: string) {
       const item = findItem(id);
       if (!item || item.kind !== 'digital' || !owned(member).has(id)) throw fail('兑换后才能查看。', 403);
-      return { name: item.name, delivery: item.delivery };
+      return { name: item.name, delivery: item.delivery, ...(item.deliveryContact ? { contact: item.deliveryContact } : {}) };
     },
     orders: (member: CommunityAuthor) => (memberOrders.all(member.kind, member.id) as OrderRow[]).map(row => orderDTO(row)),
     goodsOrders: () => (goodsOrders.all() as OrderRow[]).map(row => orderDTO(row, true)),
@@ -419,15 +430,25 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
         const cat = input.cat === 'look' ? 'digital' : input.cat;
         const delivery = input.cat === 'digital' ? input.delivery : '';
         const effect = kind === 'color' && input.effect ? JSON.stringify(input.effect) : null;
+        if (input.artStyle !== undefined && input.artStyle !== null && input.artStyle !== 'holo-card') throw fail('请选择有效的商品展示样式。');
+        if (input.deliveryContact !== undefined && input.deliveryContact !== null && input.deliveryContact !== 'author-qq') throw fail('请选择有效的领取联系方式。');
+        const row = id ? customItem.get(id) as CustomItemRow | undefined : undefined;
+        if (id && !row) throw fail('没有这个物品。', 404);
+        const changingPurpose = Boolean(row && (cat !== row.cat || (kind || null) !== row.kind));
+        const image = input.image === undefined ? row?.image || null : input.image || null;
+        // Old editors omit these fields. Preserve them during ordinary edits,
+        // but never carry resource presentation/contact into a different purpose.
+        const artStyle = input.artStyle === undefined ? changingPurpose || !image ? null : row?.art_style || null : input.artStyle;
+        const deliveryContact = input.deliveryContact === undefined ? changingPurpose ? null : row?.delivery_contact || null : input.deliveryContact;
+        if ((artStyle || deliveryContact) && (cat !== 'digital' || kind)) throw fail('卡片展示与领取联系方式仅适用于数字资源。');
+        if (artStyle && (!image || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(image) || !usableShopImage.get(image))) throw fail('卡片展示需要有效的商品图片，请重新上传。');
         if (!id) {
           const newId = randomUUID();
           insertItem.run(newId, cat, input.name, input.description, input.price, input.stock, input.stock, input.limitPer, input.limitN,
-            input.minLevel, input.minDays, delivery, input.note, input.active ? 1 : 0, at, at, input.image || null, input.category || null, kind || null, effect);
+            input.minLevel, input.minDays, delivery, input.note, input.active ? 1 : 0, at, at, image, input.category || null, kind || null, effect, artStyle, deliveryContact);
           return newId;
         }
-        const row = customItem.get(id) as CustomItemRow | undefined;
         if (!row) throw fail('没有这个物品。', 404);
-        const changingPurpose = cat !== row.cat || (kind || null) !== row.kind;
         if (changingPurpose && itemPurposeLocked(row)) throw fail('物品已有兑换记录，不能更改用途；请下架后新建正确类型的物品。');
         if ((row.kind === 'frame' || row.kind === 'cover') && input.image !== undefined && input.image !== row.image && itemOwned.get(id))
           throw fail(`${row.kind === 'frame' ? '头像框' : '主页背景'}已经有人兑换，不能更换使用图片；请新建物品。`);
@@ -435,8 +456,8 @@ export function createEconomy(db: DatabaseSync, tx: Transaction, ledger: Ledger,
         const sold = row.stock != null && row.stock_left != null ? row.stock - row.stock_left : 0;
         const left = input.stock == null ? null : Math.max(0, input.stock - sold);
         updateItem.run(input.name, input.description, input.price, input.stock, left, input.limitPer, input.limitN, input.minLevel, input.minDays,
-          delivery, input.note, input.active ? 1 : 0, at, input.image === undefined ? row.image : input.image,
-          input.category === undefined ? row.category : input.category, kind === 'color' && !changingPurpose && input.effect === undefined ? row.effect : effect, cat, kind || null, id);
+          delivery, input.note, input.active ? 1 : 0, at, image,
+          input.category === undefined ? row.category : input.category, kind === 'color' && !changingPurpose && input.effect === undefined ? row.effect : effect, cat, kind || null, artStyle, deliveryContact, id);
         return id;
       });
     },

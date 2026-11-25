@@ -34,6 +34,7 @@ export function staticAssetUrl(
   base: string = globalThis.document?.documentElement?.dataset.staticBase || "",
 ): string {
   const relative = path.replace(/^\.?\//, "");
+  if (!base && globalThis.document?.location?.pathname.startsWith('/blog/') && path.startsWith('./')) return '/' + relative;
   if (!base || relative.includes("..") || !/^(?:[\w.-]+\.(?:m?js|css)(?:\?|$)|chunks\/[\w.-]+\.mjs$|assets\/(?:materials|fonts)\/[\w.-]+$|assets\/plyr\.svg$)/.test(relative)) return path;
   return base + relative;
 }

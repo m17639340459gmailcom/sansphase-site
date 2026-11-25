@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="color-scheme" content="light dark">
+  <title>会员茶室</title>
+  <link rel="stylesheet" href="/teahouse.css">
+  <script type="module" src="/teahouse-client.mjs"></script>
+</head>
+<body data-theme="light" data-layout="balanced">
+  <header class="site-header">
+    <a class="community-brand" href="/#/community/home" aria-label="返回社区首页"><strong>社区</strong><span>COMMUNITY</span></a>
+    <div class="header-actions">
+      <button type="button" id="theme-toggle" class="theme-button" aria-label="切换深浅主题"><i data-lucide="sun" aria-hidden="true"></i><span>明亮</span></button>
+      <span class="header-language">中 / EN</span>
+      <span class="header-divider"></span>
+      <div class="account-entry" id="account-entry">
+        <button type="button" class="current-person" id="current-person" aria-label="打开个人菜单" aria-haspopup="menu" aria-expanded="false" aria-controls="account-menu" disabled></button>
+        <div class="account-menu" id="account-menu" role="menu" aria-label="个人菜单" hidden></div>
+      </div>
+    </div>
+  </header>
+
+  <div class="app-shell">
+    <aside class="site-rail" aria-label="社区导航">
+      <nav class="main-nav">
+        <a href="/#/community/home"><i data-lucide="house"></i>社区首页</a>
+        <a href="/#/community/stardust"><i data-lucide="sparkles"></i>我的星尘</a>
+        <a href="/#/community/shop"><i data-lucide="gift"></i>兑换</a>
+        <a href="/#/community/rank"><i data-lucide="trophy"></i>排行</a>
+      </nav>
+      <div class="rail-divider"></div>
+      <h2 class="rail-heading">社区板块</h2>
+      <nav class="board-nav">
+        <a href="/#/community/boards/qa"><i data-lucide="circle-help"></i>学习问答</a>
+        <a href="/#/community/boards/showcase"><i data-lucide="image"></i>作品展廊</a>
+        <a href="/#/community/boards/tools"><i data-lucide="box"></i>工具资源</a>
+        <a href="/#/community/boards/moments"><i data-lucide="feather"></i>随想</a>
+        <a href="/#/community/boards/meta"><i data-lucide="megaphone"></i>站务反馈</a>
+        <a class="selected" href="/teahouse" aria-current="page"><i data-lucide="coffee"></i>会员茶室<span class="rail-vip">VIP</span></a>
+      </nav>
+      <div class="rail-bottom"><a href="/#/community/rules">社区公约<i data-lucide="arrow-up-right"></i></a><span>在这里，慢慢聊。</span></div>
+    </aside>
+
+    <main class="chat-shell" aria-label="会员茶室">
+      <header class="room-header">
+        <span class="room-symbol"><i data-lucide="coffee" aria-hidden="true"></i></span>
+        <div class="room-title"><h1>会员茶室</h1><p><i data-lucide="lock-keyhole" aria-hidden="true"></i>会员专属<span>·</span>文字与图片</p></div>
+        <div class="room-actions"><span class="online-status" id="online-status"><span></span><span id="connection-status">连接中…</span></span><button type="button" class="icon-button" id="members-toggle" aria-label="打开或收起成员栏" aria-controls="members-panel" aria-expanded="true"><i data-lucide="panel-right" aria-hidden="true"></i></button></div>
+      </header>
+      <div class="room-body">
+        <section class="conversation" aria-label="聊天记录和输入框">
+          <button type="button" class="room-notice" id="announcements-open" aria-haspopup="dialog" aria-controls="announcements-dialog"><i data-lucide="megaphone" aria-hidden="true"></i><span class="notice-label" id="notice-label">置顶公告</span><span class="notice-title" id="notice-title">暂无公告</span><span class="notice-more">全部公告</span><i data-lucide="chevron-right" aria-hidden="true"></i></button>
+          <div class="message-feed">
+          <div id="message-list" class="message-list" tabindex="0" aria-label="聊天记录，可上下滚动">
+            <div class="date-divider"><button type="button" class="notice-action" id="load-history" hidden>加载更早消息</button><span id="chat-status" role="status">正在连接茶室…</span><button type="button" class="notice-action" id="retry-chat" hidden>重新加载</button></div><div id="messages" class="messages" role="log" aria-live="polite" aria-relevant="additions removals">
+            </div>
+          </div>
+          <button type="button" id="new-messages" class="new-messages" hidden><i data-lucide="arrow-down" aria-hidden="true"></i>回到最新消息</button>
+          </div>
+          <div class="composer-area">
+            <form id="composer" class="composer">
+              <div class="composer-tools"><button type="button" class="icon-button" id="emoji-toggle" disabled aria-label="选择表情" aria-expanded="false" aria-controls="emoji-panel" title="表情"><i data-lucide="smile" aria-hidden="true"></i></button><button type="button" class="icon-button" id="attach-button" disabled aria-label="选择图片" title="选择、粘贴或拖入图片"><i data-lucide="image" aria-hidden="true"></i></button><span class="tool-separator"></span><span class="input-hint">支持粘贴或拖入图片</span></div>
+              <div id="emoji-panel" class="emoji-panel" role="group" aria-label="选择表情" hidden><div class="emoji-heading">表情<span>点击插入</span></div><div class="emoji-grid"><button type="button" data-emoji="😊" aria-label="微笑">😊</button><button type="button" data-emoji="😂" aria-label="笑哭">😂</button><button type="button" data-emoji="🥰" aria-label="喜爱">🥰</button><button type="button" data-emoji="😎" aria-label="酷">😎</button><button type="button" data-emoji="🤔" aria-label="思考">🤔</button><button type="button" data-emoji="😅" aria-label="笑汗">😅</button><button type="button" data-emoji="😭" aria-label="哭泣">😭</button><button type="button" data-emoji="😮" aria-label="惊讶">😮</button><button type="button" data-emoji="👍" aria-label="赞">👍</button><button type="button" data-emoji="👏" aria-label="鼓掌">👏</button><button type="button" data-emoji="🙏" aria-label="感谢">🙏</button><button type="button" data-emoji="🤝" aria-label="握手">🤝</button><button type="button" data-emoji="❤️" aria-label="爱心">❤️</button><button type="button" data-emoji="🎉" aria-label="庆祝">🎉</button><button type="button" data-emoji="✨" aria-label="闪耀">✨</button><button type="button" data-emoji="🌙" aria-label="月亮">🌙</button><button type="button" data-emoji="☕" aria-label="咖啡">☕</button><button type="button" data-emoji="🍵" aria-label="茶">🍵</button><button type="button" data-emoji="🌷" aria-label="鲜花">🌷</button><button type="button" data-emoji="💡" aria-label="灵感">💡</button></div></div>
+              <div id="attachment-tray" class="attachment-tray" hidden></div>
+              <label for="message-input" class="sr-only">发送到会员茶室的消息</label>
+              <textarea id="message-input" disabled rows="1" maxlength="2000" placeholder="说点什么，和大家聊聊…" autocomplete="off"></textarea>
+              <div class="composer-toolbar"><span class="keyboard-hint">Enter 发送<span>·</span>Shift + Enter 换行</span><button type="submit" id="send-button" class="send-button" disabled>发送</button></div>
+              <input type="file" id="image-input" accept="image/jpeg,image/png,image/webp" multiple hidden>
+            </form>
+            <div class="composer-foot"><span><i data-lucide="lock-keyhole" aria-hidden="true"></i>仅茶室成员可见</span><span>自己的消息可在 5 分钟内撤回</span></div>
+          </div>
+        </section>
+        <aside id="members-panel" class="members-panel" aria-label="茶室成员">
+          <div class="members-heading"><h2>茶室成员<span id="member-count">0</span></h2><button type="button" class="icon-button" id="members-close" aria-label="收起成员栏"><i data-lucide="x" aria-hidden="true"></i></button></div>
+          <p class="member-group-label"><span class="status-dot"></span>在线</p>
+          <ul class="member-list" id="member-list"></ul>
+          <div class="room-note"><i data-lucide="coffee" aria-hidden="true"></i><h3>同一片星空下</h3><p>聊想法，也聊日常。<br>这里不赶进度，慢慢来。</p></div>
+        </aside>
+      </div>
+    </main>
+  </div>
+  <dialog id="announcements-dialog" class="announcements-dialog" aria-labelledby="announcements-heading">
+    <div class="announcements-shell">
+      <header class="announcements-header"><div class="announcement-heading-group"><button type="button" id="announcement-back" class="icon-button" aria-label="返回公告列表" hidden><i data-lucide="arrow-left" aria-hidden="true"></i></button><div><span class="announcement-eyebrow">会员茶室</span><h2 id="announcements-heading">群公告</h2></div></div><div class="announcement-header-actions"><button type="button" id="announcement-new" class="notice-action primary" hidden><i data-lucide="plus" aria-hidden="true"></i>发布公告</button><button type="button" class="icon-button" id="announcements-close" aria-label="关闭公告" autofocus><i data-lucide="x" aria-hidden="true"></i></button></div></header>
+      <div id="announcements-reader" class="announcements-reader">
+        <nav id="announcement-history" class="announcement-history" aria-label="公告列表"><span class="announcement-history-label">全部公告 <span id="announcement-count">0</span><span class="announcement-order">置顶优先 · 最新发布在前</span></span><div id="announcement-list" class="announcement-list"></div></nav>
+        <article id="announcement-detail" class="announcement-detail" aria-labelledby="announcement-title" hidden><div class="announcement-detail-meta"><span id="announcement-pinned" class="announcement-pin"><i data-lucide="pin" aria-hidden="true"></i>置顶</span><span id="announcement-date"></span></div><h3 id="announcement-title"></h3><p id="announcement-author" class="announcement-author"></p><div id="announcement-body" class="announcement-body"></div><div id="announcement-management" class="announcement-management" hidden><button type="button" id="announcement-edit" class="notice-action"><i data-lucide="pencil" aria-hidden="true"></i>编辑</button><button type="button" id="announcement-pin-toggle" class="notice-action">取消置顶</button><button type="button" id="announcement-delete" class="notice-action">删除</button></div></article>
+      </div>
+      <form id="announcement-editor" class="announcement-editor" hidden>
+        <p id="announcement-editor-note" class="announcement-editor-note">公告会同步给茶室成员</p>
+        <label for="announcement-title-input">公告标题</label><input id="announcement-title-input" type="text" maxlength="60" required placeholder="用一句话说清公告内容">
+        <label for="announcement-body-input">公告内容</label><textarea id="announcement-body-input" rows="7" maxlength="2000" required placeholder="填写要告知茶室成员的内容"></textarea>
+        <label class="announcement-pin-choice"><input type="checkbox" id="announcement-pin-input">置顶到聊天区上方</label>
+        <div class="announcement-editor-actions"><button type="button" id="announcement-cancel" class="notice-action">取消</button><button type="submit" class="notice-action primary" id="announcement-save">发布公告</button></div>
+      </form>
+      <footer class="announcements-foot"><span id="notice-role-current" class="notice-role-current">普通会员 · 仅查看</span><span id="announcement-status" role="status">关闭后继续聊天</span></footer>
+    </div>
+  </dialog>
+  <dialog id="image-dialog" class="image-dialog" aria-label="查看图片"><button type="button" id="image-close" class="icon-button" aria-label="关闭图片"><i data-lucide="x" aria-hidden="true"></i></button><img id="lightbox-image" alt="聊天图片大图"></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

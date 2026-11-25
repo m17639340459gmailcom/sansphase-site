@@ -12,8 +12,9 @@ import { createReaderProfileCommands, readerProfileReason } from './reader-profi
 import type { ReaderProfileCommands } from './reader-profile-commands.ts';
 import { createMediaRetention } from './payload/media-retention.ts';
 import type { createReaderUidStore } from './reader-uids.ts';
+import { searchAdminReaders } from './reader-admin-search.ts';
 
-type ReaderAdminRow = { id: string; email: string; nickname: string; phone?: string | null; _verified?: boolean; disabled?: boolean; createdAt: string; avatar?: string | null; vip_until?: string | null; vip_started_at?: string | null };
+type ReaderAdminRow = { id: string; email: string; nickname: string; phone?: string | null; _verified?: boolean; disabled?: boolean; createdAt: string; avatar?: string | null; vip_until?: string | null; vip_started_at?: string | null; admin_remark?: string | null };
 type AuthorService = { identity: (req: IncomingMessage) => Promise<unknown> };
 type LoginLedger = { latest: (actorType: string, actorId: string) => { ip?: string; at?: string } | null; list: (actorType: string, actorId: string) => unknown[] };
 type MediaRetentionView = Pick<ReturnType<typeof createMediaRetention>, 'versions' | 'list'> & {
@@ -41,7 +42,7 @@ export function createReaderAdminService({ payload, authorService, siteOrigin, d
   const dto = (value: unknown) => {
     const row = value as ReaderAdminRow;
     const last = loginLedger?.latest('reader', row.id);
-    return { id: row.id, uid: uidStore.get(row.id), email: row.email, nickname: row.nickname, phone: row.phone || '', verified: row._verified === true, disabled: Boolean(row.disabled), createdAt: row.createdAt, lastLoginIp: last?.ip || null, lastLoginAt: last?.at || null, ...membershipState(row) };
+    return { id: row.id, uid: uidStore.get(row.id), email: row.email, nickname: row.nickname, phone: row.phone || '', verified: row._verified === true, disabled: Boolean(row.disabled), createdAt: row.createdAt, lastLoginIp: last?.ip || null, lastLoginAt: last?.at || null, ...membershipState(row), remark: row.admin_remark || '' };
   };
   const body = async (req: IncomingMessage): Promise<AdminBody> => {
     if (Number(req.headers['content-length']) > 8192) throw fail('请求内容过大。', 413);
@@ -52,8 +53,9 @@ export function createReaderAdminService({ payload, authorService, siteOrigin, d
   const audit = readerAudit(directory, authorId);
   const profiles = profileCommands || createReaderProfileCommands({ payload, directory, workflow, uidStore });
   const assertOwner = async (req: IncomingMessage) => { if (!await authorService.identity(req)) throw fail('只有作者可以管理读者。', 403); };
+  const sendReader = async (req: IncomingMessage, res: ServerResponse, value: unknown) => { await assertOwner(req); send(res, dto(value)); };
   // Payload has no generated collection types here; narrow documents at its boundary.
-  const findReader = async (id: string) => await payload.findByID({ collection: 'readers', id }) as ReaderAdminRow;
+  const findReader = async (id: string) => await payload.findByID({ collection: 'readers', id, showHiddenFields: true }) as ReaderAdminRow;
   return {
     async handle(req: IncomingMessage, res: ServerResponse) {
       try {
@@ -125,7 +127,7 @@ export function createReaderAdminService({ payload, authorService, siteOrigin, d
           send(res, { events: loginLedger?.list('reader', row.id) || [] }); return;
         }
         if (req.method === 'GET' && path[0] === 'readers' && path.length === 1) {
-          const q = String(url.searchParams.get('q') || '').trim().slice(0, 80);
+          const q = Array.from(String(url.searchParams.get('q') || '').trim()).slice(0, 80).join('');
           const status = url.searchParams.get('status') || 'all';
           if (!['all', 'active', 'disabled'].includes(status)) throw fail('账号状态无效。');
           const membership = url.searchParams.get('membership') || 'all';
@@ -137,17 +139,20 @@ export function createReaderAdminService({ payload, authorService, siteOrigin, d
           };
           const membershipWhere = membership === 'vip' || membership === 'expired' ? membershipConditions[membership] : null;
           const sort = membership === 'vip' ? ['vip_until', 'id'] : membership === 'expired' ? ['-vip_until', 'id'] : '-createdAt';
-          const page = Math.max(1, Math.min(10000, Number(url.searchParams.get('page')) || 1));
+          const page = Math.max(1, Math.min(10000, Math.trunc(Number(url.searchParams.get('page'))) || 1));
           const statusWhere: Record<'all' | 'active' | 'disabled', Where> = {
             all: { _verified: { equals: true } },
             active: { and: [{ _verified: { equals: true } }, { disabled: { equals: false } }] },
             disabled: { and: [{ _verified: { equals: true } }, { disabled: { equals: true } }] },
           };
           const uidMatch = uidStore.readerId(q.replace(/^UID\s*/i, ''));
-          const searchWhere: Where | null = q ? { or: [{ email: { contains: q } }, { nickname: { contains: q } }, { phone: { contains: q } }, ...(uidMatch ? [{ id: { equals: uidMatch } }] : [])] } : null;
-          const where: Where[] = [searchWhere, statusWhere[status as 'all' | 'active' | 'disabled'], membershipWhere].filter((condition): condition is Where => Boolean(condition));
-          const result = await payload.find({ collection: 'readers', limit: 20, page, sort, depth: 0,
-            ...(where.length ? { where: where.length === 1 ? where[0] : { and: where } } : {}) });
+          const search = q ? searchAdminReaders(directory, { q, uidMatch, page, now,
+            status: status as 'all' | 'active' | 'disabled', membership: membership as 'all' | 'vip' | 'expired' }) : null;
+          const where: Where[] = [statusWhere[status as 'all' | 'active' | 'disabled'], membershipWhere,
+            search ? { id: { in: search.ids } } : null].filter((condition): condition is Where => Boolean(condition));
+          const result = search && !search.ids.length ? { docs: [], page, totalPages: search.totalPages, totalDocs: search.total }
+            : await payload.find({ collection: 'readers', limit: 20, page: search ? 1 : page, sort, depth: 0, showHiddenFields: true,
+              ...(where.length ? { where: where.length === 1 ? where[0] : { and: where } } : {}) });
           const [all, active, disabled, vip, expiredVip] = await Promise.all([
             payload.find({ collection: 'readers', limit: 1, depth: 0, where: statusWhere.all }),
             payload.find({ collection: 'readers', limit: 1, depth: 0, where: statusWhere.active }),
@@ -155,18 +160,53 @@ export function createReaderAdminService({ payload, authorService, siteOrigin, d
             payload.find({ collection: 'readers', limit: 1, depth: 0, where: { and: [statusWhere.all, membershipConditions.vip] } }),
             payload.find({ collection: 'readers', limit: 1, depth: 0, where: { and: [statusWhere.all, membershipConditions.expired] } }),
           ]);
-          send(res, { users: result.docs.map(dto), page: result.page, totalPages: result.totalPages, total: result.totalDocs,
+          await assertOwner(req);
+          send(res, { users: result.docs.map(dto), page: search?.page ?? result.page, totalPages: search?.totalPages ?? result.totalPages, total: search?.total ?? result.totalDocs,
             summary: { total: all.totalDocs, active: active.totalDocs, disabled: disabled.totalDocs, vip: vip.totalDocs, expiredVip: expiredVip.totalDocs } }); return;
         }
         if (req.method === 'GET' && path[0] === 'audit' && path.length === 1) {
           const lines = (await readFile(auditPath, 'utf8').catch(error => error.code === 'ENOENT' ? '' : Promise.reject(error))).trim().split('\n').filter(Boolean);
-          send(res, { events: lines.slice(-100).reverse().map(line => JSON.parse(line)).filter(event => ['disable', 'enable', 'revoke', 'vip-grant', 'vip-add-days', 'vip-revoke', 'uid-change', 'delete', 'auto-delete-inactive'].includes(event.action)).slice(0, 20) }); return;
+          const events = lines.slice(-100).reverse().flatMap(line => {
+            const event: unknown = JSON.parse(line);
+            if (!event || typeof event !== 'object' || !('action' in event) || typeof event.action !== 'string' ||
+              !['disable', 'enable', 'revoke', 'vip-grant', 'vip-add-days', 'vip-revoke', 'uid-change', 'delete', 'auto-delete-inactive', 'remark'].includes(event.action)) return [];
+            const row = event as Record<string, unknown>;
+            if (typeof row.at !== 'string' || typeof row.readerId !== 'string') return [];
+            const safe: Record<string, unknown> = { at: row.at, action: row.action, readerId: row.readerId };
+            if (typeof row.uid === 'string') safe.uid = row.uid;
+            if (row.action === 'vip-add-days' && typeof row.days === 'number') safe.days = row.days;
+            if (['vip-grant', 'vip-add-days'].includes(event.action) && typeof row.until === 'string') safe.until = row.until;
+            if (row.action === 'uid-change' && typeof row.from === 'string' && typeof row.to === 'string') { safe.from = row.from; safe.to = row.to; }
+            if (row.action === 'remark') { safe.cleared = row.cleared === true; safe.length = typeof row.length === 'number' ? row.length : 0; }
+            return [safe];
+          }).slice(0, 20);
+          await assertOwner(req);
+          res.setHeader('Cache-Control', 'private, no-store');
+          send(res, { events }); return;
         }
         if (req.method === 'POST' && path[0] === 'readers' && uuidPattern.test(path[1] || '') && path.length === 3) {
           const input = await body(req);
           if (input.confirmId !== path[1]) throw fail('用户编号不匹配。');
           const row = await findReader(path[1]);
           if (!row || row._verified !== true) throw fail('用户不存在。', 404);
+          if (path[2] === 'remark') {
+            if (Object.keys(input).some(key => !['confirmId', 'remark'].includes(key)) || typeof input.remark !== 'string') throw fail('请填写有效的用户备注。');
+            const remark = input.remark.trim();
+            if (Array.from(remark).length > 200) throw fail('用户备注最多 200 个字。');
+            const updated = await profiles.accountMutation(async () => {
+              await assertOwner(req);
+              const latest = await findReader(row.id);
+              if (!latest || latest._verified !== true) throw fail('用户不存在。', 404);
+              if ((latest.admin_remark || '') === remark) return latest;
+              const details = { cleared: remark === '', length: Array.from(remark).length };
+              await audit('request-remark', row.id, details);
+              await assertOwner(req);
+              const result = await payload.update({ collection: 'readers', id: row.id, showHiddenFields: true, data: { admin_remark: remark || null } });
+              await audit('remark', row.id, details);
+              return result;
+            });
+            await sendReader(req, res, updated); return;
+          }
           if (path[2] === 'delete') {
             if (String(input.confirmEmail || '').trim().toLowerCase() !== row.email.toLowerCase()) throw fail('请完整输入该账号的邮箱以确认删除。');
             const result = await profiles.accountMutation(async () => {
@@ -188,69 +228,75 @@ export function createReaderAdminService({ payload, authorService, siteOrigin, d
               throw error;
             }
             if (change.changed) await audit('uid-change', row.id, { from: change.previous, to: change.uid });
-            send(res, dto(row)); return;
+            await sendReader(req, res, row); return;
           }
           if (path[2] === 'disable') {
             const updated = await profiles.accountMutation(async () => {
               await assertOwner(req); await audit('request-disable', row.id);
-              const result = await payload.update({ collection: 'readers', id: row.id, data: { disabled: true, sessions: [] } });
+              const result = await payload.update({ collection: 'readers', id: row.id, showHiddenFields: true, data: { disabled: true, sessions: [] } });
               await audit('disable', row.id); return result;
             });
-            send(res, dto(updated)); return;
+            await sendReader(req, res, updated); return;
           }
           if (path[2] === 'enable') {
             const updated = await profiles.accountMutation(async () => {
               await assertOwner(req); await audit('request-enable', row.id);
-              const result = await payload.update({ collection: 'readers', id: row.id, data: { disabled: false } });
+              const result = await payload.update({ collection: 'readers', id: row.id, showHiddenFields: true, data: { disabled: false } });
               await audit('enable', row.id); return result;
             });
-            send(res, dto(updated)); return;
+            await sendReader(req, res, updated); return;
           }
           if (path[2] === 'revoke') {
             const updated = await profiles.accountMutation(async () => {
               await assertOwner(req); await audit('request-revoke', row.id);
-              const result = await payload.update({ collection: 'readers', id: row.id, data: { sessions: [] } });
+              const result = await payload.update({ collection: 'readers', id: row.id, showHiddenFields: true, data: { sessions: [] } });
               await audit('revoke', row.id); return result;
             });
-            send(res, dto(updated)); return;
+            await sendReader(req, res, updated); return;
           }
           if (path[2] === 'vip-grant') {
             const updated = await serializeMembership(async () => {
+              await assertOwner(req);
               const latest = await findReader(row.id);
               const now = new Date();
               const current = membershipState(latest, now);
               const until = addCalendarMonth(current.vip && current.vipUntil ? current.vipUntil : now.toISOString());
               await audit('request-vip-grant', row.id, { previousUntil: current.vipUntil, until });
-              const result = await payload.update({ collection: 'readers', id: row.id, data: { vip_started_at: current.vip ? current.vipStartedAt || now.toISOString() : now.toISOString(), vip_until: until } });
+              await assertOwner(req);
+              const result = await payload.update({ collection: 'readers', id: row.id, showHiddenFields: true, data: { vip_started_at: current.vip ? current.vipStartedAt || now.toISOString() : now.toISOString(), vip_until: until } });
               await audit('vip-grant', row.id, { until });
               return result;
             });
-            send(res, dto(updated)); return;
+            await sendReader(req, res, updated); return;
           }
           if (path[2] === 'vip-add-days') {
             if (typeof input.days !== 'number' || !Number.isInteger(input.days) || input.days < 1 || input.days > 365) throw fail('请输入 1 至 365 的整数天数。');
             const updated = await serializeMembership(async () => {
+              await assertOwner(req);
               const latest = await findReader(row.id);
               if (!latest || latest._verified !== true) throw fail('用户不存在。', 404);
               const now = new Date();
               const current = membershipState(latest, now);
               const until = addMembershipDays(current.vip && current.vipUntil ? current.vipUntil : now.toISOString(), input.days as number);
               await audit('request-vip-add-days', row.id, { days: input.days, previousUntil: current.vipUntil, until });
-              const result = await payload.update({ collection: 'readers', id: row.id, data: { vip_started_at: current.vip ? current.vipStartedAt || now.toISOString() : now.toISOString(), vip_until: until } });
+              await assertOwner(req);
+              const result = await payload.update({ collection: 'readers', id: row.id, showHiddenFields: true, data: { vip_started_at: current.vip ? current.vipStartedAt || now.toISOString() : now.toISOString(), vip_until: until } });
               await audit('vip-add-days', row.id, { days: input.days, previousUntil: current.vipUntil, until });
               return result;
             });
-            send(res, dto(updated)); return;
+            await sendReader(req, res, updated); return;
           }
           if (path[2] === 'vip-revoke') {
             const updated = await serializeMembership(async () => {
+              await assertOwner(req);
               const latest = await findReader(row.id);
               await audit('request-vip-revoke', row.id, { previousUntil: latest.vip_until || null });
-              const result = await payload.update({ collection: 'readers', id: row.id, data: { vip_started_at: null, vip_until: null } });
+              await assertOwner(req);
+              const result = await payload.update({ collection: 'readers', id: row.id, showHiddenFields: true, data: { vip_started_at: null, vip_until: null } });
               await audit('vip-revoke', row.id);
               return result;
             });
-            send(res, dto(updated)); return;
+            await sendReader(req, res, updated); return;
           }
         }
         throw fail('不存在的操作。', 404);

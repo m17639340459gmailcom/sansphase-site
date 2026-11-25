@@ -79,6 +79,23 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
       return true;
     }
     if (path === 'stardust') {
+      let referrals = null;
+      if (url.searchParams.get('tab') === 'invites' && me.kind === 'reader' && ctx.options.referralSelf && ctx.options.referralOrigin) {
+        const self = await ctx.options.referralSelf(ctx.req);
+        await ctx.refreshViewer();
+        if (self && self.readerId === me.id) {
+          if (!/^[A-Za-z0-9_-]{24}$/.test(self.code) || self.invitees.length > 100) throw fail('邀请信息暂不可用。', 503);
+          const origin = new URL(ctx.options.referralOrigin);
+          if (origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash
+            || origin.protocol !== 'https:' && !(origin.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(origin.hostname))) throw fail('邀请地址暂不可用。', 503);
+          ctx.options.assertReferralActive?.([me.id]);
+          live.transaction(() => { for (const invitee of self.invitees) {
+            ctx.options.assertReferralActive?.([me.id, invitee.readerId]);
+            live.referrals.bind(invitee.readerId, { inviter: { kind: 'reader', id: me.id }, registeredAt: invitee.registeredAt });
+          } });
+          referrals = { shareUrl: `${origin.origin}/share/invite/${self.code}`, ...live.referrals.summary(me) };
+        }
+      }
       const flow = ['in', 'out'].includes(url.searchParams.get('flow') || '') ? url.searchParams.get('flow') as 'in' | 'out' : 'all';
       const rows = ledger.history(me, { flow, limit: 80 });
       const map = await ctx.people([me]), appearance = ctx.appearancePreview(me, map);
@@ -94,6 +111,7 @@ export async function memberRoutes(ctx: Ctx): Promise<boolean> {
       const level = appearance?.trustLevel ?? ctx.level;
       ctx.send({
         balance: ledger.balance(me), gainedToday: ledger.gainedToday(me), behaviourToday: ledger.behaviourToday(me), dailyCap: r.dailyCap,
+        referrals,
         checkedIn: economy.checked(me), month: ledger.month(me), flow,
         ledger: rows.map(({ ref, ...row }) => ({ ...row, topic: titles.get(row.id) || null, detail: detail(ref) })),
         level, owner: ctx.owner, vip: ctx.ownerReaderPreview !== null || me.kind === 'reader' && ctx.membershipVip, browsingAsReader: ctx.browsingAsReader, readOnly: ctx.readOnly, steward: members.steward(me), staffRole: ctx.staff?.role ?? null, stats: members.stats(me),

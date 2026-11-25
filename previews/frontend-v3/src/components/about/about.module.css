@@ -1,0 +1,366 @@
+/* ---------------------------------------------------------------- */
+/* Holographic portrait (portrait.tsx + holo-card.tsx)               */
+/* ---------------------------------------------------------------- */
+.holoRoot {
+  perspective: 1100px;
+}
+.tilt {
+  position: relative;
+  border-radius: 1rem;
+  transform-style: preserve-3d;
+}
+.media {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 1rem 1rem 0 0;
+  background: var(--bg-elevated);
+}
+.scanlines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    color-mix(in oklab, var(--bg) 26%, transparent) 0 1px,
+    transparent 1px 3px
+  );
+  transition: opacity 0.6s var(--fx-ease);
+}
+.foil,
+.glare {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.6s var(--fx-ease);
+}
+.foil {
+  background: linear-gradient(
+    115deg,
+    transparent 22%,
+    color-mix(in oklab, var(--accent) 24%, transparent) 38%,
+    color-mix(in oklab, var(--amber) 24%, transparent) 48%,
+    color-mix(in oklab, var(--cool) 16%, transparent) 58%,
+    transparent 74%
+  );
+  background-size: 260% 260%;
+  background-position: calc(var(--hx, 0.5) * 100%) calc(var(--hy, 0.5) * 100%);
+}
+.glare {
+  background: radial-gradient(
+    26rem circle at calc(var(--hx, 0.5) * 100%) calc(var(--hy, 0.5) * 100%),
+    var(--fx-glare),
+    transparent 45%
+  );
+}
+.band {
+  position: absolute;
+  inset-inline: 0;
+  top: -35%;
+  height: 35%;
+  pointer-events: none;
+  opacity: 0;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    color-mix(in oklab, var(--accent) 12%, transparent) 70%,
+    color-mix(in oklab, var(--amber) 34%, transparent) 97%,
+    transparent
+  );
+}
+.holoRoot[data-active] .foil {
+  opacity: 0.85;
+}
+.holoRoot[data-active] .glare,
+.holoRoot[data-active] .scanlines {
+  opacity: 1;
+}
+.holoRoot[data-active] .band {
+  opacity: 1;
+  animation: band 2.6s var(--fx-ease-in-out) infinite;
+}
+
+.hud {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transform: translateZ(42px);
+}
+.corner {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border: 0 solid var(--accent);
+  opacity: 0.9;
+  transition: translate 0.6s var(--fx-ease);
+}
+.corner[data-c="tl"] {
+  top: -9px;
+  left: -9px;
+  border-width: 1.5px 0 0 1.5px;
+  transform-origin: top left;
+}
+.corner[data-c="tr"] {
+  top: -9px;
+  right: -9px;
+  border-width: 1.5px 1.5px 0 0;
+  transform-origin: top right;
+}
+.corner[data-c="bl"] {
+  bottom: -9px;
+  left: -9px;
+  border-width: 0 0 1.5px 1.5px;
+  transform-origin: bottom left;
+}
+.corner[data-c="br"] {
+  bottom: -9px;
+  right: -9px;
+  border-width: 0 1.5px 1.5px 0;
+  transform-origin: bottom right;
+}
+.holoRoot[data-active] .corner[data-c="tl"] {
+  translate: -4px -4px;
+}
+.holoRoot[data-active] .corner[data-c="tr"] {
+  translate: 4px -4px;
+}
+.holoRoot[data-active] .corner[data-c="bl"] {
+  translate: -4px 4px;
+}
+.holoRoot[data-active] .corner[data-c="br"] {
+  translate: 4px 4px;
+}
+
+.edge {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+}
+.edge::before {
+  content: "";
+  position: absolute;
+  inset-inline: -6%;
+  top: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent) 22%, var(--amber) 50%, var(--accent) 78%, transparent);
+  box-shadow: 0 0 18px 3px var(--accent-glow);
+}
+@media screen and (prefers-reduced-motion: no-preference) {
+  .holo:is([data-fx-state="ssr"], [data-fx-state="idle"]) .media {
+    clip-path: inset(0 0 100% 0);
+  }
+  .holo:is([data-fx-state="ssr"], [data-fx-state="idle"]) .corner {
+    opacity: 0;
+    scale: 0;
+  }
+  .holo:is([data-fx-state="ssr"], [data-fx-state="idle"]) .chips {
+    opacity: 0;
+    translate: 0 -6px;
+  }
+  .holo[data-fx-state="play"] .media {
+    animation: materialize 1.25s var(--fx-ease) 0.1s both;
+  }
+  .holo[data-fx-state="play"] .edge {
+    animation: edge 1.25s var(--fx-ease) 0.1s both;
+  }
+  .holo[data-fx-state="play"] .corner {
+    animation: corner 0.7s var(--fx-ease) calc(0.9s + var(--i, 0) * 0.07s) both;
+  }
+  .holo[data-fx-state="play"] .chips {
+    animation: chips 0.6s var(--fx-ease) 0.75s both;
+  }
+  .holo[data-fx-state="ssr"] .media {
+    animation: materialize 0.8s var(--fx-ease) 4s both;
+  }
+  .holo[data-fx-state="ssr"] .corner {
+    animation: corner 0.6s var(--fx-ease) 4s both;
+  }
+  .holo[data-fx-state="ssr"] .chips {
+    animation: chips 0.6s var(--fx-ease) 4s both;
+  }
+}
+
+/* ---------------------------------------------------------------- */
+/* Story: the lead paragraph lights up word by word with scroll      */
+/* ---------------------------------------------------------------- */
+.lead[data-on] .unit {
+  opacity: clamp(0.16, calc((var(--p, 1) * (var(--n, 1) + 14) - var(--i, 0)) / 14), 1);
+  transition: opacity 0.18s linear;
+}
+.digits {
+  display: block;
+  translate: 0 calc(var(--idx, 0) * -1.25em);
+  transition: translate 0.6s var(--fx-ease);
+}
+
+/* ---------------------------------------------------------------- */
+/* Education timeline                                                */
+/* ---------------------------------------------------------------- */
+.node {
+  position: absolute;
+  z-index: 1;
+  width: 15px;
+  height: 15px;
+  margin: -7.5px 0 0 -7.5px;
+  border: 1.5px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--bg);
+  transition:
+    border-color 0.4s ease,
+    background-color 0.4s ease,
+    box-shadow 0.6s var(--fx-ease),
+    scale 0.5s var(--fx-ease);
+}
+.node::after {
+  content: "";
+  position: absolute;
+  inset: -7px;
+  border: 1px solid var(--accent);
+  border-radius: 50%;
+  opacity: 0;
+}
+.node[data-on] {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow:
+    0 0 0 5px var(--accent-soft),
+    0 0 22px 2px var(--accent-glow);
+}
+.node[data-on]::after {
+  animation: ping 1.1s var(--fx-ease) both;
+}
+.head {
+  position: absolute;
+  top: 0;
+  z-index: 2;
+  width: 11px;
+  height: 11px;
+  margin: -5.5px 0 0 -5.5px;
+  border-radius: 50%;
+  background: var(--amber);
+  box-shadow:
+    0 0 0 3px color-mix(in oklab, var(--amber) 28%, transparent),
+    0 0 18px 4px var(--accent-glow),
+    0 0 46px 12px color-mix(in oklab, var(--accent) 20%, transparent);
+  pointer-events: none;
+}
+.card {
+  transition:
+    opacity 0.8s var(--fx-ease),
+    transform 1.1s var(--fx-ease);
+}
+.card:not([data-on]) {
+  opacity: 0;
+  transform: translateX(var(--from, 24px));
+}
+.connector {
+  position: absolute;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(var(--dir, 90deg), var(--accent), color-mix(in oklab, var(--accent) 15%, transparent));
+  scale: 0 1;
+  transition: scale 0.9s var(--fx-ease) 0.2s;
+}
+[data-on] > .connector {
+  scale: 1 1;
+}
+.year {
+  color: transparent;
+  -webkit-text-stroke: 1.2px var(--line-strong);
+  transition:
+    color 0.9s var(--fx-ease) 0.25s,
+    -webkit-text-stroke-color 0.9s var(--fx-ease) 0.25s;
+}
+[data-on] .year {
+  color: var(--accent);
+  -webkit-text-stroke-color: transparent;
+}
+@media (hover: hover) and (pointer: fine) {
+  .entry:hover .node[data-on] {
+    scale: 1.3;
+  }
+}
+
+.dots {
+  background-image: radial-gradient(circle at center, color-mix(in oklab, var(--bg) 18%, transparent) 1px, transparent 1.5px);
+  background-size: 18px 18px;
+  mask-image: linear-gradient(to bottom, #000, transparent 75%);
+}
+
+@keyframes materialize {
+  from { clip-path: inset(0 0 100% 0); }
+  to { clip-path: inset(0); }
+}
+@keyframes edge {
+  0% { translate: 0 0; opacity: 0; }
+  6%, 82% { opacity: 1; }
+  100% { translate: 0 100%; opacity: 0; }
+}
+@keyframes corner {
+  from { scale: 0; opacity: 0; }
+  to { scale: 1; opacity: 0.9; }
+}
+@keyframes chips {
+  from { opacity: 0; translate: 0 -6px; }
+  to { opacity: 1; translate: none; }
+}
+@keyframes band {
+  from {
+    translate: 0 0;
+  }
+  to {
+    translate: 0 386%;
+  }
+}
+@keyframes ping {
+  from {
+    scale: 0.4;
+    opacity: 0.9;
+  }
+  to {
+    scale: 2.4;
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .band {
+    display: none;
+  }
+  .card {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+  .connector {
+    scale: 1 1 !important;
+  }
+  .node::after {
+    animation: none !important;
+  }
+  .lead .unit {
+    opacity: 1 !important;
+  }
+}
+
+@media print {
+  .card {
+    clip-path: none !important;
+    animation: none !important;
+    opacity: 1 !important;
+    scale: none !important;
+    translate: none !important;
+    transform: none !important;
+  }
+  .band,
+  .head {
+    display: none !important;
+  }
+  .lead .unit {
+    opacity: 1 !important;
+  }
+}

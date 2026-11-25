@@ -15,9 +15,10 @@ function frameImage(ref: FrameRef | null, value: unknown): string | null {
   return ref?.startsWith('image:') && typeof value === 'string' && framePath.test(value) &&
     value === `/api/reader/frame/${ref.slice(6)}.webp` ? value : null;
 }
-function vipFrameCurrent(reader: Pick<ReaderFrameIdentity, 'vip' | 'vipUntil'> | null): boolean {
-  return reader !== null && reader.vip !== false && (reader.vipUntil === undefined
-    || reader.vipUntil !== null && Number.isFinite(Date.parse(reader.vipUntil)) && Date.parse(reader.vipUntil) > Date.now());
+function vipFrameCurrent(reader: Pick<ReaderFrameIdentity, 'vip'> | null): boolean {
+  // Account/session responses already enforce expiry on the server. A device
+  // clock or a future date without an approved identity cannot decide access.
+  return reader?.vip === true;
 }
 export function readerFrameOwner(reader: ReaderFrameIdentity | null): string {
   if (!reader?.email) return '';
@@ -98,11 +99,11 @@ export function mountReaderFrames({ readIdentity, equipped, post, english, doc =
     select.value = state.frame || '';
     controls();
   };
-  const paint = (root: HTMLElement) => {
+  const paint = (root: HTMLElement, projection?: ReaderFrameIdentity) => {
     const avatar = root.closest('.reader-avatar-anchor')?.querySelector<HTMLButtonElement>('[data-reader-avatar-trigger]');
-    if (!avatar || !state) return;
+    if (!avatar || !state && !projection) return;
     const identity = readIdentity();
-    const decoration = readerFrameDecoration({ ...state, vip: identity?.vip, vipUntil: identity?.vipUntil });
+    const decoration = readerFrameDecoration(projection ?? { ...state, vip: identity?.vip, vipUntil: identity?.vipUntil });
     for (const name of ['gold', 'orbit', 'nebula', 'vipmoon', 'custom']) avatar.classList.remove(`reader-avatar-frame-${name}`);
     if (decoration.className) avatar.classList.add(decoration.className);
     avatar.querySelector('.reader-profile-frame-image')?.remove();
@@ -162,6 +163,14 @@ export function mountReaderFrames({ readIdentity, equipped, post, english, doc =
   doc.defaultView?.addEventListener('reader:identity', clear);
   return {
     open,
+    reconcileIdentity() {
+      const root = settings, identity = readIdentity();
+      if (!root || !identity || owner !== readerFrameOwner(identity)) return;
+      generation++; abort?.abort(); abort = null; loading = saving = false; state = null;
+      paint(root, identity); controls();
+      const panel = root.closest<HTMLElement>('[data-reader-avatar-panel]');
+      if (panel && !panel.hidden) void open();
+    },
     route(page: string) {
       const root = page === 'account' ? doc.querySelector<HTMLElement>('[data-reader-frame-settings]') : null;
       const key = root ? readerFrameOwner(readIdentity()) : '';

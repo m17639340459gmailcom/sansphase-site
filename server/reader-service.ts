@@ -19,6 +19,9 @@ import { validReaderNickname } from '../src/reader-policy.ts';
 import type { createReaderUidStore } from './reader-uids.ts';
 import { strictPayloadIdentity } from './payload/strict-identity.ts';
 import { activeOwnerReader, readOwnerReaderId } from './owner-reader.ts';
+import type { LoginVerification } from './login-verification.ts';
+import type { ReaderInvitations } from './reader-invitations.ts';
+import { accountSessionLifetimeSeconds } from './auth-session-policy.ts';
 
 type ReaderUser = {
   id: string; collection?: string; email: string; nickname: string; phone?: string | null;
@@ -37,6 +40,8 @@ type ReaderServiceOptions = {
   profileCommands?: ReaderProfileCommands;
   frames?: CommunityFrameAccess;
   ownerReaderId?: string;
+  loginVerification?: LoginVerification;
+  invitations?: ReaderInvitations;
 };
 type ServiceError = Error & { status: number };
 const errorStatus = (error: unknown): number | undefined => error && typeof error === 'object' && 'status' in error && typeof error.status === 'number' ? error.status : undefined;
@@ -47,7 +52,7 @@ const fail = (message: string, status = 400): ServiceError => Object.assign(new 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const phonePattern = /^1[3-9]\d{9}$/;
 
-export function createReaderService({ payload, siteOrigin, directory, emailReady = false, authorService, loginLedger, uidStore, workflow = createReaderWorkflow(directory, payload.config.secret), profileCommands, frames, ownerReaderId }: ReaderServiceOptions) {
+export function createReaderService({ payload, siteOrigin, directory, emailReady = false, authorService, loginLedger, uidStore, workflow = createReaderWorkflow(directory, payload.config.secret), profileCommands, frames, ownerReaderId, loginVerification, invitations }: ReaderServiceOptions) {
   if (!payload || !siteOrigin || !directory || !uidStore) throw Error('Reader service requires Payload, site origin, private storage and UID store.');
   const attempts = new Map<string, { count: number; until: number }>();
   const avatarDir = resolve(directory, 'uploads');
@@ -63,7 +68,7 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
   };
   const session = (req: IncomingMessage) => req.headers.cookie?.split(';').map(value => value.trim())
     .find(value => value.startsWith(cookieName + '='))?.slice(cookieName.length + 1) || '';
-  const cookie = (token: string) => `${cookieName}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${token ? 7 * 86400 : 0}${siteOrigin.startsWith('https:') ? '; Secure' : ''}`;
+  const cookie = (token: string) => `${cookieName}=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${token ? accountSessionLifetimeSeconds : 0}${siteOrigin.startsWith('https:') ? '; Secure' : ''}`;
   const client = (req: IncomingMessage) => loginIpKey(clientAddress(req).ip || '') || 'unknown';
   const throttle = (key: string, limit: number, windowMs: number) => {
     const now = Date.now();
@@ -76,11 +81,14 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
     if (req.headers.origin !== siteOrigin || req.headers['x-reader-request'] !== '1')
       throw fail('请求来源验证失败，请从本站操作。', 403);
   };
-  const json = async (req: IncomingMessage): Promise<ReaderBody> => {
-    if (Number(req.headers['content-length']) > 16384) throw fail('请求内容过大。', 413);
-    let size = 0; const chunks: Buffer[] = [];
-    for await (const chunk of req) { size += chunk.length; if (size > 16384) throw fail('请求内容过大。', 413); chunks.push(chunk); }
-    try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) as ReaderBody; } catch { throw fail('请求格式无效。'); }
+  const json = async (req: IncomingMessage, max = 16384, timeoutMs = 0): Promise<ReaderBody> => {
+    if (Number(req.headers['content-length']) > max) throw fail('请求内容过大。', 413);
+    const timer = timeoutMs ? setTimeout(() => req.destroy(fail('请求读取超时，请重试。', 408)), timeoutMs) : undefined;
+    try {
+      let size = 0; const chunks: Buffer[] = [];
+      for await (const chunk of req) { size += chunk.length; if (size > max) throw fail('请求内容过大。', 413); chunks.push(chunk); }
+      try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) as ReaderBody; } catch { throw fail('请求格式无效。'); }
+    } finally { if (timer !== undefined) clearTimeout(timer); }
   };
   const cleanEmail = (value: unknown) => {
     const email = String(value || '').trim().toLowerCase();
@@ -136,7 +144,7 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
   };
   // Only personal-account endpoints use this delegation. Ordinary identity and
   // identityStrict keep the original owner login as the management identity.
-  const personal = async (req: IncomingMessage) => await authenticated(req) || await ownerPersonal(req);
+  const personal = async (req: IncomingMessage, strict = false) => await authenticated(req, strict) || await ownerPersonal(req);
   async function findEmail(email: string, showHiddenFields = false): Promise<ReaderUser | null> {
     const result = await payload.find({ collection: 'readers', where: { email: { equals: email } }, limit: 1, depth: 0, showHiddenFields });
     return result.docs[0] as ReaderUser | undefined || null;
@@ -194,7 +202,7 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
     async handle(req: IncomingMessage, res: ServerResponse) {
       const path = new URL(req.url || '', siteOrigin).pathname.slice('/api/reader/'.length);
       try {
-        if (path === 'session' && req.method === 'GET') { send(res, await displayDTO(await personal(req))); return; }
+        if (path === 'session' && req.method === 'GET') { send(res, await displayDTO(await personal(req, true))); return; }
         if (path === 'frame-state' && req.method === 'GET') {
           const user = await personal(req); if (!user) throw fail('请先登录。', 401);
           send(res, await frameState(user)); return;
@@ -236,8 +244,19 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
           }, avatarLimits);
           send(res, result); return;
         }
-        const body = await json(req);
+        const captchaBody = path === 'login-challenge' || path === 'login-challenge/verify';
+        const body = await json(req, path === 'login-challenge/verify' ? 40 * 1024 : path === 'login-challenge' ? 4096 : 16384, captchaBody ? 10_000 : 0);
         const key = client(req);
+        if (path === 'login-challenge/verify') {
+          if (!loginVerification) throw fail('登录验证未启用。', 403);
+          res.setHeader('Cache-Control', 'private, no-store');
+          send(res, await loginVerification.match(req, 'reader', body)); return;
+        }
+        if (path === 'login-challenge') {
+          if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length) throw fail('登录验证请求格式无效。');
+          res.setHeader('Cache-Control', 'private, no-store');
+          send(res, loginVerification ? await loginVerification.issue(req, res, 'reader') : { enabled: false }); return;
+        }
         if (path === 'frame') {
           const user = await personal(req); if (!user) throw fail('请先登录。', 401);
           if (!frames) throw fail('头像框暂不可用，请稍后再试。', 503);
@@ -248,12 +267,14 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
           if (!emailReady) throw fail('邮箱验证服务尚未配置，暂时不能注册。', 503);
           throttle(`register:${key}`, 30, 3600000);
           const email = cleanEmail(body.email), name = nickname(body.nickname), number = phone(body.phone), pass = password(body.password);
+          const inviterId = Object.hasOwn(body, 'inviteCode') ? invitations?.resolveCode(body.inviteCode) : null;
+          if (Object.hasOwn(body, 'inviteCode') && !inviterId) throw fail('邀请链接已失效，请重新获取，或移除邀请信息后继续普通注册。');
           verificationMailLimit(email, key);
           const existing = await findEmail(email);
           let requestId = randomUUID();
           if (existing && existing._verified !== true) await payload.delete({ collection: 'readers', id: existing.id });
           if ((!existing || existing._verified !== true) && !await ownerEmail(email)) {
-            const pending = workflow.putRegistration({ email, nickname: name, phone: number, password: pass });
+            const pending = workflow.putRegistration({ email, nickname: name, phone: number, password: pass, inviterId, invitationBound: Boolean(inviterId) });
             requestId = pending.id;
             try { await sendVerification(email, pending.code); }
             catch (error) { workflow.removeRegistration(pending.id); throw error; }
@@ -265,13 +286,17 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
           if (!workflow.consumeAuthLimits([{ key: `verify:${key}`, limit: 20, windowMs: 3600000 }])) throw fail('验证尝试过于频繁，请稍后再试。', 429);
           const email = cleanEmail(body.email), code = String(body.code || ''), requestId = String(body.requestId || '');
           if (!uuidPattern.test(requestId)) throw fail('验证码无效或注册申请已失效，请重新获取。');
+          let invitationUnavailable = false;
           await serializeVerification(async () => {
             const pending = workflow.registrationByCode(email, requestId, code);
             if (pending) {
               if (await findEmail(pending.email) || await ownerEmail(pending.email)) throw fail('该邮箱已注册，请直接登录。', 409);
+              if (pending.invitationBound && !invitations) throw fail('邀请服务暂不可用，请稍后重新验证。', 503);
+              const invitation = invitations?.registrationFields(pending.inviterId, pending.invitationBound);
+              invitationUnavailable = Boolean(pending.invitationBound && !invitation?.invited_by);
               const user = await payload.create({ collection: 'readers', data: {
                 email: pending.email, password: pending.password, nickname: nickname(pending.nickname),
-                phone: pending.phone, disabled: false, _verified: true,
+                phone: pending.phone, disabled: false, _verified: true, ...invitation,
               }, disableVerificationEmail: true });
               try { uidStore.assignRandom(user.id); }
               catch (error) { await payload.delete({ collection: 'readers', id: user.id }); throw error; }
@@ -280,7 +305,7 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
             }
             throw fail('验证码无效、已过期或错误次数过多，请重新获取。');
           });
-          send(res, { message: '邮箱验证成功，账号已启用。现在可以登录。' }); return;
+          send(res, { message: '邮箱验证成功，账号已启用。现在可以登录。' + (invitationUnavailable ? '原邀请人已失效，本次注册不再计入邀请奖励。' : '') }); return;
         }
         if (path === 'resend') {
           if (!emailReady) throw fail('邮箱服务尚未配置。', 503);
@@ -301,6 +326,7 @@ export function createReaderService({ payload, siteOrigin, directory, emailReady
         }
         if (path === 'login') {
           throttle(`login:${key}`, 200, 3600000);
+          await loginVerification?.verify(req, 'reader');
           const email = cleanEmail(body.email);
           if (await ownerEmail(email)) {
             try {

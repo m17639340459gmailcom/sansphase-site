@@ -9,7 +9,7 @@ export function readCategories(boards: HTMLElement): Category[] {
   const seen = new Set<string>();
   for (const link of boards.querySelectorAll<HTMLAnchorElement>(":scope > a.community-board-link[href]")) {
     const href = link.getAttribute("href")!;
-    const id = /^#\/community\/boards\/([^/]+)$/.exec(href)?.[1];
+    const id = href === '/teahouse' && link.dataset.boardId === 'vip' ? 'vip' : /^#\/community\/boards\/([^/]+)$/.exec(href)?.[1];
     if (!id || !validCommunityBoardId(id) || seen.has(href) || link.hidden || link.getAttribute("aria-disabled") === "true") continue;
     // The layout is bundled separately from the API controller. Read dynamic
     // metadata from its authorized markup, not from a second runtime registry.

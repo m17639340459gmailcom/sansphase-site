@@ -11,6 +11,18 @@ import { communityLegacyStaffPermissions } from '../community-staff.ts';
 // this explicit, backed-up migration adds the community tables.
 const member = (prefix = 'member') => `${prefix}_kind TEXT NOT NULL CHECK(${prefix}_kind IN ('reader','owner')), ${prefix}_id TEXT NOT NULL`;
 const tables: Record<string, string> = {
+  community_referrals: `CREATE TABLE community_referrals (
+  invitee_id TEXT PRIMARY KEY, inviter_id TEXT NOT NULL, registered_at TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'waiting' CHECK(status IN ('waiting','rewarded','limit','reverted','ineligible')),
+  topic_id TEXT, approved_at TEXT, reward_month TEXT,
+  amount INTEGER NOT NULL DEFAULT 0 CHECK(amount IN (0,15)),
+  reverted_amount INTEGER NOT NULL DEFAULT 0 CHECK(reverted_amount>=0 AND reverted_amount<=amount),
+  invitee_deleted INTEGER NOT NULL DEFAULT 0 CHECK(invitee_deleted IN (0,1)),
+  inviter_deleted INTEGER NOT NULL DEFAULT 0 CHECK(inviter_deleted IN (0,1)),
+  CHECK(invitee_id<>inviter_id)
+);
+CREATE INDEX community_referrals_inviter_month_idx ON community_referrals(inviter_id,reward_month,amount);
+CREATE UNIQUE INDEX community_referrals_topic_idx ON community_referrals(topic_id) WHERE topic_id IS NOT NULL;`,
   community_board_catalog: `CREATE TABLE community_board_catalog (
   id INTEGER PRIMARY KEY CHECK(id=1), version INTEGER NOT NULL DEFAULT 0 CHECK(version>=0)
 );
@@ -477,6 +489,8 @@ const columns: Array<[string, string, string]> = [
   ['community_shop_items', 'category', 'TEXT REFERENCES community_shop_categories(id)'],
   ['community_shop_items', 'kind', "TEXT CHECK (kind IN ('frame','color','cover','makeup','pin','highlight')) CONSTRAINT community_shop_card_kind_check CHECK ((cat='card' AND kind IS NOT NULL AND kind IN ('makeup','pin','highlight')) OR (cat='digital' AND (kind IS NULL OR kind IN ('frame','color','cover'))) OR (cat='goods' AND kind IS NULL))"],
   ['community_shop_items', 'effect', 'TEXT'],
+  ['community_shop_items', 'art_style', "TEXT CHECK (art_style IS NULL OR (art_style='holo-card' AND cat='digital' AND kind IS NULL AND image IS NOT NULL))"],
+  ['community_shop_items', 'delivery_contact', "TEXT CHECK (delivery_contact IS NULL OR (delivery_contact='author-qq' AND cat='digital' AND kind IS NULL))"],
   ['community_topics', 'deleted_reason', 'TEXT'],
   ['community_replies', 'deleted_reason', 'TEXT'],
   // NULL preserves an existing all-board appointment; new appointments store an explicit board array.

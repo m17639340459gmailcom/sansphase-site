@@ -27,10 +27,10 @@ VERIFICATION_SHM_SHA256 = 'fd4c9fda9cd3f9ae7c962b0ddf37232294d55580e1aa165aa0612
 RECEIPT_ROOT = Path('/var/log/sansphase-maintenance')
 PROFILES = {
     'main': {'base': 'opt/sansphase', 'backup': 'var/backups/sansphase',
-             'provider': 'payload',
+             'provider': 'payload', 'releaseRetention': 2,
              'required': {'content.db', 'settings.json', 'migration-complete.json'}},
     'community': {'base': 'opt/sansphase-community', 'backup': 'var/backups/sansphase-community',
-                  'provider': 'sansphase-community',
+                  'provider': 'sansphase-community', 'releaseRetention': 2,
                   'required': {'content.db', 'community-host.db', 'settings.json'}},
 }
 
@@ -436,7 +436,7 @@ def plan(root=Path('/'), now=None, categories=('backups',), refs=(), profile='ma
     releases = sorted([p for p in release_root.iterdir() if p.is_dir() and not p.is_symlink()],
                       key=lambda p: p.stat().st_mtime, reverse=True)
     protected = {current}
-    protected.update([p for p in releases if p != current][:1])
+    protected.update([p for p in releases if p != current][:settings['releaseRetention'] - 1])
     refs = list(refs)
     for release in protected:
         for base, directories, files in os.walk(release, followlinks=False):

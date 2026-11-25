@@ -69,7 +69,19 @@ export function createStableCommunityFrame(document: Document, window: FrameWind
   const scrollHost = () => mobileLayout
     ? document.scrollingElement || document.documentElement : center;
   const readTop = () => scrollHost()?.scrollTop || 0;
+  // The inactive document host must not carry an earlier page/mobile offset
+  // and push the entire desktop frame behind the fixed header.
+  const clearInactiveDocumentScroll = () => {
+    if (!mobileLayout) {
+      const outer = document.scrollingElement || document.documentElement;
+      if (outer.scrollTop !== 0) outer.scrollTop = 0;
+      // The main-site overflow-x rule can make body a separate scroll host
+      // once html owns its overflow. Neither outer host belongs to this frame.
+      if (document.body.scrollTop !== 0) document.body.scrollTop = 0;
+    }
+  };
   const writeTop = (top: number) => {
+    clearInactiveDocumentScroll();
     const host = scrollHost();
     if (host) { host.scrollTop = top; lastScrollTop = host.scrollTop; }
   };
@@ -77,6 +89,11 @@ export function createStableCommunityFrame(document: Document, window: FrameWind
     // A resize can clamp the old scroll container before matchMedia dispatches.
     // Keep its last user position until the new scroll host takes over.
     if (mobileLayout !== Boolean(mobile?.matches)) return;
+    if (!mobileLayout && (event.target === document || event.target === document.documentElement
+      || event.target === document.body)) {
+      clearInactiveDocumentScroll();
+      return;
+    }
     if (event.target === scrollHost() || (mobileLayout && event.target === document)) {
       const top = readTop();
       // writeTop records programmatic restoration before its scroll event fires.
@@ -129,6 +146,7 @@ export function createStableCommunityFrame(document: Document, window: FrameWind
     routeSlot.style.minHeight = `${Math.ceil(readingFloor.height)}px`;
   };
   const onScrollInput = () => {
+    clearInactiveDocumentScroll();
     cancelScrollRestore();
     if (!loading() && !memberReading()) releaseReadingHeight();
   };

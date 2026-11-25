@@ -1,15 +1,29 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { resolve, relative } from 'node:path';
+import { frontendVersion } from './frontend-selection.mjs';
 
 // Deliberate source allowlist: no archives, generated website, credentials,
 // database, uploads, browser profiles, migration exports or one-off experiments.
 const trees=['src','public','server','tests','deploy','docs/assets'];
+const frontendV3Root = 'previews/frontend-v3/';
+const ignoredTrees = new Set([
+  'server/login-captcha-service/target',
+  ...['src/shared/site', 'src/app/admin', 'src/app/api', 'src/components/admin', 'src/components/learn',
+    'src/app/[locale]/(site)/learn', 'src/app/[locale]/(site)/skills'].map(path => frontendV3Root + path),
+]);
+const ignoredV3Files = new Set([
+  'src/data/fde.ts', 'src/lib/fde.ts', 'src/lib/fde-quiz.ts',
+  'tests/fde-content.test.mjs', 'tests/fde-quiz.test.mjs', 'tests/blog-content.test.mjs',
+].map(path => frontendV3Root + path));
 const singles=['.gitignore','package.json','pnpm-lock.yaml','pnpm-workspace.yaml','tsconfig.json','server.mjs','README.md','ARCHITECTURE.md','THIRD_PARTY_NOTICES.md','docs/AUTHOR-GUIDE.md','docs/DEPLOYMENT.md','docs/STATIC-DELIVERY.md','docs/UPLOAD-15GB.md','docs/RELEASE-PROCESS.md','docs/TYPESCRIPT-MIGRATION.md','docs/RELEASE-PREPARATION-2026-09-15.md','scripts/build-site.mjs','scripts/build-cosmos.mjs','scripts/typed-browser-modules.mjs','scripts/compose-site-styles.mjs','scripts/build-manifest.mjs','scripts/verify-site.mjs','scripts/dev.mjs','scripts/start.mjs','scripts/backup-payload.mjs','scripts/restore-payload.mjs','scripts/payload-account.mjs','scripts/healthcheck.mjs','scripts/scheduled-backup.mjs','scripts/publication-files.mjs','scripts/prepare-publication.mjs'];
 
-export async function publicationFiles(root=resolve('.')) {
+export async function publicationFiles(root=resolve('.'), {frontend='v1'}={}) {
+  const selected=frontendVersion(frontend);
   const result=[...singles,'scripts/migrate-content-order.mjs','scripts/migrate-showcase-cover.mjs','scripts/migrate-reader-accounts.mjs','scripts/migrate-vip-books.mjs','scripts/migrate-community.mjs','scripts/reader-preview.mjs','scripts/check-reader-email.mjs','scripts/static-package.mjs','scripts/catalog-fixture-preview.mjs','scripts/fixtures/catalog-data.mjs','scripts/fixtures/music-demo.mjs','scripts/fixtures/reading-demo.mjs','scripts/fixtures/community-demo.mjs','docs/CATALOG-DEMO.md','docs/READER-ACCESS.md','.gitattributes','.github/workflows/check.yml'];
   result.push('scripts/publication-retention.mjs','scripts/preview.ps1','启动预览.cmd','docs/MAINTENANCE.md','AGENTS.md');
   result.push('CONTRIBUTING.md','docs/README.md','docs/CODE-MAP.md','.github/pull_request_template.md');
+  result.push('docs/SHARING-AND-INVITATIONS.md', 'docs/PUBLIC-READING.md');
+  result.push('scripts/migrate-reader-invitations.ts');
   result.push('scripts/compose-community-styles.mjs', 'docs/COMMUNITY-LOCAL-INTEGRATION.md', 'docs/COMMUNITY-APPEARANCE.md', 'docs/CHECKIN-SKY-PROMPT.md');
   result.push('scripts/fixtures/community-preview-identity.ts', 'docs/COMMUNITY-PRELAUNCH.md', 'docs/COMMUNITY-BANNERS.md');
   result.push('scripts/fixtures/community-preview-profile.ts', 'docs/COMMUNITY-PROFILES.md');
@@ -23,20 +37,48 @@ export async function publicationFiles(root=resolve('.')) {
   result.push('scripts/prepare-owner-reader.mjs');
   result.push('scripts/migrate-reader-profiles.mjs');
   result.push('scripts/migrate-payload-auth-security.mjs', 'docs/PAYLOAD-AUTH-UPGRADE.md');
+  result.push('docs/LOGIN-VERIFICATION.md', 'scripts/login-verification-preview.mjs', 'scripts/build-login-captcha.mjs');
   result.push('scripts/build-growth-constellation.mjs', 'scripts/growth-constellation.ts', 'docs/COMMUNITY-STARDUST-RULES.md');
   result.push('scripts/build-trust-moon.mjs', 'scripts/trust-moon.ts');
   result.push('scripts/build-vip-badge.mjs', 'scripts/vip-badge.ts', 'scripts/vip-badge-glyphs.ts');
   result.push('scripts/community-compact-art.ts', 'scripts/community-staff-compact-art.ts');
   result.push('scripts/community-vip-frame-art.ts', 'scripts/vip-moon-frame.ts');
+  result.push('docs/TEAHOUSE.md', 'scripts/preview-teahouse-local.ts');
+  result.push('docs/ADMIN-CONSOLE-LOCAL.md', 'scripts/preview-admin-console.ts', 'scripts/preview-captcha.ts', 'scripts/fixtures/admin-console-preview.ts', 'patches/query-string@9.5.1.patch');
+  result.push('scripts/build-admin-console.ts', 'scripts/browser-package-notices.ts');
+  result.push('scripts/build-management-console.ts', 'scripts/build-community-console.ts', 'scripts/preview-community-console.ts', 'docs/COMMUNITY-CONSOLE-LOCAL.md');
+  result.push('docs/READER-ADMIN-REMARKS.md');
+  result.push('scripts/preview-diagnostics.ts', 'docs/LOCAL-DIAGNOSTICS.md');
+  result.push('scripts/frontend-selection.mjs', 'scripts/frontend-v3-release.mjs', 'docs/FRONTEND-DELIVERY.md');
+  // Keep build-site.mjs and its imports together in each source package.
+  result.push('scripts/build-frontend-v3.mjs', 'scripts/frontend-v3-shared.mjs');
+  const selectedTrees=[...trees];
+  if(selected==='v2') {
+    result.push('scripts/build-frontend-v2.mjs','scripts/preview-local-frontends.ts','scripts/preview-frontend-integration.ts','scripts/fixtures/frontend-integration.ts','scripts/fixtures/local-test-readers.ts','docs/FRONTEND-LOCAL-INTEGRATION.md');
+    result.push(...['.gitattributes','package.json','package-lock.json','tsconfig.json','SOURCES.json','README.md','UI_SWAP_CONTRACT.md','LOCAL-INTEGRATION.md','DEMO_CONTENT_SOURCES.md','HOMEPAGE_ACCEPTANCE.md','INNER_PAGES_ACCEPTANCE.md','LOADING_AUDIT.md','SECOND_UX_REVIEW.md','TASK_ACCEPTANCE_20261019.md','integration-server.ts','server-model.ts','server-response.ts','server.ts'].map(file=>'previews/hero-upgrade/'+file));
+    selectedTrees.push(...['src','www','vendor','scripts','tests'].map(tree=>'previews/hero-upgrade/'+tree));
+  }
+  if (selected === 'v3') {
+    result.push('scripts/preview-frontend-integration.ts', 'scripts/fixtures/frontend-integration.ts', 'scripts/fixtures/local-test-readers.ts', 'docs/FRONTEND-V3-CUTOVER-MATRIX.md');
+    const app = frontendV3Root;
+    result.push(...['.gitignore', 'AGENTS.md', 'LICENSE', 'README.md', 'SOURCE.json', 'package.json', 'package-lock.json', 'next.config.ts', 'postcss.config.mjs', 'eslint.config.mjs', 'tsconfig.json', 'public/hero-particles-dark.webp', 'public/hero-particles-light.webp'].map(file => app + file));
+    selectedTrees.push(...['src', 'tests', 'content/sansphase-blog', 'public/demo-library', 'public/images/demo-editorial', 'public/images/home', 'public/images/sansphase', 'public/images/workflow', 'public/materials'].map(tree => app + tree));
+  }
   async function visit(directory) {
     for(const entry of await readdir(directory,{withFileTypes:true})) {
       const path=resolve(directory,entry.name);
+      const source=relative(root,path).replaceAll('\\','/');
+      if(ignoredV3Files.has(source) || entry.isDirectory() && ignoredTrees.has(source)) continue;
       if(entry.isSymbolicLink()) throw Error('Publication cannot contain symlinks');
       if(entry.isDirectory()) await visit(path);
-      else if(entry.isFile()) result.push(relative(root,path).replaceAll('\\','/'));
+      else if(entry.isFile()) {
+        if(selected!=='v2' && ['tests/local-frontends-preview.test.ts','tests/frontend-integration-preview.test.ts','tests/fixtures/frontend-versions-backup.ts','tests/local-test-readers.test.ts'].includes(source))continue;
+        if(selected!=='v3' && (/^tests\/frontend-v3-/.test(source) || source==='tests/admin-console-escape-browser.test.mjs'))continue;
+        result.push(source);
+      }
     }
   }
-  for(const tree of trees) await visit(resolve(root,tree));
+  for(const tree of selectedTrees) await visit(resolve(root,tree));
   return [...new Set(result)].sort();
 }
 

@@ -57,13 +57,27 @@ test('both nickname finishes and selected text remain readable on light surfaces
   assert.equal(selected.get('-webkit-text-fill-color'), selected.get('color'), 'selected gradient nicknames must use readable solid ink');
 });
 
-test('all member levels retain bright ink on the dark profile cover in light mode', async () => {
+test('profile supporting text and identity labels keep their existing cover palette while only the large nickname changes', async () => {
   const css = await rules(), cover = css.get(`${prefix} .community-m-intro`)!;
-  // 85% #1b2b40 over a white cover is approximately #3d4b5d, the
-  // brightest possible backing behind a profile identity mark.
+  assert.ok(cover, 'the cover retains its existing identity and supporting-text colours');
+  // The existing identity mark uses 85% #1b2b40: even a white photo
+  // makes its own small backing no brighter than approximately #3d4b5d.
   for (const name of ['--cm-lv0', '--cm-lv1', '--cm-lv2', '--cm-lv3', '--cm-lv4', '--cm-vip']) {
-    assert.ok(cover.get(name), `${name} must not inherit dark paper ink on the cover`);
+    assert.ok(cover.get(name), `${name} must not inherit dark paper ink on the existing identity mark`);
     assert.ok(contrast(cover.get(name)!, '#3d4b5d') >= 4.5);
+  }
+  assert.equal(cover.get('--muted'), '#dce4f0', 'UID and biography keep their established colour');
+  assert.ok(contrast(cover.get('--text')!, cover.get('--community-control-hover')!) >= 4.5, 'the original profile hover control stays readable');
+  assert.ok(!css.has(`${prefix} .community-m-name h1 .community-uname`), 'light mode must not force black ink over dark artwork');
+  const nickname = css.get('body.community-open:is(.community-frame-open, .community-management-open) .community-m-intro .community-m-name h1 .community-uname');
+  assert.ok(nickname, 'only the cover nickname uses sampled background contrast in either theme');
+  assert.equal(nickname.get('color'), 'var(--profile-name-ink, #ffffff)');
+  assert.equal(nickname.get('-webkit-text-fill-color'), nickname.get('color'), 'legacy gradient text fill must not override the readable ink');
+  assert.equal(nickname.get('background-image'), 'none');
+  assert.equal(nickname.get('text-shadow'), 'none', 'adaptive contrast must not add a shadow or outline');
+  assert.equal(nickname.get('animation'), 'none');
+  for (const property of ['background', 'background-image', 'filter', 'backdrop-filter', 'opacity']) {
+    assert.ok(!cover.has(property), `cover palette must not change the original artwork through ${property}`);
   }
 });
 

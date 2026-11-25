@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import {JSDOM} from 'jsdom';
 
 test('author deletion confirms the named item, preserves unsaved edits on cancel/failure and refreshes all six lists',async()=>{
@@ -32,7 +34,7 @@ test('author deletion confirms the named item, preserves unsaved edits on cancel
   const click=s=>{const el=d.querySelector(s);assert.ok(el,s);el.click();};
   const escape=()=>d.activeElement.dispatchEvent(new w.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
   try{
-    await(await load(new URL('../dist/author.bundle.mjs',import.meta.url))).evaluate();
+    await(await load(process.env.TEST_AUTHOR_DIST ? pathToFileURL(resolve(process.env.TEST_AUTHOR_DIST, 'author.bundle.mjs')) : new URL('../dist/author.bundle.mjs',import.meta.url))).evaluate();
     click('[data-author-login]');await settle();
     for(const kind of kinds){
       click(`[data-author-open="${kind}"]`);await settle();click('[data-edit]');await settle();

@@ -1,0 +1,117 @@
+@import "../author.css";
+@import "../styles-reading.css";
+
+[data-author-host="admin-console"]:has(.author-workspace:not([aria-hidden])) .author-workspace-loading,
+.author-workspace[aria-hidden="true"] {
+  display: none;
+}
+
+.author-workspace {
+  color: var(--text);
+  font: 14px/1.55 var(--font);
+}
+
+.author-workspace .author-frame {
+  width: 100%;
+  max-height: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+
+.author-workspace .author-panel {
+  padding: 0 6px 8px 0;
+  max-height: calc(100dvh - 128px);
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.author-workspace .author-panel h2 {
+  padding-right: 0;
+  font-size: clamp(22px, 3vw, 29px);
+  margin: 0 0 10px;
+  line-height: 1.25;
+  font-weight: 650;
+}
+
+.author-workspace :is(.author-description, .author-field, .author-menu-group h3, .author-hub-heading p, .author-menu-grid small, .author-item small, .author-order-hint, .author-order-handle, .author-book-chapters p, .author-book-edit-actions span) {
+  color: var(--muted);
+}
+
+.author-workspace .author-menu-group h3 {
+  margin: 20px 0 10px;
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.author-workspace .author-menu-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.author-workspace .author-menu-grid strong {
+  font-weight: 650;
+}
+
+.author-workspace .author-menu-grid button > svg:first-child,
+.author-workspace .author-panel .author-back {
+  color: var(--signal);
+}
+
+.author-workspace :is(.author-panel button, .author-upload, .author-field input, .author-field textarea, .author-book-chapters select, .author-book-chapters input, .author-order-row, .author-editor-wrap, .author-discard) {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--line);
+  box-shadow: none;
+}
+
+.author-workspace :is(.author-panel button, .author-upload):hover {
+  background: var(--author-hover);
+  border-color: var(--signal);
+}
+
+.author-workspace .author-panel .author-primary {
+  background: var(--signal);
+  border-color: var(--signal);
+  color: var(--author-on-primary);
+}
+
+.author-workspace :is(input, textarea, select):focus-visible,
+.author-workspace .author-editor-wrap:focus-within {
+  border-color: var(--focus-edge);
+  outline: none;
+  box-shadow: none;
+}
+
+.author-workspace .author-field :is(input, textarea)::placeholder {
+  color: var(--muted);
+}
+
+.author-workspace .author-editor-tools {
+  top: 0;
+  background: var(--surface);
+  border-color: var(--line);
+  box-shadow: none;
+}
+
+.author-workspace :is(.author-editor, .author-preview, .author-book-chapters) {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--line);
+}
+
+.author-workspace :is(.author-delete-content, .author-discard[data-action="delete"] [data-discard]) {
+  color: var(--error);
+}
+
+.author-workspace .author-panel [tabindex="-1"]:focus {
+  outline: none;
+}
+
+@media (max-width: 680px) {
+  .author-workspace .author-menu-grid,
+  .author-workspace .author-two {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

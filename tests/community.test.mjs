@@ -723,7 +723,7 @@ test("the 星尘 center: the ledger, levels and the rules", () => {
   assert.match(ledger, /data-community="stardust" data-tab="ledger"/);
   assert.match(ledger, /<p>今天获得 <b>5<\/b> 星尘，行为星尘 <b>5 \/ 6<\/b>。今天还没签到。<\/p>/);
   assert.match(ledger, /<dt>余额<\/dt><dd>42<\/dd>[\s\S]*href="#\/community\/checkin"/);
-  assert.match(ledger, /<a href="#\/community\/stardust" aria-current="page">明细<\/a><a href="#\/community\/stardust\/levels">等级<\/a><a href="#\/community\/stardust\/rules">规则<\/a><a class="community-tab-go" href="#\/community\/shop">/);
+  assert.match(ledger, /<a href="#\/community\/stardust" aria-current="page">明细<\/a><a href="#\/community\/stardust\/levels">等级<\/a><a href="#\/community\/stardust\/rules">规则<\/a><a href="#\/community\/stardust\/invites">邀请<\/a><a class="community-tab-go" href="#\/community\/shop">/);
   assert.match(ledger, /<dt>本月收入<\/dt><dd class="is-plus">\+60<\/dd><\/div><div><dt>本月支出<\/dt><dd class="is-minus">−18<\/dd>/);
   assert.match(ledger, /data-action="community-flow" data-flow="all" aria-pressed="true"/);
   assert.match(ledger, /发主题 · <a class="community-ledger-title" title="&lt;一个主题&gt;" href="#\/post\/t1">&lt;一个主题&gt;<\/a>[\s\S]*\+5/);
@@ -965,7 +965,7 @@ test("moderation: the queue, reports, orders with shipping details, shop items, 
       [['待审', '3'], ['待处理举报', '1'], ['24 小时新主题', '4'], ['24 小时回复', '9']]);
     assert.equal(queueDom.window.document.querySelectorAll('.community-kpis dd.is-warn').length, 2);
     assert.deepEqual([...queueDom.window.document.querySelectorAll('.community-management-nav nav a')].map(link => link.getAttribute('href')),
-      ["#/community/manage", "#/community/manage/profiles", "#/community/manage/content", "#/community/manage/banners", "#/community/manage/boards", "#/community/manage/orders", "#/community/manage/items", "#/community/manage/stewards", "#/community/manage/sanctions", "#/community/manage/data", "#/community/manage/contact", "#/community/manage/convention"]);
+      ["#/community/manage", "#/community/manage/profiles", "#/community/manage/banners", "#/community/manage/boards", "#/community/manage/orders", "#/community/manage/items", "#/community/manage/stewards", "#/community/manage/sanctions", "#/community/manage/data", "#/community/manage/contact", "#/community/manage/convention"]);
   } finally { queueDom.window.close(); }
   assert.match(queue, /待审 · 初光等级，帖子带外链[\s\S]*&lt;待审&gt;[\s\S]*链接 https:\/\/a\.example[\s\S]*data-action="community-approve" data-id="p1"[\s\S]*data-action="community-reject" data-kind="topic" data-id="p1"/);
   assert.match(queue, /已自动隐藏 · 举报：其他[\s\S]*data-action="community-restore" data-kind="topic" data-id="h1"[\s\S]*data-action="community-queue-delete" data-kind="topic" data-id="h1"/);

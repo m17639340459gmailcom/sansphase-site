@@ -9,6 +9,9 @@
 .reading-sidebar .identity-avatar, .reading-sidebar .identity-mark { width: 104px; }
 .reading-directory-slot { position: sticky; top: calc(var(--reading-header-offset, 100px) + 20px); }
 .reading-directory-slot:empty { display: none; }
+/* The initial mobile directory reserves its final place before the body. On
+   desktop the same node becomes visible when adopted into the existing rail. */
+@media (min-width: 901px) { .reading-article > [data-reading-static-directory] { display: none; } }
 /* In the side rail the contents list is always open: a quiet mono label and a
    hairline index. On phones it sits in the article as a normal disclosure. */
 .reading-sidebar .article-contents { margin: 0; padding: 4px 0 0; border: 0; }

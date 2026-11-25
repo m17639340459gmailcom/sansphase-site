@@ -6,6 +6,7 @@ import sharp from "sharp";
 import { resolve } from "node:path";
 import { MAX_BODY_LENGTH } from '../content-limits.ts';
 import { smtpConfigured, smtpTransportOptions } from './smtp-settings.ts';
+import { accountSessionLifetimeSeconds } from '../auth-session-policy.ts';
 
 const owner: Access = ({ req }) =>
   req.user?.collection === "authors" && req.user?.role === "owner";
@@ -72,7 +73,7 @@ export function makePayloadConfig({ directory, secret, push = false, siteOrigin 
         slug: "authors",
         access,
         auth: {
-          tokenExpiration: 86400,
+          tokenExpiration: accountSessionLifetimeSeconds,
           useSessions: true,
           maxLoginAttempts: 8,
           lockTime: 600000,
@@ -103,7 +104,7 @@ export function makePayloadConfig({ directory, secret, push = false, siteOrigin 
             generateEmailSubject: () => '重置你的 SANSPHASE 密码',
             generateEmailHTML: ({ token }: {token?: string} = {}) => `<p>点击链接重置密码：</p><p><a href="${siteOrigin}/#/reset/${encodeURIComponent(String(token))}">重置密码</a></p><p>如果不是你申请的，可以忽略这封邮件。</p>`,
           },
-          tokenExpiration: 7 * 86400,
+          tokenExpiration: accountSessionLifetimeSeconds,
           useSessions: true,
           maxLoginAttempts: 8,
           lockTime: 600000,
@@ -117,6 +118,13 @@ export function makePayloadConfig({ directory, secret, push = false, siteOrigin 
           text('avatar'),
           text('vip_started_at'),
           text('vip_until'),
+          // Private owner annotations never participate in a reader profile or auth response.
+          text('admin_remark', { hidden: true, access: { create: () => false, update: () => false, read: () => false },
+            validate: (value: unknown) => value == null || typeof value === 'string' && Array.from(value).length <= 200 || '用户备注最多 200 个字。' }),
+          // Server-controlled registration provenance; never public profile fields.
+          text('invitation_code', { unique: true, hidden: true, access: { create: () => false, update: () => false, read: () => false } }),
+          text('invited_by', { index: true, hidden: true, access: { create: () => false, update: () => false, read: () => false } }),
+          { name: 'invitation_bound', type: 'checkbox' as const, required: true, defaultValue: false, hidden: true, access: { create: () => false, update: () => false, read: () => false } },
           { name: 'disabled', type: 'checkbox' as const, defaultValue: false },
         ],
       }] : []),

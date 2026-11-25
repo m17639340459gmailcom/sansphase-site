@@ -1,3 +1,4 @@
+@import url("./login-verification.css");
 /* Author hub and forms share the site glass tokens; no page-level editing controls. */
 .author-book-chapters{padding:18px;border:1px solid #b4cce344;background:#617e9c16;margin:18px 0}
 .author-book-chapters h3{margin:0 0 8px}.author-book-chapters p{font-size:12px;line-height:1.8;color:#c0cede}
@@ -128,6 +129,17 @@ body.community-open[data-community-theme="light"] .author-dialog {
   border-color: var(--text);
   color: var(--surface);
 }
+.author-panel .login-verification-control { box-sizing: border-box; display: flex; align-items: center; justify-content: start; gap: 10px; width: 100%; min-height: 43px; margin: 0 0 12px; padding: 10px 12px; border: 1px solid var(--manage-edge); border-radius: 10px; background: var(--manage-inset); color: var(--text); text-align: left; font-size: 13px; opacity: 1; cursor: pointer; }
+.author-panel .login-verification-control:hover { border-color: var(--focus-edge); background: var(--manage-inset); }
+.author-panel .login-verification-control:focus-visible { outline: none; box-shadow: none; border-color: var(--focus-edge); text-decoration: underline; text-underline-offset: 4px; }
+.author-panel .login-verification-control:disabled { opacity: 1; cursor: default; }
+.author-panel .login-verification-control[hidden] { display: none; }
+.author-panel .login-verification-control[aria-busy="true"] { cursor: wait; }
+.author-panel .login-verification-control[data-state="verified"] { border-color: #88bca1; }
+.author-panel [data-login-verification-icon] { display: block; flex: none; width: 19px; height: 19px; color: var(--signal); fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.author-panel [data-login-verification-check] { visibility: hidden; }
+.author-panel .login-verification-control[data-state="verified"] [data-login-verification-check] { visibility: visible; }
+.author-panel .login-verification-control[data-state="verified"] [data-login-verification-icon] { color: #a9d5bd; }
 .author-field {
   display: flex;
   flex-direction: column;

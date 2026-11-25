@@ -1,0 +1,43 @@
+/* Blog card: pointer tilt + spotlight (vars written by PostCardFrame), cover parallax and glare. */
+
+.frame {
+  --px: 0;
+  --py: 0;
+  transition:
+    transform 0.7s var(--fx-ease),
+    border-color 0.3s ease,
+    box-shadow 0.3s ease;
+}
+.frame[data-tilt] {
+  transform: perspective(1000px) rotateX(calc(var(--py) * -5deg)) rotateY(calc(var(--px) * 6deg)) translateY(-4px);
+  will-change: transform;
+}
+
+.cover {
+  transition:
+    scale 0.9s var(--fx-ease),
+    translate 0.9s var(--fx-ease);
+}
+.frame[data-tilt] .cover {
+  scale: 1.06;
+  translate: calc(var(--px) * -12px) calc(var(--py) * -10px);
+}
+
+.glare {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(24rem circle at var(--mx, 50%) var(--my, 0%), var(--fx-glare), transparent 60%);
+  transition: opacity 0.5s var(--fx-ease);
+}
+.frame[data-tilt] .glare {
+  opacity: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .frame,
+  .cover {
+    transition: none;
+  }
+}

@@ -1,0 +1,53 @@
+.icon {
+  width: 18px;
+  height: 18px;
+  overflow: visible;
+}
+
+/* Resting states follow the <html> class, so the right icon paints before hydration.
+   The morph between them is played with WAAPI on click (next-themes blocks CSS transitions
+   while it swaps the theme). */
+.body,
+.core,
+.rays,
+.ray {
+  transform-box: view-box;
+  transform-origin: 12px 12px;
+}
+.core {
+  scale: 0.5;
+}
+.bite {
+  translate: 8px -8px;
+}
+:global(.dark) .core {
+  scale: 1;
+}
+:global(.dark) .bite {
+  translate: 0 0;
+}
+:global(.dark) .ray {
+  opacity: 0;
+  scale: 0.4;
+  rotate: -30deg;
+}
+
+/* Hover: the sun turns a notch, the moon tilts. */
+.rays,
+.body {
+  transition: rotate 0.8s var(--fx-ease);
+}
+.toggle:focus-visible .rays {
+  rotate: 45deg;
+}
+:global(.dark) .toggle:focus-visible .body {
+  rotate: -18deg;
+}
+@media (hover: hover) and (pointer: fine) {
+  .toggle:hover .rays {
+    rotate: 45deg;
+  }
+  :global(.dark) .toggle:hover .body {
+    rotate: -18deg;
+  }
+}

@@ -62,23 +62,67 @@ test('author tools opened from a light community retain a complete dark palette'
   assert.match(properties['--dialog-fill'], /28 34 48/);
 });
 
-test('custom nicknames keep dark contrast on photo covers within the light theme', async () => {
+test('custom nickname palette selection preserves the existing photo-cover and showcase exceptions', async () => {
   const css = postcss.parse(await readFile('src/community.css', 'utf8'));
   const lightRule = css.nodes.find(node => node.type === 'rule' && node.selector.includes('[data-community-theme="light"]') && node.nodes.some(declaration => declaration.prop === '--name-ink-start'));
+  const darkRule = css.nodes.find(node => node.type === 'rule' && !node.selector.includes('[data-community-theme=') && node.nodes.some(declaration => declaration.prop === '--name-ink-start'));
   assert.ok(lightRule);
-  const dom = new JSDOM('<body class="community-open" data-community-theme="light"><span class="community-uname" data-name-effect="solid"></span><div class="community-m-intro"><span class="community-uname" data-name-effect="solid"></span></div><div class="community-feed-showcase-track"><span class="community-uname" data-name-effect="solid"></span></div></body>');
-  const [paper, cover, showcase] = dom.window.document.querySelectorAll('.community-uname');
-  assert.equal(paper.matches(lightRule.selector), true);
-  assert.equal(cover.matches(lightRule.selector), false);
-  assert.equal(showcase.matches(lightRule.selector), false);
-  dom.window.close();
+  assert.ok(darkRule);
+  assert.equal(lightRule.nodes.find(node => node.prop === '--name-ink-start').value, 'var(--name-light-start)');
+  assert.equal(darkRule.nodes.find(node => node.prop === '--name-ink-start').value, 'var(--name-dark-start)');
+  for (const effect of ['solid', 'gradient', 'shimmer']) {
+    const dom = new JSDOM(`<body class="community-open community-frame-open" data-community-theme="light"><span class="community-uname" data-name-effect="${effect}"></span><div class="community-m-intro"><span class="community-uname" data-name-effect="${effect}"></span></div><div class="community-feed-showcase-track"><span class="community-uname" data-name-effect="${effect}"></span></div></body>`);
+    try {
+      const [paper, cover, showcase] = dom.window.document.querySelectorAll('.community-uname');
+      assert.equal(paper.matches(lightRule.selector), true);
+      assert.equal(cover.matches(lightRule.selector), false, `${effect} keeps its existing photo-cover palette; the large nickname override is tested separately`);
+      assert.equal(showcase.matches(lightRule.selector), false, 'the permanently dark showcase stays a separate case');
+      dom.window.document.body.dataset.communityTheme = 'dark';
+      for (const name of [paper, cover, showcase]) {
+        assert.equal(name.matches(lightRule.selector), false);
+        assert.equal(name.matches(darkRule.selector), true);
+      }
+    } finally { dom.window.close(); }
+  }
 });
 
-test('profile cover hover buttons keep a dark background under pale labels', async () => {
-  const css = postcss.parse(await readFile('src/community-layout/appearance.css', 'utf8'));
-  const rule = css.nodes.find(node => node.type === 'rule' && node.selector.endsWith(' .community-m-intro'));
-  const variables = Object.fromEntries(rule.nodes.filter(node => node.type === 'decl').map(node => [node.prop, node.value]));
-  assert.ok(contrast(variables['--text'], variables['--community-control-hover']) >= 4.5);
-  const hover = css.nodes.find(node => node.type === 'rule' && node.selector.includes('.community-button:not('));
-  assert.equal(hover.nodes.find(node => node.prop === 'background').value, 'var(--community-control-hover)');
+test('profile readability never masks the cover or adds glyph outlines and secondary text shadows', async () => {
+  const css = postcss.parse(await readFile('src/community.css', 'utf8'));
+  const light = postcss.parse(await readFile('src/community-layout/appearance.css', 'utf8'));
+  for (const sheet of [css, light]) {
+    sheet.walkRules(rule => {
+      assert.doesNotMatch(rule.selector, /\.community-m-(?:intro|id|name)::(?:before|after)/, 'profile readability must not add a panel or scrim over the photo');
+      if (/\.community-m-(?:intro|id|name|tags|acts)\b/.test(rule.selector)) {
+        for (const declaration of rule.nodes.filter(node => node.type === 'decl')) {
+          assert.notEqual(declaration.prop, '-webkit-text-stroke', 'nickname changes must not draw an outline');
+          assert.notEqual(declaration.prop, 'paint-order', 'the retired outline treatment must be removed');
+          if (declaration.prop === 'text-shadow') assert.equal(declaration.value, 'none', 'profile text must not acquire new shadows');
+        }
+      }
+      assert.doesNotMatch(rule.selector, /\.community-m-acts\s+\.community-button/, 'the nickname fix must retain the original action button appearance');
+    });
+  }
+});
+
+test('profile large nicknames use sampled ink in both themes without replacing finishes elsewhere', async () => {
+  const light = postcss.parse(await readFile('src/community-layout/appearance.css', 'utf8'));
+  const selector = 'body.community-open:is(.community-frame-open, .community-management-open) .community-m-intro .community-m-name h1 .community-uname';
+  const rule = light.nodes.find(node => node.type === 'rule' && node.selector === selector);
+  assert.ok(rule, 'large profile nicknames need background-aware ink independent of site theme');
+  const properties = Object.fromEntries(rule.nodes.filter(node => node.type === 'decl').map(node => [node.prop, node.value]));
+  assert.equal(properties.color, 'var(--profile-name-ink, #ffffff)');
+  assert.equal(properties['-webkit-text-fill-color'], 'var(--profile-name-ink, #ffffff)');
+  assert.equal(properties['background-image'], 'none');
+  assert.equal(properties['text-shadow'], 'none');
+  assert.equal(properties.animation, 'none');
+  for (const attributes of ['', 'class="is-color-gold"', 'class="is-color-aurora"', 'data-name-effect="solid"', 'data-name-effect="gradient"', 'data-name-effect="shimmer"']) {
+    const nickname = attributes.startsWith('class=') ? `<span class="community-uname ${attributes.slice(7, -1)}"></span>` : `<span class="community-uname" ${attributes}></span>`;
+    const dom = new JSDOM(`<body class="community-open community-frame-open" data-community-theme="light"><div class="community-m-intro"><div class="community-m-name"><h1>${nickname}</h1><p><span class="community-uname"></span></p></div></div><div class="community-account">${nickname}</div><div class="community-feed-showcase-track">${nickname}</div></body>`);
+    try {
+      const document = dom.window.document;
+      assert.deepEqual([...document.querySelectorAll(selector)], [document.querySelector('.community-m-name h1 .community-uname')], 'only the cover large nickname uses sampled ink');
+      document.body.dataset.communityTheme = 'dark';
+      assert.deepEqual([...document.querySelectorAll(selector)], [document.querySelector('.community-m-name h1 .community-uname')], 'dark mode keeps the same cover-aware nickname; effects elsewhere remain untouched');
+    } finally { dom.window.close(); }
+  }
 });

@@ -1,6 +1,7 @@
 import { communityReviewReasons } from '../src/community-rules.mjs';
 import { fail } from './community-db.ts';
 import type { Body, Ctx } from './community-context.ts';
+import { prepareReferralAttributions } from './community-referral-context.ts';
 
 // All selected posts are checked in one transaction before approval or rejection.
 // The existing single-post operations retain rewards, notices and deletion reasons.
@@ -13,8 +14,16 @@ export async function reviewTopics(ctx: Ctx, body: Body) {
   const reason = body.action === 'reject' ? String(body.reason || '') : '';
   if (body.action === 'reject' && !(communityReviewReasons as readonly string[]).includes(reason)) throw fail('请选择审核不通过的理由。');
   const note = body.action === 'reject' && typeof body.note === 'string' && body.note.trim() ? ctx.clean(body.note, [1, 200], '补充说明', false) : '';
-  const now = new Date().toISOString();
+  const authors = (ids as string[]).map(id => {
+    const topic = ctx.live.topic(id);
+    if (!topic?.pending) throw fail('选择中有帖子已被处理，请刷新列表后重新选择。', 409);
+    ctx.requireStaff(body.action === 'approve' ? 'topic.approve' : 'topic.reject', topic.board);
+    return topic.author;
+  });
+  const referrals = body.action === 'approve' ? await prepareReferralAttributions(ctx, authors) : null;
   await ctx.auditMutation(body.action === 'approve' ? 'bulk-approve-topics' : 'bulk-reject-topics', () => {
+    referrals?.assertCurrent();
+    const now = new Date().toISOString();
     for (const id of ids as string[]) {
       const topic = ctx.live.topic(id);
       if (!topic?.pending) throw fail('选择中有帖子已被处理，请刷新列表后重新选择。', 409);
@@ -22,9 +31,9 @@ export async function reviewTopics(ctx: Ctx, body: Body) {
       if(body.action==='reject')ctx.live.staff.protect(ctx.me,topic.author);
     }
     for (const id of ids as string[]) {
-      if (body.action === 'approve') ctx.live.approveTopic(id, now);
+      if (body.action === 'approve') ctx.live.approveTopic(id, now, referrals?.values.get(ctx.live.topic(id)!.author.id));
       else ctx.live.rejectTopic(id, reason, note, now);
     }
-  }, { topics: ids, ...(reason ? { reason, note } : {}) });
+  }, { topics: ids, ...(reason ? { reason, note } : {}) }, referrals?.confirmation);
   ctx.send({ ok: true, count: ids.length });
 }

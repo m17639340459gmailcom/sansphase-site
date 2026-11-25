@@ -17,6 +17,7 @@ import { validateSceneCdnOrigin } from "../src/scene-delivery.mjs";
 import { composeSiteStyles } from "./compose-site-styles.mjs";
 import { typedBrowserModules } from './typed-browser-modules.mjs';
 import { composeCommunityStyles } from './compose-community-styles.mjs';
+import { preserveBrowserPackageNotices } from './browser-package-notices.ts';
 
 const outdir = process.argv[2] || "dist";
 const sceneCdnOrigin = validateSceneCdnOrigin(process.env.SANSPHASE_SCENE_CDN_ORIGIN);
@@ -33,6 +34,7 @@ const result = await build({
   entryPoints: {
     "cosmos.bundle": "src/library-cosmos.tsx",
     "ui.bundle": "src/library-ui.tsx",
+    "article-page": "src/article-page.ts",
     "author.bundle": "src/author-entry.mjs",
     "music.bundle": "src/music-player.mjs",
     "community-appearance": "src/community-appearance.ts",
@@ -41,10 +43,14 @@ const result = await build({
     "community-compose-editor": "src/community-compose-editor.ts",
     "community-profile-dialog": "src/community-profile-dialog.ts",
     "community-shop-dialog": "src/community-shop-dialog.ts",
+    "community-delivery-contact": "src/community-delivery-contact.ts",
     "community-profile-crop": "src/community-profile-crop.ts",
     "community-page-cache": "src/community-page-cache.ts",
     "image-compression-library": "src/image-compression-library.ts",
     "upload-image-metadata": "src/upload-image-metadata.ts",
+    "login-verification-library": "src/login-verification-library.ts",
+    "teahouse-client": "src/teahouse/client.ts",
+    "site-diagnostics": "src/site-diagnostics.ts",
   },
   bundle: true,
   format: "esm",
@@ -70,14 +76,23 @@ const result = await build({
 for (const file of [
   "index.html",
   "app.mjs",
+  "blog-route.mjs",
+  "blog-metadata.mjs",
+  "article-contents.mjs",
+  "community-equipment-controller.mjs",
+  "community-steward-controller.mjs",
   "visitor-controls.css",
   "reader.css",
+  "login-verification.css",
   "reader-ui.mjs",
+  "login-verification.mjs",
+  "login-verification-control.mjs",
   "reader-frames.mjs",
   "reader-policy.mjs",
   "reader-membership.mjs",
   "admin-readers.mjs",
   "admin-route.mjs",
+  "admin-console-navigation.mjs",
   "visitor-location.mjs",
   "site-copy.mjs",
   "catalog.mjs",
@@ -119,6 +134,7 @@ for (const file of [
   "community-icon-display.mjs",
   "community-news.mjs",
   "community-entry.mjs",
+  "share-links.mjs",
   "community-ui.mjs",
   "community-passive-refresh.mjs",
   "community-staff.mjs",
@@ -129,6 +145,7 @@ for (const file of [
   "community-editor-preparation.mjs",
   "community-post.mjs",
   "community-pages.mjs",
+  "community-invitations.mjs",
   "community-profile.mjs",
   "community-convention.mjs",
   "community-convention-consent.mjs",
@@ -142,6 +159,7 @@ for (const file of [
   "community-shop-editor.mjs",
   "community-equipment-import.mjs",
   "community-name-effects.mjs",
+  "community-profile-contrast.mjs",
   "community-rules.mjs",
   "community-growth.mjs",
   "community-growth-art.mjs",
@@ -169,6 +187,8 @@ for (const file of [
 }
 await writeFile(`${outdir}/styles.css`, await composeSiteStyles());
 await writeFile(`${outdir}/community.css`, await composeCommunityStyles());
+await copyFile('src/teahouse/index.html', `${outdir}/teahouse.html`);
+await copyFile('src/teahouse/chat.css', `${outdir}/teahouse.css`);
 await mkdir("outputs/verification", { recursive: true });
 await writeFile(
   "outputs/verification/library-build-meta.json",
@@ -283,45 +303,7 @@ await copyFile(
   "src/vendor/active-theory-tubes/sources.json",
   `${destination}/reference-tubes-sources.json`,
 );
-// Preserve notices for packages actually included in the browser graph.
-const packages = new Map();
-for (const input of Object.keys(result.metafile.inputs)) {
-  if (!input.includes("node_modules/")) continue;
-  let directory = dirname(resolve(input));
-  while (
-    basename(directory) !== "node_modules" &&
-    dirname(directory) !== directory
-  ) {
-    try {
-      const pkg = JSON.parse(
-        await readFile(resolve(directory, "package.json"), "utf8"),
-      );
-      if (pkg.name) {
-        packages.set(`${pkg.name}@${pkg.version}`, { directory, pkg });
-        break;
-      }
-    } catch {}
-    directory = dirname(directory);
-  }
-}
-const sources = [];
-for (const [id, { directory, pkg }] of packages) {
-  const files = (await readdir(directory)).filter((name) =>
-    /^(licen[sc]e|copying|notice)(\.|$)/i.test(name),
-  );
-  for (const file of files)
-    await copyFile(
-      resolve(directory, file),
-      resolve(destination, `${id.replaceAll("/", "-")}-${file}`),
-    );
-  sources.push({
-    name: pkg.name,
-    version: pkg.version,
-    license: pkg.license,
-    repository: pkg.repository,
-    notices: files,
-  });
-}
+const sources = await preserveBrowserPackageNotices(result.metafile, destination);
 await copyFile(
   "src/vendor/react-bits/LICENSE.md",
   `${destination}/react-bits-LICENSE.md`,

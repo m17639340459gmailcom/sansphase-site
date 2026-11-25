@@ -23,6 +23,8 @@ import { createCommunityProfileBackgrounds } from './community-profile-backgroun
 import { createCommunityStaff } from './community-staff.ts';
 import { createCommunityFeatureRecommendations } from './community-staff-features.ts';
 import { createCommunityBoards } from './community-boards.ts';
+import { createCommunityReferrals, referralReviewReason } from './community-referrals.ts';
+import type { IdentityReferralAttribution } from './community-identity-protocol.ts';
 
 export type { CommunityAuthor, Target } from './community-db.ts';
 export type ShowcaseMeta = { tools: string; model: string; usage: string; prompt: string; promptMode: PromptMode; price: number };
@@ -51,6 +53,7 @@ export type BoardStats = { topics: number; repliesToday: number; latest: { id: s
 export type NewTopic = {
   board: string; author: CommunityAuthor; title: string; body: string; tags?: readonly string[]; images?: readonly string[];
   bounty?: number; meta?: ShowcaseMeta | null; resource?: ResourceMeta | null; pending?: string | null; pin?: boolean; now?: string;
+  referral?: IdentityReferralAttribution;
 };
 
 export function communityTablesReady(directory: string) {
@@ -81,6 +84,7 @@ export function createCommunityStore(directory: string, { previewCatalog = false
   const staff: ReturnType<typeof createCommunityStaff> = createCommunityStaff(db, tx, boards.ids);
   const featureRecommendations = createCommunityFeatureRecommendations(db, tx, staff);
   const members = createMembers(db, convention, tx, staff, boards.ids);
+  const referrals = createCommunityReferrals(db, tx, ledger, members.notify);
   const banners = createCommunityBanners(db, tx, members, staff, boards.ids);
   const profileBackgrounds = createCommunityProfileBackgrounds(db, tx, (id, reason) => {
     // Queue both filenames durably before removing their registry. A rollback
@@ -292,6 +296,7 @@ export function createCommunityStore(directory: string, { previewCatalog = false
     experience.revert({ kind: 'topic', id }, now);
     ledger.revert({ kind: 'topic', id }, now);
     ledger.revert({ kind: 'topic', id: `featured:${id}` }, now);
+    referrals.revertTopic(id, now);
     const author = authorOf(row);
     // The asker gets half of an unclaimed bounty back.
     const refund = economy.refundBounty(id, now);
@@ -327,6 +332,7 @@ export function createCommunityStore(directory: string, { previewCatalog = false
   return {
     boards,
     ledger,
+    referrals,
     experience,
     members,
     staff,
@@ -341,8 +347,12 @@ export function createCommunityStore(directory: string, { previewCatalog = false
     transaction: tx,
 
     /* ---------- 帖子与回复 ---------- */
-    createTopic({ board, author, title, body, tags = [], images = [], bounty = 0, meta = null, resource = null, pending = null, pin = false, now = new Date().toISOString() }: NewTopic) {
+    createTopic({ board, author, title, body, tags = [], images = [], bounty = 0, meta = null, resource = null, pending = null, pin = false, now = new Date().toISOString(), referral }: NewTopic) {
       return tx(() => {
+        if (author.kind === 'reader') {
+          if (referral) referrals.bind(author.id, referral);
+          if (referrals.needsReview(author.id)) pending = referralReviewReason;
+        }
         const id = randomUUID();
         insertTopic.run(id, board, author.kind, author.id, title, body, JSON.stringify(tags), meta ? JSON.stringify(meta) : null, resource ? JSON.stringify(resource) : null,
           pending ? 1 : 0, pending, pin ? 1 : 0, now, now);
@@ -354,14 +364,15 @@ export function createCommunityStore(directory: string, { previewCatalog = false
       });
     },
     // Review: a pending topic goes live now, earning as if just posted.
-    approveTopic(id: string, now = new Date().toISOString()) {
+    approveTopic(id: string, now = new Date().toISOString(), referral?: IdentityReferralAttribution) {
       return tx(() => {
         const row = topicRow(id);
         if (!row || !Number(approve.run(now, now, id).changes)) throw fail('这个帖子不在待审列表里。', 409);
         const author = authorOf(row);
         const earned = published(id, author, now);
+        const referralEarned = referrals.approved(author, id, row.created_at, referral, now);
         notify(author, { type: 'review', topicId: id, text: '你的帖子通过了审核', data: { state: 'approved', title: displayTitle(row.title, row.body) } }, now);
-        return { earned, author };
+        return { earned, author, referralEarned };
       });
     },
     // A review rejection is recorded separately from a violation deletion: it never penalises the author.
@@ -552,7 +563,7 @@ export function createCommunityStore(directory: string, { previewCatalog = false
     },
     // Permanent account cleanup is separate from reversible moderation deletes.
     purgeReaderData(readerId: string, queueFile: (filename: string, reason: string) => void) {
-      return tx(() => purgeCommunityReaderData(db, readerId, { queueFile, cancelOrder: id => economy.cancel(id) }));
+      return tx(() => { const result = purgeCommunityReaderData(db, readerId, { queueFile, cancelOrder: id => economy.cancel(id) }); referrals.purgeReader(readerId); return result; });
     },
     participants(topicId: string) {
       return (replyAuthorsOf.all(topicId) as Array<{ author_kind: Kind; author_id: string }>).map(authorOf);

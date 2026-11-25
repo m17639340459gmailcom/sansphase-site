@@ -1,0 +1,4 @@
+:root {
+  /* The small UI face handles frequent characters. New text can still use full Noto Sans SC. */
+  --font-zh: var(--font-zh-ui), var(--font-zh-full);
+}

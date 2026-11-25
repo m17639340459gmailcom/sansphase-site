@@ -19,8 +19,8 @@ test('private backups include approved reader avatars but omit temporary verific
     const avatar = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
     const db = new DatabaseSync(resolve(directory, 'content.db'));
     try {
-      db.exec('CREATE TABLE media (filename TEXT); CREATE TABLE readers (avatar TEXT);');
-      db.prepare('INSERT INTO readers (avatar) VALUES (?)').run(avatar);
+      db.exec('CREATE TABLE media (filename TEXT); CREATE TABLE readers (avatar TEXT, invitation_code TEXT UNIQUE, invited_by TEXT, invitation_bound INTEGER NOT NULL DEFAULT 0);');
+      db.prepare('INSERT INTO readers (avatar,invitation_code,invited_by,invitation_bound) VALUES (?,?,?,1)').run(avatar, 'a'.repeat(24), '11111111-1111-4111-8111-111111111111');
     } finally { db.close(); }
     const temporary = new DatabaseSync(resolve(directory, 'reader-workflow.db'));
     try { temporary.exec('CREATE TABLE reader_registration_requests (email TEXT);'); }
@@ -39,7 +39,9 @@ test('private backups include approved reader avatars but omit temporary verific
     await run(process.execPath, restoreArgs, { cwd: resolve(import.meta.dirname, '..') });
     assert.equal(await readFile(resolve(restored, 'uploads', `reader-avatar-${avatar}.webp`), 'utf8'), 'approved-image');
     const restoredDb = new DatabaseSync(resolve(restored, 'content.db'), { readOnly: true });
-    try { assert.equal(restoredDb.prepare('SELECT avatar FROM readers').get().avatar, avatar); }
+    try {
+      assert.deepEqual({ ...restoredDb.prepare('SELECT * FROM readers').get() }, { avatar, invitation_code: 'a'.repeat(24), invited_by: '11111111-1111-4111-8111-111111111111', invitation_bound: 1 });
+    }
     finally { restoredDb.close(); }
     assert.equal(JSON.parse(await readFile(restoredConfig, 'utf8')).directory, restored);
     await assert.rejects(run(process.execPath, restoreArgs, { cwd: resolve(import.meta.dirname, '..') }), 'existing data cannot be overwritten');
@@ -54,7 +56,7 @@ test('durable profile workflow backups preserve pending images, nickname proposa
     const workflow=createReaderWorkflow(directory,'x'.repeat(64)),pending='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
     workflow.putProfile('reader','avatar',pending); const name=workflow.putProfile('reader','nickname','新昵称');
     workflow.putProfileAdvice(name.id,'reject','修改用语',{kind:'reader',id:'reviewer'});
-    workflow.putRegistration({email:'temporary@example.test',nickname:'读者',phone:'13800138000',password:'password-value'});
+    workflow.putRegistration({email:'temporary@example.test',nickname:'读者',phone:'13800138000',password:'password-value',inviterId:'11111111-1111-4111-8111-111111111111',invitationBound:true});
     await writeFile(resolve(directory,'uploads',`pending-reader-avatar-${pending}.webp`),'pending-image');
     const audit='{"action":"profile-rejected","actorId":"reviewer","reason":"修改用语"}\n';
     await writeFile(resolve(directory,'reader-admin-audit.jsonl'),audit);

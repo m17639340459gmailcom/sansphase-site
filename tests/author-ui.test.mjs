@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { JSDOM, VirtualConsole } from "jsdom";
 import { validateArticle } from "../server/author-service.ts";
 import { cleanBody } from "../server/content-service.ts";
@@ -76,7 +78,7 @@ test("author hub groups actions; background editing preserves profile; back navi
   const escape = (options={}) => (d.activeElement || d).dispatchEvent(new w.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true,...options}));
   try {
     await (
-      await load(new URL("../dist/author.bundle.mjs", import.meta.url))
+      await load(process.env.TEST_AUTHOR_DIST ? pathToFileURL(resolve(process.env.TEST_AUTHOR_DIST, 'author.bundle.mjs')) : new URL("../dist/author.bundle.mjs", import.meta.url))
     ).evaluate();
     click("[data-author-login]");
     await settle();

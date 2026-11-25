@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {publicBootstrap, publicPage} from '../server/content-delivery.ts';
+import {publicBootstrap, publicPage, publicPageResponse} from '../server/content-delivery.ts';
 import {createPreviewServer} from '../server.mjs';
 
 const data={source:'cms',profile:{name:'Author'},announcements:[],notes:Array.from({length:1000},(_,i)=>({id:`note-${i}`,title:`Article ${i}`,summary:'Summary',category:i%2?'A':'B',tags:['tag'],bodyHTML:'<p>'+ 'Long article '.repeat(1000)+'</p>',attachments:[],coverSrc:'/api/media/cover'})),works:[],resources:[],software:[],'resource-center':[]};
@@ -29,6 +29,23 @@ test('pages retain author order, filter across the full collection, and omit bod
 test('detail returns exactly the requested public item and rejects unsupported queries',()=>{
  assert.equal(publicPage(data,new URLSearchParams({view:'detail',kind:'notes',id:'note-900'})).item.bodyHTML,data.notes[900].bodyHTML);
  for(const params of [{view:'detail',kind:'notes',id:'unpublished'},{view:'list',kind:'authors'},{view:'all',kind:'notes'}]) assert.throws(()=>publicPage(data,new URLSearchParams(params)),e=>e.status===404||e.status===400);
+});
+
+test('public response validators follow response bytes across rebuilt snapshots, not unrelated writes',()=>{
+ const original={...data,notes:[{...data.notes[0]}]};
+ const detail=new URLSearchParams({view:'detail',kind:'notes',id:'note-0',public:'1'});
+ const list=new URLSearchParams({view:'list',kind:'notes',public:'1'});
+ const before=publicPageResponse(original,detail), beforeList=publicPageResponse(original,list);
+ const rebuilt=structuredClone(original);
+ assert.equal(publicPageResponse(rebuilt,detail).etag,before.etag);
+ assert.equal(publicPageResponse(rebuilt,list).etag,beforeList.etag);
+ const bodyChanged=structuredClone(original);bodyChanged.notes[0].bodyHTML='<p>Updated body</p>';
+ assert.notEqual(publicPageResponse(bodyChanged,detail).etag,before.etag);
+ assert.equal(publicPageResponse(bodyChanged,list).etag,beforeList.etag,'list representation has not changed');
+ const titleChanged=structuredClone(original);titleChanged.notes[0].title='Updated title';
+ assert.notEqual(publicPageResponse(titleChanged,list).etag,beforeList.etag);
+ assert.throws(()=>publicPageResponse({...original,notes:[]},detail),{status:404});
+ assert.throws(()=>publicPageResponse({...original,notes:[{...original.notes[0],locked:true}]},detail),{status:403});
 });
 
 test('HTTP bootstrap, bounded pages and withdrawal work without leaking author identity',async t=>{
@@ -63,6 +80,13 @@ test('explicit public pages revalidate against current publication without ident
  assert.equal(response.headers.get('cache-control'),'private, no-cache');
  assert.equal((await response.json()).author,undefined);assert.equal(identityCalls,0);
  response=await fetch(path,{headers:{'If-None-Match':etag}});assert.equal(response.status,304);
+ // Account commits and the snapshot time limit may rebuild the same publication.
+ current=structuredClone(data);
+ response=await fetch(path,{headers:{'If-None-Match':etag}});assert.equal(response.status,304);
+ current=structuredClone(data);current.notes[1].bodyHTML='<p>Newly published body</p>';
+ response=await fetch(path,{headers:{'If-None-Match':etag}});assert.equal(response.status,200);
+ assert.notEqual(response.headers.get('etag'),etag);assert.equal((await response.json()).item.bodyHTML,'<p>Newly published body</p>');
+ current=structuredClone(data);
  // Nginx may weaken a strong validator when gzip changes the wire bytes.
  for(const validator of ['W/'+etag,'"unrelated", W/'+etag,'*']) {
   response=await fetch(path,{headers:{'If-None-Match':validator}});assert.equal(response.status,304);

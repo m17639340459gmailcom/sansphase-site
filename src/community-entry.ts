@@ -4,6 +4,23 @@ export type CommunityHostConfig = { communityDestination?: unknown; communityOnl
 export type CommunityEntryState = 'idle' | 'pending' | 'leaving' | 'error' | 'auth';
 const destinationOrigin = 'https://community.sansphase.com';
 const mainOrigin = 'https://www.sansphase.com';
+const postIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const validPostId = (value: unknown): value is string => typeof value === 'string' && postIdPattern.test(value);
+// A public post UUID is navigation context, never an arbitrary return URL.
+export function communityEntryPost(search = '', hash = ''): string | null {
+  const parts = hash.split('/');
+  if (parts[0] === '#' && parts[1] === 'post') {
+    return validPostId(parts[2]) && (parts.length === 3 || parts.length === 5 && parts[3] === 'reply' && validPostId(parts[4])) ? parts[2] : null;
+  }
+  const values = new URLSearchParams(search).getAll('post');
+  return values.length === 1 && validPostId(values[0]) ? values[0] : null;
+}
+export function communityEntryLandingLocation(pathname: string, search: string, hash: string): string {
+  const post = communityEntryPost(search, hash), params = new URLSearchParams(search);
+  params.delete('post');
+  if (post) params.set('post', post);
+  return pathname + (params.size ? `?${params}` : '') + '#/community';
+}
 function exactOrigin(value: unknown, allowed: string): string | null {
   if (typeof value !== 'string') return null;
   try {
@@ -14,10 +31,12 @@ function exactOrigin(value: unknown, allowed: string): string | null {
 export function communityEntryDestination(config: CommunityHostConfig | null | undefined) {
   return config?.communityOnly === true ? null : exactOrigin(config?.communityDestination, destinationOrigin);
 }
-export function communityEntryTarget(value: unknown, destination: string, now = Date.now()): string | null {
+export function communityEntryTarget(value: unknown, destination: string): string | null {
   if (!value || typeof value !== 'object' || !('url' in value) || !('expiresAt' in value) || typeof value.url !== 'string') return null;
   const expiresAt = typeof value.expiresAt === 'number' ? value.expiresAt : typeof value.expiresAt === 'string' ? Date.parse(value.expiresAt) : NaN;
-  if (!Number.isFinite(expiresAt) || expiresAt <= now || expiresAt > now + 65000 || exactOrigin(destination, destinationOrigin) === null) return null;
+  // The authority checks the ticket's real expiry and single use on exchange.
+  // A device's wall clock cannot establish whether a server ticket is fresh.
+  if (!Number.isSafeInteger(expiresAt) || expiresAt <= 0 || exactOrigin(destination, destinationOrigin) === null) return null;
   try {
     const url = new URL(value.url);
     if (url.origin !== destination || url.username || url.password || url.pathname !== '/community-enter' || url.search || !/^#community-entry=[A-Za-z0-9_-]{32,256}$/.test(url.hash)) return null;
@@ -27,6 +46,7 @@ export function communityEntryTarget(value: unknown, destination: string, now = 
 type EntryResponse = { ok: boolean; status: number; json: () => Promise<unknown> };
 export function createCommunityEntry(options: {
   config: () => CommunityHostConfig | null; request: (url: string, init: RequestInit) => Promise<EntryResponse>;
+  post?: () => string | null;
   navigate: (url: string) => void; fadeOut: () => Promise<void>; restore?: () => void; changed: (state: CommunityEntryState) => void;
 }) {
   let state: CommunityEntryState = 'idle', pending: Promise<boolean> | null = null, generation = 0;
@@ -37,6 +57,8 @@ export function createCommunityEntry(options: {
     const destination = communityEntryDestination(options.config());
     if (!destination) return Promise.resolve(false);
     if (!authenticated) { set('auth'); return Promise.resolve(false); }
+    const requestedPost = options.post?.();
+    const post = validPostId(requestedPost) ? requestedPost : null;
     const token = ++generation;
     // Set the lock before publishing state: a render callback can itself call
     // enter again. Requests and fades therefore share one in-flight promise.
@@ -52,7 +74,9 @@ export function createCommunityEntry(options: {
         set('leaving');
         await options.fadeOut();
         if (token !== generation) return false;
-        options.navigate(target);
+        // Append only our finite destination after verifying the authority's URL.
+        // The one-use secret stays in the fragment and is never persisted locally.
+        options.navigate(target + (post ? `&post=${post}` : ''));
         return true;
       } catch {
         if (token !== generation) return false;

@@ -1,0 +1,427 @@
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 1.5rem;
+  background: var(--bg-elevated);
+  transition:
+    border-color 0.3s,
+    box-shadow 0.6s var(--fx-ease);
+}
+.card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 5px;
+}
+
+/* ------------------------------ stage ------------------------------ */
+.visual {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 14rem;
+  padding: 2.5rem 1.5rem 1.5rem;
+  perspective: 1100px;
+  background:
+    radial-gradient(ellipse at 70% 15%, hsl(var(--project-hue) 58% 67% / 0.25), transparent 65%),
+    linear-gradient(145deg, hsl(var(--project-hue) 35% 85% / 0.12), hsl(var(--project-hue) 40% 68% / 0.18));
+}
+.visual::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background-image: radial-gradient(circle at center, var(--line-strong) 1px, transparent 1.5px);
+  background-size: 22px 22px;
+  mask-image: radial-gradient(ellipse 75% 70% at 50% 45%, #000 20%, transparent);
+  opacity: 0.55;
+}
+/* Outlined case number drifting against the tilt: a cheap depth cue behind the deck. */
+.index {
+  position: absolute;
+  left: 1rem;
+  bottom: -0.16em;
+  z-index: -1;
+  font-family: var(--font-display);
+  font-size: clamp(5rem, 11vw, 8.5rem);
+  font-weight: 600;
+  line-height: 0.8;
+  letter-spacing: -0.05em;
+  color: transparent;
+  -webkit-text-stroke: 1px var(--line-strong);
+  user-select: none;
+  translate: calc(var(--px, 0) * -18px) calc(var(--py, 0) * -12px);
+}
+.deck {
+  position: relative;
+  width: 100%;
+  max-width: 27rem;
+  transform-style: preserve-3d;
+  transform: rotateX(calc(var(--py, 0) * -7deg)) rotateY(calc(var(--px, 0) * 9deg));
+}
+.shot {
+  position: relative;
+  transform: translateZ(0);
+}
+.shot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: 0.6rem;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(28rem circle at var(--gx, 50%) var(--gy, 0%), var(--fx-glare), transparent 45%);
+  transition: opacity 0.6s var(--fx-ease);
+}
+.screenshot {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 16rem;
+  object-fit: contain;
+}
+/* The other screens of the case, stacked behind the cover; only their title bars peek out. */
+.sheet {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 0;
+}
+.sheet[data-depth="1"] {
+  transform: translate3d(0, -0.95rem, -30px) scale(0.95);
+}
+.sheet[data-depth="2"] {
+  transform: translate3d(0, -1.8rem, -60px) scale(0.9);
+}
+.sheetWindow {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+}
+.sheetShot {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: var(--bg);
+}
+/* Hidden (so never downloaded) where nothing can fan the deck open. */
+.sheetImage {
+  display: none;
+  object-fit: contain;
+}
+.screens {
+  position: absolute;
+  right: 0.85rem;
+  bottom: 0.85rem;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.3rem 0.6rem;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+/* ----------------------------- content ----------------------------- */
+.content {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  padding: 1.5rem;
+}
+.meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  border-radius: 999px;
+  padding: 0.3rem 0.6rem;
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 0.625rem;
+  line-height: 1.5;
+}
+.dot {
+  position: relative;
+  width: 0.3rem;
+  height: 0.3rem;
+  border-radius: 50%;
+  color: var(--muted);
+  background: currentColor;
+}
+.status[data-tone="ready"] .dot {
+  color: #329478;
+}
+.status[data-tone="preview"] .dot {
+  color: var(--accent);
+}
+.title {
+  margin: 1rem 0 0.35rem;
+  font-family: var(--font-display);
+  font-size: clamp(1.4rem, 2.2vw, 1.8rem);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+.titleText {
+  padding-bottom: 0.06em;
+  background: linear-gradient(var(--accent), var(--accent)) 0 100% / 0 1.5px no-repeat;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  transition: background-size 0.7s var(--fx-ease);
+}
+.description {
+  margin-top: 1rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.9;
+}
+.highlights {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 1.25rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.8;
+}
+.highlights li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.65rem;
+}
+.highlights li > span {
+  width: 0.3rem;
+  height: 0.3rem;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.8rem;
+  padding: 1.25rem 0;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+}
+.action {
+  --fx-roll-to: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: auto;
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+}
+.arrow {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex-shrink: 0;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  transition: border-color 0.3s;
+}
+.arrow::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: var(--accent);
+  scale: 0;
+  transition: scale 0.5s var(--fx-ease);
+}
+.arrow svg {
+  grid-area: 1 / 1;
+  transition: translate 0.45s var(--fx-ease);
+}
+.arrow svg:last-child {
+  translate: -130% 130%;
+  color: var(--fx-on-accent);
+}
+
+/* --------------------------- interaction --------------------------- */
+.card:focus-visible .titleText {
+  background-size: 100% 1.5px;
+}
+.card:focus-visible .arrow {
+  border-color: var(--accent);
+}
+.card:focus-visible .arrow::before {
+  scale: 1;
+}
+.card:focus-visible .arrow svg:first-child {
+  translate: 130% -130%;
+}
+.card:focus-visible .arrow svg:last-child {
+  translate: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .sheetImage {
+    display: block;
+  }
+  .card:hover {
+    border-color: var(--line-strong);
+    box-shadow: 0 32px 64px -40px #0006;
+  }
+  .card:hover .shot::after {
+    opacity: 1;
+  }
+  .card:hover .titleText {
+    background-size: 100% 1.5px;
+  }
+  .card:hover .arrow {
+    border-color: var(--accent);
+  }
+  .card:hover .arrow::before {
+    scale: 1;
+  }
+  .card:hover .arrow svg:first-child {
+    translate: 130% -130%;
+  }
+  .card:hover .arrow svg:last-child {
+    translate: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .deck,
+  .shot,
+  .sheet {
+    transition: transform 0.8s var(--fx-ease);
+  }
+  .index {
+    transition: translate 0.9s var(--fx-ease);
+  }
+  .status:not([data-tone="paused"]) .dot::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: currentColor;
+    animation: ping 2.4s var(--fx-ease) infinite;
+  }
+  .card:focus-visible .shot {
+    transform: translateZ(36px);
+  }
+  .card:focus-visible .sheet[data-depth="1"] {
+    transform: translate3d(-9%, -11%, -50px) rotate(-5deg) scale(0.97);
+  }
+  .card:focus-visible .sheet[data-depth="2"] {
+    transform: translate3d(9%, -16%, -100px) rotate(6deg) scale(0.94);
+  }
+}
+
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .card:hover .deck {
+    will-change: transform;
+  }
+  .card:hover .shot {
+    transform: translateZ(40px);
+  }
+  .card:hover .sheet[data-depth="1"] {
+    transform: translate3d(-9%, -11%, -50px) rotate(-5deg) scale(0.97);
+  }
+  .card:hover .sheet[data-depth="2"] {
+    transform: translate3d(9%, -16%, -100px) rotate(6deg) scale(0.94);
+  }
+}
+
+@keyframes ping {
+  from {
+    opacity: 0.55;
+    scale: 1;
+  }
+  70%,
+  to {
+    opacity: 0;
+    scale: 3.2;
+  }
+}
+
+/* Set on click, before the route transition captures the cover (see onClick). */
+.card[data-leaving] :is(.deck, .shot, .sheet) {
+  transform: none;
+  transition: none;
+}
+.card[data-leaving] .shot::after {
+  opacity: 0;
+  transition: none;
+}
+
+/* ------------------------------ layout ----------------------------- */
+@media (min-width: 768px) {
+  .visual {
+    min-height: 17rem;
+    padding: 2.75rem 2rem 1.75rem;
+  }
+  .content {
+    padding: 1.75rem;
+  }
+}
+@media (min-width: 1024px) {
+  .wide {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.55fr);
+  }
+  .wide .visual {
+    grid-column: 2;
+    grid-row: 1;
+    min-height: 26rem;
+    padding: 2.75rem 2rem 2rem;
+  }
+  .wide:not(.mirror) .deck {
+    max-width: 31rem;
+  }
+  .wide:not(.mirror) .screenshot {
+    max-height: 19rem;
+  }
+  .wide .content {
+    grid-column: 1;
+    grid-row: 1;
+    padding: 2.25rem;
+  }
+  .wide .title {
+    font-size: 2.4rem;
+  }
+  .mirror {
+    grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  }
+  .mirror .visual {
+    grid-column: 1;
+    min-height: 24rem;
+  }
+  .mirror .content {
+    grid-column: 2;
+  }
+}

@@ -1,6 +1,8 @@
 import { readFile, readdir, stat } from "node:fs/promises";
 import { resolve, sep } from "node:path";
 import { JSDOM } from "jsdom";
+import { adminConsoleRequiredFiles } from '../server/admin-console-assets.ts';
+import { verifyAdminConsoleDependencies } from './build-admin-console.ts';
 
 export async function verifySite(root) {
   const base = resolve(root);
@@ -9,13 +11,36 @@ export async function verifySite(root) {
     if (!local.startsWith(base + sep) || !(await stat(local)).isFile())
       throw new Error(`Missing build asset: ${path}`);
   };
-  const html = await readFile(resolve(base, "index.html"), "utf8");
-  const dom = new JSDOM(html);
-  for (const el of dom.window.document.querySelectorAll("[src], link[href]")) {
-    const path = el.getAttribute("src") || el.getAttribute("href");
-    if (!/^(https?:|data:|#)/.test(path)) await check(path);
+  for (const file of adminConsoleRequiredFiles) await check(file);
+  const adminHTML = new JSDOM(await readFile(resolve(base, 'admin-console/index.html'), 'utf8'));
+  const entryPoints = [];
+  try {
+    if (adminHTML.window.document.querySelector('base')) throw Error('The admin-console must use its own same-origin asset base.');
+    for (const element of adminHTML.window.document.querySelectorAll('[src], link[href]')) {
+      const reference = element.getAttribute('src') || element.getAttribute('href');
+      const url = new URL(reference, 'https://build.invalid/admin-console/index.html');
+      if (url.origin !== 'https://build.invalid' || !url.pathname.startsWith('/admin-console/'))
+        throw Error(`The admin-console assets must be same-origin and self-contained: ${reference}`);
+      const path = decodeURIComponent(url.pathname).slice(1);
+      await check(path);
+      if (/\.(?:m?js|css)$/.test(path)) entryPoints.push(path);
+    }
+    for (const required of adminConsoleRequiredFiles.slice(1))
+      if (!entryPoints.includes(required)) throw Error(`The admin-console HTML does not reference ${required}`);
+  } finally { adminHTML.window.close(); }
+  await verifyAdminConsoleDependencies(base, entryPoints);
+  const files = await readdir(base);
+  const pages = ['index.html', ...files.filter(file => file !== 'index.html' && file.endsWith('.html'))];
+  for (const page of pages) {
+    const html = await readFile(resolve(base, page), "utf8");
+    const dom = new JSDOM(html);
+    try {
+      for (const el of dom.window.document.querySelectorAll("[src], link[href]")) {
+        const path = el.getAttribute("src") || el.getAttribute("href");
+        if (!/^(https?:|data:|#)/.test(path)) await check(path);
+      }
+    } finally { dom.window.close(); }
   }
-  dom.window.close();
 
   for (const file of await readdir(base)) {
     if (!/\.(mjs|css)$/.test(file)) continue;

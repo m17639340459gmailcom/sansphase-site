@@ -1,0 +1,197 @@
+/* ------------------------------ hero ------------------------------ */
+.watermark {
+  position: relative;
+  padding-right: 1.25rem;
+  font-size: clamp(9rem, 30vw, 24rem);
+  opacity: 0.6;
+}
+@media (min-width: 640px) {
+  .watermark {
+    padding-right: 2rem;
+    opacity: 1;
+  }
+}
+@media (min-width: 1024px) {
+  .watermark {
+    padding-right: 3rem;
+  }
+}
+.dot {
+  width: 0.35rem;
+  height: 0.35rem;
+  border-radius: 50%;
+  color: var(--muted);
+  background: currentColor;
+}
+.dot[data-tone="ready"] {
+  color: #329478;
+}
+.dot[data-tone="preview"] {
+  color: var(--accent);
+}
+.media {
+  --project-media-max-height: min(32rem, 58svh);
+  max-width: 56rem;
+  margin-inline: auto;
+}
+.mediaImage {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: var(--project-media-max-height);
+  object-fit: contain;
+}
+
+/* --------------------------- highlights --------------------------- */
+/* Hidden only once hydrated ("idle"): without JS the list simply shows. */
+[data-fx-state="idle"] .highlight {
+  opacity: 0;
+  translate: 0 0.75rem;
+}
+[data-fx-state="play"] .highlight {
+  animation: item-in 0.7s var(--fx-ease) calc(0.25s + var(--i, 0) * 0.08s) backwards;
+}
+.check {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+  margin-top: 0.2rem;
+  overflow: visible;
+}
+.check circle {
+  fill: var(--accent-soft);
+}
+.check path {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1 1.05;
+}
+[data-fx-state="idle"] .check path {
+  stroke-dashoffset: 1.02;
+}
+[data-fx-state="play"] .check path {
+  animation: draw 0.6s var(--fx-ease-in-out) calc(0.45s + var(--i, 0) * 0.08s) backwards;
+}
+
+/* ----------------------------- sidebar ---------------------------- */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 0.375rem;
+  padding: 0.375rem 0.625rem;
+  background: var(--bg);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+}
+[data-fx-state="idle"] > .chip {
+  opacity: 0;
+  scale: 0.9;
+}
+[data-fx-state="play"] > .chip {
+  animation: chip-in 0.5s var(--fx-ease) calc(var(--i, 0) * 0.035s) backwards;
+}
+.link {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  transition:
+    border-color 0.3s,
+    color 0.3s;
+}
+.link::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--accent-soft);
+  transform-origin: left center;
+  scale: 0 1;
+  transition: scale 0.6s var(--fx-ease);
+}
+.linkArrow {
+  display: grid;
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.linkArrow svg {
+  grid-area: 1 / 1;
+  width: 1rem;
+  height: 1rem;
+  transition: translate 0.45s var(--fx-ease);
+}
+.linkArrow svg:last-child {
+  translate: -110% 110%;
+}
+.link:focus-visible {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.link:focus-visible::before {
+  scale: 1 1;
+}
+.link:focus-visible .linkArrow svg:first-child {
+  translate: 110% -110%;
+}
+.link:focus-visible .linkArrow svg:last-child {
+  translate: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .link:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .link:hover::before {
+    scale: 1 1;
+  }
+  .link:hover .linkArrow svg:first-child {
+    translate: 110% -110%;
+  }
+  .link:hover .linkArrow svg:last-child {
+    translate: none;
+  }
+}
+
+@keyframes item-in {
+  from {
+    opacity: 0;
+    translate: 0 0.75rem;
+  }
+}
+@keyframes draw {
+  from {
+    stroke-dashoffset: 1.02;
+  }
+}
+@keyframes chip-in {
+  from {
+    opacity: 0;
+    scale: 0.9;
+  }
+}
+
+@media (prefers-reduced-motion: reduce), print {
+  .highlight,
+  .check path,
+  .chip {
+    animation: none !important;
+    opacity: 1 !important;
+    translate: none !important;
+    scale: none !important;
+    stroke-dashoffset: 0 !important;
+  }
+}

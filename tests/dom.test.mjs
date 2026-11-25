@@ -15,6 +15,7 @@ import * as contentReader from '../dist/content-reader.mjs';
 import * as navigationPrefetch from '../dist/navigation-prefetch.mjs';
 import {mountRouteAssets} from '../dist/route-assets.mjs';
 import {createDeferredModuleLoader} from '../src/admin-route.mjs';
+import * as adminConsoleNavigation from '../src/admin-console-navigation.mjs';
 import * as core from "../dist/core.mjs";
 import * as data from "./fixtures/site-data.mjs";
 import {
@@ -298,6 +299,8 @@ for (const mode of [null, false, true, 'hk', 'hk-reduced']) test(typeof mode ===
     if (referencing !== mod) return libraryModule(new URL(specifier, referencing.identifier));
     if (specifier === "./ui.bundle.mjs")
       return libraryModule(new URL("../dist/ui.bundle.mjs", import.meta.url));
+    if (['./article-page.mjs', './blog-route.mjs', './blog-metadata.mjs'].includes(specifier))
+      return libraryModule(new URL('../dist/' + specifier.slice(2), import.meta.url));
     if (specifier === './book-shell.mjs' || specifier === './vip-book-prompt.mjs')
       return libraryModule(new URL('../dist/' + specifier.slice(2), import.meta.url));
     if (['./community.mjs', './community-ui.mjs', './community-sky.mjs', './community-layout.mjs', './community-landing.mjs', './community-entry.mjs', './community-appearance.mjs', './community-routing.mjs', './community-introduction.mjs'].includes(specifier))
@@ -318,6 +321,7 @@ for (const mode of [null, false, true, 'hk', 'hk-reduced']) test(typeof mode ===
       specifier === './route-assets.mjs' ? {mountRouteAssets:win=>mountRouteAssets(win,{loadAuthor:async()=>{},loadBackground:async()=>{}})} :
       specifier === './route-styles.mjs' ? {ensureRouteStyle:async()=>{}} :
       specifier === './admin-route.mjs' ? {createDeferredModuleLoader,loadAdminReaders:async()=>({adminReadersPage:()=>'<section class="page"><h1>用户管理</h1></section>',mountReaderAdmin:()=>()=>{}})} :
+      specifier === './admin-console-navigation.mjs' ? adminConsoleNavigation :
       specifier === './home-preload.mjs' ? {...homePreload,preparePageImages:(...args)=>{homeActivity.warmups++;return homePreload.preparePageImages(...args);}} :
       specifier === './image-sources.mjs' ? imageSources :
       specifier.includes("visitor-location") ? visitorLocation :
@@ -762,10 +766,9 @@ for (const mode of [null, false, true, 'hk', 'hk-reduced']) test(typeof mode ===
           q(".nav [aria-current=page]").getAttribute("href"),
           "#/works",
         );
-        await navigate("admin");
-        assert.equal(d.body.classList.contains("admin-open"), true);
-        await navigate("works");
-        assert.equal(d.body.classList.contains("admin-open"), false);
+        // The legacy admin hash now crosses documents to /admin-console/.
+        // Its real navigation is covered by admin-console-release-browser;
+        // jsdom only supports the in-document routes exercised here.
         await navigate("note/building-sansphase");
         assert.equal(
           q(".nav [aria-current=page]").getAttribute("href"),

@@ -95,8 +95,9 @@ test('an eligible profile collection offers exactly one transparent VIP frame ch
   assert.equal(communityProfileFramesHTML({ ...profile, data: { person: { ...person, vip: false }, frames: [] } }, { ...person, vip: false }, common), '');
 });
 
-test('main-site frames share the fixed static artwork and membership changes cannot retain an expired VIP selection', () => {
-  assert.deepEqual(readerFrameDecoration({ frame: 'vipmoon', frameImage: null }), { className: 'reader-avatar-frame-vipmoon', image: source });
+test('main-site VIP artwork requires the server membership verdict, including legacy reader identities', () => {
+  assert.deepEqual(readerFrameDecoration({ frame: 'vipmoon', frameImage: null, vip: true }), { className: 'reader-avatar-frame-vipmoon', image: source });
+  assert.deepEqual(readerFrameDecoration({ frame: 'vipmoon', frameImage: null }), { className: '', image: null }, 'missing qualification is not a grant, even for legacy identities');
   assert.deepEqual(readerFrameDecoration({ frame: 'vipmoon', frameImage: null, vip: false }), { className: '', image: null });
   const current = { uid: '10001', email: 'vip@example.test', vip: true, frame: 'vipmoon', frameImage: null };
   const next = retainReaderFrame({ uid: current.uid, email: current.email, vip: false }, current);
@@ -104,6 +105,26 @@ test('main-site frames share the fixed static artwork and membership changes can
   assert.equal(next.frameImage, null);
   assert.equal(retainReaderFrame({ uid: current.uid, email: current.email, vip: true }, current).frame, 'vipmoon');
   assert.equal(retainReaderFrame({ uid: current.uid, email: current.email, vip: false }, { ...current, frame: 'gold' }).frame, 'gold');
+});
+
+test('local clock skew cannot hide or lose a server-confirmed VIP frame across a same-owner profile write', t => {
+  const serverNow = Date.now(), expiry = new Date(serverNow + 1000).toISOString();
+  for (const offset of [-86400000, -300000, -5000, 5000, 300000, 86400000]) {
+    const clock = t.mock.method(Date, 'now', () => serverNow + offset);
+    try {
+      for (const uid of ['10001', undefined]) {
+        const current = { uid, email: 'vip@example.test', vip: true, vipUntil: expiry, frame: 'vipmoon', frameImage: null };
+        const next = { uid, email: current.email, vip: true, vipUntil: expiry };
+        assert.equal(readerFrameDecoration(current).className, 'reader-avatar-frame-vipmoon');
+        assert.equal(retainReaderFrame(next, current).frame, 'vipmoon');
+        assert.equal(retainReaderFrame({ ...next, vip: false }, current).frame, null);
+        assert.equal(retainReaderFrame({ ...next, vip: undefined }, current).frame, null);
+        assert.equal(readerFrameDecoration({ ...current, vip: false, vipUntil: new Date(serverNow + 86400000).toISOString() }).className, '');
+        assert.equal(current.frame, 'vipmoon', 'projection never alters the stored selection object');
+        assert.equal(retainReaderFrame({ ...next, vipUntil: new Date(serverNow + 86400000).toISOString() }, current).frame, 'vipmoon', 'confirmed renewal can render the retained selection');
+      }
+    } finally { clock.mock.restore(); }
+  }
 });
 
 test('fresh publication includes the formal VIP builder and sources rather than depending on the collaborator draft directory', async () => {

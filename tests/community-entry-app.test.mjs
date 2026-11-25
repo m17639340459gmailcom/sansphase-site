@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { JSDOM } from 'jsdom';
 import { parseRoute } from '../src/core.ts';
-import { communityHostRoute, communityEntryDestination, createCommunityEntry } from '../src/community-entry.ts';
+import { communityHostRoute, communityEntryDestination, communityEntryLandingLocation, communityEntryPost, createCommunityEntry } from '../src/community-entry.ts';
 import { communityLandingHTML } from '../src/community.ts';
 import { readerGate } from '../src/reader-ui.ts';
 
@@ -17,18 +17,35 @@ function setup(identity = true) {
   const config = { communityDestination: 'https://community.sansphase.com', communityEnabled: false, reader: identity ? { nickname: '读者' } : null, author: null };
   const calls = [], navigations = [], fades = [], rendered = [];
   let status = 200;
-  const context = { siteContent: config, parseRoute, communityHostRoute, communityEntryDestination, location: { hash: '#/community', pathname: '/', search: '', assign: url => navigations.push(url) }, communityOnly: () => config.communityOnly === true, communityEnabled: () => config.communityEnabled === true, renderGeneration: 0, contentReader: { cancel() {} }, loadedContentKey: '', remotePage: null, document: dom.window.document, communityStyleReady: false, ensureRouteStyle: async () => {}, prepareCommunityLanding: async () => {}, history: { replaceState: (_state, _title, path) => { context.location.hash = path.slice(path.indexOf('#')); } },
+  const context = { siteContent: config, parseRoute, communityHostRoute, communityEntryDestination, communityEntryLandingLocation, location: { hash: '#/community', pathname: '/', search: '', assign: url => navigations.push(url) }, communityOnly: () => config.communityOnly === true, communityEnabled: () => config.communityEnabled === true, renderGeneration: 0, contentReader: { cancel() {} }, loadedContentKey: '', remotePage: null, document: dom.window.document, communityStyleReady: false, ensureRouteStyle: async () => {}, prepareCommunityLanding: async () => {}, history: { replaceState: (_state, _title, path) => { const url = new URL(path, 'https://www.sansphase.com'); context.location.hash = url.hash; context.location.search = url.search; } },
     renderView(options) {
       rendered.push(options);
       dom.window.document.querySelector('main').innerHTML = options.contentStatus === 'auth' ? readerGate() : config.communityDestination ? communityLandingHTML(zh => zh, {}, { entryState: context.communityEntry.state() }) : '<section data-content-state="not-open">社区尚未开放</section>';
     },
   };
-  context.communityEntry = createCommunityEntry({ config: () => config, request: async (url, init) => { calls.push({ url, init }); return { status, ok: status === 200, json: async () => ({ url: 'https://community.sansphase.com/community-enter#community-entry=' + 'a'.repeat(43), expiresAt: new Date(Date.now() + 60000).toISOString() }) }; }, navigate: url => navigations.push(url), fadeOut: async () => { fades.push('fade'); }, restore: () => {}, changed: state => { if (state === 'auth') { config.reader = null; config.author = null; } void context.render({ preserveScroll: true }); } });
+  context.communityEntry = createCommunityEntry({ config: () => config, post: () => communityEntryPost(context.location.search), request: async (url, init) => { calls.push({ url, init }); return { status, ok: status === 200, json: async () => ({ url: 'https://community.sansphase.com/community-enter#community-entry=' + 'a'.repeat(43), expiresAt: new Date(Date.now() + 60000).toISOString() }) }; }, navigate: url => navigations.push(url), fadeOut: async () => { fades.push('fade'); }, restore: () => {}, changed: state => { if (state === 'auth') { config.reader = null; config.author = null; } void context.render({ preserveScroll: true }); } });
   vm.createContext(context);
   vm.runInContext(renderSource + '\nglobalThis.render = render;', context);
   return { context, dom, calls, navigations, fades, rendered, config, status: value => { status = value; }, close: () => dom.window.close() };
 }
 const turn = () => new Promise(resolve => setTimeout(resolve, 0));
+
+test('main-site public post links retain their UUID through landing, login gate and ticket navigation', async () => {
+  const s = setup(false), post = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  try {
+    s.context.location.hash = `#/post/${post}`;
+    await s.context.render();
+    assert.equal(s.context.location.hash, '#/community');
+    assert.equal(s.context.location.search, `?post=${post}`);
+    await s.context.communityEntry.enter(false); await turn();
+    assert.equal(s.context.location.search, `?post=${post}`);
+    assert.ok(s.dom.window.document.querySelector('[data-reader-return]'));
+    s.config.reader = { nickname: '读者' };
+    await s.context.render();
+    await s.context.communityEntry.enter(true); await turn();
+    assert.equal(new URL(s.navigations.at(-1)).hash, '#community-entry=' + 'a'.repeat(43) + `&post=${post}`);
+  } finally { s.close(); }
+});
 
 test('the introduction commits once after its actual sky resource preparation, without painting an intermediate landing', async () => {
   const s = setup();

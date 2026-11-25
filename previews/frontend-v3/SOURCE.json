@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "origin": "https://github.com/DingxinTao0417/tdx-portfolio",
+  "commit": "c73bc4966f0ba808b978e22eccf5a063fc649751",
+  "license": "MIT",
+  "copyright": "Copyright (c) 2026 Dingxin Tao",
+  "stage": "sansphase_v3_local_integration",
+  "local_only": true,
+  "upstream_source_files": "adapted for the public SANSPHASE V3 frontend",
+  "upstream_content": "reference-only MPA routes are isolated from the local SANSPHASE V3 preview",
+  "upstream_colors": "adapted to the V2 light and dark palette",
+  "sansphase_backend_integration": "same-origin integration through the main-site gateway, exercised with isolated local fixtures",
+  "deployment_performed": false,
+  "public_push_performed": false,
+  "standalone_content_source": "synthetic preview data",
+  "next_stage": "Complete HTTPS staging and release acceptance before publishing publicly."
+}

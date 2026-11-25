@@ -19,3 +19,13 @@ node scripts/migrate-payload-auth-security.mjs <private-payload-directory>
 回滚只切换到上述兼容代码，继续使用当前生产数据与配置。不能回退到 3.89，也不能恢复上线前整库覆盖新注册、帖子、资料或其他合法写入。数据库恢复属于独立故障恢复，应另行明确写入截止点和数据合并方式。
 
 官方升级说明：[3.90.0](https://github.com/payloadcms/payload/releases/tag/v3.90.0)、[3.90.2](https://github.com/payloadcms/payload/releases/tag/v3.90.2)。
+
+## 登录保持与会话探测
+
+2026-10-17：按用户确认，成功登录后的作者、读者账号使用同一套固定七天期限。`server/auth-session-policy.ts` 同时供 Payload JWT 与浏览器 `HttpOnly; SameSite=Strict; Path=/` Cookie 使用；HTTPS 继续附加 `Secure`，不扩大 Cookie 域。读者原有七天期限保持，作者原有一天期限改为七天。当前私有 Payload 配置没有会话期限覆盖入口。
+
+七天从成功登录开始计算，访问与探测不无限续期。主动退出、账号禁用、删除、管理撤销、密码恢复仍可提前终止访问；不会改签旧 JWT，也不重写已有会话的到期时间，因此更新前的一天作者会话到原期限时仍须再登录一次。该改动不需要业务 schema 迁移，不触碰账号、VIP、内容或上传文件。
+
+`/api/reader/session` 与 `/api/author/session` 复用现有严格身份校验，区分确认无效的会话和临时账号存储故障：前者成功返回空身份，后者返回 503 并保留浏览器 Cookie，避免客户端把临时故障当作退出。普通内容读取仍按其原有访问规则执行。
+
+`tests/main-session-persistence.test.ts` 使用独立数据库、真实 Payload 与 HTTP 入口，验证 Cookie/JWT 一致的七天期限、应用重启、期限边界、存储故障和主动退出。读者注册、禁用、密码恢复与权限隔离继续由原有读者集成测试覆盖。

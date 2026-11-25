@@ -2,6 +2,7 @@ import Plyr from "plyr";
 import { icons } from "./library-ui.tsx";
 import { staticAssetUrl } from "./scene-delivery.mjs";
 import { createMusicAutoplay } from './music-autoplay.mjs';
+import { musicPlayerShellHTML, musicPlayerControlsHTML } from './music-player-markup.ts';
 
 // Plyr controls playback. Platform share URLs deliberately never become audio sources.
 export function mountMusicPlayer(host, tracks, {onState=()=>{},autoplay=false,autoplayReady=true,preparePlayback=true,language='zh'}={}) {
@@ -9,13 +10,10 @@ export function mountMusicPlayer(host, tracks, {onState=()=>{},autoplay=false,au
   let sourceReady = false;
   const t=(zh,en)=>language==='en'?en:zh;
   host.classList.add('vinyl-player');
-  host.innerHTML = `<div class="music-turntable" aria-hidden="true"><div class="music-record"><div class="music-record-label"><span>無相</span><img hidden alt="" decoding="async"></div></div><svg class="music-tonearm" viewBox="0 0 70 90"><circle cx="10" cy="8" r="8" fill="#666a74" stroke="#242832" stroke-width="2"/><circle cx="10" cy="8" r="5" fill="#d4d6df"/><path d="M10 8 C11 35 12 48 23 57 L43 71" fill="none" stroke="#a5a9b5" stroke-width="5" stroke-linecap="round"/><path d="M10 8 C11 35 12 48 23 57 L43 71" fill="none" stroke="#f3f0ee" stroke-width="3" stroke-linecap="round"/><path d="m39 64 14 9 -5 8 -14 -9z" fill="#e6e4e6" stroke="#a6a4af"/><path d="m42 78 4 3" stroke="#e1dace" stroke-width="2"/></svg></div><p class="music-current" aria-live="polite"></p><div class="music-track-caption"><span data-music-state>待播放</span><span aria-hidden="true">·</span><span data-track-count></span></div><audio preload="none"></audio><p class="music-error" role="status"></p>`;
+  host.removeAttribute('inert');host.removeAttribute('data-music-player-static');
+  host.innerHTML = musicPlayerShellHTML({english:language==='en'});
   const audio = host.querySelector("audio");
-  const controls=()=>`<div class="plyr__controls vinyl-controls">
-    <div class="music-seek-row"><div class="plyr__time plyr__time--current" aria-label="${t('已播放','Elapsed time')}">00:00</div><div class="plyr__progress"><input data-plyr="seek" type="range" min="0" max="100" step="0.01" value="0" aria-label="${t('播放进度','Seek')}"><progress class="plyr__progress__buffer" min="0" max="100" value="0"></progress></div><div class="plyr__time plyr__time--duration" aria-label="${t('总时长','Duration')}">00:00</div></div>
-    <div class="music-transport"><button type="button" data-prev aria-label="${t('上一首','Previous track')}">${icons.previous}</button><button type="button" class="plyr__control" data-plyr="play" aria-label="${t('播放','Play')}"><span class="icon--pressed">${icons.pause}</span><span class="icon--not-pressed">${icons.play}</span></button><button type="button" data-next aria-label="${t('下一首','Next track')}">${icons.next}</button></div>
-    <div class="music-volume-row"><button type="button" class="plyr__control" data-plyr="mute" aria-label="${t('静音','Mute')}"><span class="icon--pressed">${icons.muted}</span><span class="icon--not-pressed">${icons.volume}</span></button><div class="plyr__volume"><input data-plyr="volume" type="range" min="0" max="1" step="0.05" value="1" autocomplete="off" aria-label="${t('音量','Volume')}"></div><span class="music-position" data-track-position aria-hidden="true"></span></div>
-  </div>`;
+  const controls=()=>musicPlayerControlsHTML({english:language==='en',icons});
   const player = new Plyr(audio, {
     controls:controls(), volume:0.4, invertTime:false, toggleInvert:false,
     iconUrl: staticAssetUrl("/assets/plyr.svg"), loadSprite:false, autoplay: false, storage: { enabled: false },
@@ -120,10 +118,13 @@ export function mountSiteMusic(target,settings,onState,{autoplayReady=true,prepa
   if(key!==playlistKey) {
     sitePlayer?.();siteHost?.remove();sitePlayer=undefined;siteHost=undefined;playlistKey=key;
     if(tracks.length) {
-      siteHost=document.createElement('div');siteHost.className='site-music-player';siteHost.hidden=true;document.body.append(siteHost);
+      siteHost=target?.querySelector(':scope > .site-music-player[data-music-player-static]')||document.createElement('div');siteHost.className='site-music-player';siteHost.hidden=true;document.body.append(siteHost);
       sitePlayer=mountMusicPlayer(siteHost,tracks,{onState,autoplay:false,autoplayReady:false,preparePlayback,language});
     }
   }
+  // A persistent player can arrive from another page. Retire only the inert
+  // server shell, retaining the live media element and its playback position.
+  for(const placeholder of target?.querySelectorAll(':scope > [data-music-player-static]')||[])placeholder.remove();
   if(siteHost && target) {
     if(target.moveBefore && siteHost.isConnected) target.moveBefore(siteHost,null);else target.append(siteHost);
     siteHost.hidden=false;

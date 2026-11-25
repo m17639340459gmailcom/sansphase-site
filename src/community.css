@@ -1257,7 +1257,7 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-sitem.is-off { opacity: 0.6; }
 .community-sitem.is-owned { border-color: rgb(159 211 180 / 24%); }
 .community-sitem-art { position: relative; box-sizing: border-box; width: 100%; min-width: 0; min-height: 0; height: 112px; padding: 0; overflow: hidden; display: grid; grid-template-rows: minmax(0, 1fr); place-items: center; border: 0; border-bottom: 1px solid var(--line); background: radial-gradient(70% 90% at 50% 40%, rgb(96 118 170 / 18%), transparent 70%), rgb(5 7 11 / 55%); cursor: pointer; }
-.community-sitem-art.is-tool-card { height: 208px; }
+.community-sitem.is-merchandise .community-sitem-art, .community-sitem-art.is-tool-card { height: 208px; }
 .community-sitem-art.is-tool-card .community-holo:not(.is-uploaded) { width: 118px; height: 168px; transform: perspective(700px) rotateX(var(--holo-rx, 0deg)) rotateY(var(--holo-ry, 0deg)) rotate(5deg); }
 .community-sitem-art > .community-product-image { display: block; box-sizing: border-box; min-width: 0; min-height: 0; width: 100%; height: 100%; max-width: 100%; max-height: 100%; padding: 8px; object-fit: contain; }
 .community-sitem-art:focus-visible { outline: 1px solid var(--focus-edge); outline-offset: -4px; }
@@ -1329,18 +1329,26 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 /* Uploaded cards retain their exact silhouette; both sheen layers use the
    same contain-fitted alpha mask as the original artwork. */
 .community-sart.is-uploaded-card { box-sizing: border-box; min-width: 0; min-height: 0; padding: 8px; grid-template-rows: minmax(0, 1fr); }
+.community-sitem.is-merchandise .community-sart.is-uploaded-card, .community-shop-detail-art.is-merchandise .community-sart.is-uploaded-card { padding: 10px; }
 .community-holo.is-uploaded { box-sizing: border-box; min-width: 0; min-height: 0; width: 100%; height: 100%; max-width: 100%; max-height: 100%; grid-template-rows: minmax(0, 1fr); gap: 0; overflow: visible; border: 0; border-radius: 0; background: transparent; box-shadow: none; filter: drop-shadow(0 5px 5px rgb(3 9 18 / 25%)); transform: perspective(700px) rotateX(var(--holo-rx, 0deg)) rotateY(var(--holo-ry, 0deg)) rotate(-2deg); }
 .community-sitem-art.is-tool-card .community-holo.is-uploaded, .community-shop-detail-art .community-holo.is-uploaded { transform: perspective(700px) rotateX(var(--holo-rx, 0deg)) rotateY(var(--holo-ry, 0deg)); }
+.community-sitem.is-merchandise .community-holo.is-uploaded, .community-shop-detail-art.is-merchandise .community-holo.is-uploaded { transform: perspective(700px) rotateX(var(--holo-rx, 0deg)) rotateY(var(--holo-ry, 0deg)) rotate(3deg); }
 .community-holo.is-uploaded > .community-product-image { display: block; min-width: 0; min-height: 0; width: 100%; height: 100%; max-width: 100%; max-height: 100%; object-fit: contain; }
 .community-holo.is-uploaded::before, .community-holo.is-uploaded::after { pointer-events: none; mask-image: var(--card-image); mask-size: contain; mask-position: center; mask-repeat: no-repeat; mask-mode: alpha; }
 .community-holo.is-uploaded::before { z-index: 1; opacity: .85; }
 .community-holo.is-uploaded::after { content: ""; position: absolute; inset: 0; z-index: 2; background: radial-gradient(ellipse at var(--holo-x, 50%) var(--holo-y, 35%), rgb(255 253 239 / 26%), transparent 58%); mix-blend-mode: screen; opacity: .3; transition: opacity .25s; }
 .community-sitem-art:is(:hover, :focus-visible) .community-holo.is-uploaded, .community-shop-detail-art:is(:hover, :focus-visible) .community-holo.is-uploaded { transform: perspective(700px) rotateX(var(--holo-rx, 0deg)) rotateY(var(--holo-ry, 0deg)) scale(1.035); }
+.community-sitem.is-merchandise .community-sitem-art:is(:hover, :focus-visible) .community-holo.is-uploaded, .community-shop-detail-art.is-merchandise:is(:hover, :focus-visible) .community-holo.is-uploaded { transform: perspective(700px) rotateX(var(--holo-rx, 0deg)) rotateY(var(--holo-ry, 0deg)) rotate(3deg) scale(1.035); }
 .community-sitem-art:is(:hover, :focus-visible) .community-holo.is-uploaded::after, .community-shop-detail-art:is(:hover, :focus-visible) .community-holo.is-uploaded::after { opacity: .85; }
 .community-holo-ic { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--cm-signal-soft); color: var(--signal); box-shadow: 0 0 14px rgb(217 196 156 / 30%); }
 .community-holo-ic .ui-icon { width: 19px; height: 19px; }
 .community-holo b { font-size: 13px; font-weight: 500; }
 .community-holo small { font: 9.5px var(--font-mono); letter-spacing: 0.18em; color: var(--dim); }
+/* The same material moves the real decoration preview without adding a
+   rectangular card background or changing the item being demonstrated. */
+.community-sitem-art .community-holo.is-preview, .community-shop-detail-art .community-holo.is-preview { box-sizing: border-box; width: 100%; height: 100%; min-width: 0; min-height: 0; padding: 8px; overflow: visible; border: 0; border-radius: 0; background: transparent; box-shadow: none; transform: perspective(700px) rotateX(var(--holo-rx, 0deg)) rotateY(var(--holo-ry, 0deg)); }
+.community-holo.is-preview::before { inset: 12%; background: radial-gradient(ellipse at var(--holo-x, 50%) var(--holo-y, 35%), rgb(120 220 255 / 12%), rgb(255 120 200 / 5%) 40%, transparent 70%); }
+.community-sitem-art:is(:hover, :focus-visible) .community-holo.is-preview, .community-shop-detail-art:is(:hover, :focus-visible) .community-holo.is-preview { transform: perspective(700px) rotateX(var(--holo-rx, 0deg)) rotateY(var(--holo-ry, 0deg)) scale(1.035); }
 .community-have { position: absolute; bottom: 5px; left: 50%; transform: translateX(-50%); padding: 1px 8px; border: 1px solid var(--cm-signal-edge); border-radius: var(--pill); background: rgb(5 7 11 / 75%); font-size: 12px; color: var(--signal); white-space: nowrap; }
 .community-file { position: relative; display: grid; align-content: end; gap: 5px; width: 76px; height: 96px; padding: 10px; border-radius: 6px 18px 6px 6px; background: linear-gradient(160deg, #eee4d0, #c9b894); color: #2a2014; box-shadow: 0 8px 18px rgb(0 0 0 / 35%); transform: rotate(4deg); transition: transform 0.35s var(--ease); }
 .community-file-fold { position: absolute; top: 0; right: 0; width: 22px; height: 22px; border-radius: 0 18px 0 4px; background: linear-gradient(225deg, #0b0f17 50%, #b3a078 50%); }
@@ -1416,7 +1424,8 @@ body.community-open .community-uname[data-name-effect="shimmer"] { background-si
 .community-m-id > .community-av.is-staff-frame { margin: 27px; }
 .community-m-id > .community-av.has-vip-frame-space { margin: 30px; }
 .community-m-name { display: grid; gap: 4px; min-width: 0; }
-.community-m-name h1 { font-family: var(--font-serif); font-size: 28px; letter-spacing: 0.08em; overflow-wrap: anywhere; }
+/* Keep traditional and simplified nickname glyphs in one complete Song family. */
+.community-m-name h1 { font-family: var(--font-wordmark); font-size: 28px; letter-spacing: 0.08em; overflow-wrap: anywhere; }
 .community-m-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .community-m-tags .is-mono { font-size: 12px; }
 .community-m-name p { font-size: 14px; color: var(--muted); }
@@ -1555,6 +1564,10 @@ a.community-queue-title:hover { text-decoration: underline; text-underline-offse
   .community-av.is-frame-orbit::after, .community-bh-glow, .community-holo::before,
   .community-cover-sample i, .community-m-cover i, .is-color-aurora, .community-ck-dot, body.community-open .community-uname[data-name-effect] { animation: none; }
   .community-holo.is-uploaded,
+  .community-sitem.is-merchandise .community-holo.is-uploaded, .community-shop-detail-art.is-merchandise .community-holo.is-uploaded,
+  .community-sitem.is-merchandise .community-sitem-art:is(:hover, :focus-visible) .community-holo.is-uploaded, .community-shop-detail-art.is-merchandise:is(:hover, :focus-visible) .community-holo.is-uploaded,
+  .community-sitem-art .community-holo.is-preview, .community-shop-detail-art .community-holo.is-preview,
+  .community-sitem-art:is(:hover, :focus-visible) .community-holo.is-preview, .community-shop-detail-art:is(:hover, :focus-visible) .community-holo.is-preview,
   .community-sitem-art.is-tool-card .community-holo:not(.is-uploaded), .community-shop-detail-art .community-holo:not(.is-uploaded),
   .community-sitem-art.is-tool-card .community-holo.is-uploaded, .community-shop-detail-art .community-holo.is-uploaded,
   .community-sitem:hover .community-sitem-art.is-tool-card .community-holo:not(.is-uploaded), .community-sitem-art.is-tool-card:focus-visible .community-holo:not(.is-uploaded), .community-shop-detail-art:is(:hover, :focus-visible) .community-holo:not(.is-uploaded),

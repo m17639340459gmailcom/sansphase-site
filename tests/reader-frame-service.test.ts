@@ -5,16 +5,34 @@ import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:net';
+import { JWTAuthentication, jwtSign } from 'payload';
 import type { Payload } from 'payload';
 import { createReaderService } from '../server/reader-service.ts';
 import { createPreviewServer } from '../server.mjs';
 import type { createReaderUidStore } from '../server/reader-uids.ts';
 import { createCommunityFrameClient } from '../server/community-frame-client.ts';
 
+async function readerAuthentication<T extends { id: string }>(row: T) {
+  const secret = randomUUID() + randomUUID(), sid = randomUUID();
+  // Both ordinary and strict reader endpoints use the real Payload JWT
+  // strategy; only the persisted account lookup is synthetic in this fixture.
+  const payload = {
+    secret, config: { secret: 'reader-frame-synthetic-workflow-key-at-least-32-characters', auth: { jwtOrder: ['JWT'] } },
+    collections: { readers: { config: { slug: 'readers', auth: { useSessions: true, verify: true, depth: 0 } } } },
+    auth: async ({ headers }: { headers: Headers }) => JWTAuthentication({ payload, headers, strategyName: 'local-jwt' }),
+    findByID: async (options: Parameters<Payload['findByID']>[0]) => {
+      assert.equal(options.collection, 'readers'); assert.equal(options.id, row.id);
+      return { ...row, sessions: [{ id: sid }] };
+    },
+  } as unknown as Payload;
+  const { token } = await jwtSign({ fieldsToSign: { collection: 'readers', id: row.id, sid }, secret, tokenExpiration: 3600 });
+  return { payload, cookie: `sansphase_reader_session=${token}` };
+}
+
 test('main frame display and equip derive the reader from auth, and remote failure leaves the account usable',async t=>{
   const directory=await mkdtemp(resolve(tmpdir(),'reader-frame-http-')),id=randomUUID(),imageId=randomUUID();
   const row={id,collection:'readers',email:'private@example.invalid',nickname:'测试读者',signature:'已通过签名',_verified:true,disabled:false,createdAt:'2026-01-01T00:00:00.000Z'};
-  const payload={config:{secret:'reader-frame-test-key-at-least-32-characters'},auth:async({headers}:{headers:Headers})=>({user:headers.get('authorization')==='JWT reader.token'?row:null}),findByID:async()=>row}as unknown as Payload;
+  const { payload, cookie } = await readerAuthentication(row);
   let frame:string|null='gold',failed=false,reads=0;
   const frames={
     state:async(readerId:string)=>{assert.equal(readerId,id);reads++;if(failed)throw Error('unavailable');return{frame,frameImage:null,items:[{id:'owned-gold',name:'金环',ref:'gold',image:null}],available:true};},
@@ -27,7 +45,6 @@ test('main frame display and equip derive the reader from auth, and remote failu
   const service=createReaderService({payload,directory,siteOrigin:base,uidStore,frames});
   const server=createPreviewServer({readerService:service,contentService:{snapshot:async()=>({data:{notes:[]}})}});
   await new Promise<void>(done=>server.listen(port,'127.0.0.1',done));
-  const cookie='sansphase_reader_session=reader.token';
   t.after(async()=>{await new Promise<void>(done=>server.close(()=>done()));await rm(directory,{recursive:true,force:true,maxRetries:10,retryDelay:100});});
   let response=await fetch(base+'/api/reader/session',{headers:{cookie}});let account=await response.json();assert.equal(account.frame,'gold');assert.equal(account.signature,row.signature);
   response=await fetch(base+'/api/reader/frame-state',{headers:{cookie}});assert.equal((await response.json()).available,true);
@@ -47,7 +64,7 @@ test('fresh main membership vetoes a still-cached VIP frame while retaining othe
   const directory = await mkdtemp(resolve(tmpdir(), 'reader-vip-frame-http-')), id = randomUUID();
   const row = { id, collection: 'readers', email: 'private@example.invalid', nickname: '会员读者', signature: '', _verified: true, disabled: false,
     createdAt: '2026-01-01T00:00:00.000Z', vip_until: new Date(Date.now() + 60_000).toISOString() as string | null };
-  const payload = { config: { secret: 'reader-vip-frame-test-key-at-least-32-characters' }, auth: async ({ headers }: { headers: Headers }) => ({ user: headers.get('authorization') === 'JWT reader.token' ? { ...row } : null }), findByID: async () => ({ ...row }) } as unknown as Payload;
+  const { payload, cookie } = await readerAuthentication(row);
   let calls = 0;
   const frames = createCommunityFrameClient({ origin: 'https://community.sansphase.com', secret: 'frame-cached-proof-at-least-32-characters', fetch: async () => {
     calls++;
@@ -56,7 +73,7 @@ test('fresh main membership vetoes a still-cached VIP frame while retaining othe
   } });
   const reservation = createServer(); await new Promise<void>(done => reservation.listen(0, '127.0.0.1', done));
   const port = (reservation.address() as { port: number }).port; await new Promise<void>(done => reservation.close(() => done()));
-  const base = `http://127.0.0.1:${port}`, cookie = 'sansphase_reader_session=reader.token';
+  const base = `http://127.0.0.1:${port}`;
   const service = createReaderService({ payload, directory, siteOrigin: base, uidStore: { get: () => '10001' } as unknown as ReturnType<typeof createReaderUidStore>, frames });
   const server = createPreviewServer({ readerService: service, contentService: { snapshot: async () => ({ data: { notes: [] } }) } });
   await new Promise<void>(done => server.listen(port, '127.0.0.1', done));

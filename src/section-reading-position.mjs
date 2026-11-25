@@ -1,5 +1,5 @@
 // Follow the reading position without moving the page or changing directory disclosure.
-export function createSectionPositionTracker({content,sidebar,toolbar,getChapter,getFirstPart,isPaused=()=>false}) {
+export function createSectionPositionTracker({content,sidebar,toolbar=null,headingSelector='.section-body h2,.section-body h3,.section-body h4',getChapter,getFirstPart,isPaused=()=>false}) {
  const doc=content.ownerDocument,win=doc.defaultView;
  let entries=[],buttons=[],chapterButton=null,currentButton=null,currentHidden=false,followPending=false,frame=0,disposed=false;
  function refresh(){
@@ -10,7 +10,7 @@ export function createSectionPositionTracker({content,sidebar,toolbar,getChapter
   chapterButton=[...sidebar.querySelectorAll('[data-section-chapter]')].find(button=>button.dataset.sectionChapter===chapter?.id)||null;
   const byBlock=new Map();
   chapter?.headings?.forEach((h,index)=>{if(!byBlock.has(h.block))byBlock.set(h.block,[]);byBlock.get(h.block).push({...h,index});});
-  entries=[...content.querySelectorAll('.section-body h2,.section-body h3,.section-body h4')].map((node,index)=>{
+  entries=[...content.querySelectorAll(headingSelector)].map((node,index)=>{
    if(!chapter?.headings)return {node,index};
    const block=node.closest('[data-book-block][data-book-offset]');if(!block)return null;
    const range=doc.createRange();range.selectNodeContents(block);range.setEndBefore(node);
@@ -40,7 +40,7 @@ export function createSectionPositionTracker({content,sidebar,toolbar,getChapter
   if(chapter){
    // A bookmark may begin halfway through a subsection whose title is not loaded.
    chapter.headings?.forEach((h,index)=>{if(Number.isInteger(h.part)&&h.part<getFirstPart())selected=index;});
-   const line=Math.max(170,toolbar.getBoundingClientRect().bottom+20);
+   const line=Math.max(170,(toolbar?.getBoundingClientRect().bottom??0)+20);
    for(const entry of entries){if(entry.node.getBoundingClientRect().top<=line)selected=entry.index;else break;}
    // Only at the actual page end may a short final subsection win early.
    // Merely seeing the article bottom still leaves the previous subsection active.
@@ -51,7 +51,7 @@ export function createSectionPositionTracker({content,sidebar,toolbar,getChapter
    if(active&&button.getAttribute('aria-current')!=='location')button.setAttribute('aria-current','location');
    else if(!active&&button.hasAttribute('aria-current'))button.removeAttribute('aria-current');
   });
-  const button=chapter?(buttons[selected]||chapterButton):null,hidden=Boolean(button?.closest('[hidden]'));
+  const button=chapter?(buttons[selected]||chapterButton):null,hidden=Boolean(button?.closest('[hidden],details:not([open])'));
   const follow=button!==currentButton||(currentHidden&&!hidden)||followPending;
   currentButton=button;currentHidden=hidden;followPending=false;
   if(follow&&button&&!hidden)keepVisible(button);
@@ -61,6 +61,7 @@ export function createSectionPositionTracker({content,sidebar,toolbar,getChapter
  const resize=win.ResizeObserver?new win.ResizeObserver(schedule):null;resize?.observe(content);
  win.addEventListener('scroll',schedule,{passive:true});win.addEventListener('resize',resized);
  sidebar.addEventListener('click',schedule);
+ sidebar.addEventListener('toggle',schedule,true);
  content.addEventListener('load',schedule,true);
- return {refresh,update,schedule,destroy(){disposed=true;win.cancelAnimationFrame(frame);resize?.disconnect();win.removeEventListener('scroll',schedule);win.removeEventListener('resize',resized);sidebar.removeEventListener('click',schedule);content.removeEventListener('load',schedule,true);}};
+ return {refresh,update,schedule,destroy(){disposed=true;win.cancelAnimationFrame(frame);resize?.disconnect();win.removeEventListener('scroll',schedule);win.removeEventListener('resize',resized);sidebar.removeEventListener('click',schedule);sidebar.removeEventListener('toggle',schedule,true);content.removeEventListener('load',schedule,true);}};
 }

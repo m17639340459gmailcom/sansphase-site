@@ -1,8 +1,21 @@
 // Runs in <head>, before the asynchronous module graph. Reload restoration
 // belongs to the same render transaction as the view, not a later browser frame.
 (() => {
-  if (!location.hash || /^#\/?(?:home)?\/?$/.test(location.hash))
+  const articlePath = /^\/blog\/[a-z0-9]+(?:-[a-z0-9]+)*$/.test(location.pathname);
+  if (!articlePath && (!location.hash || /^#\/?(?:home)?\/?$/.test(location.hash)))
     document.documentElement.classList.add('is-home-boot', 'is-site-preparing');
+  if (articlePath) {
+    // Apply the saved reading palette before the SSR body first paints.
+    const theme = () => {
+      if (!document.body) return false;
+      try { document.body.classList.toggle('theme-light', localStorage.getItem('sansphase-theme') === 'light'); } catch {}
+      return true;
+    };
+    if (!theme()) {
+      const observer = new MutationObserver(() => { if (theme()) observer.disconnect(); });
+      observer.observe(document.documentElement, {childList: true});
+    }
+  }
   const key = "sansphase-page-view-v1";
   const route = () => location.pathname + location.hash;
   let saved = null;

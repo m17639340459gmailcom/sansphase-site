@@ -34,13 +34,16 @@ test('password reset success stays visible after asynchronous account rendering'
   } finally {releaseRender();Object.assign(globalThis,originals);dom.window.close();}
 });
 
-test('registration requires a code entered on the page and returns to sign-in after verification', async () => {
+test('registration requires a code entered on the page and keeps resend cooldown stable while the device clock changes', async t => {
+  let elapsed = 1_000, deviceTime = Date.now();
+  t.mock.method(performance, 'now', () => elapsed);
+  t.mock.method(Date, 'now', () => deviceTime);
   const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://127.0.0.1:4203/#/account' });
   const originals = Object.fromEntries(['window', 'document', 'location', 'history', 'FormData', 'fetch'].map(key => [key, globalThis[key]]));
   const calls = [];
   Object.assign(globalThis, { window: dom.window, document: dom.window.document, location: dom.window.location,
     history: dom.window.history, FormData: dom.window.FormData,
-    fetch: async (url, options) => { calls.push({ url, body: JSON.parse(options.body) }); return { ok: true, json: async () => ({ requestId: '11111111-1111-4111-8111-111111111111', message: '验证码已发送' }) }; } });
+    fetch: async (url, options) => { calls.push({ url, body: JSON.parse(options.body) }); return { ok: true, json: async () => url === '/api/reader/login-challenge' ? { enabled: false } : { requestId: '11111111-1111-4111-8111-111111111111', message: '验证码已发送' } }; } });
   try {
     const render = () => { document.body.innerHTML = readerPage('account', '', null, false, true); };
     render();
@@ -53,11 +56,19 @@ test('registration requires a code entered on the page and returns to sign-in af
     assert.equal(document.querySelector('[name="email"]').value, 'reader@example.test');
     assert.equal(document.querySelector('[name="password"]'), null);
     assert.equal(document.querySelector('[data-reader-resend-code]').disabled, true);
+    deviceTime += 300_000;
+    ui.route('account', '');
+    assert.equal(document.querySelector('[data-reader-resend-code]').disabled, true, 'moving the device clock ahead must not end the real sixty-second cooldown');
+    deviceTime -= 600_000;
+    elapsed += 60_000;
+    ui.route('account', '');
+    assert.equal(document.querySelector('[data-reader-resend-code]').disabled, false, 'moving the device clock back must not prolong a completed cooldown');
     document.querySelector('[name="code"]').value = '123456';
     document.querySelector('form').dispatchEvent(new dom.window.Event('submit', { bubbles: true, cancelable: true }));
     await new Promise(resolve => setTimeout(resolve, 0));
-    assert.equal(calls[1].url, '/api/reader/verify');
-    assert.deepEqual(calls[1].body, { email: 'reader@example.test', code: '123456', requestId: '11111111-1111-4111-8111-111111111111' });
+    const accountCalls = calls.filter(call => call.url !== '/api/reader/login-challenge');
+    assert.deepEqual(accountCalls.map(call => call.url), ['/api/reader/register', '/api/reader/verify']);
+    assert.deepEqual(accountCalls[1].body, { email: 'reader@example.test', code: '123456', requestId: '11111111-1111-4111-8111-111111111111' });
     assert(document.querySelector('[data-reader-form="login"]'), 'Sign in now must open the login form');
     assert.match(document.querySelector('[data-reader-message]').textContent, /验证成功/);
   } finally { Object.assign(globalThis, originals); dom.window.close(); }
@@ -140,8 +151,14 @@ test('without email delivery the registration tab explains the pause instead of 
 test('registration requires a phone field and owner sign-in opens the author studio', async () => {
   const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://127.0.0.1:4196/#/account' });
   const originals = Object.fromEntries(['window','document','location','fetch','CustomEvent','FormData'].map(key => [key, globalThis[key]]));
+  const requests = [];
   Object.assign(globalThis, { window: dom.window, document: dom.window.document, location: dom.window.location, CustomEvent: dom.window.CustomEvent, FormData: dom.window.FormData,
-    fetch: async () => ({ ok: true, json: async () => ({ role: 'owner', name: 'Owner' }) }) });
+    fetch: async (path, options) => {
+      requests.push({ path, options });
+      if (path === '/api/reader/login-challenge') return { ok: true, json: async () => ({ enabled: false }) };
+      assert.equal(path, '/api/reader/login', 'owner credentials continue through the shared reader login route');
+      return { ok: true, json: async () => ({ role: 'owner', name: 'Owner' }) };
+    } });
   let readerIdentity = false, ownerIdentity, studioOpened = false;
   try {
     const render = () => { document.body.innerHTML = location.hash === '#/account'
@@ -149,6 +166,8 @@ test('registration requires a phone field and owner sign-in opens the author stu
       : '<button type="button" data-author-login>作者台</button>'; };
     render();
     mountReaderUI({ render, onIdentity: () => { readerIdentity = true; } });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const initialRequests = requests.length;
     document.addEventListener('click', event => { if (event.target.closest('[data-author-login]')) studioOpened = true; });
     document.querySelector('[data-reader-mode="register"]').click();
     assert(document.querySelector('[data-reader-form="register"] [name="phone"][required]'));
@@ -161,7 +180,9 @@ test('registration requires a phone field and owner sign-in opens the author stu
     phone.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
     assert.equal(phone.validationMessage, '');
     assert.match(document.body.textContent, /连续六个月未登录/);
+    assert.equal(requests.length, initialRequests, 'registration form display and field validation do not request a login challenge');
     document.querySelector('[data-reader-mode="login"]').click();
+    await new Promise(resolve => setTimeout(resolve, 0));
     window.addEventListener('author:identity', event => { ownerIdentity = event.detail; render(); });
     const form = document.querySelector('[data-reader-form="login"]');
     form.querySelector('[name="email"]').value = 'owner@example.test';
@@ -172,6 +193,16 @@ test('registration requires a phone field and owner sign-in opens the author stu
     assert.equal(ownerIdentity.role, 'owner');
     assert.equal(studioOpened, true);
     assert.equal(readerIdentity, false);
+    assert.deepEqual(requests.slice(-2).map(request => request.path), ['/api/reader/login-challenge', '/api/reader/login']);
+    assert.ok(requests.slice(0, -2).every(request => request.path === '/api/reader/login-challenge'), 'earlier login forms may prepare a challenge but never submit credentials');
+    for (const request of requests) {
+      assert.equal(request.options.method, 'POST');
+      assert.equal(request.options.credentials, 'same-origin');
+      assert.equal(request.options.headers['X-Reader-Request'], '1');
+      assert.equal(request.options.headers['X-Login-Verification'], undefined, 'disabled verification never invents a proof');
+    }
+    assert.equal(requests.at(-2).options.body, '{}');
+    assert.deepEqual(JSON.parse(requests.at(-1).options.body), { email: 'owner@example.test', password: 'owner-secret-long' });
   } finally {
     Object.assign(globalThis, originals);
     dom.window.close();
@@ -219,9 +250,9 @@ test('the password eye reveals and hides entered text without submitting login, 
 
 test('registration nickname validation rejects more than eight visible characters before calling the API', async () => {
   const dom = new JSDOM('<!doctype html><body></body>', { url: 'http://127.0.0.1:4196/#/account' });
-  const previous = Object.fromEntries(['window', 'document', 'FormData', 'fetch'].map(key => [key, globalThis[key]]));
+  const previous = Object.fromEntries(['window', 'document', 'location', 'FormData', 'fetch'].map(key => [key, globalThis[key]]));
   let requests = 0;
-  Object.assign(globalThis, { window: dom.window, document: dom.window.document, FormData: dom.window.FormData, fetch: async () => { requests++; } });
+  Object.assign(globalThis, { window: dom.window, document: dom.window.document, location: dom.window.location, FormData: dom.window.FormData, fetch: async () => { requests++; } });
   try {
     const render = () => { document.body.innerHTML = readerPage('account', '', null); };
     render(); mountReaderUI({ render, onIdentity: () => {} });

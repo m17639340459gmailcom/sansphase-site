@@ -53,6 +53,7 @@ test('resizing retains the draft, navigation and a single usable check-in action
   frame.center()!.dispatchEvent(new window.Event('scroll'));
   for (const width of [1240, 1100, 1000, 800, 701, 700, 390, 800, 1100, 1600]) {
     if (width === 700) frame.center()!.scrollTop = 0; // CSS removes the old scrolling box before the media event.
+    if (width === 390) document.body.scrollTop = 160; // Main-site body overflow can leave a separate old offset.
     resize(width);
     assert.equal(document.querySelector('form'), form, `draft survives at ${width}`);
     assert.equal(document.getElementById('navigation'), nav);
@@ -61,6 +62,8 @@ test('resizing retains the draft, navigation and a single usable check-in action
     assert.ok(button.closest(width <= 1240 ? '[data-frame-checkin]' : '[data-frame-right]'), `check-in location at ${width}`);
     assert.ok(nav?.closest(width <= 700 ? '#site-header' : '.community-feed-rail'), `navigation location at ${width}`);
     assert.equal(width <= 700 ? document.documentElement.scrollTop : frame.center()!.scrollTop, 260, `reading position at ${width}`);
+    if (width > 700) assert.equal(document.documentElement.scrollTop, 0, 'desktop does not retain the former mobile document offset');
+    if (width > 700) assert.equal(document.body.scrollTop, 0, 'desktop does not retain a former body offset either');
     frame.sync(summary); // Normal data refresh cannot re-add a duplicate in the hidden rail.
     button.click();
   }
@@ -176,4 +179,74 @@ test('the formal stylesheet cascade collapses right first, narrows left next, an
     }
     frame.dispose(); window.close();
   }
+});
+
+test('desktop home retains a definite reading viewport and mobile keeps natural document flow', async () => {
+  const { composeCommunityStyles } = await import('../../scripts/compose-community-styles.mjs');
+  const files = ['styles-foundation.css', 'styles-blog.css', 'library-home.css'];
+  const css = (await Promise.all(files.map(file => readFile(new URL(`../../src/${file}`, import.meta.url), 'utf8')))).join('\n') + '\n'
+    + await composeCommunityStyles();
+  for (const width of [1600, 1000, 390]) {
+    const sheet = postcss.parse(css);
+    sheet.walkAtRules('media', rule => {
+      const max = /max-width:\s*(\d+)px/.exec(rule.params), min = /min-width:\s*(\d+)px/.exec(rule.params);
+      if ((!max && !min) || (max && width > Number(max[1])) || (min && width < Number(min[1]))) rule.remove();
+      else rule.replaceWith(...rule.nodes!);
+    });
+    sheet.walkAtRules('container', rule => { rule.remove(); });
+    const { window } = new JSDOM(`<style>${sheet}</style>${header}<main id="main"></main>`, { url: 'http://localhost:4242/#/community/home' });
+    const resize = viewport(window); resize(width);
+    const frame = createStableCommunityFrame(window.document, window);
+    window.document.body.classList.add('content-open', 'community-open');
+    const main = window.document.getElementById('main')!;
+    try {
+      const home = (long: boolean) => `<section class="page community-page" data-community="home"><div class="community-layout"><div class="community-main"><section class="community-curated">精选榜单</section>${long ? '<article class="community-topic">较长讨论列表</article>'.repeat(30) : ''}<button>查看更多</button></div></div></section>`;
+      for (const long of [false, true]) {
+        frame.render(main, home(long), summary);
+        const root = main.querySelector<HTMLElement>('[data-community-frame]')!;
+        const layout = root.querySelector<HTMLElement>(':scope > .community-layout')!;
+        assert.equal(parseFloat(window.getComputedStyle(main).minHeight), 0, 'home must not inherit the main-site full-screen floor');
+        const bodyStyle = window.getComputedStyle(window.document.body);
+        if (width > 700) {
+          assert.match(window.getComputedStyle(root).height, /100dvh/, 'the frame must provide a definite height for column scrolling');
+          assert.equal(window.getComputedStyle(layout).height, '100%');
+          assert.equal(bodyStyle.height, '100dvh');
+          assert.equal(bodyStyle.overflowY, 'hidden', 'body must not acquire independent vertical scrolling from the main-site horizontal overflow rule');
+        } else {
+          assert.equal(window.getComputedStyle(root).height, 'auto');
+          assert.equal(window.getComputedStyle(layout).height, 'auto');
+          assert.notEqual(bodyStyle.overflowY, 'hidden');
+          assert.notEqual(bodyStyle.height, '100dvh');
+        }
+        assert.equal(parseFloat(window.getComputedStyle(main.querySelector('[data-frame-route]')!).minHeight), 0, 'empty home content needs no separate route floor');
+        assert.equal(window.getComputedStyle(frame.center()!).overflow, width > 700 ? 'auto' : 'visible');
+        const outerOverflow = window.getComputedStyle(window.document.documentElement).overflowY;
+        if (width > 700) assert.equal(outerOverflow, 'hidden', 'desktop forbids a second outer scrollbar');
+        else assert.notEqual(outerOverflow, 'hidden', 'mobile retains document scrolling');
+        if (width > 700) assert.equal(window.getComputedStyle(layout).gridTemplateRows, 'minmax(0, 1fr)', 'long content can shrink into the existing scroll columns');
+        assert.equal(main.querySelectorAll('.community-topic').length, long ? 30 : 0, 'no content is removed to reduce whitespace');
+        assert.ok(main.querySelector('button'));
+      }
+      window.history.replaceState(null, '', '#/community/u/10009');
+      frame.render(main, '<section class="community-member" data-community="member">个人资料</section>', summary);
+      assert.equal(window.getComputedStyle(main).minHeight, '100svh', 'other routes retain their original main-site floor');
+      if (width > 700) assert.match(window.getComputedStyle(main.firstElementChild!).height, /100dvh/, 'other desktop routes retain their scrolling viewport');
+      window.history.replaceState(null, '', '#/community/manage');
+      frame.render(main, '', summary);
+      assert.notEqual(window.getComputedStyle(window.document.body).overflowY, 'hidden', 'management restores document scrolling after frame disposal');
+      assert.notEqual(window.getComputedStyle(window.document.body).height, '100dvh');
+    } finally { frame.dispose(); window.close(); }
+  }
+});
+
+test('standalone home keeps a compact ending without changing other community pages', async () => {
+  const { composeCommunityStyles } = await import('../../scripts/compose-community-styles.mjs');
+  const css = await composeCommunityStyles();
+  const { window } = new JSDOM(`<style>${css}</style><section class="page community-page" data-community="home" data-home-design="feed"></section><section class="page community-page" data-community="board"></section>`, { url: 'http://localhost:4242/#/community/home' });
+  try {
+    const home = window.getComputedStyle(window.document.querySelector('[data-community="home"]')!);
+    assert.equal(home.paddingBottom, '24px');
+    assert.equal(parseFloat(home.minHeight), 0);
+    assert.equal(window.getComputedStyle(window.document.querySelector('[data-community="board"]')!).paddingBottom, '80px');
+  } finally { window.close(); }
 });

@@ -8,6 +8,8 @@ import type { Body, Ctx } from './community-context.ts';
 import type { StoredTopic } from './community-store.ts';
 import { bodyImageContent } from '../src/community-body-images.ts';
 import { isCommunityPassiveRead } from './community-passive-request.ts';
+import { prepareReferralAttributions } from './community-referral-context.ts';
+import { referralReviewReason } from './community-referrals.ts';
 
 const pageSize = 20;
 const searchLimit = 40;
@@ -182,6 +184,7 @@ async function createTopic(ctx: Ctx, body: Body) {
   // Resolve mentions before the transaction; the creation, reward, notices and
   // saved retry result then form one synchronous commit.
   const mentions = await ctx.mentions(typeof body.body === 'string' ? body.body : '');
+  const referrals = await prepareReferralAttributions(ctx, [me]);
   await ctx.refreshViewer();
   ctx.requireConsent();
   assertNotMuted(ctx);
@@ -189,6 +192,7 @@ async function createTopic(ctx: Ctx, body: Body) {
   let input: Parameters<typeof live.createTopic>[0] | undefined;
   return live.requests.run(me, ctx.path, ctx.req.headers['x-idempotency-key'], body, () => {
     if (!input) throw Error('Community topic input was not prepared.');
+    referrals.assertCurrent();
     const result = live.createTopic(input);
     if (input.pending) live.members.notify(ctx.ownerMember, { type: 'review', actor: me, topicId: result.id, text: '有新帖子等待审核', data: { state: 'queue' }, link: '#/community/manage' });
     else for (const member of mentions)
@@ -209,8 +213,10 @@ async function createTopic(ctx: Ctx, body: Body) {
     const pin = board === 'meta' && ctx.owner && body.announce === true;
     // 初光的前 2 个带链接或图片的帖子先审后发。
     const review = newcomer && (links > 0 || images.length > 0) && live.members.stats(me).approved < r.l0ReviewCount;
+    const referral = referrals.values.get(me.id);
     input = { board, author: me, title, body: content, tags, images, bounty, meta, resource, pin,
-      pending: review ? (links ? '初光等级，帖子带外链' : '初光等级，帖子带图片') : null };
+      referral, pending: me.kind === 'reader' && live.referrals.needsReview(me.id, referral) ? referralReviewReason
+        : review ? (links ? '初光等级，帖子带外链' : '初光等级，帖子带图片') : null };
     ctx.throttle('topic');
   });
 }
@@ -485,12 +491,14 @@ export async function contentRoutes(ctx: Ctx): Promise<boolean> {
         const permission=topicAction[2]==='feature'?'feature.decide':`topic.${topicAction[2]}` as 'topic.pin'|'topic.lock'|'topic.move'|'topic.approve'|'topic.restore';
         ctx.requireStaff(permission,topic.board);
         if(topicAction[2]==='feature'&&ctx.staff?.role==='assistant')throw fail('协管需推荐给所属版主审批。',403);
+        const referrals = topicAction[2] === 'approve' ? await prepareReferralAttributions(ctx, [topic.author]) : null;
         await ctx.auditMutation(topicAction[2], () => {
           ctx.requireStaff(permission,live.topic(topic.id)?.board);
+          referrals?.assertCurrent();
           if (topicAction[2] === 'pin') live.setPinned(topic.id, flag(body));
           else if (topicAction[2] === 'lock') live.setLocked(topic.id, flag(body));
           else if (topicAction[2] === 'feature') live.setFeatured(topic.id, flag(body), { actor: me });
-          else if (topicAction[2] === 'approve') live.approveTopic(topic.id);
+          else if (topicAction[2] === 'approve') live.approveTopic(topic.id, new Date().toISOString(), referrals?.values.get(topic.author.id));
           else if (topicAction[2] === 'restore') live.restore(target);
           else {
             const board = String(body.board || '');
@@ -498,7 +506,7 @@ export async function contentRoutes(ctx: Ctx): Promise<boolean> {
             ctx.requireStaff('topic.move',board);
             live.move(topic.id, board);
           }
-        }, { topic: topic.id, on: flag(body), board: body.board ?? undefined });
+        }, { topic: topic.id, on: flag(body), board: body.board ?? undefined }, referrals?.confirmation);
         ctx.send({ ok: true });
         return true;
       }

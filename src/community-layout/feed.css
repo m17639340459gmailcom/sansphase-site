@@ -14,6 +14,7 @@
   padding-top: 28px;
   gap: 0;
 }
+.community-page[data-community="home"][data-home-design="feed"] { min-height: 0; padding-bottom: 24px; }
 #site-header.community-header[data-feed-shell="true"] {
   grid-template-columns: minmax(0, 1fr) auto;
 }

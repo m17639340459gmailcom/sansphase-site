@@ -1,5 +1,7 @@
 import {mountDirectoryReturn} from './article-directory-return.mjs';
 import {mountReadingLayout} from './reading-layout.mjs';
+import {publicShareURL} from './share-links.mjs';
+import {articleContentsHTML,articleCodeToolsHTML} from './article-contents.mjs';
 
 let directoryId = 0;
 
@@ -7,24 +9,24 @@ let directoryId = 0;
 // the hash alone: the site uses that hash for its page router.
 function mountDirectory(article, body, headings, english, sidebar) {
   const doc=article.ownerDocument,win=doc.defaultView;
-  const contents=doc.createElement('details');
-  contents.className='article-contents';contents.id=`article-contents-${++directoryId}`;
-  const summary=doc.createElement('summary');summary.textContent=english?'On this page':'文章目录';
-  const nav=doc.createElement('nav');nav.setAttribute('aria-label',summary.textContent);
-  const list=doc.createElement('ol');nav.append(list);contents.append(summary,nav);body.before(contents);
+  let contents=article.querySelector(':scope > details[data-reading-static-directory]');
+  if(!contents) {
+    const template=doc.createElement('template');
+    template.innerHTML=articleContentsHTML(headings.map(h=>({title:h.textContent.trim(),level:h.tagName==='H3'?3:2})),{english,sidebar:Boolean(sidebar),id:`article-contents-${++directoryId}`});
+    contents=template.content.firstElementChild;
+    body.before(contents);
+  }
+  const summary=contents.querySelector('summary'),nav=contents.querySelector('nav');
   const listeners=[],tabIndexes=headings.map(h=>h.getAttribute('tabindex'));
-  const buttons=[];
-  headings.forEach(h=>{
-    const li=doc.createElement('li'),button=doc.createElement('button');
-    button.type='button';button.textContent=h.textContent.trim();
-    if(h.tagName==='H3')button.className='article-contents-child';
+  const buttons=[...nav.querySelectorAll('button')];
+  headings.forEach((h,index)=>{
+    const button=buttons[index];
     const jump=()=>{
       h.setAttribute('tabindex','-1');
       h.scrollIntoView({block:'start',behavior:win.matchMedia?.('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});
       h.focus({preventScroll:true});
     };
     button.addEventListener('click',jump);listeners.push(()=>button.removeEventListener('click',jump));
-    li.append(button);list.append(li);buttons.push(button);
   });
   if(sidebar) {
     contents.classList.add('reading-directory-card');
@@ -53,6 +55,7 @@ function mountDirectory(article, body, headings, english, sidebar) {
     win.addEventListener('scroll',queue,{passive:true});win.addEventListener('resize',queue);update();
     listeners.push(()=>{win.removeEventListener('scroll',queue);win.removeEventListener('resize',queue);if(frame!==null)win.cancelAnimationFrame(frame);});
   }
+  contents.removeAttribute('data-reading-static-directory');
   const cleanReturn=mountDirectoryReturn(article,contents,summary,english);
   return ()=>{
     cleanReturn();listeners.forEach(fn=>fn());
@@ -65,6 +68,7 @@ function mountShare(article, {english,copy}) {
   const footer=article.querySelector('.article-bottom'),more=footer?.querySelector('.article-more');
   if(!more) return ()=>{};
   const doc=article.ownerDocument,win=doc.defaultView;
+  if(!publicShareURL(win.location.href)) return ()=>{};
   const group=doc.createElement('div'); group.className='article-footer-links';
   const share=doc.createElement('div'); share.className='article-share';
   const button=doc.createElement('button'); button.type='button'; button.className='article-share-button';
@@ -81,8 +85,9 @@ function mountShare(article, {english,copy}) {
   };
   const onShare=async()=>{
     if(busy) return;
+    const url=publicShareURL(win.location.href),title=article.querySelector('h1')?.textContent || doc.title;
+    if(!url){message(english?'This content cannot be shared yet.':'当前内容暂不可分享。');return;}
     busy=true;
-    const url=win.location.href,title=article.querySelector('h1')?.textContent || doc.title;
     try {
       if(typeof win.navigator.share==='function') {
         try {await win.navigator.share({title,url}); return;}
@@ -122,12 +127,16 @@ export function enhanceArticleReading(article, {english=false, sidebarHTML='', c
     cleanup.push(mountDirectory(article,body,headings,english,layout?.directory));
   }
   for(const pre of body.querySelectorAll('pre')) {
-    const toolbar=doc.createElement('div'); toolbar.className='article-code-tools';
-    const button=doc.createElement('button'); button.type='button'; button.textContent=english?'Copy code':'复制代码';
-    const status=doc.createElement('span'); status.setAttribute('role','status');
+    let toolbar=pre.previousElementSibling;
+    if(!toolbar?.matches('.article-code-tools[data-reading-static-code]')) {
+      const template=doc.createElement('template');template.innerHTML=articleCodeToolsHTML(english);
+      toolbar=template.content.firstElementChild;pre.before(toolbar);
+    }
+    const button=toolbar.querySelector('button'),status=toolbar.querySelector('[role=status]');
+    toolbar.removeAttribute('inert');toolbar.removeAttribute('data-reading-static-code');
     let active=true;
     const onCopy=async()=>{try{await copy(pre.querySelector('code')?.textContent ?? pre.textContent);if(active)status.textContent=english?'Copied':'已复制';}catch{if(active)status.textContent=english?'Select and copy the code manually.':'复制失败，请选中代码后手动复制。';}};
-    button.addEventListener('click',onCopy); toolbar.append(button,status); pre.before(toolbar);
+    button.addEventListener('click',onCopy);
     cleanup.push(()=>{active=false;button.removeEventListener('click',onCopy);toolbar.remove();});
   }
   return ()=>cleanup.reverse().forEach(fn=>fn());

@@ -6,6 +6,16 @@ import { JSDOM } from "jsdom";
 const code = await readFile(new URL("../src/page-session.js", import.meta.url), "utf8");
 const key = "sansphase-page-view-v1";
 const entry = { route: "/#/notes", scrollY: 800, view: { calendarOpen: true } };
+test('an ordinary article path never enters the homepage preparation state', () => {
+  const dom = new JSDOM('<body><main>Article</main></body>', { url: 'https://test.invalid/blog/hello', runScripts: 'outside-only' });
+  try {
+    dom.window.performance.getEntriesByType = () => [{type: 'navigate'}];
+    dom.window.localStorage.setItem('sansphase-theme', 'light');
+    dom.window.eval(code);
+    assert.equal(dom.window.document.documentElement.classList.contains('is-home-boot'), false);
+    assert.equal(dom.window.document.documentElement.classList.contains('is-site-preparing'), false);
+  } finally { dom.window.close(); }
+});
 function boot({ type = "reload", saved = entry, hash = "#/notes", blocked = false } = {}) {
   const dom = new JSDOM("<main>Stable page</main>", { url: `https://test.invalid/${hash}`, runScripts: "outside-only" });
   const w = dom.window, calls = [];

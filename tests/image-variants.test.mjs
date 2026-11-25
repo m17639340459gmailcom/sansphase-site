@@ -81,18 +81,60 @@ test('resized media and 304 responses require current publication; downloads rem
  } finally {if(server)await new Promise(r=>{server.close(r);server.closeAllConnections();});await rm(dir,{recursive:true,force:true});}
 });
 
-test('image variant cleanup removes both cache modes before deleting the original and leaves unrelated files intact', async () => {
+test('homepage covers serve only a bounded WebP for the current public pick and stay separate from original media', async (t) => {
+ const dir=await mkdtemp(resolve(tmpdir(),'sansphase-home-cover-'));
+ const id=randomUUID(),olderId=randomUUID(),filename=id+'.webp';
+ const source=resolve(dir,'uploads',filename);
+ await mkdir(resolve(dir,'uploads'));
+ await sharp({create:{width:1200,height:800,channels:3,background:'#417faa'}}).webp().toFile(source);
+ const row={id:randomUUID(),kind:'works',slug:'latest',title:'Latest',status:'published',published_at:'2026-01-02',cover:id};
+ const older={...row,id:randomUUID(),slug:'older',published_at:'2026-01-01',cover:olderId};
+ let rows=[row,older];
+ const store=createPayloadStore({findByID:async({id:found})=>{assert.equal(found,id);return {id,filename,mimeType:'image/webp'};}},{directory:dir});
+ store.publicData=async()=>[[],null,[],rows];
+ const server=createPreviewServer({contentService:createContentService({store,url:'http://cms.test',revision:()=>rows}),readerService:{identity:async()=>null}});
+ t.after(async()=>{
+  await new Promise(r=>{server.close(r);server.closeAllConnections();});
+  await rm(dir,{recursive:true,force:true});
+ });
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const base=`http://127.0.0.1:${server.address().port}`;
+ const {featured}=await (await fetch(base+'/api/content?view=bootstrap&public=1&activity=resources&featured=1')).json();
+ assert.equal(featured.works.coverSrc,`/api/media/${id}?view=home-cover`);
+ const url=base+featured.works.coverSrc;
+ const response=await fetch(url);
+ assert.equal(response.status,200);
+ assert.equal(response.headers.get('content-type'),'image/webp');
+ const small=Buffer.from(await response.arrayBuffer());
+ const resized=await sharp(small).metadata();
+ assert.equal(resized.width,768);
+ assert.equal(resized.height,512);
+ assert.notEqual(hash(small),hash(await readFile(source)));
+ const etag=response.headers.get('etag');
+ assert.ok(etag);
+ assert.equal((await fetch(url,{method:'HEAD'})).status,200);
+ for(const blocked of [url+'&download=1',url+'&preview='+id,url+'&w=3840',url+'&view=home-cover',url.replace(id,olderId),base+`/api/media/${id}?w=960&view=content`]) {
+  assert.equal((await fetch(blocked)).status,404);
+ }
+ assert.equal((await fetch(url,{headers:{Range:'bytes=0-9'}})).status,404);
+ rows=[older];
+ assert.equal((await fetch(url,{headers:{'If-None-Match':etag}})).status,404);
+ rows=[{...row,vip_only:true}];
+ assert.equal((await fetch(url)).status,404);
+});
+
+test('image variant cleanup removes all cache modes before deleting the original and leaves unrelated files intact', async () => {
  const dir=await mkdtemp(resolve(tmpdir(),'sansphase-variant-cleanup-'));
  try {
   const source=resolve(dir,'source.png'),other=resolve(dir,'other.png');
   for(const file of [source,other]) await sharp({create:{width:1600,height:900,channels:4,background:'#4477aacc'}}).png().toFile(file);
   const variant=createImageVariants(dir);
-  const paths=await Promise.all([variant(source,384,'image/png'),variant(source,768,'image/png',true),variant(other,384,'image/png',true)]);
+  const paths=await Promise.all([variant(source,384,'image/png'),variant(source,768,'image/png',true),variant(source,768,'image/png','home-cover'),variant(other,384,'image/png',true)]);
   assert.ok(paths.every(Boolean));
   await imageVariants.removeImageVariants(dir,source,()=>unlink(source));
-  for(const path of paths.slice(0,2)) await assert.rejects(stat(path),{code:'ENOENT'});
+  for(const path of paths.slice(0,3)) await assert.rejects(stat(path),{code:'ENOENT'});
   await assert.rejects(stat(source),{code:'ENOENT'});
-  assert.ok((await stat(paths[2])).isFile());
+  assert.ok((await stat(paths[3])).isFile());
   assert.ok((await stat(other)).isFile());
   assert.equal((await readdir(resolve(dir,'image-cache'))).some(name=>name.endsWith('.tmp')),false);
  } finally {await rm(dir,{recursive:true,force:true});}

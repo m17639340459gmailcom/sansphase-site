@@ -13,90 +13,10 @@ import { flushSync, createPortal } from "react-dom";
 import * as ToggleGroup from "@radix-ui/react-toggle-group";
 import {filterTimezones,searchTimezoneCities,timezoneLabel} from './timezone-search.mjs';
 import { Toaster, toast } from "sonner";
-import A11yDialog from "a11y-dialog";
 import GlassSurface from "./vendor/react-bits/GlassSurface.jsx";
-import { communityBoardDrawings } from './community-board-drawings.ts';
-import {
-  createElement,
-  Menu,
-  GripVertical,
-  ArrowRight,
-  ArrowLeft,
-  Download,
-  Plus,
-  X,
-  Search,
-  FileText,
-  Grid2X2,
-  List,
-  Link,
-  Sun,
-  Moon,
-  CalendarDays,
-  CloudSun,
-  UserRound,
-  Music2,
-  Disc3,
-  Tags,
-  Bell,
-  MessagesSquare,
-  Clock3,
-  ChevronDown,
-  ChevronUp,
-  Check,
-  Play, Pause, SkipBack, SkipForward, Volume2, VolumeX,
-  TrendingUp, MessageSquare, ChevronRight, BookOpen, Users, Lock, Pin, Award, Trash2, Send, Star, Copy,
-  Eye, Flag, Gift, PenLine, ThumbsUp, Bookmark, Sunrise, ImagePlus, ShieldCheck,
-  AtSign, LockOpen, ExternalLink, TriangleAlert, Ban, FolderInput, Ellipsis, Trophy, Crown, Bold, Quote, Upload, Truck, Sparkles, Package, RotateCcw, Inbox,
-} from "lucide";
-
-const family = {
-  menu: Menu,
-  grip: GripVertical,
-  right: ArrowRight,
-  left: ArrowLeft,
-  download: Download,
-  plus: Plus,
-  close: X,
-  search: Search,
-  document: FileText,
-  grid: Grid2X2,
-  list: List,
-  link: Link,
-  sun: Sun,
-  moon: Moon,
-  calendar: CalendarDays,
-  "cloud-sun": CloudSun,
-  user: UserRound,
-  music: Music2,
-  disc: Disc3,
-  tags: Tags,
-  bell: Bell,
-  message: MessagesSquare,
-  clock: Clock3,
-  "chevron-down": ChevronDown,
-  "chevron-up": ChevronUp,
-  check: Check,
-  play: Play, pause: Pause, previous: SkipBack, next: SkipForward, volume: Volume2, muted: VolumeX,
-  // Community boards and actions.
-  ...communityBoardDrawings, trending: TrendingUp,
-  reply: MessageSquare, "chevron-right": ChevronRight, book: BookOpen, users: Users, lock: Lock, pin: Pin,
-  award: Award, trash: Trash2, send: Send, star: Star, copy: Copy,
-  eye: Eye, flag: Flag, gift: Gift, pen: PenLine, like: ThumbsUp, bookmark: Bookmark, sunrise: Sunrise, "image-plus": ImagePlus, shield: ShieldCheck,
-  at: AtSign, unlock: LockOpen, external: ExternalLink, alert: TriangleAlert, ban: Ban, move: FolderInput, more: Ellipsis, trophy: Trophy, crown: Crown,
-  bold: Bold, quote: Quote, upload: Upload, truck: Truck, sparkles: Sparkles, package: Package, restore: RotateCcw, inbox: Inbox,
-};
-export const icon = (name: keyof typeof family, classes = "") =>
-  createElement(family[name], {
-    class: `ui-icon ${classes}`,
-    "aria-hidden": "true",
-    focusable: "false",
-    "stroke-width": 1.6,
-  }).outerHTML;
-export const icons = Object.fromEntries(
-  (Object.keys(family) as Array<keyof typeof family>).map((name) => [name, icon(name)]),
-);
-export const arrow = icon("right", "arrow");
+import { icons } from "./site-icons.ts";
+export { arrow, icon, icons } from "./site-icons.ts";
+export { createDialog } from "./site-dialog.ts";
 export { toast };
 
 export function mountToaster(container: Element) {
@@ -128,35 +48,6 @@ export function mountToaster(container: Element) {
     toast.dismiss();
     root.unmount();
   };
-}
-
-export function createDialog(container: HTMLElement) {
-  const dialog = new A11yDialog(container);
-  const doc = container.ownerDocument;
-  const priorInert = new Map<HTMLElement, boolean>();
-  const setBackground = (value: boolean) => {
-    doc.body.classList.toggle("dialog-open", value);
-    for (const id of ["site-header", "home-stage", "main", "site-footer"]) {
-      const node = doc.getElementById(id);
-      if (node) {
-        if (value) {
-          priorInert.set(node, node.inert);
-          node.inert = true;
-        } else if (priorInert.has(node)) node.inert = priorInert.get(node) ?? false;
-      }
-    }
-    if (!value) priorInert.clear();
-  };
-  const show = dialog.show.bind(dialog);
-  dialog.show = (event) => {
-    const wasShown = dialog.shown;
-    show(event);
-    if (!wasShown && dialog.shown) setBackground(true);
-    return dialog;
-  };
-  dialog.on("hide", () => setBackground(false));
-  dialog.on("destroy", () => setBackground(false));
-  return dialog;
 }
 
 // Small adapters keep the existing content controller while Radix owns focus,

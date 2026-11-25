@@ -22,7 +22,7 @@ const subViews: Record<string, CommunityView> = {
 // Pages with their own tabs: the tab is the last part of the address; the first is the default.
 export const communityPageTabs = {
   member: ["topics", "replies", "badges", "icons", "frames", "bookmarks"],
-  stardust: ["ledger", "levels", "rules"],
+  stardust: ["ledger", "levels", "rules", "invites"],
   inbox: ["all", "reply", "thanks", "system"],
   shop: ["all", "look", "card", "digital", "goods", "mine"],
   manage: ["queue", "reports", "profiles", "content", "features", "banners", "boards", "orders", "items", "stewards", "sanctions", "data", "contact", "convention"],

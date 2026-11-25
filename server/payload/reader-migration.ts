@@ -7,6 +7,13 @@ const required = ['authors', 'authors_sessions', 'site_profile', 'library_entrie
 const column = (db:DatabaseSync, table:string, name:string) => db.prepare(`PRAGMA table_info(${table})`).all().some(row => row.name === name);
 const table = (db:DatabaseSync, name:string) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
 const trigger = (db:DatabaseSync, name:string) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?").get(name));
+export function assertReaderAdminRemarksReady(directory: string) {
+  const db = new DatabaseSync(resolve(directory, 'content.db'), { readOnly: true });
+  try {
+    const field = db.prepare('PRAGMA table_info(readers)').all().find(row => row.name === 'admin_remark');
+    if (!field || String(field.type).toLowerCase() !== 'text') throw Error('Apply the explicit reader account migration before starting private reader remarks.');
+  } finally { db.close(); }
+}
 const missingUid = (db:DatabaseSync) => !table(db, 'reader_uids') || Boolean(db.prepare('SELECT 1 FROM readers r WHERE NOT EXISTS (SELECT 1 FROM reader_uids u WHERE u.reader_id=r.id) LIMIT 1').get());
 const ensureUids = (db:DatabaseSync) => {
   if (!table(db, 'reader_uids')) db.exec(readerUidsTableSql);
@@ -37,7 +44,9 @@ export async function migrateReaderAccounts(directory:string) {
       if (!column(db,name,field)) throw Error(`Apply the earlier site migration first: ${name}.${field}`);
     if (table(db, 'readers')) {
       for (const name of ['email', 'nickname', '_verified', 'disabled']) if (!column(db, 'readers', name)) throw Error(`Reader schema is incomplete: ${name}`);
-      if (!column(db, 'readers', 'phone') || !column(db, 'readers', 'signature') || !column(db, 'readers', 'avatar') || !column(db, 'readers', 'vip_started_at') || !column(db, 'readers', 'vip_until') || !column(db, 'readers', 'reset_password_requested_at') || !table(db, 'login_events') || missingUid(db) || !trigger(db, 'reader_uids_on_insert')) {
+      const remarkField = db.prepare('PRAGMA table_info(readers)').all().find(row => row.name === 'admin_remark');
+      if (remarkField && String(remarkField.type).toLowerCase() !== 'text') throw Error('Unexpected private reader remark schema.');
+      if (!column(db, 'readers', 'phone') || !column(db, 'readers', 'signature') || !column(db, 'readers', 'avatar') || !column(db, 'readers', 'vip_started_at') || !column(db, 'readers', 'vip_until') || !column(db, 'readers', 'reset_password_requested_at') || !remarkField || !table(db, 'login_events') || missingUid(db) || !trigger(db, 'reader_uids_on_insert')) {
         const backupDir = resolve(root, 'schema-backups');
         await mkdir(backupDir, { recursive: true });
         const backupPath = resolve(backupDir, `before-reader-schema-${new Date().toISOString().replaceAll(/[:.]/g, '-')}.db`);
@@ -50,6 +59,7 @@ export async function migrateReaderAccounts(directory:string) {
           if (!column(db, 'readers', 'vip_started_at')) db.exec('ALTER TABLE readers ADD COLUMN vip_started_at text');
           if (!column(db, 'readers', 'vip_until')) db.exec('ALTER TABLE readers ADD COLUMN vip_until text');
           if (!column(db, 'readers', 'reset_password_requested_at')) db.exec('ALTER TABLE readers ADD COLUMN reset_password_requested_at text');
+          if (!remarkField) db.exec('ALTER TABLE readers ADD COLUMN admin_remark text');
           if (!table(db, 'login_events')) db.exec(loginEventsSchema);
           ensureUids(db);
           db.exec('COMMIT');
@@ -72,6 +82,7 @@ export async function migrateReaderAccounts(directory:string) {
         avatar text,
         vip_started_at text,
         vip_until text,
+        admin_remark text,
         disabled integer DEFAULT false,
         updated_at text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
         created_at text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,

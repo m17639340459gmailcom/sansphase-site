@@ -3,6 +3,11 @@
 html.community-frame-document,
 html:has(body.community-management-open) { scrollbar-width: auto; scrollbar-gutter: stable; scroll-behavior: auto; overflow-anchor: none; }
 html.community-frame-document { scrollbar-color: transparent transparent; }
+/* Desktop columns own scrolling; the outer document is used only on mobile. */
+@media (min-width: 701px) {
+  html.community-frame-document { overflow-y: hidden; }
+  body.community-frame-open { height: 100dvh; overflow-y: hidden; }
+}
 html:has(body.community-management-open) { scrollbar-color: #87909b transparent; }
 html.community-frame-document::-webkit-scrollbar,
 html:has(body.community-management-open)::-webkit-scrollbar { display: block; width: 10px; height: 10px; }
@@ -68,7 +73,9 @@ body.community-frame-open #site-header[data-feed-shell="true"] .menu-button { di
 body.community-open:is(.community-frame-open, .community-management-open) .community-sky { opacity: .3; }
 body.community-frame-open #site-footer { display: none; }
 .page.community-page[data-community-frame="stable"] { --frame-promo-height: clamp(260px, 24vw, 340px); height: calc(100dvh - var(--header-h)); min-height: 0; padding: 28px 0; }
-.page.community-page[data-community-frame="stable"] > .community-layout { height: 100%; min-height: 0; align-items: stretch; grid-template-columns: 156px minmax(0, 1fr) 280px; gap: 24px; }
+.page.community-page[data-community-frame="stable"] > .community-layout { height: 100%; min-height: 0; align-items: stretch; grid-template-columns: 156px minmax(0, 1fr) 280px; grid-template-rows: minmax(0, 1fr); gap: 24px; }
+/* Keep a definite desktop viewport; remove only the home's extra content floor. */
+body.community-frame-open #main:has(> [data-community-frame="stable"][data-frame-view="home"]) { min-height: 0; }
 .page.community-page[data-community-frame="stable"] > .community-layout > .community-frame-center { grid-column: 2; grid-row: 1; min-width: 0; display: block; overflow: auto; overscroll-behavior-y: contain; overflow-anchor: none; scroll-behavior: auto; scrollbar-width: auto; scrollbar-gutter: stable; scrollbar-color: transparent transparent; padding-right: 12px; min-height: 0; }
 .page.community-page[data-community-frame="stable"] > .community-layout > .community-frame-center::-webkit-scrollbar { width: 10px; height: 10px; }
 .page.community-page[data-community-frame="stable"] > .community-layout > .community-frame-center::-webkit-scrollbar-track { background: transparent; border-radius: 10px; }
@@ -112,6 +119,7 @@ body.community-frame-open #site-footer { display: none; }
 .page.community-page[data-community-frame="stable"] [data-frame-showcase] .community-feed-showcase-card { height: var(--frame-promo-height); min-height: var(--frame-promo-height); max-height: var(--frame-promo-height); }
 .page.community-page[data-community-frame="stable"] .community-frame-showcase-empty { display: grid; place-items: center; height: var(--frame-promo-height); padding: 24px; text-align: center; border: 1px solid var(--feed-edge); border-radius: var(--community-reading-radius); background: var(--community-reading-card); box-shadow: var(--community-reading-card-shadow); color: var(--feed-soft); font-size: 14px; }
 .page.community-page[data-community-frame="stable"] .community-frame-route { min-width: 0; min-height: 360px; padding: 28px 28px 4px; border: 0; border-radius: 0; background: none; box-shadow: none; }
+.page.community-page[data-community-frame="stable"][data-frame-view="home"] .community-frame-route { min-height: 0; }
 .page.community-page[data-community-frame="stable"] [data-frame-showcase]:not([hidden]) + .community-frame-route { padding-top: 8px; }
 .page.community-page[data-community-frame="stable"] .community-sort-tabs button { font-weight: 600; }
 .page.community-page[data-community-frame="stable"] .community-frame-route > .community-page { width: 100%; max-width: none; margin: 0; padding: 0 0 24px; min-width: 0; min-height: 0; }

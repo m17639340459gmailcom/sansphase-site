@@ -75,6 +75,15 @@ test('blog layout keeps notice, article area and side cards in their existing or
   dom.window.close();
 });
 
+test('shared reading sidebar extraction preserves the approved author and music markup',()=>{
+  const {page,state,setLanguage}=setup();
+  assert.equal(page.author(), '<div class="blog-identity"><div class="identity-mark" aria-hidden="true">無</div><h2>作者</h2><p>记录生活</p><div class="identity-line"></div><span class="subtle identity-bio">一点简介</span><p class="identity-count">2 篇文章 · 2 个标签</p><nav class="identity-links" aria-label="作者其他平台"></nav></div>');
+  assert.equal(page.music(), '<div class="blog-side-card blog-music-card"><span class="eyebrow">MUSIC音乐</span><p class="subtle">歌单待更新</p></div>');
+  setLanguage('en'); state.siteContent.profile.music.tracks=[{}];
+  assert.equal(page.author(), '<div class="blog-identity"><div class="identity-mark" aria-hidden="true">無</div><h2>作者</h2><p>Keeping notes</p><div class="identity-line"></div><span class="subtle identity-bio">A short bio</span><p class="identity-count">2 articles · 2 tags</p><nav class="identity-links" aria-label="Author links"></nav></div>');
+  assert.equal(page.music(), '<div class="blog-side-card blog-music-card"><span class="eyebrow">MUSICMUSIC</span><div id="blog-audio-player" aria-label="Music player"></div></div>');
+});
+
 test('blog presentation stays in the existing UI bundle',async()=>{
   const {readFile,readdir}=await import('node:fs/promises');
   const app=await readFile('dist/app.mjs','utf8');

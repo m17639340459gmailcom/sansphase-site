@@ -4,7 +4,7 @@ export type MembershipIdentity = { vip?: boolean; vipUntil?: string | null };
 const hour = 3600000,
   day = 24 * hour;
 
-// Presentation only: a future date never grants membership without server approval.
+// The server decides membership; the device clock estimates the countdown only.
 export function membershipSummary(
   reader: MembershipIdentity,
   now = Date.now(),
@@ -13,7 +13,7 @@ export function membershipSummary(
   const until = Date.parse(reader.vipUntil || "");
   const valid = Number.isFinite(until),
     left = valid ? Math.max(0, until - now) : 0;
-  const active = reader.vip === true && left > 0;
+  const active = reader.vip === true;
   const status = active
     ? "active"
     : valid && until <= now
@@ -21,7 +21,7 @@ export function membershipSummary(
       : "inactive";
   const days = Math.floor(left / day),
     hours = Math.floor((left % day) / hour);
-  const remaining = !active
+  const remaining = !active || !valid
     ? "—"
     : days > 0
       ? english
@@ -37,7 +37,7 @@ export function membershipSummary(
   return {
     active,
     status,
-    expiring: active && left <= 5 * day,
+    expiring: active && valid && left <= 5 * day,
     remaining,
     until: valid ? new Date(until).toISOString() : null,
     left,
@@ -99,8 +99,8 @@ export function refreshMembership(
         : "普通读者";
   }
   if (!state.active) {
-    // Expiration updates the visible qualification only. Keep the stored
-    // personal frame choice so a verified renewal can restore it later.
+    // Server-confirmed expiration updates the visible qualification only.
+    // Keep the stored choice so a verified renewal can restore it later.
     for (const avatar of card?.querySelectorAll<HTMLElement>('.reader-avatar-frame-vipmoon') ?? []) {
       avatar.classList.remove('reader-avatar-frame-vipmoon');
       avatar.querySelector(':scope > .reader-profile-frame-image')?.remove();
@@ -114,23 +114,55 @@ export function refreshMembership(
   return state;
 }
 
-export function mountMembershipClock(root: Document, english: () => boolean) {
+type MembershipRefresh = { reader: MembershipIdentity; serverNow?: number };
+
+export function mountMembershipClock(root: Document, english: () => boolean, {
+  refresh,
+}: { refresh?: () => Promise<MembershipRefresh | null> } = {}) {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const update = () => {
+  let active = false, disposed = false, pending = false, generation = 0;
+  let anchor: { serverNow: number; elapsed: number } | null = null;
+  const now = () => anchor ? anchor.serverNow + Math.max(0, performance.now() - anchor.elapsed) : Date.now();
+  const paint = () => {
     clearTimeout(timer);
-    const state = refreshMembership(root, english());
-    if (!state || root.hidden) return;
-    timer = setTimeout(
-      update,
-      state.active ? Math.min(60000, Math.max(1, state.left + 1)) : 60000,
-    );
+    const state = refreshMembership(root, english(), now());
+    if (!active || disposed || !state || root.hidden) return;
+    // Only a server time anchor can schedule an earlier expiry recheck. Zero
+    // remaining time or an unavailable server never creates a busy loop.
+    const delay = anchor && state.active && state.left > 0 ? Math.min(60000, Math.max(1000, state.left + 1000)) : 60000;
+    timer = setTimeout(() => { void recheck(); }, delay);
   };
-  root.addEventListener("visibilitychange", update);
+  const recheck = async () => {
+    const section = root.querySelector<HTMLElement>('[data-reader-membership]');
+    if (!active || disposed || root.hidden || !section) { clearTimeout(timer); return; }
+    if (!refresh || pending) { paint(); return; }
+    const token = generation;
+    pending = true;
+    try {
+      const value = await refresh();
+      if (token !== generation || disposed || !active || root.querySelector('[data-reader-membership]') !== section) return;
+      if (value) {
+        if (Number.isFinite(value.serverNow)) anchor = { serverNow: value.serverNow!, elapsed: performance.now() };
+        section.dataset.vip = String(value.reader.vip === true);
+        section.dataset.until = value.reader.vipUntil || '';
+      }
+    } catch {
+      // Network failure is not evidence that a confirmed membership expired.
+    } finally {
+      pending = false;
+      if (token === generation && !disposed && active) paint();
+    }
+  };
+  const visibility = () => { if (root.hidden) clearTimeout(timer); else void recheck(); };
+  root.addEventListener("visibilitychange", visibility);
   return {
-    update,
+    update() { active = true; paint(); },
+    recheck,
+    pause() { active = false; generation++; clearTimeout(timer); anchor = null; },
     dispose() {
+      disposed = true; active = false; generation++;
       clearTimeout(timer);
-      root.removeEventListener("visibilitychange", update);
+      root.removeEventListener("visibilitychange", visibility);
     },
   };
 }

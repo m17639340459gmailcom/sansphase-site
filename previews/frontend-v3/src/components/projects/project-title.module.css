@@ -1,0 +1,10 @@
+.title :global(.fx-u) {
+  font-variation-settings:
+    "wght" calc(600 + var(--fx-swell, 0) * 200),
+    "wdth" calc(100 - var(--fx-swell, 0) * 14);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .title :global(.fx-u) {
+    transition: font-variation-settings 0.5s var(--fx-ease);
+  }
+}

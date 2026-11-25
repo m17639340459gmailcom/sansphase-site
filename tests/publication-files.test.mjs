@@ -3,27 +3,43 @@ import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, rm, readFile } from 'node:fs/promises';
 import { resolve, dirname, relative } from 'node:path';
 import { tmpdir } from 'node:os';
+import { existsSync } from 'node:fs';
 import ts from 'typescript';
 import { publicationFiles, scanPublication } from '../scripts/publication-files.mjs';
 
+test('publication retains the local admin harness and the lockfile-required dependency patch', async () => {
+  const files = new Set(await publicationFiles());
+  for (const file of ['scripts/build-admin-console.ts', 'server/admin-console-assets.ts', 'scripts/preview-admin-console.ts', 'scripts/fixtures/admin-console-preview.ts', 'docs/ADMIN-CONSOLE-LOCAL.md', 'docs/READER-ADMIN-REMARKS.md', 'patches/query-string@9.5.1.patch']) {
+    assert.ok(files.has(file), `missing admin dependency ${file}`);
+  }
+});
+
 test('publication includes relative imports of every shipped build script and test',async()=>{
   const root=resolve('.');
-  const files=new Set(await publicationFiles(root));
-  for(const file of files) {
-    if(!/^(scripts|tests)\//.test(file)||!/\.(mjs|ts)$/.test(file))continue;
-    const text=await readFile(resolve(root,file),'utf8');
-    const imports=[];
-    const visit=node=>{
-      if((ts.isImportDeclaration(node)||ts.isExportDeclaration(node))&&node.moduleSpecifier&&ts.isStringLiteral(node.moduleSpecifier)) imports.push(node.moduleSpecifier.text);
-      if(ts.isCallExpression(node)&&node.expression.kind===ts.SyntaxKind.ImportKeyword&&node.arguments.length===1&&ts.isStringLiteral(node.arguments[0])) imports.push(node.arguments[0].text);
-      ts.forEachChild(node,visit);
-    };
-    visit(ts.createSourceFile(file,text,ts.ScriptTarget.Latest));
-    for(const imported of imports.filter(path=>path.startsWith('.')&&/\.(mjs|ts)$/.test(path))) {
-      const dependency=relative(root,resolve(dirname(resolve(root,file)),imported)).replaceAll('\\','/');
-      // These modules are built before the tests import them; generated output is never shipped as source.
-      if (dependency.startsWith('dist/') || ['outputs/verification/library-scene-test.mjs', 'outputs/verification/opening-sky-test.mjs'].includes(dependency)) continue;
-      assert.ok(files.has(dependency),`${file} imports missing publication file ${dependency}`);
+  const frontends=['v1'];
+  if (existsSync(resolve(root,'previews/hero-upgrade/package-lock.json'))) frontends.push('v2');
+  if (existsSync(resolve(root,'previews/frontend-v3/package-lock.json'))) frontends.push('v3');
+  for(const frontend of frontends) {
+    const files=new Set(await publicationFiles(root,{frontend}));
+    if (frontend !== 'v3') assert.ok(![...files].some(file=>file.startsWith('previews/frontend-v3/')),`${frontend} includes the V3 application`);
+    assert.equal(files.has('tests/admin-console-escape-browser.test.mjs'), frontend === 'v3',
+      `${frontend} should ship the admin Escape regression only when the V3 harness is present`);
+    for(const file of files) {
+      if(!/^(scripts|tests)\//.test(file)||!/\.(mjs|ts)$/.test(file))continue;
+      const text=await readFile(resolve(root,file),'utf8');
+      const imports=[];
+      const visit=node=>{
+        if((ts.isImportDeclaration(node)||ts.isExportDeclaration(node))&&node.moduleSpecifier&&ts.isStringLiteral(node.moduleSpecifier)) imports.push(node.moduleSpecifier.text);
+        if(ts.isCallExpression(node)&&node.expression.kind===ts.SyntaxKind.ImportKeyword&&node.arguments.length===1&&ts.isStringLiteral(node.arguments[0])) imports.push(node.arguments[0].text);
+        ts.forEachChild(node,visit);
+      };
+      visit(ts.createSourceFile(file,text,ts.ScriptTarget.Latest));
+      for(const imported of imports.filter(path=>path.startsWith('.')&&/\.(mjs|ts)$/.test(path))) {
+        const dependency=relative(root,resolve(dirname(resolve(root,file)),imported)).replaceAll('\\','/');
+        // These modules are built before the tests import them; generated output is never shipped as source.
+        if (dependency.startsWith('dist/') || ['outputs/verification/library-scene-test.mjs', 'outputs/verification/opening-sky-test.mjs'].includes(dependency)) continue;
+        assert.ok(files.has(dependency),`${frontend}: ${file} imports missing publication file ${dependency}`);
+      }
     }
   }
 });

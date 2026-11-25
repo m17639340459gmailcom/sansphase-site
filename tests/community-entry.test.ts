@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { communityEntryDestination, communityEntryTarget, createCommunityEntry, communityHostRoute, rewriteCommunityMainSiteLinks, exitCommunity } from '../src/community-entry.ts';
+import { communityEntryDestination, communityEntryTarget, communityEntryPost, communityEntryLandingLocation, createCommunityEntry, communityHostRoute, rewriteCommunityMainSiteLinks, exitCommunity } from '../src/community-entry.ts';
 import { communityLandingHTML, communityAccountHTML } from '../src/community.ts';
 
 const destination = 'https://community.sansphase.com';
@@ -24,11 +24,68 @@ test('server ticket URL must use the configured exact origin, dedicated entry pa
   assert.equal(communityEntryTarget({ ...valid, expiresAt: new Date(0).toISOString() }, destination), null);
 });
 
+test('community entry does not reject a fresh server ticket because the device clock is ahead or behind', async t => {
+  const serverTime = Date.parse('2026-10-13T08:00:00Z');
+  const issued = { url: target, expiresAt: new Date(serverTime + 60_000).toISOString() };
+  for (const skew of [-86_400_000, -300_000, -10_000, -5_000, 5_000, 10_000, 300_000, 86_400_000]) {
+    t.mock.method(Date, 'now', () => serverTime + skew);
+    let navigated = '';
+    const entry = createCommunityEntry({ config: () => config, request: async () => response(issued), navigate: url => { navigated = url; }, fadeOut: async () => {}, changed: () => {} });
+    assert.equal(await entry.enter(true), true, `device skew ${skew}ms must not block the server-issued ticket`);
+    assert.equal(navigated, target);
+    t.mock.restoreAll();
+  }
+});
+
+test('adjusting the device clock while requesting a ticket cannot break community entry', async t => {
+  const serverTime = Date.parse('2026-10-13T08:00:00Z');
+  let deviceTime = serverTime;
+  t.mock.method(Date, 'now', () => deviceTime);
+  let navigated = '';
+  const entry = createCommunityEntry({ config: () => config, request: async () => {
+    deviceTime += 300_000;
+    return response({ url: target, expiresAt: new Date(serverTime + 60_000).toISOString() });
+  }, navigate: url => { navigated = url; }, fadeOut: async () => { deviceTime -= 600_000; }, changed: () => {} });
+  assert.equal(await entry.enter(true), true);
+  assert.equal(navigated, target);
+});
+
+test('entry expiry metadata must remain a positive valid timestamp while the authority owns expiration', () => {
+  for (const expiresAt of [null, false, '', -1, 0, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, 1.5]) {
+    assert.equal(communityEntryTarget({ ...valid, expiresAt }, destination), null);
+  }
+});
+
 test('signed-out main visitors use the login gate without issuing an entry request', async () => {
   let requests = 0;
   const entry = createCommunityEntry({ config: () => config, request: async () => { requests++; return response(); }, navigate: () => assert.fail('must not navigate'), fadeOut: async () => {}, changed: () => {} });
   assert.equal(await entry.enter(false), false);
   assert.equal(entry.state(), 'auth'); assert.equal(requests, 0);
+});
+
+test('only a single UUID post target survives the main-site landing and login query', () => {
+  const post = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  assert.equal(communityEntryPost(`?post=${post}`), post);
+  assert.equal(communityEntryPost('', `#/post/${post}`), post);
+  assert.equal(communityEntryLandingLocation('/', '?communityTheme=light', `#/post/${post}`), `/?communityTheme=light&post=${post}#/community`);
+  assert.equal(communityEntryLandingLocation('/', `?post=${post}`, '#/community/home'), `/?post=${post}#/community`);
+  for (const search of ['?post=https://evil.example', '?post=//evil.example', '?post=../admin', `?post=${post}&post=${post}`]) {
+    assert.equal(communityEntryPost(search), null);
+    assert.equal(new URL(communityEntryLandingLocation('/', search, '#/community'), 'https://www.sansphase.com').search, '');
+  }
+});
+
+test('a validated post target is appended only after the server-issued ticket URL is verified', async () => {
+  const post = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  for (const requested of [post, 'https://evil.example', '../admin', '']) {
+    let navigated = '';
+    const entry = createCommunityEntry({ config: () => config, post: () => requested, request: async (_url, init) => {
+      assert.equal(init.body, '{}', 'navigation context does not alter the authenticated entry protocol'); return response();
+    }, navigate: url => { navigated = url; }, fadeOut: async () => {}, changed: () => {} });
+    assert.equal(await entry.enter(false), false); assert.equal(navigated, '');
+    assert.equal(await entry.enter(true), true);
+    assert.equal(navigated, target + (requested === post ? `&post=${post}` : ''));
+  }
 });
 
 test('concurrent entry attempts mint once, send same-origin protected request, fade then navigate', async () => {

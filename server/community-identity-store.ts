@@ -4,11 +4,12 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 import { DatabaseSync } from 'node:sqlite';
 import { createTransaction } from './community-db.ts';
 import { identityHash, opaqueIdentityValue, validIdentityValue } from './community-identity-protocol.ts';
+import { accountSessionLifetimeMs } from './auth-session-policy.ts';
 
 export type IdentitySourceSession = { kind: 'reader' | 'owner'; id: string; cookie: string };
 type StoredSource = { state: string };
 const fileOf = (directory: string) => resolve(directory, 'community-identity.db');
-const idleMs = 30 * 60_000, absoluteMs = 12 * 60 * 60_000;
+const idleMs = accountSessionLifetimeMs, absoluteMs = accountSessionLifetimeMs;
 function entryStat(path: string) {
   try { return lstatSync(path); }
   catch (error) { if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null; throw error; }
@@ -42,6 +43,7 @@ export function prepareIdentityStore(directory: string) {
   chmodSync(file, 0o600);
   const db = new DatabaseSync(file);
   try {
+    db.exec('PRAGMA busy_timeout=5000');
     const version = db.prepare('PRAGMA user_version').get() as { user_version: number };
     if (version.user_version !== 0 && version.user_version !== 1) throw Error('Unsupported identity store schema.');
     if (version.user_version === 0 && db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().length) throw Error('Identity preparation requires an empty dedicated database.');
@@ -49,8 +51,15 @@ export function prepareIdentityStore(directory: string) {
       CREATE TABLE IF NOT EXISTS identity_tickets(ticket_hash TEXT PRIMARY KEY,binding_hash TEXT NOT NULL,state TEXT NOT NULL,expires_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS identity_sessions(session_hash TEXT PRIMARY KEY,state TEXT NOT NULL,created_at INTEGER NOT NULL,last_seen INTEGER NOT NULL,expires_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS identity_nonces(nonce_hash TEXT PRIMARY KEY,expires_at INTEGER NOT NULL);
-      CREATE TABLE IF NOT EXISTS identity_limits(key_hash TEXT PRIMARY KEY,count INTEGER NOT NULL,expires_at INTEGER NOT NULL);
-      PRAGMA user_version=1; COMMIT;`);
+      CREATE TABLE IF NOT EXISTS identity_limits(key_hash TEXT PRIMARY KEY,count INTEGER NOT NULL,expires_at INTEGER NOT NULL);`);
+    const now = Date.now();
+    // Retain only references still valid under the legacy policy. Their old
+    // twelve-hour expiry identifies them without breaking old runtime schema.
+    db.prepare(`UPDATE identity_sessions SET expires_at=CASE
+      WHEN expires_at>? AND last_seen>? AND created_at<=? AND last_seen<=? THEN created_at+?
+      ELSE 0 END WHERE expires_at=created_at+?`)
+      .run(now, now - 30 * 60_000, now, now, absoluteMs, 12 * 60 * 60_000);
+    db.exec('PRAGMA user_version=1; COMMIT');
   } finally { db.close(); }
   return { file, version: 1 };
 }
@@ -98,7 +107,12 @@ export function createIdentityStore({ directory, stateEncryptionKey }: { directo
     session(sessionRef: string, now: number) {
       if (!validIdentityValue(sessionRef)) return null;
       return tx(() => {
-        const row = db.prepare('SELECT state FROM identity_sessions WHERE session_hash=? AND expires_at>? AND last_seen>?').get(identityHash(sessionRef), now, now - idleMs) as StoredSource | undefined;
+        // A rollback can create legacy twelve-hour rows again. Without an
+        // explicit preparation they keep their original idle rule, so a stale
+        // row cannot be revived merely by restarting the newer application.
+        const row = db.prepare(`SELECT state FROM identity_sessions WHERE session_hash=? AND expires_at>? AND last_seen>?
+          AND (expires_at!=created_at+? OR last_seen>?)`)
+          .get(identityHash(sessionRef), now, now - idleMs, 12 * 60 * 60_000, now - 30 * 60_000) as StoredSource | undefined;
         if (!row) return null;
         db.prepare('UPDATE identity_sessions SET last_seen=? WHERE session_hash=?').run(now, identityHash(sessionRef));
         return decrypt(row.state);

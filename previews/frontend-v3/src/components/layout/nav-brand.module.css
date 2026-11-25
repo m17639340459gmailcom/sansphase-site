@@ -1,0 +1,163 @@
+.brand {
+  position: relative;
+  display: inline-block;
+  line-height: 1;
+}
+
+/* Accent gradient text with a glint layer parked off to the left; a glitch sweeps it across. */
+.word {
+  --brand-glint: color-mix(in oklab, var(--amber) 60%, var(--bg-elevated));
+  display: inline-flex;
+  background-image:
+    linear-gradient(100deg, transparent 38%, var(--brand-glint) 50%, transparent 62%),
+    linear-gradient(100deg, var(--accent) 0%, var(--amber) 60%, var(--accent-strong) 100%);
+  background-repeat: no-repeat;
+  background-size:
+    250% 100%,
+    100% 100%;
+  background-position:
+    130% 0,
+    0 0;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+:global(.dark) .word {
+  --brand-glint: color-mix(in oklab, var(--amber) 55%, var(--fg));
+}
+
+/* Each glyph cell keeps the width of its real letter, so scrambled glyphs never shift the bar. */
+.cell {
+  display: inline-grid;
+}
+.cell > span {
+  grid-area: 1 / 1;
+}
+.sizer {
+  visibility: hidden;
+}
+.char {
+  display: flex;
+  width: 0;
+  justify-content: center;
+  justify-self: center;
+  white-space: nowrap;
+}
+
+/* Chromatic slices, only visible while the glitch runs. */
+.ghost {
+  position: absolute;
+  inset: 0;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+}
+.ghost[data-layer="a"] {
+  color: var(--cool);
+}
+.ghost[data-layer="b"] {
+  color: var(--amber);
+}
+
+.brand[data-glitch] .word {
+  animation:
+    brand-shine 0.9s var(--fx-ease) both,
+    brand-jolt 0.42s steps(1, end) both;
+}
+.brand[data-glitch] .ghost[data-layer="a"] {
+  animation: brand-slice-a 0.42s steps(1, end) both;
+}
+.brand[data-glitch] .ghost[data-layer="b"] {
+  animation: brand-slice-b 0.42s steps(1, end) both;
+}
+
+@keyframes brand-shine {
+  from {
+    background-position:
+      130% 0,
+      0 0;
+  }
+  to {
+    background-position:
+      -30% 0,
+      0 0;
+  }
+}
+@keyframes brand-jolt {
+  0% {
+    translate: 1px 0;
+  }
+  25% {
+    translate: -1.5px 0;
+  }
+  50% {
+    translate: 0.5px 0;
+  }
+  75%,
+  100% {
+    translate: 0 0;
+  }
+}
+@keyframes brand-slice-a {
+  0% {
+    opacity: 0.8;
+    clip-path: inset(12% 0 58% 0);
+    translate: -3px 0;
+  }
+  20% {
+    clip-path: inset(62% 0 8% 0);
+    translate: 2px 0;
+  }
+  40% {
+    clip-path: inset(34% 0 42% 0);
+    translate: -2px 0;
+  }
+  60% {
+    clip-path: inset(4% 0 78% 0);
+    translate: 3px 0;
+  }
+  80% {
+    clip-path: inset(72% 0 10% 0);
+    translate: -1px 0;
+  }
+  100% {
+    opacity: 0;
+    clip-path: inset(50% 0 50% 0);
+    translate: 0 0;
+  }
+}
+@keyframes brand-slice-b {
+  0% {
+    opacity: 0.75;
+    clip-path: inset(66% 0 6% 0);
+    translate: 3px 0;
+  }
+  20% {
+    clip-path: inset(8% 0 70% 0);
+    translate: -2px 0;
+  }
+  40% {
+    clip-path: inset(48% 0 30% 0);
+    translate: 2px 0;
+  }
+  60% {
+    clip-path: inset(22% 0 60% 0);
+    translate: -3px 0;
+  }
+  80% {
+    clip-path: inset(80% 0 4% 0);
+    translate: 1px 0;
+  }
+  100% {
+    opacity: 0;
+    clip-path: inset(50% 0 50% 0);
+    translate: 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .brand[data-glitch] .word,
+  .brand[data-glitch] .ghost {
+    animation: none !important;
+  }
+}

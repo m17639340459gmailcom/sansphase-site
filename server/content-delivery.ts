@@ -1,11 +1,11 @@
 import {filterItems} from '../src/core.mjs';
-import {createHash,randomUUID} from 'node:crypto';
+import {createHash} from 'node:crypto';
 import {bookManifest,bookPart} from './book-delivery.ts';
 
 type PublicItem = { id: string; title: string; category?: string; summary?: string; en?: string; summaryEn?: string; tags?: string[]; bodyHTML?: string; attachments?: unknown[]; locked?: boolean; coverSrc?: string; [key: string]: unknown };
 type PublicData = {source?: string; profile?: unknown; announcements?: unknown; [key: string]: unknown};
 type PageEntry = {body: string; etag: string; bytes?: number};
-type PageState = {revision: string; pages: Map<string, PageEntry>; bytes: number};
+type PageState = {pages: Map<string, PageEntry>; bytes: number};
 const kinds: string[]=['notes','works','resources','software','resource-center'];
 const bootstraps=new WeakMap<PublicData, Record<string, unknown>>();
 const responses=new WeakMap<PublicData, PageState>();
@@ -13,14 +13,17 @@ const responses=new WeakMap<PublicData, PageState>();
 // must first acquire the current, permission-checked publication snapshot.
 export function publicPageResponse(data: PublicData,params: URLSearchParams) {
  let state=responses.get(data);
- if(!state)responses.set(data,state={revision:randomUUID(),pages:new Map(),bytes:0});
+ if(!state)responses.set(data,state={pages:new Map(),bytes:0});
  const normalized=new URLSearchParams(params);normalized.sort();
  const key=normalized.toString();
  let entry=state.pages.get(key);
  if(entry){state.pages.delete(key);state.pages.set(key,entry);return entry;}
  const body=JSON.stringify(publicPage(data,params));
  const bytes=Buffer.byteLength(body);
- entry={body,etag:'"'+createHash('sha256').update(state.revision+':'+key).digest('hex')+'"'};
+ // A rebuilt publication can have identical bytes after an unrelated account
+ // write. Its validator remains valid, but the current snapshot above still
+ // determines visibility before a conditional response is considered.
+ entry={body,etag:'"'+createHash('sha256').update(body).digest('hex')+'"'};
  if(bytes<=2*1024*1024) {
   state.pages.set(key,{...entry,bytes});state.bytes+=bytes;
   while(state.pages.size>64||state.bytes>2*1024*1024) {

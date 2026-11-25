@@ -1,3 +1,4 @@
+@import url("./login-verification.css");
 .reader-page { min-height: min(72vh, 720px); display: grid; place-items: center; padding: clamp(26px, 4vw, 54px) 18px 58px; }
 .reader-page:not(.reader-admin-page) { min-height: calc(100dvh - 162px); padding: 24px 18px; }
 .reader-card { box-sizing: border-box; width: min(100%, 480px); padding: 32px; border: 1px solid var(--manage-edge); background: var(--manage-panel); box-shadow: 0 22px 80px rgba(0, 6, 18, .32); color: var(--text); border-radius: var(--radius-card); }
@@ -41,6 +42,16 @@
 .reader-tabs button[aria-current="page"] { color: #fff; border-bottom-color: #a4d0ff; }
 .reader-card button, .reader-card a { font: inherit; }
 .reader-card [hidden] { display: none !important; }
+.reader-card--auth .login-verification-control { box-sizing: border-box; display: flex; align-items: center; gap: 10px; width: 100%; min-height: 43px; padding: 10px 12px; border: 1px solid var(--manage-edge); border-radius: 10px; background: var(--manage-inset); color: var(--text); text-align: left; font-size: 13px; cursor: pointer; }
+.reader-card--auth .login-verification-control:hover { border-color: var(--focus-edge); }
+.reader-card--auth .login-verification-control:focus-visible { outline: none; box-shadow: none; border-color: var(--focus-edge); text-decoration: underline; text-underline-offset: 4px; }
+.reader-card--auth .login-verification-control:disabled { cursor: default; }
+.reader-card--auth .login-verification-control[aria-busy="true"] { cursor: wait; }
+.reader-card--auth .login-verification-control[data-state="verified"] { border-color: #88bca1; }
+.reader-card--auth [data-login-verification-icon] { display: block; flex: none; width: 19px; height: 19px; color: var(--signal); fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.reader-card--auth [data-login-verification-check] { visibility: hidden; }
+.reader-card--auth .login-verification-control[data-state="verified"] [data-login-verification-check] { visibility: visible; }
+.reader-card--auth .login-verification-control[data-state="verified"] [data-login-verification-icon] { color: #a9d5bd; }
 .reader-card--auth .reader-primary { box-sizing: border-box; display: flex; justify-content: center; align-items: center; gap: 8px; width: 100%; min-height: 43px; border: 1px solid var(--text); border-radius: var(--pill); background: var(--text); color: var(--surface); font-size: 14px; font-weight: 650; text-decoration: none; cursor: pointer; transition: background .18s ease, box-shadow .18s ease, transform .18s ease; }
 .reader-card--auth .reader-primary:hover { background: #eef6ff; box-shadow: 0 5px 22px rgba(137, 188, 233, .2); transform: translateY(-1px); }
 .reader-card--auth .reader-primary:disabled { opacity: .6; cursor: wait; transform: none; }

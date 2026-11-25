@@ -549,7 +549,7 @@ test('a pending publication shortcut cannot repaint the old pane after managemen
   assert.ok(contentReads >= 2, 'the settled write refreshes the current pane and releases its route handoff');
   const page = fixture.main.querySelector('[data-community="manage"]');
   assert.equal(page.dataset.tab, 'content');
-  assert.equal(page.querySelector('.community-management-nav [aria-current="page"]').getAttribute('href'), '#/community/manage/content');
+  assert.equal(page.querySelector('.community-management-nav a[href="#/community/manage/content"]'), null, 'the legacy route stays readable without restoring the removed menu entry');
   const currentLink = page.querySelector('.community-queue-title');
   assert.equal(currentLink.textContent, latestContent.title);
   assert.equal(page.querySelector('[data-action="community-item-active"]'), null);
@@ -975,7 +975,7 @@ test('modern staff configuration remains intact when navigation or reader identi
   const form = main.querySelector('[data-community-form="steward-scope"]');
   form.querySelector('[name="delegable"]').checked = true;
   let confirmations = 0; w.confirm = () => { confirmations++; return false; };
-  main.querySelector('a[href="#/community/manage/content"]').click(); await turn();
+  main.querySelector('.community-management-nav a[href="#/community/manage"]').click(); await turn();
   assert.equal(confirmations, 1); assert.equal(w.location.hash, '#/community/manage/stewards');
   assert.equal(main.querySelector('[data-community-form="steward-scope"]'), form);
   assert.equal(form.querySelector('[name="delegable"]').checked, true);
@@ -1154,6 +1154,39 @@ test('editing a lookup UID invalidates the previous candidate and stale response
   assert.equal(main.querySelector('[data-steward-candidate]'), null);
 });
 
+test('returning to staff management rejects an earlier lookup even when its UID is selected again', async t => {
+  const pending = deferred(); let lookups = 0;
+  t.after(() => pending.resolve(response(moderatorCandidate(false))));
+  const { main, w, requests, remount } = await setup(t, '#/community/manage/stewards', url => {
+    if (url.endsWith('/me')) return response(managementViewer);
+    if (url.includes('/manage?')) return response({ ...managementData, stewards: [] });
+    if (url.endsWith('/members/10002?tab=topics')) {
+      lookups++;
+      return lookups === 1 ? pending.promise : response({ ...moderatorCandidate(false), person: { ...person, uid: '10002', name: '重新读取的成员' } });
+    }
+    return null;
+  });
+  w.scrollTo = () => {};
+  const lookup = () => {
+    const form = main.querySelector('[data-community-form="steward-lookup"]');
+    form.elements.namedItem('uid').value = '10002';
+    form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  };
+  lookup();
+  await remount('#/community/manage/items');
+  await remount('#/community/manage/stewards');
+  lookup(); await turn();
+  const candidate = main.querySelector('[data-steward-candidate]');
+  assert.match(candidate.closest('.community-steward-candidate').textContent, /重新读取的成员/);
+  const field = main.querySelector('[data-community-form="steward-lookup"] [name="uid"]');
+  field.focus();
+  pending.resolve(response(moderatorCandidate(false))); await turn();
+  assert.equal(main.querySelector('[data-steward-candidate]'), candidate);
+  assert.equal(w.document.activeElement, field);
+  assert.equal(lookups, 2);
+  assert.equal(requests.some(item => item.url.endsWith('/steward')), false);
+});
+
 test('board selection survives real cleanup and remount between review and reports, then clears outside task queues', async t => {
   const { main, remount } = await setup(t, '#/community/manage', url => {
     if (url.endsWith('/me')) return response(managementViewer);
@@ -1291,7 +1324,8 @@ test('opening management dialogs preserves document position and does not scroll
   section.replaceWith = next => { top = 0; replace(next); };
   main.querySelector('[data-action="community-ship"]').click();
   assert.equal(autoScroll, 0); assert.equal(top, 420);
-  assert.deepEqual(calls.at(-1), { left: 0, top: 420, behavior: 'instant' });
+  assert.equal(main.querySelector('[data-community]'), section, 'opening a dialog retains the existing management page');
+  for (const call of calls) assert.deepEqual(call, { left: 0, top: 420, behavior: 'instant' });
   assert.ok(main.querySelector('[role="dialog"] form[data-community-form="ship"]'));
   assert.equal(header.inert, true, 'background header cannot be operated through the dialog');
   assert.equal(main.querySelector('.community-management-nav').inert, true);
@@ -1424,6 +1458,37 @@ test('desktop frame drops upload once, retain the draft and position, and clear 
   assert.equal(zone.classList.contains('is-dragging'), false);
   assert.equal(form.querySelector('[type="submit"]').disabled, false);
   assert.equal(scrolls, 0);
+});
+
+test('equipment drag handlers release on exit and stay single after repeated management entrances', async t => {
+  const image = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const { main, w, requests, remount } = await setup(t, '#/community/manage/items', url => {
+    if (url.endsWith('/me')) return response(managementViewer);
+    if (url.includes('/manage?')) return response(managementData);
+    if (url.endsWith('/manage/item-image')) return response({ id: image, frameReady: true });
+    return null;
+  });
+  w.scrollTo = () => {};
+  for (let i = 0; i < 2; i++) {
+    main.querySelector('[data-action="community-item-edit"]').click();
+    const form = main.querySelector('[data-community-form="item"]');
+    const zone = form.querySelector('[data-item-media]');
+    fileDrag(w, w.document.body, 'dragenter');
+    assert.equal(zone.classList.contains('is-dragging'), true);
+    await remount('#/community/manage/stewards');
+    assert.equal(zone.classList.contains('is-dragging'), false);
+    assert.equal(fileDrag(w, w.document.body, 'dragenter').defaultPrevented, false);
+    await remount('#/community/manage/items');
+  }
+  main.querySelector('[data-action="community-item-edit"]').click();
+  const form = main.querySelector('[data-community-form="item"]');
+  const name = form.elements.namedItem('name'); name.value = '保留商品草稿'; name.focus();
+  fileDrag(w, form, 'drop', [uploadImageFile('frame.gif', 'image/gif')]);
+  await waitForImageState(() => form.elements.namedItem('image').value === image, 'one upload settles after repeated entrances');
+  assert.equal(requests.filter(item => item.url.endsWith('/manage/item-image')).length, 1);
+  assert.equal(name.value, '保留商品草稿');
+  assert.equal(w.document.activeElement, name);
+  assert.equal(main.querySelector('[data-community-form="item"]'), form);
 });
 
 test('equipment drops reject multiple files and invalid images without losing previous artwork', async t => {
@@ -1783,11 +1848,12 @@ for (const role of ['owner', 'steward']) {
 
   test(`${role} reader preview opens the post menu and copies visible content without enabling stale write controls`, async t => {
     const copied = clipboardFixture(t), notices = [];
+    const id = '827fd106-eed2-4d05-b0ad-5bc3907484e3';
     const shown = thread();
-    Object.assign(shown.topic, { board: 'showcase', canModerate: true, meta: { tools: '现有工具', model: '', usage: '作品展示', promptMode: 'public', prompt: '已公开的提示词' } });
-    const { main, w, requests } = await setup(t, '#/post/p1', url => {
+    Object.assign(shown.topic, { id, board: 'showcase', canModerate: true, meta: { tools: '现有工具', model: '', usage: '作品展示', promptMode: 'public', prompt: '已公开的提示词' } });
+    const { main, requests } = await setup(t, `?communityTheme=dark&token=private#/post/${id}`, url => {
       if (url.endsWith('/me')) return response(readerPreview(role));
-      if (url.endsWith('/topics/p1')) return response(shown);
+      if (url.endsWith(`/topics/${id}`)) return response(shown);
       return null;
     }, { notify: value => notices.push(value) });
     const section = main.querySelector('[data-community]');
@@ -1803,7 +1869,7 @@ for (const role of ['owner', 'steward']) {
     assert.equal(main.querySelector('[data-community]'), section);
     main.querySelector('[data-action="community-copy-link"]').click(); await turn();
     main.querySelector('[data-action="community-copy-prompt"]').click(); await turn();
-    assert.deepEqual(copied, [w.location.href, '已公开的提示词']);
+    assert.deepEqual(copied, [`http://localhost/share/post/${id}`, '已公开的提示词']);
     main.querySelector('[data-action="community-like"]').click();
     main.querySelector('[data-action="community-bookmark"]').click();
     assert.equal(requests.some(entry => entry.init.method === 'POST'), false);

@@ -37,6 +37,24 @@ test('the original inline directory expands without changing layout and respects
   dispose();assert.equal(d.querySelector('h3').getAttribute('tabindex'),'0');dom.window.close();
 });
 
+test('static code tools are adopted once and copy the untouched source before clean disposal',async()=>{
+  const dom=new JSDOM('<article><div class="article-body"><blockquote><div class="article-code-tools" data-reading-static-code inert><button type="button">复制代码</button><span role="status"></span></div><pre><code>const text = "**原样保留**";\nnext(&lt;value&gt;)</code></pre></blockquote></div></article>');
+  const d=dom.window.document,toolbar=d.querySelector('.article-code-tools'),pre=d.querySelector('pre'),code=d.querySelector('code'),original=code.textContent;
+  let copied,calls=0;
+  const dispose=enhanceArticleReading(d.querySelector('article'),{copy:async value=>{copied=value;calls++;}});
+  assert.equal(d.querySelectorAll('.article-code-tools').length,1);
+  assert.equal(pre.previousElementSibling,toolbar);
+  assert.equal(toolbar.hasAttribute('inert'),false);
+  assert.equal(toolbar.hasAttribute('data-reading-static-code'),false);
+  const button=toolbar.querySelector('button');button.click();await Promise.resolve();
+  assert.equal(copied,original);assert.equal(calls,1);
+  assert.equal(toolbar.querySelector('[role=status]').textContent,'已复制');
+  dispose();button.click();await Promise.resolve();
+  assert.equal(calls,1);assert.equal(d.querySelector('.article-code-tools'),null);
+  assert.equal(d.querySelector('pre'),pre);assert.equal(d.querySelector('code'),code);assert.equal(code.textContent,original);
+  dom.window.close();
+});
+
 test('a short article needs no empty directory; clipboard failures are visible',async()=>{
   const dom=new JSDOM('<article><div class="article-body"><h2>唯一章节</h2><pre><code>example</code></pre></div></article>');
   const d=dom.window.document;
@@ -85,6 +103,48 @@ test('a sidebar offers a single chapter and omits a directory for unstructured s
     dispose();dom.window.close();
   }
 });
+
+test('server-rendered reading rails are adopted without replacing nodes or adding a second layout',()=>{
+  const dom=new JSDOM('<main><section class="page reading-page"><div class="reading-layout"><aside class="blog-page reading-sidebar"><div class="blog-identity">作者</div><div class="blog-music-card">音乐</div><div class="reading-directory-slot"></div></aside><article class="reading-article"><div class="article-body"><h2>开始</h2><p>保留正文</p></div></article></div></section></main>',{url:'http://localhost/blog/example',pretendToBeVisual:true});
+  const d=dom.window.document,article=d.querySelector('article'),layout=d.querySelector('.reading-layout'),sidebar=d.querySelector('.reading-sidebar'),author=d.querySelector('.blog-identity'),body=d.querySelector('.article-body');
+  const dispose=enhanceArticleReading(article,{sidebarHTML:'<div class="blog-identity">不应重新插入</div>'});
+  assert.equal(d.querySelectorAll('.reading-layout').length,1);
+  assert.equal(d.querySelectorAll('.reading-sidebar').length,1);
+  assert.equal(d.querySelector('.reading-layout'),layout);
+  assert.equal(d.querySelector('.reading-sidebar'),sidebar);
+  assert.equal(d.querySelector('.blog-identity'),author);
+  assert.equal(d.querySelector('.article-body'),body);
+  assert.equal(d.querySelectorAll('.article-contents').length,1);
+  dispose();
+  assert.equal(d.querySelector('.page').firstElementChild,article);
+  assert.equal(d.querySelector('.reading-layout'),null);
+  assert.equal(d.querySelector('.article-body'),body);
+  dom.window.close();
+});
+
+test('the static mobile directory is adopted and moved responsively as the same single node',()=>{
+  const dom=new JSDOM('<section class="page reading-page"><div class="reading-layout"><aside class="blog-page reading-sidebar"><div class="reading-directory-slot"></div></aside><article><details class="article-contents reading-directory-card" id="article-contents-ssr" data-reading-static-directory><summary>文章目录</summary><nav aria-label="文章目录"><ol><li><button type="button">开始</button></li><li><button type="button" class="article-contents-child">小节</button></li></ol></nav></details><div class="article-body"><h2>开始</h2><h3>小节</h3><p>原文</p></div></article></div></section>',{url:'http://localhost/blog/example',pretendToBeVisual:true});
+  const w=dom.window,d=w.document; let changed,jumped=false;
+  const media={matches:true,addEventListener:(_,fn)=>changed=fn,removeEventListener:()=>{}};
+  w.matchMedia=query=>query.includes('max-width')?media:{matches:true};
+  const article=d.querySelector('article'),directory=d.querySelector('details'),body=d.querySelector('.article-body');
+  d.querySelector('h3').scrollIntoView=()=>{jumped=true;};
+  const dispose=enhanceArticleReading(article,{sidebarHTML:'<div>不应重绘</div>'});
+  assert.equal(d.querySelectorAll('.article-contents').length,1);
+  assert.equal(d.querySelector('.article-contents'),directory);
+  assert.equal(directory.hasAttribute('data-reading-static-directory'),false);
+  assert.equal(body.previousElementSibling,directory);
+  assert.equal(directory.open,false);
+  directory.querySelector('.article-contents-child').click(); assert.equal(jumped,true);
+  media.matches=false;changed();
+  assert.equal(directory.parentElement,d.querySelector('.reading-directory-slot'));
+  assert.equal(directory.open,true);
+  media.matches=true;changed();
+  assert.equal(body.previousElementSibling,directory);
+  dispose(); assert.equal(d.querySelector('details'),null);
+  assert.equal(d.querySelector('.page').firstElementChild,article);
+  dom.window.close();
+});
 test('writing templates provide outlines rather than invented author content',()=>{
   for(const template of Object.values(articleTemplates)) {
     const dom=new JSDOM(template.body);
@@ -127,6 +187,27 @@ test('denied sharing offers a selectable URL instead of claiming success',async(
   assert.equal(d.querySelector('[role=status] input').value,dom.window.location.href);
   assert.match(d.querySelector('[role=status]').textContent,/Copy this link/);
   d.querySelector('h1').click();assert.equal(d.querySelector('[role=status]').textContent,'');
+  dispose();dom.window.close();
+});
+
+test('blog clipboard and native sharing use the same public metadata URL',async()=>{
+  for(const native of [false,true]) {
+    const dom=new JSDOM(shareMarkup,{url:'https://example.test/?communityTheme=light&token=private#/note/hello-world'}),w=dom.window,d=w.document;
+    let shared;
+    if(native)w.navigator.share=async value=>{shared=value.url;};
+    const dispose=enhanceArticleReading(d.querySelector('article'),{copy:async value=>{shared=value;}});
+    d.querySelector('.article-share-button').click();await Promise.resolve();await Promise.resolve();
+    assert.equal(shared,'https://example.test/share/blog/hello-world');
+    assert.equal(w.location.hash,'#/note/hello-world');
+    dispose();dom.window.close();
+  }
+});
+
+test('author previews do not offer a public share action',()=>{
+  const dom=new JSDOM(shareMarkup,{url:'https://example.test/?preview=draft-id#/note/hello-world'}),d=dom.window.document;
+  const dispose=enhanceArticleReading(d.querySelector('article'));
+  assert.equal(d.querySelector('.article-share-button'),null);
+  assert.ok(d.querySelector('.article-more'));
   dispose();dom.window.close();
 });
 

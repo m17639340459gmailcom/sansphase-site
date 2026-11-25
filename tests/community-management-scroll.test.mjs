@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import ts from 'typescript';
 import { JSDOM } from 'jsdom';
-import { parseRoute } from '../src/core.mjs';
+import { parseSiteRoute } from '../src/blog-route.mjs';
 import { communityRoute, inCommunityArea } from '../src/community.mjs';
 
 const source = await readFile(new URL('../src/app.mjs', import.meta.url), 'utf8');
@@ -18,8 +18,9 @@ function appHandlers() {
   const click = listeners.find(node => node.expression.expression.getText(ast) === 'document.addEventListener'
     && node.expression.arguments[0]?.text === 'click'
     && node.expression.arguments[1]?.getText(ast) === 'rememberCommunityManagementSwitch');
-  const change = listeners.find(node => node.expression.expression.getText(ast) === 'window.addEventListener'
-    && node.expression.arguments[0]?.text === 'hashchange');
+  const change = listeners.find(node => node.expression.expression.getText(ast) === 'mountBlogRouting'
+    && node.expression.arguments[0]?.getText(ast) === 'window'
+    && ts.isArrowFunction(node.expression.arguments[1]));
   assert.ok(state && remember && click && change, 'the application must record and consume only explicit management content switches');
   // Execute the actual application listeners, rather than copying their logic.
   // Other app boot tasks are unrelated to these navigation decisions.
@@ -38,7 +39,11 @@ function setup(t, hash = '#/community/manage/content') {
   w.scrollTo = options => { scrolls.push(options); top = options.top; };
   const context = dom.getInternalVMContext();
   Object.assign(context, {
-    parseRoute, communityRoute, inCommunityArea, communityEnabled: () => true, main,
+    parseRoute: (hash, pathname = w.location.pathname) => parseSiteRoute(hash, pathname),
+    // This fixture isolates the actual app callback; the routing adapter has
+    // separate path/hash integration tests and only delivers hash events here.
+    mountBlogRouting: (target, changed) => target.addEventListener('hashchange', changed),
+    communityRoute, inCommunityArea, communityEnabled: () => true, main,
     homeRoot: w.document.getElementById('home-root'),
     communityFrame: { enabled: () => communityRoute(w.location.hash).view !== 'manage', center: () => main },
     routeTransitions: { run: (_from, _to, update) => update() },

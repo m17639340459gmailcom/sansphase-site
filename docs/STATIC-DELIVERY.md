@@ -38,6 +38,10 @@ SANSPHASE_SCENE_CDN_ORIGIN=https://static.sansphase.com pnpm build
 
 发布时先将 `dist/assets/site/<内容版本>` 安装到 `/var/www/sansphase-static/assets/site/<内容版本>`，核对 `dist/static-delivery.json` 的文件清单与 SHA-256，再切换应用。Nginx 为这些不可变公开文件提供一年缓存、正确的 `.mjs` MIME 类型和固定 CORS。保留旧快照，使已有页面和回滚后的页面仍能获取对应版本。此公共目录独立于 `/var/lib/sansphase` 私有数据目录，不修改数据库及上传目录的权限。
 
+明确选择前端版本 2 时，同一份清单还包含 `frontend-v2/` 下公开构建的 JS、CSS 与字体，HTML 和构建清单不公开。版本 2 的入口、静态模块依赖、按需导入与字体均位于相同版本快照，不再依赖当前应用目录中的 `/build/<hash>`。不配置 CDN 时也为版本 2 生成同源 `/assets/site/` 快照，沿用上述持久静态目录安装步骤。仅替换 Node 的当前 `dist` 而不保留旧快照，无法保证旧标签稍后加载 Reader 等模块；当前构建验证不会冒充已经执行了线上静态安装。
+
+前端版本 3 在编译时确定一个独立版本并用 Next.js 的 `assetPrefix` 请求同源 `/assets/site/<构建版本>/_next/static/`。清单仅收录 Next 的公开构建文件及其 SHA-256。切换应用前从 `dist` 按清单安装到同一持久静态根，保留 V2、V3 快照；API、用户上传和 Next 服务端文件继续由现有应用处理。
+
 源站在 `/assets/scene/` 和 `/assets/site/` 设置固定的 `Access-Control-Allow-Origin: https://www.sansphase.com` 与同值的 `Timing-Allow-Origin`，允许本站匿名读取公开资源并测量下载时间。该响应不依赖请求 Origin，无需按 Origin 拆分缓存；首页和作者 API 不添加这些头部。已有节点缓存可能保留旧头部，更新后需执行直接删除缓存，再验证实际节点响应，不能只检查源站。
 
 当前使用站长选择的免费套餐。本次配置不启用付费图片处理；升级套餐或新增计费服务需另行确认。

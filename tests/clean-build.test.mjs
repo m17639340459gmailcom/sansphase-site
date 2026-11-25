@@ -5,6 +5,7 @@ import { dirname, resolve, sep } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { publicationFiles } from "../scripts/publication-files.mjs";
+import { adminConsoleRequiredFiles } from "../server/admin-console-assets.ts";
 const run = promisify(execFile);
 
 test("the prepared publication source builds without existing dist, private settings or preview files", async () => {
@@ -22,6 +23,7 @@ test("the prepared publication source builds without existing dist, private sett
     // private-settings checks cannot read the real workspace's .local files.
     const prepared = await run(process.execPath, ["scripts/prepare-publication.mjs"], {
       cwd: directory,
+      env: {...process.env,SITE_FRONTEND:'v1'},
       timeout: 120000,
     });
     const publication = JSON.parse(prepared.stdout);
@@ -37,12 +39,18 @@ test("the prepared publication source builds without existing dist, private sett
     // website files, preview copy, archives or database are available here.
     const { stdout } = await run(process.execPath, ["scripts/build-site.mjs"], {
       cwd: publication.directory,
+      env: {...process.env,SITE_FRONTEND:'v1'},
       timeout: 120000,
     });
     assert.match(stdout, /Clean build verified/);
     const files = await readdir(resolve(publication.directory, "dist"));
     assert.ok(files.includes("index.html"));
     assert.ok(!files.includes("flight.mjs"));
+    const build = JSON.parse(await readFile(resolve(publication.directory, "dist/build-info.json"), "utf8"));
+    for (const asset of adminConsoleRequiredFiles) {
+      assert.ok(build.files.some(entry => entry.path === asset), `the clean release is missing ${asset}`);
+      assert.ok((await readFile(resolve(publication.directory, "dist", asset))).length > 0);
+    }
     assert.ok(
       (
         await readFile(
@@ -51,6 +59,11 @@ test("the prepared publication source builds without existing dist, private sett
         )
       ).length > 0,
     );
+    // The default source package must also run its delivery regressions without
+    // optional preview files being present elsewhere in this temporary tree.
+    await run(process.execPath,["--test","tests/frontend-release.test.mjs","tests/frontend-v2.test.ts","tests/typescript-project-boundary.test.mjs","tests/publication-files.test.mjs"],{
+      cwd:publication.directory,env:{...process.env,SITE_FRONTEND:'v1'},timeout:120000,maxBuffer:4*1024*1024,
+    });
   } finally {
     if (!directory.startsWith(base + sep))
       throw new Error("Unsafe clean-build test path");

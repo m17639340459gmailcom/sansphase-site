@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile, copyFile, lstat, unlink } from "node:fs/pro
 import { resolve, basename } from "node:path";
 import {fileHash} from '../server/file-hash.ts';
 import { createReaderProfileBackupGuard, snapshotReaderProfileWorkflow, verifyReaderProfileWorkflowSnapshot } from '../server/reader-profile-backup.ts';
+import { snapshotLoginVerification } from '../server/login-verification-backup.ts';
 const settings = JSON.parse(
   await readFile(
     process.env.PAYLOAD_CONFIG_FILE || ".local/payload-env.json",
@@ -45,6 +46,7 @@ try {
   snapshot.close();
 }
 const paths = ["content.db", "settings.json", "migration-complete.json"];
+if (await snapshotLoginVerification(source, target)) paths.push('login-verification.db');
 await writeFile(
   resolve(target, "settings.json"),
   JSON.stringify(settings, null, 2),

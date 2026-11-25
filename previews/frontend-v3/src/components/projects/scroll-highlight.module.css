@@ -1,0 +1,5 @@
+/* A soft six-unit front sweeps from the first word to the last as --p goes 0 → 1. */
+.scrub[data-live] .unit {
+  opacity: clamp(0.22, calc((var(--p, 0) * (var(--n) + 6) - var(--i)) / 6), 1);
+  transition: opacity 0.2s linear;
+}

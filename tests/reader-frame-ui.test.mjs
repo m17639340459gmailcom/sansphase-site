@@ -34,6 +34,61 @@ test('the VIP moon frame joins the existing main-site owned selector and equips 
   assert.equal(s.calls.filter(call => call.init?.method === 'POST').length, 1);
 });
 
+test('a fast device clock cannot disable a server-approved VIP frame equip or the owner personal reader account', async t => {
+  const serverNow = Date.now(), vipUntil = new Date(serverNow + 1000).toISOString();
+  for (const offset of [5000, 300000, 86400000]) {
+    await t.test(`device ahead ${offset} ms`, async subt => {
+      subt.mock.method(Date, 'now', () => serverNow + offset);
+      const s = setup(subt, { ...account, vip: true, vipUntil, ownerReader: true, phone: '' });
+      s.respond(async (_url, init) => state(init?.method === 'POST' ? JSON.parse(init.body).ref : null, {
+        vipUntil,
+        items: [{ id: 'frame-vipmoon', name: 'VIP 月相头像框', ref: 'vipmoon', image: null }],
+      }));
+      const nickname = s.doc.querySelector('[name="nickname"]');
+      nickname.value = '待保存昵称';
+      s.open(); await turn(); s.select('vipmoon');
+      assert.equal(s.doc.querySelector('[data-reader-frame-save]').disabled, false);
+      s.save(); await turn();
+      assert.equal(s.identity().frame, 'vipmoon');
+      assert.ok(s.doc.querySelector('[data-reader-avatar-trigger]').classList.contains('reader-avatar-frame-vipmoon'));
+      assert.equal(s.doc.querySelector('[name="nickname"]'), nickname);
+      assert.equal(nickname.value, '待保存昵称');
+      assert.equal(s.calls.filter(call => call.init?.method === 'POST').length, 1);
+    });
+  }
+});
+
+test('the server expired-frame inventory vetoes a stale VIP display without posting another equip', async t => {
+  const s = setup(t, { ...account, vip: true, vipUntil: new Date(Date.now() + 86400000).toISOString(), frame: 'vipmoon' });
+  s.respond(async () => state());
+  s.open(); await turn();
+  assert.equal(s.identity().frame, null);
+  assert.equal(s.doc.querySelector('[data-reader-avatar-trigger]').classList.contains('reader-avatar-frame-vipmoon'), false);
+  assert.equal(s.doc.querySelector('[data-reader-frame-select] option[value="vipmoon"]'), null);
+  s.select('vipmoon'); s.save(); await turn();
+  assert.equal(s.calls.filter(call => call.init?.method === 'POST').length, 0);
+});
+
+test('a temporary inventory failure on a fast device preserves the confirmed VIP frame without granting an equip', async t => {
+  const serverNow = Date.now();
+  for (const failure of ['network', 'unavailable']) {
+    await t.test(failure, async subt => {
+      subt.mock.method(Date, 'now', () => serverNow + 86400000);
+      const s = setup(subt, { ...account, vip: true, vipUntil: new Date(serverNow + 1000).toISOString(), frame: 'vipmoon' });
+      s.respond(async () => {
+        if (failure === 'network') throw new Error('offline');
+        return state(null, { available: false, items: [] });
+      });
+      s.open(); await turn();
+      assert.equal(s.identity().frame, 'vipmoon');
+      assert.ok(s.doc.querySelector('[data-reader-avatar-trigger]').classList.contains('reader-avatar-frame-vipmoon'));
+      assert.equal(s.doc.querySelector('[data-reader-frame-save]').disabled, true);
+      s.save(); await turn();
+      assert.equal(s.calls.filter(call => call.init?.method === 'POST').length, 0);
+    });
+  }
+});
+
 test('an owner with a separate real reader account sees the existing editable personal account instead of the author gate', () => {
   const doc = new JSDOM(readerPage('account', '', account, false, true, { name: '博客品牌' })).window.document;
   assert.equal(doc.querySelector('[data-author-login]'), null);
@@ -46,14 +101,20 @@ test('an owner with a separate real reader account sees the existing editable pe
 function setup(t, initial = account) {
   const dom = new JSDOM('<main></main>', { url: 'https://www.sansphase.com/#/account' });
   const win = dom.window, doc = win.document;
-  let identity = { ...initial }, calls = [], renders = 0, identities = 0;
+  let identity = { ...initial }, calls = [], verificationCalls = [], renders = 0, identities = 0, serverDate = null;
   let respond = async (_url, init) => state(init?.method === 'POST' ? JSON.parse(init.body).ref : identity.frame);
   const globals = new Map();
   for (const [key, value] of Object.entries({ document: doc, window: win, location: win.location, history: win.history, CustomEvent: win.CustomEvent, FormData: win.FormData,
     fetch: async (url, init) => {
+      // Clearing identity mounts a new login form. Keep its challenge response
+      // separate from the deferred profile response this fixture is exercising.
+      if (url === '/api/reader/login-challenge') {
+        verificationCalls.push({ url, init });
+        return new Response(JSON.stringify({ enabled: false }), { headers: { 'content-type': 'application/json' } });
+      }
       const call = { url, init }; calls.push(call);
       try {
-        const response = new Response(JSON.stringify(await respond(url, init)), { headers: { 'content-type': 'application/json' } });
+        const response = new Response(JSON.stringify(await respond(url, init)), { headers: { 'content-type': 'application/json', ...(serverDate ? { Date: serverDate } : {}) } });
         const readJSON = response.json.bind(response);
         response.json = async () => { try { return await readJSON(); } finally { call.bodyRead = true; } };
         return response;
@@ -70,13 +131,68 @@ function setup(t, initial = account) {
     ui.route('notes', ''); win.close();
     for (const [key, descriptor] of globals) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key); }
   });
-  return { doc, win, calls, identity: () => identity, renderCount: () => renders, identities: () => identities,
+  return { doc, win, calls, verificationCalls, identity: () => identity, renderCount: () => renders, identities: () => identities,
+    serverDate: value => { serverDate = new Date(value).toUTCString(); },
     respond: value => { respond = value; }, open: () => doc.querySelector('[data-reader-avatar-trigger]').click(),
     select: value => { const field = doc.querySelector('[data-reader-frame-select]'); assert.ok(field, 'the existing avatar panel owns frame selection'); field.value = value; field.dispatchEvent(new win.Event('change', { bubbles: true })); },
     save: () => { const button = doc.querySelector('[data-reader-frame-save]'); assert.ok(button); button.click(); },
     switchAccount(value) { identity = value; win.dispatchEvent(new win.CustomEvent('reader:identity', { detail: value })); paint(); ui.route('account', ''); },
   };
 }
+
+test('the real account clock refreshes server-qualified expiry and renewal without rebuilding the profile or losing focus', async t => {
+  const serverNow = Date.parse('2026-10-13T09:00:00Z');
+  let elapsed = 0, serverVip = true;
+  const schedules = [];
+  t.mock.method(Date, 'now', () => serverNow + 86400000);
+  t.mock.method(performance, 'now', () => elapsed);
+  t.mock.method(globalThis, 'setTimeout', (callback, delay) => { schedules.push({ callback, delay }); return 0; });
+  const s = setup(t, { ...account, ownerReader: true, vip: true, vipUntil: new Date(serverNow + 2000).toISOString(), frame: 'vipmoon' });
+  Object.defineProperty(s.doc, 'hidden', { get: () => false });
+  s.respond(async url => {
+    assert.equal(url, '/api/reader/session');
+    return { ...s.identity(), vip: serverVip, frame: serverVip ? 'vipmoon' : null, frameImage: null };
+  });
+  s.serverDate(serverNow);
+  const nickname = s.doc.querySelector('[name="nickname"]'); nickname.value = '保留昵称草稿'; nickname.focus();
+  s.doc.dispatchEvent(new s.win.Event('visibilitychange')); await turn();
+  assert.equal(s.calls.length, 1);
+  assert.equal(s.calls[0].init.method, 'GET'); assert.equal(s.calls[0].init.cache, 'no-store');
+  assert.equal(s.calls[0].init.credentials, 'same-origin'); assert.equal(s.calls[0].init.headers['X-Reader-Request'], '1');
+  assert.equal(schedules.at(-1).delay, 3000);
+  elapsed = 3000; serverVip = false; s.serverDate(serverNow + elapsed);
+  schedules.at(-1).callback(); await turn();
+  assert.equal(s.identity().vip, false);
+  assert.equal(s.doc.querySelector('[data-reader-avatar-trigger]').classList.contains('reader-avatar-frame-vipmoon'), false);
+  assert.equal(s.doc.querySelector('[data-reader-membership]').dataset.vip, 'false');
+  assert.equal(s.doc.querySelector('[name="nickname"]'), nickname);
+  assert.equal(nickname.value, '保留昵称草稿'); assert.equal(s.doc.activeElement, nickname);
+  assert.equal(s.renderCount(), 0); assert.equal(s.identities(), 0);
+  serverVip = true;
+  s.respond(async () => ({ ...s.identity(), vip: true, vipUntil: new Date(serverNow + 86400000).toISOString(), frame: 'vipmoon', frameImage: null }));
+  s.doc.dispatchEvent(new s.win.Event('visibilitychange')); await turn();
+  assert.equal(s.identity().vip, true);
+  assert.ok(s.doc.querySelector('[data-reader-avatar-trigger]').classList.contains('reader-avatar-frame-vipmoon'));
+  assert.equal(s.doc.activeElement, nickname);
+  assert.equal(s.renderCount(), 0); assert.equal(s.identities(), 0);
+});
+
+test('a late account membership response cannot clear or qualify another identity and a network failure keeps the last confirmed frame', async t => {
+  const s = setup(t, { ...account, vip: true, vipUntil: new Date(Date.now() + 1000).toISOString(), frame: 'vipmoon' });
+  Object.defineProperty(s.doc, 'hidden', { get: () => false });
+  let reply;
+  s.respond(async () => await new Promise(resolve => { reply = resolve; }));
+  s.doc.dispatchEvent(new s.win.Event('visibilitychange')); await turn();
+  s.switchAccount({ ...account, uid: '10002', email: 'another@example.test', vip: false });
+  reply(null); await turn();
+  assert.equal(s.identity().uid, '10002'); assert.equal(s.identities(), 0);
+  s.switchAccount({ ...account, vip: true, vipUntil: new Date(Date.now() + 1000).toISOString(), frame: 'vipmoon' });
+  s.respond(async () => { throw new Error('offline'); });
+  s.doc.dispatchEvent(new s.win.Event('visibilitychange')); await turn();
+  assert.equal(s.identity().vip, true); assert.equal(s.identity().frame, 'vipmoon');
+  assert.ok(s.doc.querySelector('[data-reader-avatar-trigger]').classList.contains('reader-avatar-frame-vipmoon'));
+  assert.equal(s.identities(), 0);
+});
 
 test('an initial owner personal account can save its nickname and signature without inventing a contact number', async t => {
   const s = setup(t, { ...account, ownerReader: true, phone: '' });
@@ -195,6 +311,12 @@ test('late profile and avatar replies cannot replace a cleared, different, or re
         const next = change === 'clear' ? null : { ...account, ...(change === 'different' ? { uid: '10002', email: 'other@example.test' } : {}), nickname: '当前账号', signature: '当前资料' };
         s.switchAccount(next);
         reply({ ...old, nickname: '迟到的旧资料', signature: '过期的签名', pendingAvatar: true }); await turn();
+        assert.equal(s.calls[0].bodyRead, true, 'the actual old profile response must settle before checking its effects');
+        assert.equal(s.verificationCalls.length, change === 'clear' ? 1 : 0);
+        if (change === 'clear') {
+          assert.equal(s.verificationCalls[0].init.method, 'POST');
+          assert.equal(s.doc.querySelector('[data-login-verification-control]').dataset.state, 'disabled');
+        }
         assert.deepEqual(s.identity(), next);
         assert.equal(s.identities(), 0);
         assert.equal(s.doc.querySelector('[data-reader-message]')?.textContent || '', '');

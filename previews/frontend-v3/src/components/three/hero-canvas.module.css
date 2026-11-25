@@ -1,0 +1,9 @@
+.poster {
+  position: absolute;
+  inset: 0;
+  background: url("/hero-particles-light.webp") center / 100% 100% no-repeat;
+}
+
+:global(.dark) .poster {
+  background-image: url("/hero-particles-dark.webp");
+}

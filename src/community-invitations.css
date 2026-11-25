@@ -1,0 +1,29 @@
+/* Invitations reuse the existing community cards, buttons and ledger table. */
+.community-invitations { display: grid; gap: 20px; min-width: 0; }
+.community-invitation-panel { display: grid; gap: 16px; }
+.community-invitation-card { display: grid; grid-template-columns: minmax(100px, .8fr) minmax(0, 1.2fr); align-items: stretch; min-width: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; color: var(--text); background: var(--cm-panel); transition: border-color .2s; }
+.community-invitation-card:hover,
+.community-invitation-card:focus-visible { border-color: var(--focus-edge, var(--signal)); }
+.community-invitation-card > img { display: block; width: 100%; height: 100%; min-height: 174px; max-height: 240px; object-fit: cover; }
+.community-invitation-copy { display: flex; flex-direction: column; justify-content: center; gap: 10px; padding: clamp(16px, 3vw, 28px); min-width: 0; }
+.community-invitation-copy > small { color: var(--signal); font-size: 11px; letter-spacing: .12em; }
+.community-invitation-copy > strong { font: 600 clamp(18px, 2vw, 24px)/1.5 var(--font-serif); overflow-wrap: anywhere; }
+.community-invitation-copy > span { color: var(--muted); font-size: 13px; }
+.community-invitation-open { display: inline-flex; align-items: center; gap: 8px; }
+.community-invitation-open .ui-icon { width: 15px; height: 15px; }
+.community-invitation-actions,
+.community-invitation-progress { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.community-invitation-actions > p { margin: 0; font-size: 14px; }
+.community-invitation-actions b { font-family: var(--font-mono); font-size: 19px; }
+.community-invitation-rule { margin: 0; line-height: 1.8; }
+.community-invitation-progress { padding-top: 14px; border-top: 1px solid var(--line); font-size: 13px; }
+.community-invitation-progress b { margin-inline-start: 8px; }
+.community-invitation-records small { display: block; margin-top: 3px; }
+.community-invite-name { display: block; max-width: 18em; overflow-wrap: anywhere; }
+@media (max-width: 480px) {
+  .community-invitation-card { grid-template-columns: minmax(88px, .7fr) minmax(0, 1.3fr); }
+  .community-invitation-copy { padding: 14px; gap: 8px; }
+  .community-invitation-copy > strong { font-size: 17px; }
+  .community-invitation-card > img { min-height: 164px; }
+}
+@media (prefers-reduced-motion: reduce) { .community-invitation-card { transition: none; } }

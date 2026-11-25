@@ -123,6 +123,7 @@ export function communityNameEffect(value: unknown): NameEffect | null {
 }
 export type ShopItem = {
   image?: string | null;
+  artStyle?: 'holo-card';
   category?: string | null;
   effect?: NameEffect | null;
   id: string; cat: "look" | "card" | "digital" | "goods"; kind: "frame" | "color" | "cover" | "card" | "digital" | "goods";

@@ -1,0 +1,66 @@
+html {
+  color-scheme: light dark;
+}
+body {
+  margin: 0;
+}
+* {
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: #a3957d transparent;
+}
+*::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #a3957d;
+  border-radius: 8px;
+}
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid #b59a6e;
+  outline-offset: 3px;
+}
+.console-monogram {
+  font-family: "Noto Serif SC", "Songti SC", SimSun, serif;
+  letter-spacing: 0.14em;
+}
+.console-table {
+  overflow-x: auto;
+}
+.console-sidebar-redesign > .MuiList-root:is(.RaMenu-open, .RaMenu-closed) {
+  width: auto;
+}
+.RaSidebar-closed .console-sidebar-redesign {
+  padding-inline: 6px;
+}
+.RaSidebar-closed .console-sidebar-redesign :is(.MuiTypography-overline, .console-sidebar-preview-note) {
+  display: none;
+}
+.RaSidebar-closed .console-sidebar-redesign .RaMenuItemLink-root {
+  justify-content: center;
+  padding-inline: 0;
+}
+.RaSidebar-closed .console-sidebar-redesign .RaMenuItemLink-icon {
+  min-width: 0;
+}
+/* Keep each link label available to assistive technology. */
+.RaSidebar-closed .console-sidebar-redesign .RaMenuItemLink-root > .MuiTypography-root {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  clip-path: inset(50%);
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
